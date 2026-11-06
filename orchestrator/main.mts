@@ -1,10 +1,16 @@
 import { createSandbox, claudeCode } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { setProject, setStage } from "./board.mts";
+import { PARKED, readRuns, setProject, setStage, TERMINAL } from "./board.mts";
+import { allLabels, LABELS, TRACKER } from "./config.mts";
+import { blockedOutcome, contentHash, SANDCASTLE_MARK } from "./graph.mts";
+import type { ImplementerBlocker } from "./graph.mts";
+import { patchManifest } from "./manifests.mts";
+import * as tracker from "./tracker.mts";
 
 // End-to-end loop for one GitLab ticket (run from the repo root):
 //   npx tsx .sandcastle/main.mts --base sal-develop [--issue 695] [--no-push]
@@ -14,13 +20,9 @@ import { setProject, setStage } from "./board.mts";
 // the container has no GitLab token.
 
 // ---- Project config: the block to edit when adapting this to another project ----------
-// (Also adapt sandbox/bootstrap-site.sh, the Environment section of prompt.md, and the fixture
-// advice in prompt.verify.md. See ADAPTING.md.)
+// Project, milestone and labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
+// Environment section of prompt.md, and the fixture advice in prompt.verify.md. See ADAPTING.md.)
 const CONFIG = {
-  gitlabHost: "git.affinitybridge.com",
-  project: "islandhealth/public-site", // path with namespace
-  projectId: 699,
-  labels: ["Ready to do", "ready-for-agent"], // an issue needs all of these to be picked automatically
   image: "sandcastle-islandhealth",
   model: "claude-opus-4-8",
   ciWaitMinutes: 30, // give up waiting for a branch pipeline after this long
@@ -32,10 +34,9 @@ const CONFIG = {
     { command: "/opt/sandcastle/bootstrap-site.sh", timeoutMs: 10 * 60_000 },
   ],
 };
-const PROJECT = CONFIG.project;
-const PROJECT_ID = CONFIG.projectId;
-const HOST = CONFIG.gitlabHost;
-const LABELS = CONFIG.labels;
+const PROJECT = TRACKER.project;
+const PROJECT_ID = TRACKER.projectId;
+const HOST = TRACKER.gitlabHost;
 const IMAGE = CONFIG.image;
 const MODEL = CONFIG.model;
 
@@ -65,18 +66,26 @@ const { values: opts } = parseArgs({
 });
 if (!opts.base) fail("--base <integration branch> is required (e.g. sal-develop, or sal-redesign for #565 children)");
 const base = opts.base;
+await tracker.ensureLabels(allLabels());
 
 // ---- pick the ticket -------------------------------------------------------
 let iid = opts.issue;
 if (!iid) {
   const list = JSON.parse(
-    glab("issue", "list", "-R", PROJECT, "--opened", ...LABELS.flatMap((l) => ["--label", l]), "--per-page", "100", "--output", "json"),
+    glab("issue", "list", "-R", PROJECT, "--opened", ...LABELS.ready.flatMap((l) => ["--label", l]), "--per-page", "100", "--output", "json"),
   );
-  if (!list.length) fail(`No open issues labelled ${LABELS.join(" + ")}.`);
+  if (!list.length) fail(`No open issues labelled ${LABELS.ready.join(" + ")}.`);
   iid = String(list[0].iid);
 }
 const issue = JSON.parse(glab("issue", "view", iid, "-R", PROJECT, "--output", "json"));
 const ticket = glab("issue", "view", iid, "-R", PROJECT, "--comments");
+// The version of the ticket this run builds from; compared again before the MR opens.
+const ticketHash = () => {
+  const t = tracker.ticket(Number(iid));
+  return { hash: contentHash({ title: t.title, description: t.description, notes: tracker.notes(Number(iid)) }), description: t.description };
+};
+const startVersion = ticketHash();
+const catalogue = tracker.catalogue().filter((t) => String(t.iid) !== iid);
 const slug = String(issue.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "");
 const branch = `${iid}-${slug}`;
 
@@ -89,7 +98,7 @@ currentIid = iid;
 setProject(PROJECT);
 setStage(iid, {
   title: String(issue.title), ticketUrl: `https://${HOST}/${PROJECT}/-/issues/${iid}`, branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
-  evidenceDir: resolve(".sandcastle/evidence", iid),
+  evidenceDir: resolve(".sandcastle/evidence", iid), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
 });
 // Heartbeat so the board can tell a long agent run from a dead process.
 setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
@@ -99,6 +108,25 @@ console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${b
 const evidenceHost = resolve(".sandcastle/evidence", iid);
 const evidenceBox = `/home/agent/evidence/${iid}`;
 mkdirSync(evidenceHost, { recursive: true });
+// A relaunched ticket (it was waiting on a blocker) must not pick up the last run's reports.
+for (const f of ["blocked.json", "verdict.md"]) rmSync(resolve(evidenceHost, f), { force: true });
+
+/** blocked.json from the implementer: tickets (or things) it needs that aren't merged yet. */
+function readBlocked(): ImplementerBlocker[] | undefined {
+  const file = resolve(evidenceHost, "blocked.json");
+  if (!existsSync(file)) return undefined;
+  try {
+    const list = JSON.parse(readFileSync(file, "utf8")).blockers;
+    if (!Array.isArray(list)) return [];
+    return list.map((b: Partial<ImplementerBlocker>) => ({
+      iid: Number.isInteger(b.iid) ? (b.iid as number) : null,
+      what: String(b.what ?? ""),
+      evidence: String(b.evidence ?? ""),
+    }));
+  } catch {
+    return []; // unreadable report: blockedOutcome sends it to a person
+  }
+}
 
 const sandbox = await createSandbox({
   branch,
@@ -125,9 +153,11 @@ const promptArgs = {
   BASE_SHA: baseSha,
   BRANCH: branch,
   EVIDENCE_DIR: evidenceBox,
+  CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
 };
 
 let tip = "";
+let blockers: ImplementerBlocker[] | undefined;
 try {
   // ---- 1. implementer ----------------------------------------------------------
   setStage(iid, { stage: "implementing" });
@@ -140,31 +170,89 @@ try {
     name: "implementer",
   });
   if (!impl.commits.length) {
-    fail(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
-  }
-  tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+    blockers = readBlocked();
+    if (!blockers) fail(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
+  } else {
+    tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+    // The real diff replaces the predicted footprint for conflict checks from now on.
+    patchManifest(PROJECT, Number(iid), { actualFootprint: sh("git", ["diff", "--name-only", `${baseSha}...${tip}`]).split("\n").filter(Boolean) });
 
-  // ---- 2. verifier -------------------------------------------------------------
-  setStage(iid, { stage: "verifying" });
-  const ver = await sandbox.run({
-    agent: claudeCode(MODEL),
-    promptFile: "./.sandcastle/prompt.verify.md",
-    promptArgs: { ...promptArgs, TIP_SHA: tip },
-    maxIterations: 1,
-    completionSignal: "<promise>COMPLETE</promise>",
-    name: "verifier",
-  });
-  const after = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
-  const dirty = (await sandbox.exec("git status --porcelain")).stdout.trim();
-  if (ver.commits.length || after !== tip || dirty) {
-    fail(`Verifier changed the branch (commits=${ver.commits.length}, head=${after.slice(0, 8)}, dirty=${!!dirty}). Not posting or pushing; inspect ${sandbox.worktreePath}.`);
+    // ---- 2. verifier -------------------------------------------------------------
+    setStage(iid, { stage: "verifying" });
+    const ver = await sandbox.run({
+      agent: claudeCode(MODEL),
+      promptFile: "./.sandcastle/prompt.verify.md",
+      promptArgs: { ...promptArgs, TIP_SHA: tip },
+      maxIterations: 1,
+      completionSignal: "<promise>COMPLETE</promise>",
+      name: "verifier",
+    });
+    const after = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+    const dirty = (await sandbox.exec("git status --porcelain")).stdout.trim();
+    if (ver.commits.length || after !== tip || dirty) {
+      fail(`Verifier changed the branch (commits=${ver.commits.length}, head=${after.slice(0, 8)}, dirty=${!!dirty}). Not posting or pushing; inspect ${sandbox.worktreePath}.`);
+    }
   }
 } finally {
   await sandbox.close();
 }
 
+// ---- implementer reported a missing prerequisite ----------------------------------
+if (blockers) {
+  const satisfied = (b: number) => {
+    const t = tracker.ticket(b);
+    if (t.state === "closed") return true;
+    const run = readRuns().find((r) => r.project === PROJECT && r.iid === String(b));
+    return !!run?.branch && tracker.mergedInto(run.branch, run.base ?? base);
+  };
+  const what = blockers.map((b) => `${b.iid != null ? `#${b.iid}` : "no ticket"}: ${b.what}`).join("; ");
+  const outcome = blockedOutcome(Number(iid), blockers, (b) => {
+    try {
+      return satisfied(b);
+    } catch {
+      return true; // no such ticket: nothing to wait for
+    }
+  });
+  if (outcome === "needs-human") {
+    tracker.addLabel(Number(iid), LABELS.needsHuman);
+    glab("issue", "note", iid, "-R", PROJECT, "-m", [
+      `## Sandcastle: blocked`,
+      `The implementer couldn't do this ticket, and the blocker isn't one Sandcastle can wait for (no open ticket provides it, or that ticket is already merged or closed). Labelled \`${LABELS.needsHuman}\`.`,
+      ...blockers.map((b) => `- ${b.iid != null ? `#${b.iid}` : "No ticket"}: ${b.what}. ${b.evidence}`),
+      SANDCASTLE_MARK,
+    ].join("\n\n"));
+    fail(`Blocked (${what}); labelled ${LABELS.needsHuman}.`);
+  }
+  patchManifest(PROJECT, Number(iid), { implementerBlockers: blockers });
+  // Remove the empty branch so the dispatcher can relaunch the ticket once the blocker merges.
+  try {
+    sh("git", ["branch", "-D", branch]);
+  } catch {
+    fail(`Blocked (${what}), but branch ${branch} could not be deleted (worktree left behind?). Delete it to let the ticket run again.`);
+  }
+  finished = true;
+  setStage(iid, { stage: "waiting", note: `implementer: needs ${what}` });
+  console.log(`#${iid} waits on ${what}. The dispatcher relaunches it once that is merged.`);
+  process.exit(0);
+}
+
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
 setStage(iid, { stage: "posting" });
+// Ticket edited since the run started? Still finish (you review every MR), but say so.
+const endVersion = ticketHash();
+let staleNote = "";
+if (endVersion.hash !== startVersion.hash) {
+  const dir = mkdtempSync(resolve(tmpdir(), "sandcastle-"));
+  writeFileSync(resolve(dir, "built-from"), `${startVersion.description}\n`);
+  writeFileSync(resolve(dir, "current"), `${endVersion.description}\n`);
+  const diff = spawnSync("git", ["diff", "--no-index", "--no-color", "built-from", "current"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+  rmSync(dir, { recursive: true, force: true });
+  staleNote = [
+    "**Built from an older version of the ticket.** It was edited while this run was in progress, so check the change against the current text.",
+    diff ? `Description changes:\n\n\`\`\`diff\n${diff}\n\`\`\`` : "The description is unchanged; the title or comments changed.",
+  ].join("\n\n");
+  setStage(iid, { note: "built from an older ticket version" });
+}
 const verdictFile = resolve(evidenceHost, "verdict.md");
 if (!existsSync(verdictFile)) fail(`Verifier wrote no verdict.md in ${evidenceHost}. Nothing posted or pushed.`);
 const verdictText = readFileSync(verdictFile, "utf8").trim();
@@ -186,6 +274,7 @@ const body = [
   verdictText.replace(/^VERDICT:.*\n?/, ""),
   section("before", "Before"),
   section("after", "After"),
+  SANDCASTLE_MARK,
 ].filter(Boolean).join("\n\n");
 glab("issue", "note", iid, "-R", PROJECT, "-m", body);
 console.log(`Evidence posted to #${iid} (verdict ${verdict}).`);
@@ -218,11 +307,26 @@ while (Date.now() < deadline) {
 if (status === "failed" || status === "canceled") fail(`CI ${status} on ${branch}. Pushed, but no MR opened.`);
 if (!["success", "none", "skipped"].includes(status)) fail(`CI still ${status} after ${CONFIG.ciWaitMinutes} min on ${branch}. Pushed, no MR opened.`);
 
+// Exact conflicts with the other live Sandcastle branches, so you know which MR to merge first.
+const openMrs = tracker.openMrBranches();
+const conflicts = readRuns()
+  .filter((r) => r.project === PROJECT && r.iid !== iid && r.branch)
+  .filter((r) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)))
+  .filter((r) => spawnSync("git", ["rev-parse", "--verify", "--quiet", r.branch!]).status === 0)
+  .flatMap((r) => {
+    const res = spawnSync("git", ["merge-tree", "--write-tree", "--name-only", "--no-messages", branch, r.branch!], { encoding: "utf8" });
+    if (res.status !== 1) return [];
+    const files = [...new Set(res.stdout.trim().split("\n").slice(1).filter(Boolean))];
+    return [`- #${r.iid} (\`${r.branch}\`${r.mr ? `, ${r.mr}` : ""}): ${files.map((f) => `\`${f}\``).join(", ")}`];
+  });
+
 const description = [
   `Refs #${iid}`,
   `Implemented and verified by Sandcastle. Verdict: **${verdict}** (evidence in the ticket comment).`,
   status === "success" ? "Branch CI passed before this MR was opened." : "No branch pipeline appeared; CI will run on this MR.",
-].join("\n\n");
+  staleNote,
+  conflicts.length ? `**Conflicts with other open Sandcastle work.** Merge one, then rebase the other:\n\n${conflicts.join("\n")}` : "",
+].filter(Boolean).join("\n\n");
 const mrOut = glab(
     "mr", "create", "-R", PROJECT, "--source-branch", branch, "--target-branch", base,
     "--title", `#${iid}: ${issue.title}`, "--description", description, "--yes", "--no-editor",

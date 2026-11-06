@@ -105,7 +105,8 @@
 (function () {
   var data = JSON.parse(document.getElementById('data').textContent);
   var STOPS = [
-    { id: 'queued',       name: 'The shoreline',        what: 'Queued, waiting for a spot' },
+    { id: 'queued',       name: 'The shoreline',        what: 'Not started: the note says what it waits for' },
+    { id: 'waiting',      name: 'Tide pool',            what: 'Implementer found a missing prerequisite; restarts when the blocker merges' },
     { id: 'setup',        name: 'Gather sand',          what: 'Starting the container and site' },
     { id: 'implementing', name: 'Build the castle',     what: 'Implementer agent working' },
     { id: 'verifying',    name: 'Check the walls',      what: 'Verifier capturing evidence' },
@@ -142,7 +143,7 @@
   var shown = 0;
   STOPS.forEach(function (stop, i) {
     var here = runs.filter(function (r) { return r.stage === stop.id; });
-    if (stop.id === 'queued' && !here.length) return;
+    if ((stop.id === 'queued' || stop.id === 'waiting') && !here.length) return;
     shown++;
     var box = el('section', 'stop' + (stop.final ? ' final' : '') + (stop.lost ? ' lost' : ''));
     var h = el('h2');
@@ -156,8 +157,9 @@
     var cards = el('div', 'cards');
     here.forEach(function (r) {
       var terminal = r.stage === 'done' || r.stage === 'stopped';
+      var parked = r.stage === 'queued' || r.stage === 'waiting';
       var quietMs = nowMs - new Date(r.updatedAt).getTime();
-      var stale = !terminal && quietMs > 20 * 60 * 1000;
+      var stale = !terminal && !parked && quietMs > 20 * 60 * 1000;
       var card = el('div', 'card' + (stale ? ' stale' : ''));
       var t = el('div', 't');
       t.appendChild(r.ticketUrl ? link(r.ticketUrl, '#' + r.iid) : document.createTextNode('#' + r.iid));
@@ -166,10 +168,10 @@
       var m = el('div', 'meta');
       if (r.project) { m.appendChild(document.createTextNode(r.project)); m.appendChild(document.createElement('br')); }
       if (r.branch) { var c = el('code', null, r.branch); m.appendChild(c); m.appendChild(document.createElement('br')); }
-      m.appendChild(document.createTextNode((terminal ? 'finished ' : 'in this stage ') + ago(r.stageSince) + (terminal ? ' ago' : '') + ' · total ' + ago(r.startedAt)));
+      m.appendChild(document.createTextNode(parked ? 'waiting ' + ago(r.stageSince) : (terminal ? 'finished ' : 'in this stage ') + ago(r.stageSince) + (terminal ? ' ago' : '') + ' · total ' + ago(r.startedAt)));
       card.appendChild(m);
       if (r.verdict) card.appendChild(el('span', 'badge ' + (r.verdict === 'PASS' ? 'pass' : 'fail'), r.verdict));
-      if (!terminal) card.appendChild(el('span', 'badge' + (stale ? ' warn' : ' pulse'), stale ? 'quiet ' + ago(r.updatedAt) + ' · pid ' + r.pid : 'working'));
+      if (!terminal && !parked) card.appendChild(el('span', 'badge' + (stale ? ' warn' : ' pulse'), stale ? 'quiet ' + ago(r.updatedAt) + ' · pid ' + r.pid : 'working'));
       if (r.note) card.appendChild(el('div', 'note', r.note));
       var links = el('div', 'links');
       if (r.mr) links.appendChild(link(r.mr, 'Merge request'));
@@ -181,10 +183,12 @@
     map.appendChild(box);
   });
 
-  var active = runs.filter(function (r) { return r.stage !== 'done' && r.stage !== 'stopped'; }).length;
-  var done = runs.filter(function (r) { return r.stage === 'done'; }).length;
-  var lost = runs.filter(function (r) { return r.stage === 'stopped'; }).length;
-  document.getElementById('tally').textContent = active + ' building · ' + done + ' at the X · ' + lost + ' washed away';
+  var count = function (stages) { return runs.filter(function (r) { return stages.indexOf(r.stage) >= 0; }).length; };
+  var waiting = count(['queued', 'waiting']);
+  var done = count(['done']);
+  var lost = count(['stopped']);
+  var active = runs.length - waiting - done - lost;
+  document.getElementById('tally').textContent = active + ' building · ' + waiting + ' waiting · ' + done + ' at the X · ' + lost + ' washed away';
   document.getElementById('updated').textContent = runs.length ? 'Last update ' + ago(data.generatedAt) + ' ago' : 'No runs yet. Start one with main.mts.';
 })();
 </script>
