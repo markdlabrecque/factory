@@ -1,0 +1,15 @@
+# systemd user template unit: one dispatch pass for one project. The instance name (after the @)
+# picks the project: ~/.config/sandcastle/dispatch/<name>.env sets SANDCASTLE_REPO (the repo root,
+# with the integration branch checked out) and a PATH that reaches node, glab, claude and docker.
+# install-dispatch.sh writes that file and enables sandcastle-dispatch@<name>.timer.
+[Unit]
+Description=Sandcastle dispatcher (%i)
+
+[Service]
+Type=oneshot
+Environment=SANDCASTLE_STATE_DIR=%h/.local/state/sandcastle
+EnvironmentFile=%h/.config/sandcastle/dispatch/%i.env
+# Runs are detached from the dispatcher so a pass returns quickly; KillMode=process keeps them alive.
+KillMode=process
+# No terminal here, so dispatch.sh stops instead of building a missing image.
+ExecStart=/bin/bash -c 'cd "$$SANDCASTLE_REPO" && exec ./.sandcastle/dispatch.sh'
