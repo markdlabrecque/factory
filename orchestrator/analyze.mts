@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keyFor, stateDir } from "./board.mts";
 import { GRAPH } from "./config.mts";
-import { contentHash, isSandcastleNote } from "./graph.mts";
+import { contentHash, isSandcastleNote, unitHash } from "./graph.mts";
 import type { Manifest, Note, Requirement } from "./graph.mts";
 import type { Ticket } from "./tracker.mts";
 
@@ -57,10 +57,20 @@ const excerpt = (s: string, n = 300) => {
   return flat.length > n ? `${flat.slice(0, n)}…` : flat;
 };
 
-/** Ticket text as an agent sees it: description, then comments from people. */
+/** Ticket text as an agent sees it: description, then comments from people, then a Task's parent. */
 export function ticketText(t: Ticket, notes: Note[]): string {
   const comments = notes.filter((n) => !isSandcastleNote(n)).map((n) => `> ${n.body.replace(/\n/g, "\n> ")}`);
-  return [t.description || "(no description)", ...(comments.length ? ["### Comments", ...comments] : [])].join("\n\n");
+  return [t.description || "(no description)", ...(comments.length ? ["### Comments", ...comments] : []), parentText(t)].filter(Boolean).join("\n\n");
+}
+
+/** Context for a Task: its parent issue. Empty for a whole ticket. */
+export function parentText(t: Ticket): string {
+  if (!t.parent) return "";
+  return [
+    `### Parent ticket #${t.parent.iid}: ${t.parent.title}`,
+    `This ticket is one Task of #${t.parent.iid}. Do only this Task; the parent and its other Tasks are context.`,
+    t.parent.description || "(no description)",
+  ].join("\n\n");
 }
 
 /** One line per open ticket plus what it provides when it has been analysed. */
@@ -119,7 +129,7 @@ export function analyse(args: {
   return {
     iid: t.iid,
     project: args.project,
-    hash: contentHash({ title: t.title, description: t.description, notes: args.notes }),
+    hash: unitHash(t, args.notes),
     analyzedAt: new Date().toISOString(),
     base: args.base,
     baseSha: args.worktree.sha,

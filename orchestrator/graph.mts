@@ -64,6 +64,43 @@ export function contentHash(t: { title: string; description?: string | null; not
   return sha(JSON.stringify([clean(t.title), clean(t.description), notes]));
 }
 
+export interface Parent {
+  iid: number;
+  title: string;
+  description: string;
+}
+
+/** Hash of what an agent builds from. A task's parent counts, so editing the parent re-analyses its tasks. */
+export function unitHash(t: { title: string; description?: string | null; parent?: Parent }, notes: Note[] = []): string {
+  const parent = t.parent ? `\n\n#${t.parent.iid} ${clean(t.parent.title)}\n${clean(t.parent.description)}` : "";
+  return contentHash({ title: t.title, description: clean(t.description) + parent, notes });
+}
+
+// ---- units of work ---------------------------------------------------------------
+
+/** A GitLab Task under an issue. */
+export interface Child {
+  iid: number;
+  open: boolean;
+}
+
+/**
+ * Which tickets get runs. With `subtasks`, an issue that has Tasks is only a container: its open
+ * Tasks are the units, and once every Task is closed the issue moves to the next stage (`advance`).
+ * An issue without Tasks, or any issue when `subtasks` is off, is a unit itself.
+ */
+export function expandUnits(parents: number[], childrenOf: Map<number, Child[]>, subtasks: boolean): { units: { iid: number; parent?: number }[]; advance: number[] } {
+  const units: { iid: number; parent?: number }[] = [];
+  const advance: number[] = [];
+  for (const p of parents) {
+    const kids = subtasks ? (childrenOf.get(p) ?? []) : [];
+    if (!kids.length) units.push({ iid: p });
+    else if (kids.every((k) => !k.open)) advance.push(p);
+    else for (const k of kids) if (k.open) units.push({ iid: k.iid, parent: p });
+  }
+  return { units, advance };
+}
+
 // ---- footprints ----------------------------------------------------------------
 
 // A footprint entry is a path ("a/b.php", which also covers anything under "a/b.php/"), a directory

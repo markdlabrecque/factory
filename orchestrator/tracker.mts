@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { TRACKER } from "./config.mts";
-import type { Note } from "./graph.mts";
+import { LABELS, TRACKER } from "./config.mts";
+import type { Child, Note, Parent } from "./graph.mts";
 
 // Tracker adapter: every tracker call the ticket graph needs. GitLab via `glab` for now; a GitHub
 // version would implement the same functions with `gh`.
@@ -11,6 +11,8 @@ export interface Ticket {
   title: string;
   description: string;
   state?: string;
+  labels?: string[];
+  parent?: Parent; // set on a Task whose parent issue is a container
 }
 
 const HOST = TRACKER.gitlabHost;
@@ -34,7 +36,76 @@ function apiAll<T>(path: string): T[] {
 /** Open tickets the graph can name as blockers: the milestone's, or the whole project's when none is set. */
 export function catalogue(milestone = TRACKER.milestone): Ticket[] {
   const filter = milestone ? `&milestone=${enc(milestone)}` : "";
-  return apiAll<Ticket>(`projects/${ID}/issues?state=opened${filter}`).map((t) => ({ iid: t.iid, title: t.title, description: t.description ?? "" }));
+  return apiAll<Ticket>(`projects/${ID}/issues?state=opened${filter}`).map(slim);
+}
+const slim = (t: Ticket): Ticket => ({ iid: t.iid, title: t.title, description: t.description ?? "", state: t.state, labels: t.labels ?? [] });
+
+/** Open tickets by iid, whatever their milestone. */
+function openTickets(iids: number[]): Ticket[] {
+  const out: Ticket[] = [];
+  for (let i = 0; i < iids.length; i += 50) {
+    const q = iids.slice(i, i + 50).map((n) => `iids[]=${n}`).join("&");
+    out.push(...apiAll<Ticket>(`projects/${ID}/issues?state=opened&${q}`).map(slim));
+  }
+  return out;
+}
+
+function gql<T>(query: string): T {
+  const out = JSON.parse(glab(["api", "graphql", "--hostname", HOST, "-f", `query=${query}`]));
+  if (out.errors?.length) throw new Error(`GitLab GraphQL: ${out.errors.map((e: { message: string }) => e.message).join("; ")}`);
+  return out.data;
+}
+type Hierarchy = { iid: string; workItemType: { name: string }; widgets: { parent?: { iid: string } | null; children?: { nodes: { iid: string; state: string; workItemType: { name: string } }[] } }[] };
+function hierarchy(iids: number[]): Hierarchy[] {
+  const out: Hierarchy[] = [];
+  for (let i = 0; i < iids.length; i += 50) {
+    const list = iids.slice(i, i + 50).map((n) => JSON.stringify(String(n))).join(",");
+    const data = gql<{ project: { workItems: { nodes: Hierarchy[] } } }>(
+      `{ project(fullPath: ${JSON.stringify(TRACKER.project)}) { workItems(iids: [${list}], first: 50) { nodes { iid workItemType { name } widgets { ... on WorkItemWidgetHierarchy { parent { iid } children(first: 100) { nodes { iid state workItemType { name } } } } } } } } }`,
+    );
+    out.push(...data.project.workItems.nodes);
+  }
+  return out;
+}
+
+/** Each issue's Tasks, in board order. Issues without Tasks are left out. */
+export function children(iids: number[]): Map<number, Child[]> {
+  const map = new Map<number, Child[]>();
+  for (const w of hierarchy(iids)) {
+    const kids = w.widgets.flatMap((x) => x.children?.nodes ?? []).filter((k) => k.workItemType.name === "Task");
+    if (kids.length) map.set(Number(w.iid), kids.map((k) => ({ iid: Number(k.iid), open: k.state === "OPEN" })));
+  }
+  return map;
+}
+
+/** The issue a Task belongs to; undefined for anything that isn't a Task with a parent. */
+export function parentOf(iid: number): number | undefined {
+  const w = hierarchy([iid])[0];
+  if (w?.workItemType.name !== "Task") return undefined;
+  const p = w.widgets.find((x) => x.parent)?.parent;
+  return p ? Number(p.iid) : undefined;
+}
+
+/**
+ * The tickets the graph and the implementer see. With subtasks, issues that have Tasks are replaced
+ * by their open Tasks (which may sit outside the milestone), each carrying its parent's text.
+ */
+export function workCatalogue(subtasks: boolean): { tickets: Ticket[]; childrenOf: Map<number, Child[]> } {
+  const open = catalogue();
+  if (!subtasks) return { tickets: open, childrenOf: new Map() };
+  const childrenOf = children(open.map((t) => t.iid));
+  const byIid = new Map(open.map((t) => [t.iid, t]));
+  const missing = [...childrenOf.values()].flat().filter((k) => k.open && !byIid.has(k.iid)).map((k) => k.iid);
+  for (const t of openTickets(missing)) byIid.set(t.iid, t);
+  for (const [p, kids] of childrenOf) {
+    const parent = byIid.get(p)!;
+    for (const k of kids) {
+      const t = byIid.get(k.iid);
+      if (t) t.parent = { iid: parent.iid, title: parent.title, description: parent.description };
+    }
+    byIid.delete(p);
+  }
+  return { tickets: [...byIid.values()], childrenOf };
 }
 
 export function ticket(iid: number): Ticket {
@@ -58,6 +129,19 @@ export function mergedInto(branch: string, base: string): boolean {
 
 export function addLabel(iid: number, label: string): void {
   glab(["issue", "update", String(iid), "-R", TRACKER.project, "--label", label]);
+}
+
+// REST rather than `glab issue`, which may not accept Tasks.
+const put = (iid: number, fields: Record<string, string>) =>
+  glab(["api", "-X", "PUT", `projects/${ID}/issues/${iid}`, "--hostname", HOST, ...Object.entries(fields).flatMap(([k, v]) => ["-f", `${k}=${v}`])]);
+
+export function close(iid: number): void {
+  put(iid, { state_event: "close" });
+}
+
+/** Move a ticket to the next stage: `LABELS.done` on, the ready labels off. It stays open. */
+export function advance(iid: number): void {
+  put(iid, { add_labels: LABELS.done, remove_labels: LABELS.ready.join(",") });
 }
 
 /**
