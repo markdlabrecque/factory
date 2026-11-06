@@ -1,0 +1,5 @@
+# ddev shim layer: project scripts and tests that call `ddev drush|wp|composer|exec` run directly against
+# the sandbox's own site (no DDEV in the container; the host keeps using real DDEV). Needs the web layer.
+COPY ddev-shim.sh /usr/local/bin/ddev
+RUN chmod +x /usr/local/bin/ddev
+ENV BASE_URL=http://127.0.0.1
