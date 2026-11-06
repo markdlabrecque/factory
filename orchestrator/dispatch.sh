@@ -5,6 +5,8 @@
 # terminal a missing or mismatched image is built; without one (the timer) the pass stops and says
 # how to build it, so a background pass never starts a long build.
 set -euo pipefail
+# Same run-state folder as the timer and the board service, so hand-started passes show on the board.
+export SANDCASTLE_STATE_DIR="${SANDCASTLE_STATE_DIR:-$HOME/.local/state/sandcastle}"
 
 fail() { echo "dispatch.sh: $*" >&2; exit 1; }
 

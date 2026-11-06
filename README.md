@@ -5,7 +5,7 @@ Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups.
 - `skills/sandcastle-setup/` - Claude Code skill that scaffolds `.sandcastle/` from layers (GitLab tracker, web runtime, Drupal/WordPress, ddev shim, Playwright), and optionally installs the workflow below. Copy to `~/.claude/skills/` (and `~/.agents/skills/` for other agents).
 - `orchestrator/` - one-ticket loop: implement, verify with screenshot/video evidence, post to the ticket, push, open the MR. Plus a dispatcher that starts many runs, held back by an agent-built ticket graph (dependencies and file conflicts). A ready issue with GitLab Tasks gets one run per Task; once MRs merge, the dispatcher closes the Tasks and moves finished tickets to the next stage (`Internal QA` by default). `dispatch.sh` runs a pass with the defaults. Start with `orchestrator/ADAPTING.md`.
 - `board/` - run-state store and treasure-map status board. `board.mts` writes `.sandcastle/state/<project>--<iid>.json` per run and regenerates a self-contained `board.html` from `board.template.html`. Copy both into a project's `.sandcastle/`.
-  - `board-server.mts`, `sandcastle-board.service`, `install-service.sh` - always-on version: a systemd user service (macOS: `com.sandcastle.board.plist` + `install-launchd.sh`, a launchd user agent) serving the board at `http://127.0.0.1:4444` (and each run's evidence under `/evidence/`) from one shared state folder. Node 22.18+. Run `board/install-service.sh` (Linux) or `board/install-launchd.sh` (macOS), then `export SANDCASTLE_STATE_DIR=$HOME/.local/state/sandcastle` wherever runs start, so every project and worktree reports to the one board.
+  - `board-server.mts`, `sandcastle-board.service`, `install-service.sh` - always-on version: a systemd user service (macOS: `com.sandcastle.board.plist` + `install-launchd.sh`, a launchd user agent) serving the board at `http://127.0.0.1:4444` (and each run's evidence under `/evidence/`) from one shared state folder. Node 22.18+. Run `board/install-service.sh` (Linux) or `board/install-launchd.sh` (macOS), so every project and worktree reports to the one board. `dispatch.sh` uses that folder unless `SANDCASTLE_STATE_DIR` says otherwise; to start `main.mts` directly, `export SANDCASTLE_STATE_DIR=$HOME/.local/state/sandcastle` first.
 
 Without the service, the board assumes it runs from a repo root containing `.sandcastle/` and writes `.sandcastle/board.html`.
 
@@ -58,7 +58,7 @@ Retry a failed run by deleting its record, `~/.local/state/sandcastle/<project>-
 
 ### On a schedule (Linux)
 
-Each project gets its own systemd user timer, `sandcastle-dispatch@<name>.timer`, which runs a pass 15 minutes after the last one finished. All projects share the run cap and the board. There's no launchd version for the dispatcher yet, so on macOS run passes by hand.
+Each project gets its own systemd user timer, `sandcastle-dispatch@<name>.timer`, which runs a pass 5 minutes after the last one finished. All projects share the run cap and the board. There's no launchd version for the dispatcher yet, so on macOS run passes by hand.
 
 ```sh
 cd ~/Projects/<project>                       # with the integration branch checked out

@@ -7,8 +7,8 @@ Description=Run the Sandcastle dispatcher for %i on a schedule
 [Timer]
 OnActiveSec=1min
 OnBootSec=2min
-# The timer re-arms 15 min after each pass finishes, so a project's passes never overlap.
-OnUnitInactiveSec=15min
+# The timer re-arms 5 min after each pass finishes, so a project's passes never overlap.
+OnUnitInactiveSec=5min
 # Spreads projects' passes apart so they rarely read the shared run cap at the same moment.
 RandomizedDelaySec=2min
 Persistent=false
