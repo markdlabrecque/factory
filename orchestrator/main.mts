@@ -6,8 +6,9 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { PARKED, readRuns, setProject, setStage, TERMINAL } from "./board.mts";
-import { allLabels, LABELS, TRACKER } from "./config.mts";
-import { blockedOutcome, contentHash, SANDCASTLE_MARK } from "./graph.mts";
+import { parentText } from "./analyze.mts";
+import { allLabels, LABELS, SUBTASKS, TRACKER } from "./config.mts";
+import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest } from "./manifests.mts";
 import * as tracker from "./tracker.mts";
@@ -16,7 +17,7 @@ import * as tracker from "./tracker.mts";
 //   npx tsx .sandcastle/main.mts --base sal-develop [--issue 695] [--no-push]
 // 1. branch <iid>-<slug> off origin/<base>   2. implementer run   3. verifier run (screenshots/video + verdict)
 // 4. host posts the evidence to the ticket   5. on PASS: push, wait for CI, open an MR into <base>.
-// Never merges, never closes the ticket. All GitLab calls run on the host with your glab auth;
+// Never merges, never closes the ticket (the dispatcher closes a Task, or moves a ticket on, once its MR merges). All GitLab calls run on the host with your glab auth;
 // the container has no GitLab token.
 
 // ---- Project config: the block to edit when adapting this to another project ----------
@@ -62,6 +63,7 @@ const { values: opts } = parseArgs({
     base: { type: "string" },
     issue: { type: "string" },
     "no-push": { type: "boolean", default: false },
+    "whole-issues": { type: "boolean", default: false }, // without --issue: pick a ready issue, not one of its Tasks
   },
 });
 if (!opts.base) fail("--base <integration branch> is required (e.g. sal-develop, or sal-redesign for #565 children)");
@@ -69,23 +71,31 @@ const base = opts.base;
 await tracker.ensureLabels(allLabels());
 
 // ---- pick the ticket -------------------------------------------------------
+const subtasks = SUBTASKS.enabled && !opts["whole-issues"];
+const work = tracker.workCatalogue(subtasks);
 let iid = opts.issue;
 if (!iid) {
   const list = JSON.parse(
-    glab("issue", "list", "-R", PROJECT, "--opened", ...LABELS.ready.flatMap((l) => ["--label", l]), "--per-page", "100", "--output", "json"),
+    glab("issue", "list", "-R", PROJECT, "--opened", ...LABELS.ready.flatMap((l) => ["--label", l]), ...(LABELS.exclude.length ? ["--not-label", LABELS.exclude.join(",")] : []), "--per-page", "100", "--output", "json"),
   );
-  if (!list.length) fail(`No open issues labelled ${LABELS.ready.join(" + ")}.`);
-  iid = String(list[0].iid);
+  const first = expandUnits(list.map((i: { iid: number }) => i.iid), work.childrenOf, subtasks).units[0];
+  if (!first) fail(`No open issues or Tasks labelled ${LABELS.ready.join(" + ")}.`);
+  iid = String(first.iid);
 }
 const issue = JSON.parse(glab("issue", "view", iid, "-R", PROJECT, "--output", "json"));
-const ticket = glab("issue", "view", iid, "-R", PROJECT, "--comments");
-// The version of the ticket this run builds from; compared again before the MR opens.
-const ticketHash = () => {
-  const t = tracker.ticket(Number(iid));
-  return { hash: contentHash({ title: t.title, description: t.description, notes: tracker.notes(Number(iid)) }), description: t.description };
+// A Task gets its parent issue as context; whole tickets have none.
+const parentIid = tracker.parentOf(Number(iid));
+const withParent = (t: tracker.Ticket): tracker.Ticket => {
+  if (parentIid === undefined) return t;
+  const p = tracker.ticket(parentIid);
+  return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
 };
-const startVersion = ticketHash();
-const catalogue = tracker.catalogue().filter((t) => String(t.iid) !== iid);
+const startTicket = withParent(tracker.ticket(Number(iid)));
+const ticket = [glab("issue", "view", iid, "-R", PROJECT, "--comments"), parentText(startTicket)].filter(Boolean).join("\n\n");
+// The version of the ticket this run builds from; compared again before the MR opens.
+const ticketHash = (t = withParent(tracker.ticket(Number(iid)))) => ({ hash: unitHash(t, tracker.notes(Number(iid))), description: t.description });
+const startVersion = ticketHash(startTicket);
+const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);
 const slug = String(issue.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "");
 const branch = `${iid}-${slug}`;
 
@@ -99,6 +109,7 @@ setProject(PROJECT);
 setStage(iid, {
   title: String(issue.title), ticketUrl: `https://${HOST}/${PROJECT}/-/issues/${iid}`, branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
   evidenceDir: resolve(".sandcastle/evidence", iid), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
+  parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
 });
 // Heartbeat so the board can tell a long agent run from a dead process.
 setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
@@ -321,7 +332,7 @@ const conflicts = readRuns()
   });
 
 const description = [
-  `Refs #${iid}`,
+  parentIid === undefined ? `Refs #${iid}` : `Refs #${iid} (Task of #${parentIid})`,
   `Implemented and verified by Sandcastle. Verdict: **${verdict}** (evidence in the ticket comment).`,
   status === "success" ? "Branch CI passed before this MR was opened." : "No branch pipeline appeared; CI will run on this MR.",
   staleNote,
@@ -334,4 +345,4 @@ const mrOut = glab(
 console.log(mrOut);
 finished = true;
 setStage(iid, { stage: "done", mr: mrOut.split(/\s+/).find((w) => w.startsWith("http")) });
-console.log("Not merged and ticket left open: merge and close by hand once you're happy.");
+console.log(`Not merged. Once you merge it, the dispatcher ${parentIid === undefined ? `moves #${iid} to ${LABELS.done}` : `closes Task #${iid}`}.`);

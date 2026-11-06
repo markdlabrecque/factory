@@ -6,8 +6,8 @@ import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { PARKED, readRuns, removeRun, setProject, setStage, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
-import { allLabels, GRAPH, LABELS, TRACKER } from "./config.mts";
-import { contentHash, decide, edgesOf, staleReason } from "./graph.mts";
+import { allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
+import { contentHash, decide, edgesOf, expandUnits, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
 import * as tracker from "./tracker.mts";
@@ -21,6 +21,9 @@ import type { Ticket } from "./tracker.mts";
 // base or closed, and its files don't overlap a live run (in flight, or MR still open).
 // Tickets that aren't free get a "queued" card on the board saying why. A ticket whose run failed
 // is not retried every pass: delete its file in the state dir to retry it.
+// With SUBTASKS.enabled (config.mts), a ready issue that has Tasks gets one run per open Task instead.
+// Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
+// ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
 
 // ---- Selection config: which tickets get a run ----------------------------------------
 // Project, milestone and labels live in config.mts. Every option below is optional; leave one unset
@@ -64,6 +67,7 @@ const { values: opts } = parseArgs({
     base: { type: "string" },
     max: { type: "string" },
     "dry-run": { type: "boolean", default: false },
+    "whole-issues": { type: "boolean", default: false }, // one run per ready issue, ignoring Tasks
   },
 });
 if (!opts.base) {
@@ -72,6 +76,7 @@ if (!opts.base) {
 }
 const base = opts.base;
 const dry = opts["dry-run"];
+const subtasks = SUBTASKS.enabled && !opts["whole-issues"];
 const PROJECT = TRACKER.project;
 const cap = Number(opts.max ?? SELECT.maxConcurrent);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -88,6 +93,20 @@ const active = allRuns.filter(running).length;
 const room = Math.max(0, cap - active);
 log(`${active} active run(s), cap ${cap}`);
 
+// ---- merged work -------------------------------------------------------------
+// Runs whose MR merged into their base since the last pass: close the Task, or move the ticket on.
+const openMrs = tracker.openMrBranches();
+for (const r of allRuns) {
+  if (r.project !== PROJECT || r.stage !== "done" || !r.branch || r.mergedAt || openMrs.has(r.branch)) continue;
+  if (!tracker.mergedInto(r.branch, r.base ?? base)) continue;
+  const what = r.parentIid ? "Task closed" : `moved to ${LABELS.done}`;
+  log(`#${r.iid} merged into ${r.base ?? base}: ${dry ? `would be ${what.toLowerCase()} (dry run)` : what}`);
+  if (dry) continue;
+  if (r.parentIid) tracker.close(Number(r.iid));
+  else tracker.advance(Number(r.iid));
+  setStage(r.iid, { mergedAt: new Date().toISOString(), note: `merged; ${what}` });
+}
+
 // ---- candidates --------------------------------------------------------------
 const args = ["issue", "list", "-R", PROJECT, "--opened", "--per-page", "100", "--output", "json", "--order", SELECT.order, "--sort", SELECT.sort];
 if (LABELS.ready.length) args.push("--label", LABELS.ready.join(","));
@@ -98,7 +117,21 @@ if (SELECT.author) args.push("--author", SELECT.author);
 if (SELECT.issueType) args.push("--issue-type", SELECT.issueType);
 if (SELECT.confidential) args.push("--confidential");
 if (SELECT.search) args.push("--search", SELECT.search);
-const issues: (Ticket & { assignees?: { username: string }[] })[] = JSON.parse(sh("glab", args));
+const ready: (Ticket & { assignees?: { username: string }[] })[] = JSON.parse(sh("glab", args));
+const parents = ready.filter((i) => !(SELECT.excludeAssignees.length && i.assignees?.some((a) => SELECT.excludeAssignees.includes(a.username))));
+
+// Ready issues with Tasks become their open Tasks; an issue whose Tasks are all closed moves on.
+const work = tracker.workCatalogue(subtasks);
+const { units, advance } = expandUnits(parents.map((p) => p.iid), work.childrenOf, subtasks);
+for (const p of advance) {
+  log(`#${p}: every Task is closed; ${dry ? `would move to ${LABELS.done} (dry run)` : `moving to ${LABELS.done}`}`);
+  if (!dry) tracker.advance(p);
+}
+const workById = new Map(work.tickets.map((t) => [t.iid, t]));
+const parentById = new Map(parents.map((p) => [p.iid, p]));
+const issues = units
+  .map((u) => (u.parent ? workById.get(u.iid) : parentById.get(u.iid)))
+  .filter((t): t is Ticket => !!t && !t.labels?.some((l) => LABELS.exclude.includes(l)));
 
 sh("git", ["fetch", "origin", "--prune"]);
 const branches = new Set(
@@ -111,15 +144,13 @@ const candidates = issues.filter((i) => {
   const r = runOf.get(i.iid);
   if (r && !PARKED.includes(r.stage)) return false; // has a run record that isn't parked
   if ([...branches].some((b) => b.startsWith(`${i.iid}-`))) return false; // already has a branch
-  if (SELECT.excludeAssignees.length && i.assignees?.some((a) => SELECT.excludeAssignees.includes(a.username))) return false;
   return true;
 });
-log(`${issues.length} match the filters, ${candidates.length} not yet started`);
+log(`${parents.length} ready ticket(s), ${issues.length} unit(s) of work, ${candidates.length} not yet started`);
 
 // ---- ticket graph ------------------------------------------------------------
-const openMrs = tracker.openMrBranches();
 const live = runs.filter((r) => running(r) || (r.stage === "done" && !!r.branch && openMrs.has(r.branch)));
-const catalogue = tracker.catalogue();
+const catalogue = work.tickets;
 const catalogueById = new Map(catalogue.map((t) => [t.iid, t]));
 const catalogueHash = new Map(catalogue.map((t) => [t.iid, contentHash({ title: t.title, description: t.description })]));
 const manifests = readManifests(PROJECT);
@@ -134,7 +165,7 @@ const hashOf = new Map<number, string>();
 for (const t of tracked) {
   const n = tracker.notes(t.iid);
   notesOf.set(t.iid, n);
-  hashOf.set(t.iid, contentHash({ title: t.title, description: t.description, notes: n }));
+  hashOf.set(t.iid, unitHash(t, n));
 }
 
 const stale = tracked
@@ -223,7 +254,7 @@ mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);
   const out = openSync(resolve(logDir, `run-${iid}.log`), "a");
-  const child = spawn(existsSync(npx) ? npx : "npx", ["tsx", resolve(here, "main.mts"), "--base", base, "--issue", iid], {
+  const child = spawn(existsSync(npx) ? npx : "npx", ["tsx", resolve(here, "main.mts"), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {
     cwd: process.cwd(),
     detached: true,
     stdio: ["ignore", out, out],

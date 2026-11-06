@@ -33,6 +33,8 @@ export interface RunState {
   note?: string;
   evidenceDir?: string;
   ticketHash?: string; // content hash of the ticket the run was built from
+  parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
+  mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on
 }
 
 export interface BoardRun extends RunState {

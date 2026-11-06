@@ -19,9 +19,21 @@ export const LABELS = {
   // Added to a ticket when the implementer reports a blocker the graph can't resolve: one with no
   // providing ticket, or one that is already merged or closed. Keep it in `exclude`.
   needsHuman: "needs-human",
+  // The stage a ticket moves to once its work is merged into the integration branch: a whole ticket
+  // when its MR merges, a parent once every one of its Tasks is closed. The `ready` labels come off
+  // and this one goes on; the ticket stays open.
+  done: "Internal QA",
 };
 
-export const allLabels = () => [...new Set([...LABELS.ready, ...LABELS.exclude, LABELS.needsHuman])];
+export const allLabels = () => [...new Set([...LABELS.ready, ...LABELS.exclude, LABELS.needsHuman, LABELS.done])];
+
+// GitLab Tasks (the "Child items" on an issue).
+export const SUBTASKS = {
+  // true: a ready issue with Tasks is a container, and each open Task is a run of its own (closed
+  // once its branch merges). false, or `--whole-issues` on dispatch.mts / main.mts: every ready issue
+  // is one run, Tasks or not.
+  enabled: true,
+};
 
 // Ticket graph: dependency analysis and conflict holds (see graph.mts).
 export const GRAPH = {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blockedOutcome, breakCycles, contentHash, decide, overlap, pathsOverlap, SANDCASTLE_MARK, staleReason } from "./graph.mts";
+import { blockedOutcome, breakCycles, contentHash, decide, expandUnits, overlap, pathsOverlap, SANDCASTLE_MARK, staleReason, unitHash } from "./graph.mts";
 import type { Edge, Manifest } from "./graph.mts";
 
 // Run: node --test 'orchestrator/*.test.mts'
@@ -119,3 +119,21 @@ function reason(d: { launch: boolean; reason?: string } | undefined): string {
   assert.ok(d && !d.launch);
   return d.reason!;
 }
+
+test("units: tasks replace their parent, closed tasks advance it, whole-issue mode ignores tasks", () => {
+  const childrenOf = new Map([
+    [1, [{ iid: 11, open: true }, { iid: 12, open: false }, { iid: 13, open: true }]],
+    [2, [{ iid: 21, open: false }]],
+  ]);
+  assert.deepEqual(expandUnits([1, 2, 3], childrenOf, true), {
+    units: [{ iid: 11, parent: 1 }, { iid: 13, parent: 1 }, { iid: 3 }],
+    advance: [2],
+  });
+  assert.deepEqual(expandUnits([1, 2, 3], childrenOf, false), { units: [{ iid: 1 }, { iid: 2 }, { iid: 3 }], advance: [] });
+});
+
+test("a task's hash changes when its parent is edited", () => {
+  const task = { title: "t", description: "d", parent: { iid: 1, title: "p", description: "v1" } };
+  assert.notEqual(unitHash(task), unitHash({ ...task, parent: { ...task.parent, description: "v2" } }));
+  assert.equal(unitHash({ title: "t", description: "d" }), contentHash({ title: "t", description: "d" }), "plain tickets keep their old hash");
+});
