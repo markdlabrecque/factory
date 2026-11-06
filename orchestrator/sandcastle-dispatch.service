@@ -1,0 +1,13 @@
+# systemd user unit: one dispatch pass (start a Sandcastle run per eligible ticket, up to the cap).
+# Fired by sandcastle-dispatch.timer. Fill in __NODE__ (absolute path of node, 22.18+) and
+# __REPO__ (the project repo root, where .sandcastle/ lives).
+[Unit]
+Description=Sandcastle dispatcher
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO__
+Environment=SANDCASTLE_STATE_DIR=%h/.local/state/sandcastle
+# Runs are detached from the dispatcher so a pass returns quickly; KillMode=process keeps them alive.
+KillMode=process
+ExecStart=__NODE__ __REPO__/.sandcastle/dispatch.mts --base __BASE__ --max 3
