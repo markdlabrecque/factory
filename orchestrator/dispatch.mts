@@ -108,7 +108,7 @@ for (const r of allRuns) {
 }
 
 // ---- candidates --------------------------------------------------------------
-const args = ["issue", "list", "-R", PROJECT, "--opened", "--per-page", "100", "--output", "json", "--order", SELECT.order, "--sort", SELECT.sort];
+const args = ["issue", "list", "-R", PROJECT, "--per-page", "100", "--output", "json", "--order", SELECT.order, "--sort", SELECT.sort];
 if (LABELS.ready.length) args.push("--label", LABELS.ready.join(","));
 if (LABELS.exclude.length) args.push("--not-label", LABELS.exclude.join(","));
 if (TRACKER.milestone) args.push("--milestone", TRACKER.milestone);
