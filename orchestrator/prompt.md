@@ -24,6 +24,18 @@ You are RALPH, an autonomous coding agent. Implement ONE ticket on the current b
 
 If the ticket needs no code change, or you are blocked, make no commit and explain why in your final message.
 
+If you are blocked because something this ticket needs doesn't exist yet (a field, content type, service, route, template, API) and it isn't part of this ticket to create it, also write `{{EVIDENCE_DIR}}/blocked.json`:
+
+```json
+{ "blockers": [{ "iid": 798, "what": "Event content type", "evidence": "ticket says 'on the new Event pages'; no node.type.event.yml in config/sync" }] }
+```
+
+`iid` is the open ticket below that creates it, or `null` if none of them does. Only name a ticket whose text clearly covers it. The orchestrator restarts this ticket once that ticket is merged.
+
+### Other open tickets
+
+{{CATALOGUE}}
+
 When done (committed, or concluded no change / blocked), output:
 
 <promise>COMPLETE</promise>

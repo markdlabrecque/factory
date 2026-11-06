@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,8 +10,11 @@ import { fileURLToPath } from "node:url";
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
 
-export type Stage = "queued" | "setup" | "implementing" | "verifying" | "posting" | "pushing" | "ci" | "done" | "stopped";
+export type Stage = "queued" | "waiting" | "setup" | "implementing" | "verifying" | "posting" | "pushing" | "ci" | "done" | "stopped";
 export const TERMINAL: Stage[] = ["done", "stopped"];
+// Not running and not finished: the dispatcher re-evaluates these every pass. "queued" = not started
+// (the note says why), "waiting" = the implementer reported a blocker. Neither counts against capacity.
+export const PARKED: Stage[] = ["queued", "waiting"];
 
 export interface RunState {
   iid: string;
@@ -29,6 +32,7 @@ export interface RunState {
   mr?: string;
   note?: string;
   evidenceDir?: string;
+  ticketHash?: string; // content hash of the ticket the run was built from
 }
 
 export interface BoardRun extends RunState {
@@ -47,7 +51,7 @@ let project: string | undefined;
 export function setProject(name: string): void {
   project = name;
 }
-const keyFor = (iid: string, proj?: string) => (proj ? `${proj.replace(/[^A-Za-z0-9._-]+/g, "_")}--${iid}` : iid);
+export const keyFor = (iid: string, proj?: string) => (proj ? `${proj.replace(/[^A-Za-z0-9._-]+/g, "_")}--${iid}` : iid);
 
 function write(file: string, text: string) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -90,6 +94,12 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
   renderBoard();
 }
 
+/** Delete a run record (the dispatcher clears parked records for tickets that left the queue). */
+export function removeRun(iid: string): void {
+  rmSync(resolve(stateDir(), `${keyFor(iid, project)}.json`), { force: true });
+  renderBoard();
+}
+
 /** Read every run. A run whose process is gone without a terminal stage crashed: mark it washed away. */
 export function readRuns(): BoardRun[] {
   if (!existsSync(stateDir())) return [];
@@ -98,7 +108,7 @@ export function readRuns(): BoardRun[] {
     try {
       const file = resolve(stateDir(), f);
       const s: RunState = JSON.parse(readFileSync(file, "utf8"));
-      if (!TERMINAL.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
+      if (!TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
         s.note = `process ${s.pid} exited without finishing (last stage: ${s.stage})`;
         s.stage = "stopped";
         s.stageSince = now();
