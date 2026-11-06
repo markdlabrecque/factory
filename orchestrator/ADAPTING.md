@@ -8,7 +8,7 @@ npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
 
 ## Install into a project
 
-Copy into the project's `.sandcastle/`: `main.mts`, `prompt.md`, `prompt.verify.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers).
+Copy into the project's `.sandcastle/`: `main.mts`, `dispatch.mts`, `prompt.md`, `prompt.verify.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers).
 
 ## What is generic
 
@@ -23,6 +23,20 @@ Branching, the two agent runs and the verifier guard (it must not commit, move H
 5. **CI behaviour:** if branch pushes never get a pipeline, the "no pipeline appeared" fallback is the normal path; if they always do, consider dropping it.
 6. **Integration branch:** `--base` is required. Some projects use a different integration branch per epic.
 
+## Running many tickets: the dispatcher
+
+`dispatch.mts` lists the tickets that qualify and starts one detached `main.mts --issue N` run for each, up to a cap on concurrent runs.
+
+```
+node .sandcastle/dispatch.mts --base <integration-branch> [--max N] [--dry-run]
+```
+
+- **Which tickets:** edit the `SELECT` block at the top of `dispatch.mts`. Every option (labels, excluded labels, assignee, excluded assignees, author, milestone, issue type, confidential, search, order, sort, cap, stagger) is commented there with an example. Keep `gitlabHost` and `project` in step with `CONFIG` in `main.mts`.
+- **Skipped tickets:** any ticket that already has a run record on the board (any stage, including stopped) or a `<iid>-*` branch. A failed run is not retried automatically; delete its JSON file from the state dir to retry it.
+- **Capacity:** runs in flight are counted from the board, across all projects sharing the state dir.
+- **Logs:** each run writes to `.sandcastle/logs/run-<iid>.log`. Add `logs/` to `.sandcastle/.gitignore`.
+- **On a schedule (Linux/systemd):** copy `sandcastle-dispatch.service` and `sandcastle-dispatch.timer` to `~/.config/systemd/user/`, fill in `__NODE__`, `__REPO__` and `__BASE__`, then `systemctl --user enable --now sandcastle-dispatch.timer`. Disable with `systemctl --user disable --now sandcastle-dispatch.timer`. The timer re-arms 15 minutes after each pass finishes, so passes never overlap.
+
 ## Not included
 
-No queue, no dependency ordering between tickets, no retry.
+No dependency ordering between tickets (blocked-by links are not checked; use an exclude label), no automatic retry.
