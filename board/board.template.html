@@ -1,10 +1,18 @@
 <!doctype html>
+<!-- Shared board/evidence shell: sticky navigation, saved theme and same-tab evidence previews. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="10">
 <title>Sandcastle Map</title>
+<script>
+(function () {
+  var theme;
+  try { theme = localStorage.getItem('sandcastle-theme'); } catch (_) {}
+  document.documentElement.dataset.theme = theme === 'light' || theme === 'dark' ? theme : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+})();
+</script>
 <style>
   :root {
     --sea: #2a7f8e; --sea-soft: #cfe6e6;
@@ -13,16 +21,31 @@
     --ink: #4a3320; --ink-soft: #7a6244;
     --x: #c0392b; --gold: #d9a21b; --ok: #3b7a4a;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
+    :root[data-theme="dark"] {
       --sea: #5db7c4; --sea-soft: #1d3a44;
       --sand: #1c2733; --sand-deep: #26354a;
       --parchment: #2a3a4f; --edge: #6d7f98;
       --ink: #f1e7cf; --ink-soft: #b9ad94;
       --x: #ef6a58; --gold: #f0c04a; --ok: #6cc17f;
     }
-  }
+  :root { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing: border-box; }
+  .app-nav { position: sticky; top: 0; z-index: 10; background: var(--parchment); border-bottom: 2px solid var(--edge); margin: 0 -16px; padding: 10px 16px; }
+  .nav-inner { max-width: 1400px; margin: auto; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  a { color: var(--sea); }
+  .app-nav a { font-weight: 700; }
+  .app-nav [aria-current="page"] { color: var(--ink); }
+  .theme-control { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  select { font: inherit; background: var(--sand); color: var(--ink); border: 1px solid var(--edge); border-radius: 8px; padding: 5px; }
+  a:focus-visible, select:focus-visible { outline: 3px solid var(--sea); outline-offset: 3px; }
+  .evidence-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+  .evidence-item { min-width: 0; overflow-wrap: anywhere; }
+  .evidence-item h2 { margin-bottom: 10px; }
+  .evidence-item img, .evidence-item video { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: var(--sand); border-radius: 8px; }
+  .evidence-item pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 65vh; overflow: auto; }
+  .evidence-item .links { font-size: 14px; }
+  .evidence-summary { margin-bottom: 0; }
   body {
     margin: 0; padding: 0 16px 56px; color: var(--ink);
     font: 15px/1.45 ui-rounded, "Avenir Next", system-ui, sans-serif;
@@ -75,6 +98,13 @@
 </style>
 </head>
 <body>
+<nav class="app-nav" aria-label="Main navigation">
+  <div class="nav-inner">
+    <a href="/" id="board-nav" aria-current="page">Sandcastle Board</a>
+    <a id="evidence-nav" hidden>Evidence</a>
+    <label class="theme-control">Theme <select id="theme" aria-label="Color theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+  </div>
+</nav>
 <header>
   <svg viewBox="0 0 80 80" role="img" aria-label="Sandcastle">
     <rect x="8" y="46" width="64" height="24" rx="3" fill="#e3c98f" stroke="#c9a45c" stroke-width="2"/>
@@ -103,7 +133,18 @@
 <script id="data" type="application/json">/*__DATA__*/null</script>
 <script>
 (function () {
+  var themeSelect = document.getElementById('theme');
+  themeSelect.value = document.documentElement.dataset.theme;
+  themeSelect.addEventListener('change', function () {
+    document.documentElement.dataset.theme = themeSelect.value;
+    try { localStorage.setItem('sandcastle-theme', themeSelect.value); } catch (_) {}
+  });
+  if (location.protocol === 'file:') document.getElementById('board-nav').href = location.pathname;
   var data = JSON.parse(document.getElementById('data').textContent);
+  if (data.evidence) {
+    renderEvidence(data.evidence);
+    return;
+  }
   var STOPS = [
     { id: 'queued',       name: 'The shoreline',        what: 'Not started: the note says what it waits for' },
     { id: 'waiting',      name: 'Tide pool',            what: 'Implementer found a missing prerequisite; restarts when the blocker merges' },
@@ -135,8 +176,49 @@
   }
   function link(href, text) {
     var a = el('a', null, text);
-    a.href = href; a.target = '_blank'; a.rel = 'noopener';
+    a.href = href;
+    if (!href.startsWith('/') && !href.startsWith('file:')) { a.target = '_blank'; a.rel = 'noopener'; }
     return a;
+  }
+
+  function renderEvidence(evidence) {
+    var run = evidence.run;
+    var nav = document.getElementById('evidence-nav');
+    document.getElementById('board-nav').removeAttribute('aria-current');
+    nav.hidden = false; nav.href = evidence.url; nav.setAttribute('aria-current', 'page');
+    document.title = 'Evidence · ' + run.key;
+    document.querySelector('h1').textContent = 'Evidence · #' + run.iid;
+    document.querySelector('.sub').textContent = (run.project ? run.project + ' · ' : '') + (run.title || run.key);
+    document.getElementById('tally').textContent = run.stage + (run.verdict ? ' · ' + run.verdict : '');
+    var map = document.getElementById('map');
+    var summary = el('section', 'stop evidence-summary');
+    var links = el('div', 'links');
+    links.appendChild(link('/', '← Back to board'));
+    if (run.ticketUrl) links.appendChild(link(run.ticketUrl, 'Ticket #' + run.iid));
+    if (run.mr) links.appendChild(link(run.mr, 'Merge request'));
+    summary.appendChild(links);
+    if (run.note) summary.appendChild(el('p', null, run.note));
+    map.appendChild(summary);
+    var grid = el('div', 'evidence-grid');
+    evidence.files.forEach(function (file) {
+      var item = el('article', 'stop evidence-item');
+      item.appendChild(el('h2', null, file.name));
+      if (file.kind === 'image') {
+        var image = el('img'); image.src = file.url; image.alt = file.name; image.loading = 'lazy';
+        var preview = link(file.url, ''); preview.appendChild(image); item.appendChild(preview);
+      } else if (file.kind === 'video') {
+        var video = el('video'); video.src = file.url; video.controls = true; video.preload = 'metadata'; item.appendChild(video);
+      } else if (file.kind === 'text') {
+        item.appendChild(el('pre', null, file.text));
+        if (file.truncated) item.appendChild(el('p', 'sub', 'Preview limited to 64 KiB. Open the original for the full file.'));
+      }
+      var actions = el('div', 'links');
+      actions.appendChild(link(file.url, 'Open original'));
+      item.appendChild(actions); grid.appendChild(item);
+    });
+    if (!evidence.files.length) grid.appendChild(el('p', 'stop', 'No evidence files yet. Return after the verifier has captured evidence.'));
+    map.appendChild(grid);
+    document.querySelector('footer').replaceChildren(el('span', null, 'Evidence files from this run. Videos play on demand.'));
   }
 
   var map = document.getElementById('map');

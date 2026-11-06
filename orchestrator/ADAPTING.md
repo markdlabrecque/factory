@@ -10,6 +10,8 @@ npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
 
 Copy into the project's `.sandcastle/`: `config.mts`, `main.mts`, `dispatch.mts`, `dispatch.sh`, `graph.mts`, `analyze.mts`, `tracker.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers). The host needs Node 22.18+, Docker, and `glab` and `claude` on the PATH and logged in.
 
+The always-on board service uses the same `board.template.html` for the board and evidence previews. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating the service. Its sticky navigation links back to the board; evidence opens in the same tab. Light/dark mode is saved in browser storage, defaulting to the system preference on the first visit. Evidence pages do not refresh during playback. Text previews are limited to 64 KiB, with originals still available. Local `board.html` links to evidence folders instead of preview pages.
+
 ## What is generic
 
 Branching, the two agent runs and the verifier guard (it must not commit, move HEAD or dirty the tree), evidence upload and the ticket comment, the verdict gate, the push/CI/MR step, and the board updates. The container never holds a GitLab token; every GitLab call runs on the host with its own `glab` auth.

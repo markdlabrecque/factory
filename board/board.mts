@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Run-state store + board page.
+// Run-state store + shared board/evidence page with sticky navigation and a saved light/dark theme.
 // Writers (main.mts) call setStage(); each call writes <stateDir>/<key>.json and regenerates
 // .sandcastle/board.html (data embedded, auto-refreshing, opens from disk). The always-on service
 // (board-server.mts) serves the same page over HTTP from the same state dir.
@@ -132,6 +132,14 @@ export function buildPage(mode: "file" | "http"): string {
   }));
   const data = JSON.stringify({ runs, generatedAt: now() }).replace(/</g, "\\u003c");
   return readFileSync(templateFile, "utf8").replace("/*__DATA__*/null", data);
+}
+
+/** Render evidence using the board's shell. Evidence never auto-refreshes while media is playing. */
+export function buildEvidencePage(run: BoardRun, files: { name: string; kind: string; url: string; text?: string; truncated?: boolean }[]): string {
+  const data = JSON.stringify({ evidence: { run, files, url: `/evidence/${encodeURIComponent(run.key)}/` } }).replace(/</g, "\\u003c");
+  return readFileSync(templateFile, "utf8")
+    .replace('<meta http-equiv="refresh" content="10">', '')
+    .replace("/*__DATA__*/null", data);
 }
 
 export function renderBoard(): void {

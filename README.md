@@ -7,7 +7,11 @@ Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups.
 - `board/` - run-state store and treasure-map status board. `board.mts` writes `.sandcastle/state/<project>--<iid>.json` per run and regenerates a self-contained `board.html` from `board.template.html`. Copy both into a project's `.sandcastle/`.
   - `board-server.mts`, `sandcastle-board.service`, `install-service.sh` - always-on version: a systemd user service (macOS: `com.sandcastle.board.plist` + `install-launchd.sh`, a launchd user agent) serving the board at `http://127.0.0.1:4444` (and each run's evidence under `/evidence/`) from one shared state folder. Node 22.18+. Run `board/install-service.sh` (Linux) or `board/install-launchd.sh` (macOS), so every project and worktree reports to the one board. `dispatch.sh` uses that folder unless `SANDCASTLE_STATE_DIR` says otherwise; to start `main.mts` directly, `export SANDCASTLE_STATE_DIR=$HOME/.local/state/sandcastle` first.
 
-Without the service, the board assumes it runs from a repo root containing `.sandcastle/` and writes `.sandcastle/board.html`.
+The board and HTTP evidence pages share the treasure-map design and a sticky navigation bar. Evidence opens in the same tab with image, video and text previews, a Back to board link, and normal browser Back/Forward navigation. The Theme selector switches between light and dark and saves the choice in your browser. The first visit follows your system preference. Evidence pages do not auto-refresh, so videos are not interrupted. Text previews stop at 64 KiB; Open original serves the full file.
+
+Without the service, the board assumes it runs from a repo root containing `.sandcastle/` and writes `.sandcastle/board.html`. The saved theme works there too, but evidence links open local folders rather than the HTTP preview pages.
+
+Run the board regression tests with `node --test board/board.test.mts`.
 
 ## Setting up a project
 
