@@ -1,0 +1,17 @@
+# systemd user template timer for sandcastle-dispatch@.service; one instance per project.
+#   systemctl --user enable --now sandcastle-dispatch@<name>.timer   (install-dispatch.sh does this)
+#   systemctl --user disable --now sandcastle-dispatch@<name>.timer
+[Unit]
+Description=Run the Sandcastle dispatcher for %i on a schedule
+
+[Timer]
+OnActiveSec=1min
+OnBootSec=2min
+# The timer re-arms 15 min after each pass finishes, so a project's passes never overlap.
+OnUnitInactiveSec=15min
+# Spreads projects' passes apart so they rarely read the shared run cap at the same moment.
+RandomizedDelaySec=2min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

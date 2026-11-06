@@ -54,6 +54,50 @@ From the project, with the integration branch checked out:
 
 It uses the checked-out branch as the base (it must be on origin), checks that `node`, `glab`, `claude` and Docker are there and logged in, and that the image in `CONFIG.image` exists and was built for your user. From a terminal it builds a missing or mismatched image; under the timer it stops and prints the build command instead. Other arguments go to `dispatch.mts`: `--max N` (concurrent runs, default 3) and `--whole-issues` (one run per issue, ignoring Tasks).
 
-On Linux, `orchestrator/sandcastle-dispatch.service` and `.timer` run a pass every 15 minutes (setup in `orchestrator/ADAPTING.md`). There's no launchd version for the dispatcher yet, so on macOS run it by hand.
+Retry a failed run by deleting its record, `~/.local/state/sandcastle/<project>--<iid>.json` (or `.sandcastle/state/` without the shared state dir). The next pass picks the ticket up again.
 
-On a new machine: clone the project, `npm install`, recreate `.sandcastle/.env` (it's gitignored), log in to `glab` and `claude`, then run `.sandcastle/dispatch.sh --dry-run` from a terminal; it builds the image. Each machine builds its own image (CPU architecture and user ID differ). Don't run dispatchers for the same project on two machines: each keeps its own state and they would start the same tickets twice.
+### On a schedule (Linux)
+
+Each project gets its own systemd user timer, `sandcastle-dispatch@<name>.timer`, which runs a pass 15 minutes after the last one finished. All projects share the run cap and the board. There's no launchd version for the dispatcher yet, so on macOS run passes by hand.
+
+```sh
+cd ~/Projects/<project>                       # with the integration branch checked out
+.sandcastle/dispatch.sh --dry-run             # once from a terminal: builds the image, checks logins
+<sandcastle-helper>/orchestrator/install-dispatch.sh            # name = the repo folder's name
+<sandcastle-helper>/orchestrator/install-dispatch.sh --name foo # if two repos share a folder name
+loginctl enable-linger $USER                  # once per machine: keep timers running when logged out
+```
+
+```sh
+systemctl --user list-timers 'sandcastle-dispatch@*'   # every project's next pass
+journalctl --user -u sandcastle-dispatch@<name> -f     # one project's dispatcher log
+<sandcastle-helper>/orchestrator/install-dispatch.sh --uninstall <name>
+```
+
+The timer never builds the image: after a Dockerfile change, run `.sandcastle/dispatch.sh --dry-run` from a terminal to rebuild it. To change a project's base, check out the other branch in its repo; the next pass uses it.
+
+Upgrading from the single-project timer:
+
+```sh
+systemctl --user disable --now sandcastle-dispatch.timer
+rm ~/.config/systemd/user/sandcastle-dispatch.{service,timer}
+```
+
+then run `install-dispatch.sh` from each project.
+
+### Updating a project's copy of the workflow
+
+Projects run their own copy of the files in `.sandcastle/`, so changes here don't reach them on their own. After pulling this repo, copy the files listed in `orchestrator/ADAPTING.md` ("Install into a project") into the project again, except the ones you adapted (`config.mts`, `main.mts`'s `CONFIG`, `prompt.md`, `prompt.verify.md`, `sandbox/bootstrap-site.sh`): merge changes into those by hand. Then check new settings in `config.mts` against the shipped one, and run `.sandcastle/dispatch.sh --dry-run`.
+
+### On a new machine
+
+```sh
+git clone <project> && cd <project> && git checkout <integration branch>
+npm install
+cp .sandcastle/.env.example .sandcastle/.env    # then fill it in; it's gitignored
+glab auth login --hostname <gitlab host>
+claude auth login
+.sandcastle/dispatch.sh --dry-run               # builds this machine's image
+```
+
+Each machine builds its own image (CPU architecture and user ID differ). Don't run dispatchers for the same project on two machines: each keeps its own state, so they would start the same tickets twice.
