@@ -1,0 +1,7 @@
+# Install GitLab CLI (pinned). Replaces the `# TODO: install your issue tracker's CLI here` line.
+ARG GLAB_VERSION={{GLAB_VERSION}}
+RUN ARCH=$(dpkg --print-architecture) \
+  && curl -fsSL -o /tmp/glab.deb \
+    "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${ARCH}.deb" \
+  && apt-get update && apt-get install -y /tmp/glab.deb \
+  && rm -f /tmp/glab.deb && rm -rf /var/lib/apt/lists/*

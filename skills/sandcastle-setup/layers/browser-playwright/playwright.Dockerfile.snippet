@@ -1,0 +1,6 @@
+# Playwright layer: Chromium only, headless. Node is already in the sandcastle base image.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright@{{PLAYWRIGHT_VERSION}} \
+  && playwright install --with-deps chromium \
+  && chmod -R a+rX /opt/ms-playwright \
+  && rm -rf /var/lib/apt/lists/*
