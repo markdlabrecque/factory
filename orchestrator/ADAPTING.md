@@ -8,7 +8,7 @@ npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
 
 ## Install into a project
 
-Copy into the project's `.sandcastle/`: `config.mts`, `main.mts`, `dispatch.mts`, `graph.mts`, `analyze.mts`, `tracker.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers). The host needs `glab` and `claude` on the PATH.
+Copy into the project's `.sandcastle/`: `config.mts`, `main.mts`, `dispatch.mts`, `dispatch.sh`, `graph.mts`, `analyze.mts`, `tracker.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers). The host needs `glab` and `claude` on the PATH.
 
 ## What is generic
 
@@ -29,8 +29,10 @@ Branching, the two agent runs and the verifier guard (it must not commit, move H
 `dispatch.mts` lists the tickets that qualify and starts one detached `main.mts --issue N` run for each, up to a cap on concurrent runs.
 
 ```
-node .sandcastle/dispatch.mts --base <integration-branch> [--max N] [--dry-run] [--whole-issues]
+.sandcastle/dispatch.sh [--dry-run] [--max N] [--whole-issues]
 ```
+
+`dispatch.sh` runs one pass with the defaults: the base is the branch checked out where you run it (it must be on origin). It first checks `node`, `glab`, `claude` and Docker are there and logged in, and that the `CONFIG.image` image exists and was built for your UID. From a terminal it builds a missing or mismatched image (`npx sandcastle docker build-image --image-name <CONFIG.image>`); without one, as under the timer, it stops and prints that command. Extra arguments go to `dispatch.mts`, which can also be run directly: `node .sandcastle/dispatch.mts --base <integration-branch> ...`.
 
 - **Which tickets:** milestone and labels are in `config.mts`; the rest (assignee, excluded assignees, author, issue type, confidential, search, order, sort, cap, stagger) is in the `SELECT` block at the top of `dispatch.mts`, each commented with an example.
 - **GitLab Tasks.** With `SUBTASKS.enabled` (the default), a ready issue that has Tasks (its "Child items") is a container: each open Task gets its own run, branch and MR, with the parent's description as context. Ready and exclude labels go on the parent; an exclude label on a Task holds back just that Task. An issue without Tasks is one run, as before. `--whole-issues` (or `enabled: false`) makes every ready issue one run, Tasks or not.
@@ -38,7 +40,7 @@ node .sandcastle/dispatch.mts --base <integration-branch> [--max N] [--dry-run] 
 - **Skipped tickets:** any ticket with a running or finished run record, or a `<iid>-*` branch. A failed run is not retried automatically; delete its JSON file from the state dir to retry it. Tickets the ticket graph holds back stay on the board as `queued` with the reason.
 - **Capacity:** runs in flight are counted from the board, across all projects sharing the state dir.
 - **Logs:** each run writes to `.sandcastle/logs/run-<iid>.log`. Add `logs/` to `.sandcastle/.gitignore`.
-- **On a schedule (Linux/systemd):** copy `sandcastle-dispatch.service` and `sandcastle-dispatch.timer` to `~/.config/systemd/user/`, fill in `__NODE__`, `__REPO__` and `__BASE__`, then `systemctl --user enable --now sandcastle-dispatch.timer`. Disable with `systemctl --user disable --now sandcastle-dispatch.timer`. The timer re-arms 15 minutes after each pass finishes, so passes never overlap.
+- **On a schedule (Linux/systemd):** copy `sandcastle-dispatch.service` and `sandcastle-dispatch.timer` to `~/.config/systemd/user/`, fill in `__REPO__` (its checked-out branch is the base) and `__NODE_BIN__`, then `systemctl --user enable --now sandcastle-dispatch.timer`. Disable with `systemctl --user disable --now sandcastle-dispatch.timer`. The timer re-arms 15 minutes after each pass finishes, so passes never overlap.
 
 ## Ticket graph
 
