@@ -23,15 +23,15 @@ Report what was detected and why (which file matched) in one line, then confirm.
 | --- | --- | --- |
 | Tracker: GitLab | `layers/tracker-gitlab/` | `GITLAB_HOST` (default git.affinitybridge.com), `LABEL` (default `Sandcastle`), `GLAB_VERSION` |
 | Runtime: web | `layers/runtime-web/` | `PHP_VERSION`; Docker only (services need root); docroot from Detect |
-| CMS: Drupal | `layers/cms-drupal/` | web runtime |
+| CMS: Drupal | `layers/cms-drupal/` | web runtime; the project's own Drush (`drush/drush` in `composer.json`), linked as `drush` |
 | CMS: WordPress | `layers/cms-wordpress/` | web runtime |
 | Browser: Playwright | `layers/browser-playwright/` | `PLAYWRIGHT_VERSION` (npm); works without the web layer too |
 
 Substitute `{{VARS}}` in snippets with the chosen values. Pin versions; look up current ones.
 
 ## Status
-- Verified (2026-11-05): web + Drush launcher + Playwright layers build on `node:22-bookworm`; running as root, `start-web.sh` serves PHP 8.3 with a working MariaDB connection and headless Chromium loads the page.
-- **Not verified:** the GitLab layer (`glab` flags, install URL); starting services via a Sandcastle sandbox hook (`sudo: true`) with the non-root `agent` user; Drush against a real Drupal project; the WP-CLI layer.
+- Verified (2026-11-05): web + Playwright layers build on `node:22-bookworm`; running as root, `start-web.sh` serves PHP 8.3 with a working MariaDB connection and headless Chromium loads the page. (That build used the Drush launcher, since removed: the Drupal layer now only links the project's `vendor/bin/drush`.)
+- **Not verified:** the GitLab layer (`glab` flags, install URL); starting services via a Sandcastle sandbox hook (`sudo: true`) with the non-root `agent` user; the `drush` link against a real Drupal project; the WP-CLI layer.
 
 ## Steps
 1. Run **Detect** above and confirm the layers and values. Check the branch is clean. If `.sandcastle/` doesn't exist, `npx sandcastle init` with tracker **Custom** and the **Docker** provider (always Docker, not Podman).

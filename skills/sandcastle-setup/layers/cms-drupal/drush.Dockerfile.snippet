@@ -1,3 +1,4 @@
-# Drupal layer: Drush launcher (uses the project's own drush via vendor/bin when present).
-RUN curl -fsSL -o /usr/local/bin/drush https://github.com/drush-ops/drush-launcher/releases/latest/download/drush.phar \
-  && chmod +x /usr/local/bin/drush
+# Drupal layer: no Drush in the image. Projects install their own with Composer, so `drush` on the
+# PATH points at the project's vendor/bin/drush. The link dangles until `composer install` runs.
+ARG WORKSPACE=/home/agent/workspace
+RUN ln -s "${WORKSPACE}/vendor/bin/drush" /usr/local/bin/drush
