@@ -11,8 +11,8 @@ Without the service, the board assumes it runs from a repo root containing `.san
 
 ## Setting up a project
 
-1. Run the `sandcastle-setup` skill in the project. It builds the Docker side: the image layers and the GitLab tracker commands.
-2. In the same project, ask Claude to install the workflow (orchestrator, dispatcher, ticket graph, board). Replace `<sandcastle-helper>` with where this repo is checked out, and fill in `<MILESTONE>` and `<BASE>`:
+1. Run the `sandcastle-setup` skill in the project. It does the base install (Sandcastle scaffold and GitLab tracker), then asks separately whether to add the Docker setup (web runtime, CMS and Playwright layers) and the workflow (orchestrator, dispatcher, ticket graph, board).
+2. For a project set up before the skill offered the workflow, ask Claude to install it with this prompt. Replace `<sandcastle-helper>` with where this repo is checked out, and fill in `<MILESTONE>` and `<BASE>`:
 
 ```text
 Install the Sandcastle workflow from <sandcastle-helper> into this project's .sandcastle/,
