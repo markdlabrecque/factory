@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- launchd user agent for the Sandcastle board. Installed by install-launchd.sh, which fills in __NODE__ and __HOME__.
+     Always on at http://127.0.0.1:4444 whether or not any run is active. Needs Node 22.18+ (runs the .mts files directly). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.sandcastle.board</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__HOME__/.local/share/sandcastle-board/board-server.mts</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORT</key><string>4444</string>
+    <key>HOST</key><string>127.0.0.1</string>
+    <key>SANDCASTLE_STATE_DIR</key><string>__HOME__/.local/state/sandcastle</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>2</integer>
+  <key>StandardOutPath</key><string>__HOME__/.local/state/sandcastle/board.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/.local/state/sandcastle/board.log</string>
+</dict>
+</plist>
