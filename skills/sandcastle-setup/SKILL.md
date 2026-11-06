@@ -21,7 +21,7 @@ Report what was detected and why (which file matched) in one line, then confirm.
 ## Layers
 | Layer | Dir | Needs |
 | --- | --- | --- |
-| Tracker: GitLab | `layers/tracker-gitlab/` | `GITLAB_HOST` (default git.affinitybridge.com), `LABEL` (default `Sandcastle`), `GLAB_VERSION` |
+| Tracker: GitLab | `layers/tracker-gitlab/` | `GITLAB_HOST` (default git.affinitybridge.com), `LABEL` (default `Sandcastle`; only for the init template's prompt, see Base install step 3), `GLAB_VERSION` |
 | Runtime: web | `layers/runtime-web/` | `PHP_VERSION`; Docker only (services need root); docroot from Detect |
 | CMS: Drupal | `layers/cms-drupal/` | web runtime; the project's own Drush (`drush/drush` in `composer.json`), linked as `drush` |
 | CMS: WordPress | `layers/cms-wordpress/` | web runtime |
@@ -38,7 +38,7 @@ Substitute `{{VARS}}` in snippets with the chosen values. Pin versions; look up 
 ### Base install (always)
 1. Run **Detect** above and confirm the values. Check the branch is clean. If `.sandcastle/` doesn't exist, `npx sandcastle init` with tracker **Custom** and the **Docker** provider (always Docker, not Podman).
 2. **Fail loudly if the scaffold moved.** Grep `.sandcastle/` for `No issue tracker configured`, `<view command`, `<close command`, `TODO: install your issue tracker`. If any is missing, stop and say which.
-3. Tracker layer: substitute list/view/close from `tracker-gitlab/commands.md` for the markers; put `.env` lines from `env.snippet` into `.sandcastle/.env` and `.env.example`; **leave `GITLAB_TOKEN` empty, tell the user to fill it** (never fetch it from 1Password). Replace the Dockerfile's `# TODO: install your issue tracker's CLI` line with `glab.Dockerfile.snippet`.
+3. Tracker layer: substitute list/view/close from `tracker-gitlab/commands.md` for the markers. These markers live in the init template's own `prompt.md` and `main.mts` (e.g. `simple-loop`); `LABEL` only filters that template's issue list. Use the default and don't ask about it, create it, or reconcile it with anything: if the workflow is chosen later, its files replace these and its labels come from `config.mts`. Put `.env` lines from `env.snippet` into `.sandcastle/.env` and `.env.example`; **leave `GITLAB_TOKEN` empty, tell the user to fill it** (never fetch it from 1Password). Replace the Dockerfile's `# TODO: install your issue tracker's CLI` line with `glab.Dockerfile.snippet`.
 4. Verify: `glab auth status --hostname <host>`.
 
 ### Then ask: two separate questions
@@ -50,15 +50,15 @@ The workflow's verifier needs the web runtime and Playwright. If the user wants 
 
 ### Docker setup (if chosen)
 1. Add the chosen `*.Dockerfile.snippet` files after the glab one, in order: web, CMS, Playwright. Copy `runtime-web/start-web.sh` into `.sandcastle/` (the web snippet COPYs it; it must be in the build context).
-2. Web layer hook: `start-web.sh <detected docroot>` run as root once the sandbox is ready. With the workflow, it goes in `CONFIG.sandboxSetup` in `main.mts` (`{ command: "start-web.sh <docroot>", sudo: true }`); without it, add `hooks: { sandbox: { onSandboxReady: [{ command: "start-web.sh <docroot>", sudo: true }] } }` to Sandcastle's `main.ts`. Project code reaches Playwright's global install via `NODE_PATH=$(npm root -g)` (ESM ignores it; use CJS or install `playwright` in the project).
+2. Web layer hook: `start-web.sh <detected docroot>` run as root once the sandbox is ready. With the workflow, it goes in `CONFIG.sandboxSetup` in `main.mts` (`{ command: "start-web.sh <docroot>", sudo: true }`); without it, add `hooks: { sandbox: { onSandboxReady: [{ command: "start-web.sh <docroot>", sudo: true }] } }` to the init template's `main.mts`. Project code reaches Playwright's global install via `NODE_PATH=$(npm root -g)` (ESM ignores it; use CJS or install `playwright` in the project).
 3. Verify: build the image (`npx sandcastle docker build-image`); a `maxIterations: 1` run on a throwaway ticket where the agent starts the web layer, loads the page with Playwright, and closes the ticket.
-4. Prompt conventions (Sandcastle's own prompt; the workflow ships its own): state the label; commit messages start with the ticket ref (`#425: ...`); `glab mr create` titles start `#<iid>: `; tell the agent to check its work with the web server and Playwright before committing.
+4. Prompt conventions (the init template's prompt; skip with the workflow, which ships its own): state the label; commit messages start with the ticket ref (`#425: ...`); `glab mr create` titles start `#<iid>: `; tell the agent to check its work with the web server and Playwright before committing.
 
 ### Workflow (if chosen)
 Source: a sandcastle-helper checkout. Ask for its path (default `~/Projects/sandcastle-helper`); if there is none, `gh repo clone markdlabrecque/sandcastle-helper` into a temp dir. Follow its `orchestrator/ADAPTING.md` ("Install into a project" and "What to adapt per project"):
-1. Copy the files ADAPTING.md lists into `.sandcastle/`, including `board.mts` and `board.template.html` from `board/`.
-2. Fill in `config.mts`: GitLab host, project path and numeric id (`glab api projects/<url-encoded path>`), labels, and the milestone (ask which; unset means every open ticket in the project). The tracker label from the base install should be one of `LABELS.ready`.
-3. Set `CONFIG.image` in `main.mts` to this project's image, and put the web hook in `CONFIG.sandboxSetup` (see Docker setup step 2). If Sandcastle's `main.ts` exists, move any hook from it and delete it: `main.mts` replaces it.
+1. Copy the files ADAPTING.md lists into `.sandcastle/`, overwriting the init template's `main.mts` and `prompt.md` (the base install's list/close substitutions and `LABEL` go with them; the workflow's host-side code does that work). Delete the template's other prompt files if it shipped any.
+2. Fill in `config.mts`: GitLab host, project path and numeric id (`glab api projects/<url-encoded path>`), and the milestone (ask which; unset means every open ticket in the project). Labels: show the shipped `LABELS` (ready, exclude, needs-human) and ask once whether to keep them. Don't bring the base install's `LABEL` into this.
+3. Set `CONFIG.image` in `main.mts` to this project's image, and put the web hook in `CONFIG.sandboxSetup` (see Docker setup step 2).
 4. Adapt `sandbox/bootstrap-site.sh`, the Environment section of `prompt.md`, and `prompt.verify.md` to this project's stack. The shipped `bootstrap-site.sh` is Drupal-only; WordPress needs a new one that ends with the site answering on `http://127.0.0.1`.
 5. Add `@ai-hero/sandcastle` and `tsx` as dev dependencies, and `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The host needs Node 22.18+, and `glab` and `claude` logged in.
 6. Verify: `node .sandcastle/dispatch.mts --base <integration branch> --dry-run` from a terminal and show the user the output. It checks the labels exist; ask before letting it create any.

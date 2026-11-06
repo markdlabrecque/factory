@@ -23,9 +23,10 @@ tracker layer exist.
 - Copy the files ADAPTING.md lists, including board.mts and board.template.html from board/.
 - Fill in config.mts for this project: GitLab host, project path and numeric id (look it up with
   glab), labels, and milestone "<MILESTONE>" (or leave it unset to use every open ticket).
-- Move the start-web.sh hook that sandcastle-setup added to Sandcastle's main.ts into
-  CONFIG.sandboxSetup in main.mts, then remove the old main.ts. Set CONFIG.image to this
-  project's image name.
+- The workflow's main.mts and prompt.md replace the ones `sandcastle init` created. Move the
+  start-web.sh hook that sandcastle-setup added to the old main.mts into CONFIG.sandboxSetup
+  in the new one. Set CONFIG.image to this project's image name. Labels come only from
+  config.mts; ignore the label in the old prompt.md.
 - Adapt sandbox/bootstrap-site.sh, the Environment section of prompt.md, and prompt.verify.md
   to this project's stack.
 - Make sure the Dockerfile's Drupal layer matches
