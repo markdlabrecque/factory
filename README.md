@@ -2,9 +2,9 @@
 
 Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups.
 
-- `skills/sandcastle-setup/` - Claude Code skill that scaffolds `.sandcastle/` from layers (GitLab tracker, web runtime, Drupal/WordPress, Playwright). Copy to `~/.claude/skills/`.
-- `orchestrator/` - one-ticket loop: implement, verify with screenshot/video evidence, post to the ticket, push, open the MR. Plus a dispatcher that starts many runs, held back by an agent-built ticket graph (dependencies and file conflicts). Start with `orchestrator/ADAPTING.md`.
-- `board/` - run-state store and treasure-map status board. `board.mts` writes `.sandcastle/state/<iid>.json` per run and regenerates a self-contained `board.html` from `board.template.html`. Copy both into a project's `.sandcastle/`.
+- `skills/sandcastle-setup/` - Claude Code skill that scaffolds `.sandcastle/` from layers (GitLab tracker, web runtime, Drupal/WordPress, ddev shim, Playwright), and optionally installs the workflow below. Copy to `~/.claude/skills/` (and `~/.agents/skills/` for other agents).
+- `orchestrator/` - one-ticket loop: implement, verify with screenshot/video evidence, post to the ticket, push, open the MR. Plus a dispatcher that starts many runs, held back by an agent-built ticket graph (dependencies and file conflicts). A ready issue with GitLab Tasks gets one run per Task; once MRs merge, the dispatcher closes the Tasks and moves finished tickets to the next stage (`Internal QA` by default). `dispatch.sh` runs a pass with the defaults. Start with `orchestrator/ADAPTING.md`.
+- `board/` - run-state store and treasure-map status board. `board.mts` writes `.sandcastle/state/<project>--<iid>.json` per run and regenerates a self-contained `board.html` from `board.template.html`. Copy both into a project's `.sandcastle/`.
   - `board-server.mts`, `sandcastle-board.service`, `install-service.sh` - always-on version: a systemd user service (macOS: `com.sandcastle.board.plist` + `install-launchd.sh`, a launchd user agent) serving the board at `http://127.0.0.1:4444` (and each run's evidence under `/evidence/`) from one shared state folder. Node 22.18+. Run `board/install-service.sh` (Linux) or `board/install-launchd.sh` (macOS), then `export SANDCASTLE_STATE_DIR=$HOME/.local/state/sandcastle` wherever runs start, so every project and worktree reports to the one board.
 
 Without the service, the board assumes it runs from a repo root containing `.sandcastle/` and writes `.sandcastle/board.html`.
@@ -22,7 +22,7 @@ tracker layer exist.
 
 - Copy the files ADAPTING.md lists, including board.mts and board.template.html from board/.
 - Fill in config.mts for this project: GitLab host, project path and numeric id (look it up with
-  glab), labels, and milestone "<MILESTONE>" (or leave it unset to use every open ticket).
+  glab), labels (including the done stage, default "Internal QA"), and milestone "<MILESTONE>" (or leave it unset to use every open ticket).
 - The workflow's main.mts and prompt.md replace the ones `sandcastle init` created. Move the
   start-web.sh hook that sandcastle-setup added to the old main.mts into CONFIG.sandboxSetup
   in the new one. Set CONFIG.image to this project's image name. Labels come only from
@@ -41,4 +41,19 @@ Work on a branch, and don't push.
 
 For WordPress, leave out the Drupal layer step. The shipped `bootstrap-site.sh` is Drupal-only, so expect the agent to write a WordPress one.
 
-3. Review the dry run: it shows which tickets the graph would start and why the others wait. Then start the dispatcher timer (see `orchestrator/ADAPTING.md`).
+3. Review the dry run: it shows which tickets the graph would start and why the others wait. Then run passes by hand or start the dispatcher timer (below).
+
+## Running the dispatcher
+
+From the project, with the integration branch checked out:
+
+```sh
+.sandcastle/dispatch.sh --dry-run   # show what would start, launch nothing
+.sandcastle/dispatch.sh             # one real pass
+```
+
+It uses the checked-out branch as the base (it must be on origin), checks that `node`, `glab`, `claude` and Docker are there and logged in, and that the image in `CONFIG.image` exists and was built for your user. From a terminal it builds a missing or mismatched image; under the timer it stops and prints the build command instead. Other arguments go to `dispatch.mts`: `--max N` (concurrent runs, default 3) and `--whole-issues` (one run per issue, ignoring Tasks).
+
+On Linux, `orchestrator/sandcastle-dispatch.service` and `.timer` run a pass every 15 minutes (setup in `orchestrator/ADAPTING.md`). There's no launchd version for the dispatcher yet, so on macOS run it by hand.
+
+On a new machine: clone the project, `npm install`, recreate `.sandcastle/.env` (it's gitignored), log in to `glab` and `claude`, then run `.sandcastle/dispatch.sh --dry-run` from a terminal; it builds the image. Each machine builds its own image (CPU architecture and user ID differ). Don't run dispatchers for the same project on two machines: each keeps its own state and they would start the same tickets twice.

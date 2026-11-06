@@ -1,6 +1,6 @@
 # Orchestrator
 
-`main.mts` takes one GitLab ticket through: branch off an integration branch, implementer run, verifier run (screenshot/video evidence plus a verdict), evidence posted to the ticket, then on PASS push, wait for CI and open an MR into the same integration branch. It never merges and never closes the ticket. Written against `@ai-hero/sandcastle` 0.14.0 with the Docker provider.
+`main.mts` takes one GitLab ticket through: branch off an integration branch, implementer run, verifier run (screenshot/video evidence plus a verdict), evidence posted to the ticket, then on PASS push, wait for CI and open an MR into the same integration branch. It never merges and never closes the ticket; once you merge the MR, the next dispatcher pass closes a Task or moves a ticket to `LABELS.done` (see below). Written against `@ai-hero/sandcastle` 0.14.0 with the Docker provider.
 
 ```
 npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
@@ -8,7 +8,7 @@ npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
 
 ## Install into a project
 
-Copy into the project's `.sandcastle/`: `config.mts`, `main.mts`, `dispatch.mts`, `dispatch.sh`, `graph.mts`, `analyze.mts`, `tracker.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers). The host needs `glab` and `claude` on the PATH.
+Copy into the project's `.sandcastle/`: `config.mts`, `main.mts`, `dispatch.mts`, `dispatch.sh`, `graph.mts`, `analyze.mts`, `tracker.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers). The host needs Node 22.18+, Docker, and `glab` and `claude` on the PATH and logged in.
 
 ## What is generic
 
