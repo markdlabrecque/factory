@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="10">
+<title>Sandcastle Map</title>
+<style>
+  :root {
+    --sea: #2a7f8e; --sea-soft: #cfe6e6;
+    --sand: #f1dfb6; --sand-deep: #e3c98f;
+    --parchment: #faf0d2; --edge: #c9a45c;
+    --ink: #4a3320; --ink-soft: #7a6244;
+    --x: #c0392b; --gold: #d9a21b; --ok: #3b7a4a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --sea: #5db7c4; --sea-soft: #1d3a44;
+      --sand: #1c2733; --sand-deep: #26354a;
+      --parchment: #2a3a4f; --edge: #6d7f98;
+      --ink: #f1e7cf; --ink-soft: #b9ad94;
+      --x: #ef6a58; --gold: #f0c04a; --ok: #6cc17f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 56px; color: var(--ink);
+    font: 15px/1.45 ui-rounded, "Avenir Next", system-ui, sans-serif;
+    background:
+      radial-gradient(circle at 12% 18%, var(--sand-deep) 0 2px, transparent 3px) 0 0 / 46px 46px,
+      radial-gradient(circle at 70% 60%, var(--sand-deep) 0 1.5px, transparent 2.5px) 0 0 / 61px 61px,
+      var(--sand);
+  }
+  header { max-width: 1400px; margin: 0 auto; padding: 28px 0 8px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header svg { width: 76px; height: 76px; flex: none; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: .3px; }
+  .sub { color: var(--ink-soft); }
+  .tally { margin-left: auto; text-align: right; font-size: 13px; color: var(--ink-soft); }
+  .map { max-width: 1400px; margin: 14px auto 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); position: relative; }
+  .stop {
+    background: var(--parchment); border: 2px solid var(--edge); border-radius: 14px;
+    padding: 12px 12px 14px; min-height: 150px; position: relative;
+    box-shadow: 0 2px 0 var(--edge);
+  }
+  .stop h2 { margin: 0; font-size: 15px; display: flex; gap: 8px; align-items: center; }
+  .stop .what { margin: 2px 0 10px; font-size: 12px; color: var(--ink-soft); }
+  .dot { width: 26px; height: 26px; border-radius: 50%; background: var(--sea); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: none; }
+  .stop.final { border-style: dashed; }
+  .stop.final .dot { background: var(--x); }
+  .stop.lost .dot { background: var(--ink-soft); }
+  .stop .trail { position: absolute; right: -15px; top: 24px; width: 16px; border-top: 3px dotted var(--edge); }
+  .count { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+  .empty { color: var(--ink-soft); font-size: 12px; font-style: italic; opacity: .8; }
+  .card { background: var(--sand); border: 1px solid var(--edge); border-radius: 10px; padding: 9px 10px; margin-top: 8px; }
+  .card.stale { border-color: var(--x); }
+  .card .t { font-weight: 700; word-break: break-word; }
+  .card .t a { color: inherit; text-decoration: none; }
+  .card .t a:hover { text-decoration: underline; }
+  .meta { font-size: 12px; color: var(--ink-soft); margin-top: 3px; overflow-wrap: anywhere; }
+  .meta code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+  .links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; }
+  .links a { color: var(--sea); font-weight: 600; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; margin-top: 6px; margin-right: 4px; background: var(--sea-soft); color: var(--ink); }
+  .badge.pass { background: var(--ok); color: #fff; }
+  .badge.fail, .badge.warn { background: var(--x); color: #fff; }
+  .note { font-size: 12px; margin-top: 6px; color: var(--ink); }
+  .pulse { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+  footer { max-width: 1400px; margin: 22px auto 0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ink-soft); }
+  .waves { position: fixed; left: 0; right: 0; bottom: 0; height: 26px; pointer-events: none;
+    background: repeating-radial-gradient(circle at 50% 100%, var(--sea) 0 8px, transparent 9px 16px) 0 0 / 32px 26px; opacity: .45; }
+  @media (max-width: 640px) { .stop .trail { display: none; } .tally { margin-left: 0; text-align: left; } }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 80 80" role="img" aria-label="Sandcastle">
+    <rect x="8" y="46" width="64" height="24" rx="3" fill="#e3c98f" stroke="#c9a45c" stroke-width="2"/>
+    <rect x="12" y="30" width="16" height="22" fill="#ecd5a0" stroke="#c9a45c" stroke-width="2"/>
+    <rect x="52" y="30" width="16" height="22" fill="#ecd5a0" stroke="#c9a45c" stroke-width="2"/>
+    <rect x="30" y="22" width="20" height="30" fill="#f1dfb6" stroke="#c9a45c" stroke-width="2"/>
+    <path d="M12 30v-5h4v3h3v-3h4v3h3v-3h2v5zM52 30v-5h4v3h3v-3h4v3h3v-3h2v5zM30 22v-5h5v3h4v-3h5v3h4v-5z" fill="#ecd5a0" stroke="#c9a45c" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M40 17V6l10 3-10 3" fill="#c0392b"/>
+    <path d="M36 70v-10a4 4 0 0 1 8 0v10z" fill="#a9824a"/>
+  </svg>
+  <div>
+    <h1>Sandcastle Map</h1>
+    <div class="sub">Every ticket is a castle on the shore. Follow the dotted trail to the X.</div>
+  </div>
+  <div class="tally" id="tally"></div>
+</header>
+
+<main class="map" id="map"></main>
+
+<footer>
+  <span id="updated"></span>
+  <span>Page refreshes every 10s. Cards that go quiet for 20+ minutes turn red.</span>
+</footer>
+<div class="waves" aria-hidden="true"></div>
+
+<script id="data" type="application/json">/*__DATA__*/null</script>
+<script>
+(function () {
+  var data = JSON.parse(document.getElementById('data').textContent);
+  var STOPS = [
+    { id: 'queued',       name: 'The shoreline',        what: 'Queued, waiting for a spot' },
+    { id: 'setup',        name: 'Gather sand',          what: 'Starting the container and site' },
+    { id: 'implementing', name: 'Build the castle',     what: 'Implementer agent working' },
+    { id: 'verifying',    name: 'Check the walls',      what: 'Verifier capturing evidence' },
+    { id: 'posting',      name: 'Message in a bottle',  what: 'Posting evidence to the ticket' },
+    { id: 'pushing',      name: 'Raise the flag',       what: 'Pushing the branch' },
+    { id: 'ci',           name: 'Wait for the tide',    what: 'CI running' },
+    { id: 'done',         name: 'X marks the spot',     what: 'MR open, or ready locally', final: true },
+    { id: 'stopped',      name: 'Washed away',          what: 'Stopped or failed', lost: true }
+  ];
+  var runs = data.runs;
+  var gen = new Date(data.generatedAt).getTime();
+  var nowMs = Date.now();
+
+  function ago(iso) {
+    var s = Math.max(0, Math.round((nowMs - new Date(iso).getTime()) / 1000));
+    if (s < 90) return s + 's';
+    var m = Math.round(s / 60);
+    if (m < 90) return m + 'm';
+    return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function link(href, text) {
+    var a = el('a', null, text);
+    a.href = href; a.target = '_blank'; a.rel = 'noopener';
+    return a;
+  }
+
+  var map = document.getElementById('map');
+  var shown = 0;
+  STOPS.forEach(function (stop, i) {
+    var here = runs.filter(function (r) { return r.stage === stop.id; });
+    if (stop.id === 'queued' && !here.length) return;
+    shown++;
+    var box = el('section', 'stop' + (stop.final ? ' final' : '') + (stop.lost ? ' lost' : ''));
+    var h = el('h2');
+    h.appendChild(el('span', 'dot', stop.final ? 'X' : stop.lost ? '~' : String(shown)));
+    h.appendChild(el('span', null, stop.name));
+    h.appendChild(el('span', 'count', here.length ? String(here.length) : ''));
+    box.appendChild(h);
+    box.appendChild(el('div', 'what', stop.what));
+    if (!stop.final && !stop.lost) box.appendChild(el('span', 'trail'));
+    if (!here.length) box.appendChild(el('div', 'empty', 'nothing here yet'));
+    here.forEach(function (r) {
+      var terminal = r.stage === 'done' || r.stage === 'stopped';
+      var quietMs = nowMs - new Date(r.updatedAt).getTime();
+      var stale = !terminal && quietMs > 20 * 60 * 1000;
+      var card = el('div', 'card' + (stale ? ' stale' : ''));
+      var t = el('div', 't');
+      t.appendChild(r.ticketUrl ? link(r.ticketUrl, '#' + r.iid) : document.createTextNode('#' + r.iid));
+      t.appendChild(document.createTextNode(' ' + (r.title || '')));
+      card.appendChild(t);
+      var m = el('div', 'meta');
+      if (r.project) { m.appendChild(document.createTextNode(r.project)); m.appendChild(document.createElement('br')); }
+      if (r.branch) { var c = el('code', null, r.branch); m.appendChild(c); m.appendChild(document.createElement('br')); }
+      m.appendChild(document.createTextNode((terminal ? 'finished ' : 'in this stage ') + ago(r.stageSince) + (terminal ? ' ago' : '') + ' · total ' + ago(r.startedAt)));
+      card.appendChild(m);
+      if (r.verdict) card.appendChild(el('span', 'badge ' + (r.verdict === 'PASS' ? 'pass' : 'fail'), r.verdict));
+      if (!terminal) card.appendChild(el('span', 'badge' + (stale ? ' warn' : ' pulse'), stale ? 'quiet ' + ago(r.updatedAt) + ' · pid ' + r.pid : 'working'));
+      if (r.note) card.appendChild(el('div', 'note', r.note));
+      var links = el('div', 'links');
+      if (r.mr) links.appendChild(link(r.mr, 'Merge request'));
+      if (r.evidenceUrl) links.appendChild(link(r.evidenceUrl, 'Evidence'));
+      card.appendChild(links);
+      box.appendChild(card);
+    });
+    map.appendChild(box);
+  });
+
+  var active = runs.filter(function (r) { return r.stage !== 'done' && r.stage !== 'stopped'; }).length;
+  var done = runs.filter(function (r) { return r.stage === 'done'; }).length;
+  var lost = runs.filter(function (r) { return r.stage === 'stopped'; }).length;
+  document.getElementById('tally').textContent = active + ' building · ' + done + ' at the X · ' + lost + ' washed away';
+  document.getElementById('updated').textContent = runs.length ? 'Last update ' + ago(data.generatedAt) + ' ago' : 'No runs yet. Start one with main.mts.';
+})();
+</script>
+</body>
+</html>

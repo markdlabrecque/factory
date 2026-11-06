@@ -1,0 +1,18 @@
+# systemd user unit for the Sandcastle board. Installed by install-service.sh, which fills in __NODE__.
+# Always on at http://127.0.0.1:4444 whether or not any run is active.
+[Unit]
+Description=Sandcastle board
+After=network.target
+
+[Service]
+Type=simple
+# Needs Node 22.18+ (runs the .mts files directly). __NODE__ becomes the absolute path of `node`.
+ExecStart=__NODE__ %h/.local/share/sandcastle-board/board-server.mts
+Environment=PORT=4444
+Environment=HOST=127.0.0.1
+Environment=SANDCASTLE_STATE_DIR=%h/.local/state/sandcastle
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
