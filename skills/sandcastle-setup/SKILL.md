@@ -64,7 +64,7 @@ Source: a sandcastle-helper checkout. Ask for its path (default `~/Projects/sand
 3. Set `CONFIG.image` in `main.mts` to this project's image, and put the web hook in `CONFIG.sandboxSetup` (see Docker setup step 2).
 4. Adapt `sandbox/bootstrap-site.sh`, the Environment section of `prompt.md`, and `prompt.verify.md` to this project's stack. The shipped `bootstrap-site.sh` is Drupal-only; WordPress needs a new one that ends with the site answering on `http://127.0.0.1`.
 5. Add `@ai-hero/sandcastle` and `tsx` as dev dependencies, and `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The host needs Node 22.18+, and `glab` and `claude` logged in.
-6. Verify: `node .sandcastle/dispatch.mts --base <integration branch> --dry-run` from a terminal and show the user the output. It checks the labels exist; ask before letting it create any.
+6. Verify: with the integration branch checked out, `.sandcastle/dispatch.sh --dry-run` from a terminal (it builds the image if it's missing) and show the user the output. It checks the labels exist; ask before letting it create any.
 
 ## Reuse
 Commit the edited `.sandcastle/`. Next project: rerun this skill, changing only host, label and CMS.

@@ -34,7 +34,7 @@ tracker layer exist.
   (a link to the project's own vendor/bin/drush, not a Drush download).
 - Add @ai-hero/sandcastle and tsx as dev dependencies, and evidence/, state/, logs/ and
   board.html to .sandcastle/.gitignore.
-- Rebuild the image, then run `node .sandcastle/dispatch.mts --base <BASE> --dry-run` from a
+- Rebuild the image, then, with <BASE> checked out, run `.sandcastle/dispatch.sh --dry-run` from a
   terminal and show me the output. Ask me before creating any GitLab label.
 Work on a branch, and don't push.
 ```
