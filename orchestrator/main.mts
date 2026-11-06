@@ -76,7 +76,7 @@ const work = tracker.workCatalogue(subtasks);
 let iid = opts.issue;
 if (!iid) {
   const list = JSON.parse(
-    glab("issue", "list", "-R", PROJECT, "--opened", ...LABELS.ready.flatMap((l) => ["--label", l]), ...(LABELS.exclude.length ? ["--not-label", LABELS.exclude.join(",")] : []), "--per-page", "100", "--output", "json"),
+    glab("issue", "list", "-R", PROJECT, ...LABELS.ready.flatMap((l) => ["--label", l]), ...(LABELS.exclude.length ? ["--not-label", LABELS.exclude.join(",")] : []), "--per-page", "100", "--output", "json"),
   );
   const first = expandUnits(list.map((i: { iid: number }) => i.iid), work.childrenOf, subtasks).units[0];
   if (!first) fail(`No open issues or Tasks labelled ${LABELS.ready.join(" + ")}.`);
