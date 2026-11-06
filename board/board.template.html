@@ -36,10 +36,10 @@
   h1 { margin: 0; font-size: 28px; letter-spacing: .3px; }
   .sub { color: var(--ink-soft); }
   .tally { margin-left: auto; text-align: right; font-size: 13px; color: var(--ink-soft); }
-  .map { max-width: 1400px; margin: 14px auto 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); position: relative; }
+  .map { max-width: 1400px; margin: 14px auto 0; display: flex; flex-direction: column; gap: 22px; position: relative; }
   .stop {
     background: var(--parchment); border: 2px solid var(--edge); border-radius: 14px;
-    padding: 12px 12px 14px; min-height: 150px; position: relative;
+    padding: 12px 12px 14px; position: relative;
     box-shadow: 0 2px 0 var(--edge);
   }
   .stop h2 { margin: 0; font-size: 15px; display: flex; gap: 8px; align-items: center; }
@@ -48,10 +48,11 @@
   .stop.final { border-style: dashed; }
   .stop.final .dot { background: var(--x); }
   .stop.lost .dot { background: var(--ink-soft); }
-  .stop .trail { position: absolute; right: -15px; top: 24px; width: 16px; border-top: 3px dotted var(--edge); }
+  .stop .trail { position: absolute; left: 24px; bottom: -22px; height: 22px; border-left: 3px dotted var(--edge); }
+  .cards { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .count { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--ink-soft); }
   .empty { color: var(--ink-soft); font-size: 12px; font-style: italic; opacity: .8; }
-  .card { background: var(--sand); border: 1px solid var(--edge); border-radius: 10px; padding: 9px 10px; margin-top: 8px; }
+  .card { background: var(--sand); border: 1px solid var(--edge); border-radius: 10px; padding: 9px 10px; }
   .card.stale { border-color: var(--x); }
   .card .t { font-weight: 700; word-break: break-word; }
   .card .t a { color: inherit; text-decoration: none; }
@@ -70,7 +71,7 @@
   footer { max-width: 1400px; margin: 22px auto 0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ink-soft); }
   .waves { position: fixed; left: 0; right: 0; bottom: 0; height: 26px; pointer-events: none;
     background: repeating-radial-gradient(circle at 50% 100%, var(--sea) 0 8px, transparent 9px 16px) 0 0 / 32px 26px; opacity: .45; }
-  @media (max-width: 640px) { .stop .trail { display: none; } .tally { margin-left: 0; text-align: left; } }
+  @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } .tally { margin-left: 0; text-align: left; } }
 </style>
 </head>
 <body>
@@ -86,7 +87,7 @@
   </svg>
   <div>
     <h1>Sandcastle Map</h1>
-    <div class="sub">Every ticket is a castle on the shore. Follow the dotted trail to the X.</div>
+    <div class="sub">Every ticket is a castle on the shore. Follow the dotted trail down to the X.</div>
   </div>
   <div class="tally" id="tally"></div>
 </header>
@@ -152,6 +153,7 @@
     box.appendChild(el('div', 'what', stop.what));
     if (!stop.final && !stop.lost) box.appendChild(el('span', 'trail'));
     if (!here.length) box.appendChild(el('div', 'empty', 'nothing here yet'));
+    var cards = el('div', 'cards');
     here.forEach(function (r) {
       var terminal = r.stage === 'done' || r.stage === 'stopped';
       var quietMs = nowMs - new Date(r.updatedAt).getTime();
@@ -173,8 +175,9 @@
       if (r.mr) links.appendChild(link(r.mr, 'Merge request'));
       if (r.evidenceUrl) links.appendChild(link(r.evidenceUrl, 'Evidence'));
       card.appendChild(links);
-      box.appendChild(card);
+      cards.appendChild(card);
     });
+    if (here.length) box.appendChild(cards);
     map.appendChild(box);
   });
 
