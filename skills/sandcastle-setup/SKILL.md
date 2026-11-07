@@ -3,8 +3,10 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab issue tracker via `glab`, then optionally the Docker setup (single-container web runtime with Apache, PHP-FPM, MariaDB and Composer, Drupal (Drush) or WordPress (WP-CLI), Playwright for self-checking) and the workflow from sandcastle-helper (orchestrator, dispatcher with ticket graph, board). Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
-<!-- Workflow board: shared evidence previews, sticky navigation and saved light/dark theme. -->
+<!-- Workflow board: shared evidence previews, sticky navigation and a Settings panel for design and light/dark/system mode. Root board-design-* images are review-only. -->
 # Sandcastle setup (layers)
+
+When copying the workflow, use the shipped `board/` files. Root `board-design-*.png` and `.svg` files are static design proposals with fictional data, not installation assets. See the repository README's Board design concepts section for previews.
 
 Sandcastle has no built-in GitLab tracker (maintainer points to `Custom`; upstream #511, #521). Instead of improvising from `SETUP_ISSUE_TRACKER.md`, apply fixed layers from `layers/`. The scaffold is copied into the project, so no fork of Sandcastle is needed.
 
@@ -65,7 +67,7 @@ Source: a sandcastle-helper checkout. Ask for its path (default `~/Projects/sand
 3. Set `CONFIG.image` in `main.mts` to this project's image, and put the web hook in `CONFIG.sandboxSetup` (see Docker setup step 2).
 4. Adapt `sandbox/bootstrap-site.sh`, the Environment section of `prompt.md`, and `prompt.verify.md` to this project's stack. The shipped `bootstrap-site.sh` is Drupal-only; WordPress needs a new one that ends with the site answering on `http://127.0.0.1`.
 5. Add `@ai-hero/sandcastle` and `tsx` as dev dependencies, and `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The host needs Node 22.18+, and `glab` and `claude` logged in.
-   For HTTP evidence previews, install the board service using `board/install-service.sh` or `board/install-launchd.sh`. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating it. Board and evidence share sticky navigation and a saved light/dark selector. Evidence opens in the same tab, with media/text previews and a link back to the board. Text previews stop at 64 KiB; originals remain available. Evidence pages do not auto-refresh. Without the service, local `board.html` opens evidence folders directly.
+   For HTTP evidence previews, install the board service using `board/install-service.sh` or `board/install-launchd.sh`. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating it. Board and evidence share sticky navigation and a Settings panel that saves the design (Ship's Log, Tide Chart, Castle Row, Treasure Map) and mode (light, dark, system). Evidence opens in the same tab, with media/text previews and a link back to the board. Text previews stop at 64 KiB; originals remain available. Evidence pages do not auto-refresh. Without the service, local `board.html` opens evidence folders directly.
 6. Verify: with the integration branch checked out, `.sandcastle/dispatch.sh --dry-run` from a terminal (it builds the image if it's missing) and show the user the output. It checks the labels exist; ask before letting it create any.
 
 ## Reuse

@@ -3,9 +3,9 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Run-state store + shared board/evidence page with sticky navigation and a saved light/dark theme.
+// Run-state store + shared board/evidence page with sticky navigation and a Settings panel (design + light/dark/system mode).
 // Writers (main.mts) call setStage(); each call writes <stateDir>/<key>.json and regenerates
-// .sandcastle/board.html (data embedded, auto-refreshing, opens from disk). The always-on service
+// .sandcastle/board.html (data embedded, reloads itself every 10s, opens from disk). The always-on service
 // (board-server.mts) serves the same page over HTTP from the same state dir.
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
@@ -138,7 +138,7 @@ export function buildPage(mode: "file" | "http"): string {
 export function buildEvidencePage(run: BoardRun, files: { name: string; kind: string; url: string; text?: string; truncated?: boolean }[]): string {
   const data = JSON.stringify({ evidence: { run, files, url: `/evidence/${encodeURIComponent(run.key)}/` } }).replace(/</g, "\\u003c");
   return readFileSync(templateFile, "utf8")
-    .replace('<meta http-equiv="refresh" content="10">', '')
+    .replace('<meta name="sandcastle-refresh" content="10">', '')
     .replace("/*__DATA__*/null", data);
 }
 
