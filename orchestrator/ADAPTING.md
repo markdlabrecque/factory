@@ -3,7 +3,25 @@
 
 The root `board-design-*.png` and matching SVG files are static review concepts, documented in [README.md](../README.md#board-design-concepts). Keep them out of project installations; the shipped Board template is unchanged by these concepts.
 
-`main.mts` takes one GitLab ticket through: branch off an integration branch, implementer run, verifier run (screenshot/video evidence plus a verdict), evidence posted to the ticket, then on PASS push, wait for CI and open an MR into the same integration branch. It never merges and never closes the ticket; once you merge the MR, the next dispatcher pass closes a Task or moves a ticket to `LABELS.done` (see below). Written against `@ai-hero/sandcastle` 0.14.0 with the Docker provider.
+`main.mts` takes one ticket through: branch off an integration branch, implementer run, verifier run (screenshot/video evidence plus a verdict), evidence posted to the ticket, then on PASS push and deliver. It never closes the ticket; once the work is merged, the next dispatcher pass closes a Task or moves a ticket to `LABELS.done` (see below). Written against `@ai-hero/sandcastle` 0.14.0 with the Docker provider.
+
+## Two reference configs
+
+The code is shared. `config.mts` decides the tracker (`TRACKER.kind`), the agent (`AGENT`) and what happens after the push (`MERGE`).
+
+| | `config.mts`: client and Affinity Bridge work | `config.personal.mts`: personal projects |
+| --- | --- | --- |
+| Tracker | GitLab via `glab` (`tracker.gitlab.mts`) | GitHub via `gh` (`tracker.github.mts`) |
+| Units of work | GitLab Tasks | GitHub sub-issues |
+| Agent | Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` in `.sandcastle/.env` | Pi with the host's pi login (Sign in with ChatGPT); each container run gets a fresh OAuth access token, so nothing goes in `.env` |
+| Implementer model | fixed, `AGENT.model` | from the ticket: exactly one of `model:sol`, `model:terra`, `model:luna` labels, or the ticket isn't started |
+| Verifier / analysis model | `AGENT.model` / `GRAPH.model` (`sonnet`) | fixed: `openai/gpt-6.1-sol` / `openai/gpt-6.1-terra` |
+| After the push | wait for the branch pipeline, open an MR; a person merges | open a PR; merge it once every CI check on the pushed commit passes |
+| Evidence images | uploaded to the ticket | committed to the `sandcastle-evidence` branch and linked |
+
+For a personal project, install `config.personal.mts` as `.sandcastle/config.mts`. Log pi in on the host once (`pi`, then `/login`, Sign in with ChatGPT). Before each implementer or verifier run, `main.mts` mints an access token with `pi auth print-bearer-token --provider openai` and hands it to that run as `OPENAI_API_KEY`; the refresh token never leaves the host. The token lasts about an hour, so one run must finish within that. It only uses three models (sol is roughly Opus, terra Sonnet, luna Haiku); `main.mts` and `dispatch.mts` refuse to run if `AGENT.model` or `GRAPH.model` is anything else (`models.mts`).
+
+**The CI gate** (`ci.mts`) is deterministic. Sandcastle merges only when at least one check on the PR's head passed and every other one passed or was skipped, and only while the head is still the commit it pushed (`gh pr merge --match-head-commit`). Failed or cancelled checks, no checks within `CONFIG.noPipelineMinutes`, or checks still running after `CONFIG.ciWaitMinutes` mean no merge: the PR becomes a draft with a comment, and the run stops. So CI must run on every PR, with no `paths` filter. Sandcastle merges in code, so no branch protection or GitHub auto-merge setting is needed.
 
 ```
 npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
@@ -11,22 +29,22 @@ npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
 
 ## Install into a project
 
-Copy into the project's `.sandcastle/`: `config.mts`, `main.mts`, `dispatch.mts`, `dispatch.sh`, `graph.mts`, `analyze.mts`, `tracker.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers). The host needs Node 22.18+, Docker, and `glab` and `claude` on the PATH and logged in.
+Copy into the project's `.sandcastle/`: `config.mts` (or `config.personal.mts`, renamed to `config.mts`), `main.mts`, `dispatch.mts`, `dispatch.sh`, `graph.mts`, `analyze.mts`, `tracker.mts`, `tracker.gitlab.mts`, `tracker.github.mts`, `ci.mts`, `models.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the tracker, web runtime, CMS and Playwright layers, plus the Pi layer for the personal config). The host needs Node 22.18+, Docker, and on the PATH and logged in: `glab` and `claude` (client config) or `gh` and `pi` (personal config).
 
 The always-on board service uses the same `board.template.html` for the board and evidence previews. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating the service. Its sticky navigation links back to the board; evidence opens in the same tab. A Settings panel (slides in from the right) picks the design (Ship's Log by default, Tide Chart, Castle Row, Treasure Map) and the mode (light, dark or system). Both are saved in browser storage. The board reloads every 10s, except while Settings is open. Evidence pages do not refresh during playback. Text previews are limited to 64 KiB, with originals still available. Local `board.html` links to evidence folders instead of preview pages.
 
 ## What is generic
 
-Branching, the two agent runs and the verifier guard (it must not commit, move HEAD or dirty the tree), evidence upload and the ticket comment, the verdict gate, the push/CI/MR step, and the board updates. The container never holds a GitLab token; every GitLab call runs on the host with its own `glab` auth.
+Branching, the two agent runs and the verifier guard (it must not commit, move HEAD or dirty the tree), evidence upload and the ticket comment, the verdict gate, the push/CI/MR step, and the board updates. The container never holds a tracker token; every tracker call runs on the host with its own `glab` or `gh` login.
 
 ## What to adapt per project
 
-1. **`config.mts`:** GitLab host, project path and id, the milestone, every label Sandcastle filters on or writes (including `LABELS.done`, the stage a ticket moves to once its work is merged), whether Tasks are the units of work (`SUBTASKS`), and the ticket graph settings. `main.mts` and `dispatch.mts` check at startup that every label exists. From a terminal they offer to create missing ones; declining, or running without a terminal (the timer), quits.
-2. **`CONFIG` at the top of `main.mts`:** image name, model, CI wait times, and `sandboxSetup` (commands that run in the container before the agent starts).
+1. **`config.mts`:** the tracker (GitLab host, project path and id; or GitHub `owner/repo`), the agent and merge settings, the milestone, every label Sandcastle filters on or writes (including `LABELS.done`, the stage a ticket moves to once its work is merged), whether Tasks are the units of work (`SUBTASKS`), and the ticket graph settings. `main.mts` and `dispatch.mts` check at startup that every label exists. From a terminal they offer to create missing ones; declining, or running without a terminal (the timer), quits.
+2. **`CONFIG` at the top of `main.mts`:** image name, CI wait times, and `sandboxSetup` (commands that run in the container before the agent starts).
 3. **`sandbox/bootstrap-site.sh`:** installs a throwaway site with synthetic data. The shipped version is Drupal from config (mirrors the project's CI e2e job). A WordPress or other stack needs its own; keep the contract that it ends with the site answering on `http://127.0.0.1`.
 4. **`prompt.md`, Environment section:** how the site is reached, how to create content, which test commands to run and which not to.
 5. **`prompt.verify.md`:** fixture advice and the before/after procedure. The `git checkout` + `drush updb/cim/cr` steps are Drupal specific.
-6. **CI behaviour:** if branch pushes never get a pipeline, the "no pipeline appeared" fallback is the normal path; if they always do, consider dropping it.
+6. **CI behaviour:** GitLab: if branch pushes never get a pipeline, the "no pipeline appeared" fallback is the normal path; if they always do, consider dropping it. GitHub with `MERGE.auto`: CI must run on every PR, or nothing merges.
 7. **Integration branch:** `--base` is required. Some projects use a different integration branch per epic.
 
 ## Running many tickets: the dispatcher
@@ -37,7 +55,7 @@ Branching, the two agent runs and the verifier guard (it must not commit, move H
 .sandcastle/dispatch.sh [--dry-run] [--max N] [--whole-issues]
 ```
 
-`dispatch.sh` runs one pass with the defaults: the base is the branch checked out where you run it (it must be on origin). It first checks `node`, `glab`, `claude`, `curl` and Docker are there and logged in; that `.sandcastle/.env` exists and its `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`) is accepted by the Anthropic API (an empty request that uses no tokens; the value is never printed); and that the `CONFIG.image` image exists and was built for your UID. From a terminal it builds a missing or mismatched image (`npx sandcastle docker build-image --image-name <CONFIG.image>`); without one, as under the timer, it stops and prints that command. Extra arguments go to `dispatch.mts`, which can also be run directly: `node .sandcastle/dispatch.mts --base <integration-branch> ...`.
+`dispatch.sh` runs one pass with the defaults: the base is the branch checked out where you run it (it must be on origin). It first checks `node`, the tracker CLI (`glab` or `gh`), the agent CLI (`claude`, or `pi` with a working OpenAI login), `curl` and Docker are there and logged in; that `.sandcastle/.env` exists and its agent credential is accepted (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` by an empty Anthropic request, with Pi, the host's `pi auth check --provider openai` instead, since runs use that login; no tokens are used, and no value is printed); and that the `CONFIG.image` image exists and was built for your UID. From a terminal it builds a missing or mismatched image (`npx sandcastle docker build-image --image-name <CONFIG.image>`); without one, as under the timer, it stops and prints that command. Extra arguments go to `dispatch.mts`, which can also be run directly: `node .sandcastle/dispatch.mts --base <integration-branch> ...`.
 
 - **Which tickets:** milestone and labels are in `config.mts`; the rest (assignee, excluded assignees, author, issue type, confidential, search, order, sort, cap, stagger) is in the `SELECT` block at the top of `dispatch.mts`, each commented with an example.
 - **GitLab Tasks.** With `SUBTASKS.enabled` (the default), a ready issue that has Tasks (its "Child items") is a container: each open Task gets its own run, branch and MR, with the parent's description as context. Ready and exclude labels go on the parent; an exclude label on a Task holds back just that Task. An issue without Tasks is one run, as before. `--whole-issues` (or `enabled: false`) makes every ready issue one run, Tasks or not.
@@ -59,6 +77,7 @@ Each dispatcher pass works out which tickets can start, so that (a) a ticket doe
 - **Before the MR opens.** If the ticket was edited during the run, the MR says it was built from an older version, with the description diff. `git merge-tree` against other live Sandcastle branches lists any exact conflicts in the MR description.
 - **`--dry-run`** runs the analysis (it costs model calls) and prints each ticket's decision without launching, touching the board, or closing and relabelling tickets.
 - **Tests:** `node --test 'orchestrator/*.test.mts'` (Node 22.18+).
+- **Model labels (personal config).** A unit of work without exactly one model label stays `queued` on the board with the reason; add the label and the next pass picks it up. On a sub-issue the label goes on the sub-issue.
 
 ## Not included
 

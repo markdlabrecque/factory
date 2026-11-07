@@ -1,4 +1,4 @@
-import { createSandbox, claudeCode } from "@ai-hero/sandcastle";
+import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -7,27 +7,32 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { PARKED, readRuns, setProject, setStage, TERMINAL } from "./board.mts";
 import { parentText } from "./analyze.mts";
-import { allLabels, LABELS, SUBTASKS, TRACKER } from "./config.mts";
+import { AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./config.mts";
+import { disallowedModels, ticketModel } from "./models.mts";
 import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest } from "./manifests.mts";
 import * as tracker from "./tracker.mts";
 
-// End-to-end loop for one GitLab ticket (run from the repo root):
+// End-to-end loop for one ticket (run from the repo root):
 //   npx tsx .sandcastle/main.mts --base sal-develop [--issue 695] [--no-push]
 // 1. branch <iid>-<slug> off origin/<base>   2. implementer run   3. verifier run (screenshots/video + verdict)
-// 4. host posts the evidence to the ticket   5. on PASS: push, wait for CI, open an MR into <base>.
-// Never merges, never closes the ticket (the dispatcher closes a Task, or moves a ticket on, once its MR merges). All GitLab calls run on the host with your glab auth;
-// the container has no GitLab token.
+// 4. host posts the evidence to the ticket   5. on PASS: push and deliver (tracker adapter):
+//    GitLab: wait for the branch pipeline, open an MR into <base>; never merges.
+//    GitHub: open a PR into <base>; with MERGE.auto, merge it once every CI check passes (ci.mts).
+// Never closes the ticket (the dispatcher closes a Task/sub-issue, or moves a ticket on, once its work
+// merges). Every tracker call runs on the host with your glab/gh login; the container has no tracker token.
+// The agent (Claude Code or Pi) comes from AGENT in config.mts. The implementer's model is AGENT.model, or
+// with AGENT.modelLabels the one the ticket's model label names (models.mts); the verifier always uses AGENT.model.
 
 // ---- Project config: the block to edit when adapting this to another project ----------
-// Project, milestone and labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
+// Tracker, agent, merge policy, milestone and labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
 // Environment section of prompt.md, and the fixture advice in prompt.verify.md. See ADAPTING.md.)
 const CONFIG = {
   image: "sandcastle-islandhealth",
-  model: "claude-opus-4-8",
-  ciWaitMinutes: 30, // give up waiting for a branch pipeline after this long
-  noPipelineMinutes: 2, // open the MR anyway if no branch pipeline appears in this time
+  ciWaitMinutes: 30, // give up waiting for CI after this long
+  // No CI seen in this time: GitLab opens the MR anyway; with MERGE.auto the PR is not merged.
+  noPipelineMinutes: 2,
   // Runs in order inside the container once it is up; the working directory is the worktree.
   sandboxSetup: [
     { command: "cd /home/agent/workspace && composer install --no-interaction --prefer-dist", timeoutMs: 20 * 60_000 },
@@ -36,10 +41,20 @@ const CONFIG = {
   ],
 };
 const PROJECT = TRACKER.project;
-const PROJECT_ID = TRACKER.projectId;
-const HOST = TRACKER.gitlabHost;
 const IMAGE = CONFIG.image;
-const MODEL = CONFIG.model;
+// Pi logs in with the host's own pi login: a fresh ChatGPT OAuth access token (about an hour) minted for
+// each run, or the stored API key if that login is a key. It reaches the container as OPENAI_API_KEY for
+// that one run; no long-lived credential goes into the container or .sandcastle/.env.
+function piCredential(): string {
+  for (const cmd of [["print-bearer-token", "--min-expiry", "50m"], ["print-api-key"]]) {
+    const res = spawnSync("pi", ["auth", ...cmd, "--provider", "openai"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    if (res.status === 0 && res.stdout.trim()) return res.stdout.trim();
+  }
+  fail("pi on the host has no usable OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT.");
+}
+// Called as each run starts, so each run gets its own fresh token.
+const agent = (model: string) =>
+  AGENT.provider === "pi" ? pi(model, { thinking: AGENT.thinking, env: { OPENAI_API_KEY: piCredential() } }) : claudeCode(model);
 
 let currentIid: string | undefined;
 let finished = false;
@@ -56,7 +71,6 @@ process.on("exit", (code) => {
 function sh(cmd: string, args: string[]): string {
   return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 }
-const glab = (...args: string[]) => sh("glab", args);
 
 const { values: opts } = parseArgs({
   options: {
@@ -68,6 +82,9 @@ const { values: opts } = parseArgs({
 });
 if (!opts.base) fail("--base <integration branch> is required (e.g. sal-develop, or sal-redesign for #565 children)");
 const base = opts.base;
+if (MERGE.auto && (TRACKER as { kind?: string }).kind !== "github" && !opts["no-push"]) fail('MERGE.auto needs TRACKER.kind "github" (config.mts).');
+const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
+if (badModels) fail(badModels);
 await tracker.ensureLabels(allLabels());
 
 // ---- pick the ticket -------------------------------------------------------
@@ -75,14 +92,10 @@ const subtasks = SUBTASKS.enabled && !opts["whole-issues"];
 const work = tracker.workCatalogue(subtasks);
 let iid = opts.issue;
 if (!iid) {
-  const list = JSON.parse(
-    glab("issue", "list", "-R", PROJECT, ...LABELS.ready.flatMap((l) => ["--label", l]), ...(LABELS.exclude.length ? ["--not-label", LABELS.exclude.join(",")] : []), "--per-page", "100", "--output", "json"),
-  );
-  const first = expandUnits(list.map((i: { iid: number }) => i.iid), work.childrenOf, subtasks).units[0];
+  const first = expandUnits(tracker.readyList().map((i) => i.iid), work.childrenOf, subtasks).units[0];
   if (!first) fail(`No open issues or Tasks labelled ${LABELS.ready.join(" + ")}.`);
   iid = String(first.iid);
 }
-const issue = JSON.parse(glab("issue", "view", iid, "-R", PROJECT, "--output", "json"));
 // A Task gets its parent issue as context; whole tickets have none.
 const parentIid = tracker.parentOf(Number(iid));
 const withParent = (t: tracker.Ticket): tracker.Ticket => {
@@ -91,7 +104,11 @@ const withParent = (t: tracker.Ticket): tracker.Ticket => {
   return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
 };
 const startTicket = withParent(tracker.ticket(Number(iid)));
-const ticket = [glab("issue", "view", iid, "-R", PROJECT, "--comments"), parentText(startTicket)].filter(Boolean).join("\n\n");
+const issue = startTicket;
+const picked = ticketModel(startTicket.labels ?? [], AGENT.modelLabels, AGENT.model);
+if ("error" in picked) fail(`#${iid} ${picked.error}. Not started.`);
+const implementerModel = picked.model;
+const ticket = [tracker.viewText(Number(iid)), parentText(startTicket)].filter(Boolean).join("\n\n");
 // The version of the ticket this run builds from; compared again before the MR opens.
 const ticketHash = (t = withParent(tracker.ticket(Number(iid)))) => ({ hash: unitHash(t, tracker.notes(Number(iid))), description: t.description });
 const startVersion = ticketHash(startTicket);
@@ -107,13 +124,13 @@ if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads"
 currentIid = iid;
 setProject(PROJECT);
 setStage(iid, {
-  title: String(issue.title), ticketUrl: `https://${HOST}/${PROJECT}/-/issues/${iid}`, branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
+  title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
   evidenceDir: resolve(".sandcastle/evidence", iid), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
   parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
 });
 // Heartbeat so the board can tell a long agent run from a dead process.
 setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
-console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${baseSha.slice(0, 8)})`);
+console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${baseSha.slice(0, 8)}), implementer ${implementerModel}`);
 
 // ---- sandbox: one container + one site install shared by both runs -------------
 const evidenceHost = resolve(".sandcastle/evidence", iid);
@@ -173,7 +190,7 @@ try {
   // ---- 1. implementer ----------------------------------------------------------
   setStage(iid, { stage: "implementing" });
   const impl = await sandbox.run({
-    agent: claudeCode(MODEL),
+    agent: agent(implementerModel),
     promptFile: "./.sandcastle/prompt.md",
     promptArgs,
     maxIterations: 1,
@@ -191,7 +208,7 @@ try {
     // ---- 2. verifier -------------------------------------------------------------
     setStage(iid, { stage: "verifying" });
     const ver = await sandbox.run({
-      agent: claudeCode(MODEL),
+      agent: agent(AGENT.model),
       promptFile: "./.sandcastle/prompt.verify.md",
       promptArgs: { ...promptArgs, TIP_SHA: tip },
       maxIterations: 1,
@@ -226,7 +243,7 @@ if (blockers) {
   });
   if (outcome === "needs-human") {
     tracker.addLabel(Number(iid), LABELS.needsHuman);
-    glab("issue", "note", iid, "-R", PROJECT, "-m", [
+    tracker.comment(iid, [
       `## Sandcastle: blocked`,
       `The implementer couldn't do this ticket, and the blocker isn't one Sandcastle can wait for (no open ticket provides it, or that ticket is already merged or closed). Labelled \`${LABELS.needsHuman}\`.`,
       ...blockers.map((b) => `- ${b.iid != null ? `#${b.iid}` : "No ticket"}: ${b.what}. ${b.evidence}`),
@@ -269,14 +286,12 @@ if (!existsSync(verdictFile)) fail(`Verifier wrote no verdict.md in ${evidenceHo
 const verdictText = readFileSync(verdictFile, "utf8").trim();
 const verdict = /^VERDICT:\s*(PASS|FAIL|INCONCLUSIVE)/.exec(verdictText)?.[1] ?? "INCONCLUSIVE";
 
-const upload = (file: string): string => {
-  const out = JSON.parse(sh("glab", ["api", `projects/${PROJECT_ID}/uploads`, "--hostname", HOST, "--form", `file=@${file}`]));
-  return String(out.markdown);
-};
 const files = readdirSync(evidenceHost).sort();
 const media = (label: string) => files.filter((f) => (f.startsWith(`${label}-`) && f.endsWith(".png")) || f === `${label}.webm`);
+const shown = [...media("before"), ...media("after")];
+const uploaded = new Map(tracker.uploadEvidence(iid, tip, shown.map((f) => resolve(evidenceHost, f))).map((md, i) => [shown[i], md]));
 const section = (label: string, title: string) => {
-  const items = media(label).map((f) => `**${f}**\n\n${upload(resolve(evidenceHost, f))}`);
+  const items = media(label).map((f) => `**${f}**\n\n${uploaded.get(f)}`);
   return items.length ? `### ${title}\n\n${items.join("\n\n")}` : "";
 };
 const body = [
@@ -287,7 +302,7 @@ const body = [
   section("after", "After"),
   SANDCASTLE_MARK,
 ].filter(Boolean).join("\n\n");
-glab("issue", "note", iid, "-R", PROJECT, "-m", body);
+tracker.comment(iid, body);
 console.log(`Evidence posted to #${iid} (verdict ${verdict}).`);
 setStage(iid, { verdict });
 
@@ -299,24 +314,10 @@ if (opts["no-push"]) {
   process.exit(0);
 }
 
-// ---- 4. push, wait for CI, open MR into the integration branch ----------------------
+// ---- 4. push, then deliver: MR (GitLab), or PR merged once CI passes (GitHub + MERGE.auto) ----
 setStage(iid, { stage: "pushing" });
 sh("git", ["push", "-u", "origin", branch]);
 const sha = sh("git", ["rev-parse", branch]);
-
-setStage(iid, { stage: "ci" });
-let status = "none";
-const deadline = Date.now() + CONFIG.ciWaitMinutes * 60_000;
-const noPipelineBy = Date.now() + CONFIG.noPipelineMinutes * 60_000;
-while (Date.now() < deadline) {
-  const runs = JSON.parse(sh("glab", ["api", `projects/${PROJECT_ID}/pipelines?sha=${sha}&per_page=1`, "--hostname", HOST]));
-  status = runs[0]?.status ?? "none";
-  if (["success", "failed", "canceled", "skipped"].includes(status)) break;
-  if (status === "none" && Date.now() > noPipelineBy) break;
-  await new Promise((r) => setTimeout(r, 15_000));
-}
-if (status === "failed" || status === "canceled") fail(`CI ${status} on ${branch}. Pushed, but no MR opened.`);
-if (!["success", "none", "skipped"].includes(status)) fail(`CI still ${status} after ${CONFIG.ciWaitMinutes} min on ${branch}. Pushed, no MR opened.`);
 
 // Exact conflicts with the other live Sandcastle branches, so you know which MR to merge first.
 const openMrs = tracker.openMrBranches();
@@ -331,18 +332,23 @@ const conflicts = readRuns()
     return [`- #${r.iid} (\`${r.branch}\`${r.mr ? `, ${r.mr}` : ""}): ${files.map((f) => `\`${f}\``).join(", ")}`];
   });
 
-const description = [
+const description = (ciNote: string) => [
   parentIid === undefined ? `Refs #${iid}` : `Refs #${iid} (Task of #${parentIid})`,
   `Implemented and verified by Sandcastle. Verdict: **${verdict}** (evidence in the ticket comment).`,
-  status === "success" ? "Branch CI passed before this MR was opened." : "No branch pipeline appeared; CI will run on this MR.",
+  ciNote,
   staleNote,
   conflicts.length ? `**Conflicts with other open Sandcastle work.** Merge one, then rebase the other:\n\n${conflicts.join("\n")}` : "",
 ].filter(Boolean).join("\n\n");
-const mrOut = glab(
-    "mr", "create", "-R", PROJECT, "--source-branch", branch, "--target-branch", base,
-    "--title", `#${iid}: ${issue.title}`, "--description", description, "--yes", "--no-editor",
-);
-console.log(mrOut);
+let delivered: tracker.Delivered;
+try {
+  delivered = await tracker.deliver({
+    branch, base, sha, title: `#${iid}: ${issue.title}`, body: description, onStage: (stage) => setStage(iid!, { stage }),
+    waitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
+  });
+} catch (e) {
+  fail((e as Error).message);
+}
 finished = true;
-setStage(iid, { stage: "done", mr: mrOut.split(/\s+/).find((w) => w.startsWith("http")) });
-console.log(`Not merged. Once you merge it, the dispatcher ${parentIid === undefined ? `moves #${iid} to ${LABELS.done}` : `closes Task #${iid}`}.`);
+setStage(iid, { stage: "done", mr: delivered.url, note: delivered.merged ? "merged after CI passed" : "" });
+const next = parentIid === undefined ? `moves #${iid} to ${LABELS.done}` : `closes Task #${iid}`;
+console.log(delivered.merged ? `Merged after CI passed. The next dispatcher pass ${next}.` : `Not merged. Once you merge it, the dispatcher ${next}.`);

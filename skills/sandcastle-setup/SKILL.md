@@ -1,6 +1,6 @@
 ---
 name: sandcastle-setup
-description: Set up a project's Sandcastle scaffold from composable layers - GitLab issue tracker via `glab`, then optionally the Docker setup (single-container web runtime with Apache, PHP-FPM, MariaDB and Composer, Drupal (Drush) or WordPress (WP-CLI), Playwright for self-checking) and the workflow from sandcastle-helper (orchestrator, dispatcher with ticket graph, board). Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
+description: Set up a project's Sandcastle scaffold from composable layers - GitLab issue tracker via `glab` (client work) or GitHub via `gh` with the Pi agent (personal projects), then optionally the Docker setup (single-container web runtime with Apache, PHP-FPM, MariaDB and Composer, Drupal (Drush) or WordPress (WP-CLI), Playwright for self-checking) and the workflow from sandcastle-helper (orchestrator, dispatcher with ticket graph, board). Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
 <!-- Workflow board: shared evidence previews, sticky navigation and a Settings panel for design and light/dark/system mode. Root board-design-* images are review-only. -->
@@ -18,6 +18,7 @@ Inspect the project root first and propose these as the answers:
 - **Both or neither matched:** ask. Not a PHP/web project: offer tracker layer only.
 - **ddev in tests:** if project tests or scripts call `ddev drush|wp|composer|exec`, propose the ddev shim layer. The host keeps DDEV; only the sandbox bypasses it.
 - **Tracker:** the GitLab layer is the default when `git remote get-url origin` points at a GitLab host (e.g. git.affinitybridge.com); use that host as `GITLAB_HOST`.
+- **Flavour:** a GitHub remote means a personal project: GitHub tracker layer, Pi agent layer (`sandcastle init` with agent **Pi**), and the workflow's `config.personal.mts`. A GitLab remote means client work: GitLab layer, Claude Code, and `config.mts`.
 Report what was detected and why (which file matched) in one line, then confirm.
 
 **Database:** MariaDB for both Drupal and WordPress (decided 2026-11-05). SQLite deferred: Drupal supports it natively, WordPress needs the SQLite Database Integration plugin, and prod dumps are MySQL-shaped.
@@ -26,6 +27,8 @@ Report what was detected and why (which file matched) in one line, then confirm.
 | Layer | Dir | Needs |
 | --- | --- | --- |
 | Tracker: GitLab | `layers/tracker-gitlab/` | `GITLAB_HOST` (default git.affinitybridge.com), `LABEL` (default `Sandcastle`; only for the init template's prompt, see Base install step 3), `GLAB_VERSION` |
+| Tracker: GitHub | `layers/tracker-github/` | `LABEL` (as for GitLab), `GH_VERSION` |
+| Agent: Pi | `layers/agent-pi/` | `PI_VERSION` (npm `@earendil-works/pi-coding-agent`); replaces the init template's deprecated `@mariozechner/pi-coding-agent` line. No key in `.env`: the workflow hands each run a fresh token from the host's pi login (Sign in with ChatGPT) |
 | Runtime: web | `layers/runtime-web/` | `PHP_VERSION`; Docker only (services need root); docroot from Detect |
 | CMS: Drupal | `layers/cms-drupal/` | web runtime; the project's own Drush (`drush/drush` in `composer.json`), linked as `drush` |
 | CMS: WordPress | `layers/cms-wordpress/` | web runtime |
@@ -37,7 +40,8 @@ Substitute `{{VARS}}` in snippets with the chosen values. Pin versions; look up 
 ## Status
 - Verified (2026-11-05): web + Playwright layers build on `node:22-bookworm`; running as root, `start-web.sh` serves PHP 8.3 with a working MariaDB connection and headless Chromium loads the page. (That build used the Drush launcher, since removed: the Drupal layer now only links the project's `vendor/bin/drush`.)
 - Verified (2026-11-06, islandhealth/public-site, Drupal 10 / PHP 8.4): the ddev shim layer. As the non-root `agent` user, a project Playwright spec that seeds content via `ddev drush ev` passed, and the `drush` link ran the project's Drush against the sandbox site (`BASE_URL=http://127.0.0.1`). Specs that read existing published content still need fixtures, since the sandbox site is a fresh install.
-- **Not verified:** the GitLab layer (`glab` flags, install URL); starting services via a Sandcastle sandbox hook (`sudo: true`) with the non-root `agent` user; the WP-CLI layer.
+- Verified (2026-11-07, throwaway private GitHub repo, static site): the personal config end to end. `dispatch.sh` held back an issue without a model label and launched one labelled `model:luna`; Pi implemented it with `gpt-6-luna` on a per-run ChatGPT token, the verifier passed it with screenshots on the `sandcastle-evidence` branch, CI passed, the PR was merged, and the next pass moved the issue to `merged`. The image used the Pi layer's install line (pi 1.5.0) and the Playwright layer.
+- **Not verified:** the GitHub tracker layer (`gh` in the image; the workflow doesn't need it); the GitLab layer (`glab` flags, install URL); starting services via a Sandcastle sandbox hook (`sudo: true`) with the non-root `agent` user; the WP-CLI layer.
 
 ## Steps
 
@@ -45,7 +49,8 @@ Substitute `{{VARS}}` in snippets with the chosen values. Pin versions; look up 
 1. Run **Detect** above and confirm the values. Check the branch is clean. If `.sandcastle/` doesn't exist, `npx sandcastle init` with tracker **Custom** and the **Docker** provider (always Docker, not Podman).
 2. **Fail loudly if the scaffold moved.** Grep `.sandcastle/` for `No issue tracker configured`, `<view command`, `<close command`, `TODO: install your issue tracker`. If any is missing, stop and say which.
 3. Tracker layer: substitute list/view/close from `tracker-gitlab/commands.md` for the markers. These markers live in the init template's own `prompt.md` and `main.mts` (e.g. `simple-loop`); `LABEL` only filters that template's issue list. Use the default and don't ask about it, create it, or reconcile it with anything: if the workflow is chosen later, its files replace these and its labels come from `config.mts`. Put `.env` lines from `env.snippet` into `.sandcastle/.env` and `.env.example`; **leave `GITLAB_TOKEN` empty, tell the user to fill it** (never fetch it from 1Password). Replace the Dockerfile's `# TODO: install your issue tracker's CLI` line with `glab.Dockerfile.snippet`.
-4. Verify: `glab auth status --hostname <host>`.
+   GitHub: the same with `tracker-github/` (`gh.Dockerfile.snippet`, `GH_TOKEN` left empty). With Pi, swap the template's pi install line for `agent-pi/pi.Dockerfile.snippet`, drop the template's `ANTHROPIC_API_KEY` line from `.env.example`, and check `pi auth check --provider openai` on the host (if not ready: `pi`, then `/login`, Sign in with ChatGPT).
+4. Verify: `glab auth status --hostname <host>` or `gh auth status`.
 
 ### Then ask: two separate questions
 Once the base install is done, ask the user, as two separate yes/no questions (not one combined question):
@@ -63,10 +68,10 @@ The workflow's verifier needs the web runtime and Playwright. If the user wants 
 ### Workflow (if chosen)
 Source: a sandcastle-helper checkout. Ask for its path (default `~/Projects/sandcastle-helper`); if there is none, `gh repo clone markdlabrecque/sandcastle-helper` into a temp dir. Follow its `orchestrator/ADAPTING.md` ("Install into a project" and "What to adapt per project"):
 1. Copy the files ADAPTING.md lists into `.sandcastle/`, overwriting the init template's `main.mts` and `prompt.md` (the base install's list/close substitutions and `LABEL` go with them; the workflow's host-side code does that work with the host's `glab` login, so `GITLAB_TOKEN` in `.env` stays unused). Delete the template's other prompt files if it shipped any.
-2. Fill in `config.mts`: GitLab host, project path and numeric id (`glab api projects/<url-encoded path>`), and the milestone (ask which; unset means every open ticket in the project). Labels: show the shipped `LABELS` (ready, exclude, needs-human, and done: the stage a ticket moves to once merged, default `Internal QA`) and ask once whether to keep them. `SUBTASKS.enabled` (one run per GitLab Task) stays on unless the user says otherwise. Don't bring the base install's `LABEL` into this.
+2. Fill in `config.mts` (for a personal project, copy `config.personal.mts` over it first and set `TRACKER.project` to `owner/repo`; its models and model labels stay as shipped): GitLab host, project path and numeric id (`glab api projects/<url-encoded path>`), and the milestone (ask which; unset means every open ticket in the project). Labels: show the shipped `LABELS` (ready, exclude, needs-human, and done: the stage a ticket moves to once merged, default `Internal QA`) and ask once whether to keep them. `SUBTASKS.enabled` (one run per GitLab Task) stays on unless the user says otherwise. Don't bring the base install's `LABEL` into this.
 3. Set `CONFIG.image` in `main.mts` to this project's image, and put the web hook in `CONFIG.sandboxSetup` (see Docker setup step 2).
 4. Adapt `sandbox/bootstrap-site.sh`, the Environment section of `prompt.md`, and `prompt.verify.md` to this project's stack. The shipped `bootstrap-site.sh` is Drupal-only; WordPress needs a new one that ends with the site answering on `http://127.0.0.1`.
-5. Add `@ai-hero/sandcastle` and `tsx` as dev dependencies, and `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The host needs Node 22.18+, and `glab` and `claude` logged in.
+5. Add `@ai-hero/sandcastle` and `tsx` as dev dependencies, and `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The host needs Node 22.18+, and `glab` and `claude` (or `gh` and `pi`) logged in.
    For HTTP evidence previews, install the board service using `board/install-service.sh` or `board/install-launchd.sh`. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating it. Board and evidence share sticky navigation and a Settings panel that saves the design (Ship's Log, Tide Chart, Castle Row, Treasure Map) and mode (light, dark, system). Evidence opens in the same tab, with media/text previews and a link back to the board. Text previews stop at 64 KiB; originals remain available. Evidence pages do not auto-refresh. Without the service, local `board.html` opens evidence folders directly.
 6. Verify: with the integration branch checked out, `.sandcastle/dispatch.sh --dry-run` from a terminal (it builds the image if it's missing) and show the user the output. It checks the labels exist; ask before letting it create any.
 
