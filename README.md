@@ -1,4 +1,15 @@
+<!-- Board concept images are review artifacts, separate from the shipped template. -->
 # sandcastle-helper
+
+## Board design concepts
+
+Three static designs with fictional run data are available as 1600 × 1100 PNGs and editable SVGs in this folder:
+
+- [Tidal atlas](board-design-01-tidal-atlas.png): an illustrated coastal map with a run inspector.
+- [Mission control](board-design-02-mission-control.png): a dark dashboard with run paths and a failure inspector.
+- [Builders' workbench](board-design-03-builders-workbench.png): print-inspired job cards and a workflow stage ruler.
+
+These are review images, not changes to the running Board.
 
 Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups.
 
