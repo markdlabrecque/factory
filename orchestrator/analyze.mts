@@ -3,13 +3,15 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keyFor, stateDir } from "./board.mts";
-import { GRAPH } from "./config.mts";
+import { AGENT, GRAPH } from "./config.mts";
 import { contentHash, isSandcastleNote, unitHash } from "./graph.mts";
 import type { Manifest, Note, Requirement } from "./graph.mts";
 import type { Ticket } from "./tracker.mts";
 
-// Ticket analysis: one read-only `claude -p` run on the host per ticket, against a detached worktree
-// at origin/<base>. Read, Grep and Glob only: no Bash, no writes, no MCP servers, because ticket
+// Ticket analysis: one read-only agent run on the host per ticket, against a detached worktree at
+// origin/<base>, with GRAPH.model. AGENT.provider "claude": `claude -p` with Read, Grep and Glob and a
+// JSON schema. "pi": `pi -p` with read, grep, find and ls, no extensions, skills or context files, and
+// the JSON parsed from its reply. Either way no shell, no writes and no MCP servers, because ticket
 // text is untrusted input.
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +58,50 @@ const excerpt = (s: string, n = 300) => {
   const flat = s.replace(/\s+/g, " ").trim();
   return flat.length > n ? `${flat.slice(0, n)}…` : flat;
 };
+
+type Analysis = { provides: string[]; requires: Requirement[]; footprint: string[] };
+const spawnOpts = (cwd: string, input: string) => ({ cwd, input, encoding: "utf8" as const, timeout: GRAPH.analysisTimeoutMinutes * 60_000, maxBuffer: 64 * 1024 * 1024 });
+const failed = (iid: number, res: { status: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string }) =>
+  new Error(`analysis of #${iid} failed (exit ${res.status ?? res.signal}): ${(res.stderr || res.stdout || "").slice(0, 500)}`);
+
+function runClaude(iid: number, prompt: string, cwd: string): Analysis {
+  const res = spawnSync(
+    "claude",
+    ["-p", "--model", GRAPH.model, "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config",
+      "--no-session-persistence", "--output-format", "json", "--json-schema", JSON.stringify(SCHEMA)],
+    spawnOpts(cwd, prompt),
+  );
+  if (res.status !== 0) throw failed(iid, res);
+  const out = JSON.parse(res.stdout);
+  if (out.is_error || !out.structured_output) throw new Error(`analysis of #${iid} returned no result: ${String(out.result ?? "").slice(0, 500)}`);
+  return out.structured_output;
+}
+
+/** pi has no schema flag: ask for bare JSON, take the outermost object from the reply, check its shape. */
+function runPi(iid: number, prompt: string, cwd: string): Analysis {
+  const ask = `${prompt}\n\n## Output\n\nReply with one JSON object and nothing else (no prose, no code fence), matching this JSON Schema:\n\n${JSON.stringify(SCHEMA)}\n`;
+  const res = spawnSync(
+    "pi",
+    ["-p", "--model", GRAPH.model, "--tools", "read,grep,find,ls", "--no-extensions", "--no-skills", "--no-context-files", "--no-session"],
+    spawnOpts(cwd, ask),
+  );
+  if (res.status !== 0) throw failed(iid, res);
+  const text = res.stdout;
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  let so: Analysis | undefined;
+  try {
+    so = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    /* reported below */
+  }
+  const strings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
+  const ok = so && strings(so.provides) && strings(so.footprint) && Array.isArray(so.requires)
+    && so.requires.every((r) => typeof r?.what === "string" && (r.providedBy === null || Number.isInteger(r.providedBy)) && typeof r.confidence === "number");
+  if (!ok) throw new Error(`analysis of #${iid} returned no usable JSON: ${text.slice(0, 500)}`);
+  so!.requires = so!.requires.map((r) => ({ ...r, evidence: String(r.evidence ?? "") }));
+  return so!;
+}
 
 /** Ticket text as an agent sees it: description, then comments from people, then a Task's parent. */
 export function ticketText(t: Ticket, notes: Note[]): string {
@@ -104,16 +150,7 @@ export function analyse(args: {
   // One pass, so placeholders inside ticket text are left alone.
   const prompt = readFileSync(resolve(here, "prompt.analyze.md"), "utf8").replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
 
-  const res = spawnSync(
-    "claude",
-    ["-p", "--model", GRAPH.model, "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config",
-      "--no-session-persistence", "--output-format", "json", "--json-schema", JSON.stringify(SCHEMA)],
-    { cwd: args.worktree.path, input: prompt, encoding: "utf8", timeout: GRAPH.analysisTimeoutMinutes * 60_000, maxBuffer: 64 * 1024 * 1024 },
-  );
-  if (res.status !== 0) throw new Error(`analysis of #${t.iid} failed (exit ${res.status ?? res.signal}): ${(res.stderr || res.stdout || "").slice(0, 500)}`);
-  const out = JSON.parse(res.stdout);
-  if (out.is_error || !out.structured_output) throw new Error(`analysis of #${t.iid} returned no result: ${String(out.result ?? "").slice(0, 500)}`);
-  const so = out.structured_output as { provides: string[]; requires: Requirement[]; footprint: string[] };
+  const so = AGENT.provider === "pi" ? runPi(t.iid, prompt, args.worktree.path) : runClaude(t.iid, prompt, args.worktree.path);
 
   // Only open catalogue tickets can be providers; anything else the model names becomes unresolved.
   const open = new Map(cat.map((c) => [c.iid, c]));

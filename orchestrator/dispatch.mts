@@ -6,7 +6,8 @@ import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { PARKED, readRuns, removeRun, setProject, setStage, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
-import { allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
+import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
+import { disallowedModels, ticketModel } from "./models.mts";
 import { contentHash, decide, edgesOf, expandUnits, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
@@ -24,10 +25,12 @@ import type { Ticket } from "./tracker.mts";
 // With SUBTASKS.enabled (config.mts), a ready issue that has Tasks gets one run per open Task instead.
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
+// With AGENT.modelLabels (config.mts), a ticket without exactly one model label stays queued.
 
 // ---- Selection config: which tickets get a run ----------------------------------------
-// Project, milestone and labels live in config.mts. Every option below is optional; leave one unset
-// (or empty) to skip that filter. Filters combine with AND. Each maps to a `glab issue list` flag.
+// Tracker, milestone and labels live in config.mts. Every option below is optional; leave one unset
+// (or empty) to skip that filter. Filters combine with AND. Each maps to a `glab issue list` flag, or
+// on GitHub to the matching `gh issue list` flag or search qualifier (GitLab-only ones are ignored).
 const SELECT = {
   // -- People --
   // Only tickets assigned to this username [--assignee]. "@me" means whoever glab is logged in as.
@@ -40,16 +43,16 @@ const SELECT = {
   author: undefined as string | undefined,
 
   // -- Scope --
-  // Ticket type [--issue-type]: "issue" | "incident" | "test_case" | undefined (all types)
+  // GitLab only. Ticket type [--issue-type]: "issue" | "incident" | "test_case" | undefined (all types)
   issueType: "issue" as string | undefined,
-  // true = only confidential tickets [--confidential]; undefined = both. (There is no "exclude" form.)
+  // GitLab only. true = only confidential tickets [--confidential]; undefined = both.
   confidential: undefined as boolean | undefined,
   // Free-text match in title and description [--search]. Example: "language switcher"
   search: undefined as string | undefined,
 
   // -- Order: which tickets are tried first when more qualify than there is room for --
   // [--order] created_at | updated_at | priority | due_date | relative_position | label_priority
-  //           | milestone_due | popularity | weight
+  //           | milestone_due | popularity | weight   (GitHub: created_at, updated_at, popularity)
   order: "created_at",
   // [--sort] "asc" (oldest/lowest first) | "desc"
   sort: "asc",
@@ -83,6 +86,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 
+const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
+if (badModels) {
+  console.error(badModels);
+  process.exit(1);
+}
 await tracker.ensureLabels(allLabels());
 setProject(PROJECT);
 
@@ -108,16 +116,7 @@ for (const r of allRuns) {
 }
 
 // ---- candidates --------------------------------------------------------------
-const args = ["issue", "list", "-R", PROJECT, "--per-page", "100", "--output", "json", "--order", SELECT.order, "--sort", SELECT.sort];
-if (LABELS.ready.length) args.push("--label", LABELS.ready.join(","));
-if (LABELS.exclude.length) args.push("--not-label", LABELS.exclude.join(","));
-if (TRACKER.milestone) args.push("--milestone", TRACKER.milestone);
-if (SELECT.assignee) args.push("--assignee", SELECT.assignee);
-if (SELECT.author) args.push("--author", SELECT.author);
-if (SELECT.issueType) args.push("--issue-type", SELECT.issueType);
-if (SELECT.confidential) args.push("--confidential");
-if (SELECT.search) args.push("--search", SELECT.search);
-const ready: (Ticket & { assignees?: { username: string }[] })[] = JSON.parse(sh("glab", args));
+const ready = tracker.readyList(SELECT);
 const parents = ready.filter((i) => !(SELECT.excludeAssignees.length && i.assignees?.some((a) => SELECT.excludeAssignees.includes(a.username))));
 
 // Ready issues with Tasks become their open Tasks; an issue whose Tasks are all closed moves on.
@@ -140,12 +139,23 @@ const branches = new Set(
 const runs = allRuns.filter((r) => r.project === PROJECT);
 const runOf = new Map(runs.map((r) => [Number(r.iid), r]));
 
-const candidates = issues.filter((i) => {
+const unstarted = issues.filter((i) => {
   const r = runOf.get(i.iid);
   if (r && !PARKED.includes(r.stage)) return false; // has a run record that isn't parked
   if ([...branches].some((b) => b.startsWith(`${i.iid}-`))) return false; // already has a branch
   return true;
 });
+// Tickets without exactly one model label (when AGENT.modelLabels is set) wait for a person to add one.
+const noModel = new Map<number, string>();
+for (const i of unstarted) {
+  const m = ticketModel(i.labels ?? [], AGENT.modelLabels, AGENT.model);
+  if ("error" in m) noModel.set(i.iid, m.error);
+}
+const candidates = unstarted.filter((i) => !noModel.has(i.iid));
+for (const i of unstarted.filter((u) => noModel.has(u.iid))) {
+  log(`#${i.iid} ${i.title}: ${noModel.get(i.iid)}`);
+  if (!dry) setStage(String(i.iid), { stage: "queued", title: i.title, ticketUrl: tracker.ticketUrl(i.iid), base, note: noModel.get(i.iid) });
+}
 log(`${parents.length} ready ticket(s), ${issues.length} unit(s) of work, ${candidates.length} not yet started`);
 
 // ---- ticket graph ------------------------------------------------------------
@@ -232,11 +242,11 @@ for (const d of decisions) {
   log(`#${d.iid} ${c.title}: ${d.launch ? (dry ? "would launch (dry run)" : "launching") : d.reason}`);
   if (dry || d.launch) continue;
   const stage = runOf.get(d.iid)?.stage === "waiting" ? "waiting" : "queued";
-  setStage(String(d.iid), { stage, title: c.title, ticketUrl: `https://${TRACKER.gitlabHost}/${PROJECT}/-/issues/${d.iid}`, base, note: d.reason });
+  setStage(String(d.iid), { stage, title: c.title, ticketUrl: tracker.ticketUrl(d.iid), base, note: d.reason });
 }
 if (!dry) {
   // Parked cards for tickets that left the queue (label removed, closed, out of the milestone).
-  for (const r of runs) if (PARKED.includes(r.stage) && !byIid.has(Number(r.iid))) removeRun(r.iid);
+  for (const r of runs) if (PARKED.includes(r.stage) && !byIid.has(Number(r.iid)) && !noModel.has(Number(r.iid))) removeRun(r.iid);
   // Manifests of tickets that are gone, once they're old enough not to explain anything.
   const cutoff = Date.now() - GRAPH.pruneAfterDays * 86_400_000;
   const liveIids = new Set(live.map((r) => Number(r.iid)));
