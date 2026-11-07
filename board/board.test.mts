@@ -1,12 +1,38 @@
-// HTTP regression tests for the shared board/evidence shell, bounded previews and original files.
+// Regression tests for the shared shell, Settings (design + mode), bounded previews and original files.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+
+test("settings save design and mode, and system mode follows the OS", () => {
+  const template = readFileSync(resolve("board/board.template.html"), "utf8");
+  const script = template.slice(template.indexOf("// settings:start"), template.indexOf("// settings:end"));
+  const saved: Record<string, string> = {};
+  const media = { matches: false, listener: () => {}, addEventListener(_: string, fn: () => void) { this.listener = fn; } };
+  const root = { dataset: { mode: "system", theme: "light", design: "log" } as Record<string, string> };
+  let renders = 0;
+  const ctx: any = { root, window: { matchMedia: () => media }, localStorage: { setItem: (k: string, v: string) => { saved[k] = v; } }, render: () => { renders++; } };
+  runInNewContext(script + "; this.setMode = setMode; this.setDesign = setDesign;", ctx);
+  ctx.setMode("dark");
+  assert.equal(root.dataset.theme, "dark");
+  assert.equal(saved["sandcastle-theme"], "dark");
+  ctx.setMode("system");
+  assert.equal(root.dataset.theme, "light");
+  media.matches = true;
+  media.listener();
+  assert.equal(root.dataset.theme, "dark");
+  ctx.setDesign("castle");
+  assert.equal(root.dataset.design, "castle");
+  assert.equal(saved["sandcastle-design"], "castle");
+  assert.equal(renders, 1);
+  ctx.setDesign("bogus");
+  assert.equal(root.dataset.design, "castle");
+});
 
 test("board and evidence share navigation, theme and safe previews", async () => {
   const dir = mkdtempSync(resolve(tmpdir(), "sandcastle-board-test-"));
@@ -30,13 +56,14 @@ test("board and evidence share navigation, theme and safe previews", async () =>
     const board = await (await fetch(base)).text();
     assert.match(board, /class="app-nav"/);
     assert.match(board, /sandcastle-theme/);
-    assert.match(board, /http-equiv="refresh"/);
+    assert.match(board, /id="settings"/);
+    assert.match(board, /<meta name="sandcastle-refresh"/);
     assert.match(board, /\/evidence\/demo--1\//);
     const response = await fetch(base + "/evidence/demo--1/");
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /class="app-nav"/);
-    assert.doesNotMatch(html, /http-equiv="refresh"/);
+    assert.doesNotMatch(html, /<meta name="sandcastle-refresh"/);
     assert.doesNotMatch(html, /<script>alert/);
     const data = JSON.parse(html.match(/<script id="data" type="application\/json">(.*?)<\/script>/s)![1]);
     const files = data.evidence.files;

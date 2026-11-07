@@ -1,4 +1,7 @@
+<!-- Board design review images are excluded from deployment. -->
 # Orchestrator
+
+The root `board-design-*.png` and matching SVG files are static review concepts, documented in [README.md](../README.md#board-design-concepts). Keep them out of project installations; the shipped Board template is unchanged by these concepts.
 
 `main.mts` takes one GitLab ticket through: branch off an integration branch, implementer run, verifier run (screenshot/video evidence plus a verdict), evidence posted to the ticket, then on PASS push, wait for CI and open an MR into the same integration branch. It never merges and never closes the ticket; once you merge the MR, the next dispatcher pass closes a Task or moves a ticket to `LABELS.done` (see below). Written against `@ai-hero/sandcastle` 0.14.0 with the Docker provider.
 
@@ -10,7 +13,7 @@ npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
 
 Copy into the project's `.sandcastle/`: `config.mts`, `main.mts`, `dispatch.mts`, `dispatch.sh`, `graph.mts`, `analyze.mts`, `tracker.mts`, `manifests.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `sandbox/`, and `board.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the GitLab, web runtime, CMS and Playwright layers). The host needs Node 22.18+, Docker, and `glab` and `claude` on the PATH and logged in.
 
-The always-on board service uses the same `board.template.html` for the board and evidence previews. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating the service. Its sticky navigation links back to the board; evidence opens in the same tab. Light/dark mode is saved in browser storage, defaulting to the system preference on the first visit. Evidence pages do not refresh during playback. Text previews are limited to 64 KiB, with originals still available. Local `board.html` links to evidence folders instead of preview pages.
+The always-on board service uses the same `board.template.html` for the board and evidence previews. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating the service. Its sticky navigation links back to the board; evidence opens in the same tab. A Settings panel (slides in from the right) picks the design (Ship's Log by default, Tide Chart, Castle Row, Treasure Map) and the mode (light, dark or system). Both are saved in browser storage. The board reloads every 10s, except while Settings is open. Evidence pages do not refresh during playback. Text previews are limited to 64 KiB, with originals still available. Local `board.html` links to evidence folders instead of preview pages.
 
 ## What is generic
 
