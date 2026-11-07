@@ -40,7 +40,8 @@ Substitute `{{VARS}}` in snippets with the chosen values. Pin versions; look up 
 ## Status
 - Verified (2026-11-05): web + Playwright layers build on `node:22-bookworm`; running as root, `start-web.sh` serves PHP 8.3 with a working MariaDB connection and headless Chromium loads the page. (That build used the Drush launcher, since removed: the Drupal layer now only links the project's `vendor/bin/drush`.)
 - Verified (2026-11-06, islandhealth/public-site, Drupal 10 / PHP 8.4): the ddev shim layer. As the non-root `agent` user, a project Playwright spec that seeds content via `ddev drush ev` passed, and the `drush` link ran the project's Drush against the sandbox site (`BASE_URL=http://127.0.0.1`). Specs that read existing published content still need fixtures, since the sandbox site is a fresh install.
-- **Not verified:** the GitHub and Pi layers, and a full personal-config run (verified 2026-11-07: the GitHub adapter's read calls against a real repo, the Pi ticket analysis on the host, and `dispatch.sh`'s checks); the GitLab layer (`glab` flags, install URL); starting services via a Sandcastle sandbox hook (`sudo: true`) with the non-root `agent` user; the WP-CLI layer.
+- Verified (2026-11-07, throwaway private GitHub repo, static site): the personal config end to end. `dispatch.sh` held back an issue without a model label and launched one labelled `model:luna`; Pi implemented it with `gpt-6-luna` on a per-run ChatGPT token, the verifier passed it with screenshots on the `sandcastle-evidence` branch, CI passed, the PR was merged, and the next pass moved the issue to `merged`. The image used the Pi layer's install line (pi 1.5.0) and the Playwright layer.
+- **Not verified:** the GitHub tracker layer (`gh` in the image; the workflow doesn't need it); the GitLab layer (`glab` flags, install URL); starting services via a Sandcastle sandbox hook (`sudo: true`) with the non-root `agent` user; the WP-CLI layer.
 
 ## Steps
 
