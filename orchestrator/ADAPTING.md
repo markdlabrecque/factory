@@ -1,5 +1,7 @@
-<!-- `factory init` copies this workflow into a project (.sandcastle kept); the personal config runs on pi-claude-subscription models. -->
+<!-- `factory init` copies this workflow into a project (.sandcastle kept); the personal config runs on pi-claude-subscription models.; links the experimental herdr-core spike. -->
 # Orchestrator
+
+> **Experimental, not supported:** attaching to a running agent (herdr-core) was only tested in a spike; see [the report](../docs/research/interactive-agents-herdr-core.md). This workflow still runs its agents non-interactively.
 
 The root `board-design-*.png` and matching SVG files are static review concepts, documented in [README.md](../README.md#board-design-concepts). Keep them out of project installations; the shipped Board template is unchanged by these concepts.
 

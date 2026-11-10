@@ -3,8 +3,10 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab issue tracker via `glab` (client work) or GitHub via `gh` with the Pi agent (personal projects), then optionally the Docker setup (single-container web runtime with Apache, PHP-FPM, MariaDB and Composer, Drupal (Drush) or WordPress (WP-CLI), Playwright for self-checking) and the workflow from sandcastle-helper (orchestrator, dispatcher with ticket graph, board). Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
-<!-- `factory init` now writes the minimal workflow (.sandcastle kept); optional environment layers and the Pi layer remain here. -->
+<!-- `factory init` now writes the minimal workflow (.sandcastle kept); optional environment layers and the Pi layer remain here; the herdr-core spike is linked as experimental. -->
 # Sandcastle setup (layers)
+
+> **Experimental, not supported:** interactive agents under herdr-core are research only; see `docs/research/interactive-agents-herdr-core.md`. Do not add them to a project setup.
 
 When copying the workflow, use the shipped `board/` files. Root `board-design-*.png` and `.svg` files are static design proposals with fictional data, not installation assets. See the repository README's Board design concepts section for previews.
 

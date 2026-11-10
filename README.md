@@ -1,5 +1,7 @@
-<!-- Factory CLI: board service, project registry and init; the personal profile runs Pi on pi-claude-subscription models. -->
+<!-- Factory CLI: board service, project registry and init; the personal profile runs Pi on pi-claude-subscription models.; links the experimental herdr-core spike. -->
 # sandcastle-helper
+
+> **Experimental:** [Interactive agents under herdr-core](docs/research/interactive-agents-herdr-core.md) (spike #6) tested attaching to and steering a running agent. It is research only and not supported by Factory.
 
 ## Board design concepts
 
