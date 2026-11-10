@@ -1,4 +1,6 @@
-// Regression tests for the shared shell, Settings (design + mode), bounded previews and original files.
+// Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
+// /api/runs snapshot and the evidence routes (bounded previews, original files, path safety).
+// The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -9,15 +11,18 @@ import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-test("settings save design and mode, and system mode follows the OS", () => {
-  const template = readFileSync(resolve("board/board.template.html"), "utf8");
-  const script = template.slice(template.indexOf("// settings:start"), template.indexOf("// settings:end"));
-  const saved: Record<string, string> = {};
+const template = readFileSync(resolve("board/board.template.html"), "utf8");
+const section = (name: string) => template.slice(template.indexOf(`// ${name}:start`), template.indexOf(`// ${name}:end`));
+function load(name: string, exports: string[], ctx: Record<string, unknown> = {}): any {
+  runInNewContext(section(name) + exports.map((e) => `; this.${e} = ${e};`).join(""), ctx);
+  return ctx;
+}
+
+test("appearance keeps light/dark/system, follows the OS live and survives blocked storage", () => {
   const media = { matches: false, listener: () => {}, addEventListener(_: string, fn: () => void) { this.listener = fn; } };
-  const root = { dataset: { mode: "system", theme: "light", design: "log" } as Record<string, string> };
-  let renders = 0;
-  const ctx: any = { root, window: { matchMedia: () => media }, localStorage: { setItem: (k: string, v: string) => { saved[k] = v; } }, render: () => { renders++; } };
-  runInNewContext(script + "; this.setMode = setMode; this.setDesign = setDesign;", ctx);
+  const root = { dataset: { mode: "system", theme: "light" } as Record<string, string> };
+  const saved: Record<string, string> = {};
+  const ctx = load("settings", ["setMode"], { root, window: { matchMedia: () => media }, localStorage: { setItem: (k: string, v: string) => { saved[k] = v; } } });
   ctx.setMode("dark");
   assert.equal(root.dataset.theme, "dark");
   assert.equal(saved["sandcastle-theme"], "dark");
@@ -26,15 +31,106 @@ test("settings save design and mode, and system mode follows the OS", () => {
   media.matches = true;
   media.listener();
   assert.equal(root.dataset.theme, "dark");
-  ctx.setDesign("castle");
-  assert.equal(root.dataset.design, "castle");
-  assert.equal(saved["sandcastle-design"], "castle");
-  assert.equal(renders, 1);
-  ctx.setDesign("bogus");
-  assert.equal(root.dataset.design, "castle");
+  ctx.setMode("log"); // an old design name is not a mode
+  assert.equal(root.dataset.mode, "system");
+
+  const blocked = load("settings", ["setMode"], { root, window: {}, localStorage: { setItem() { throw new Error("denied"); } } });
+  blocked.setMode("light");
+  assert.equal(root.dataset.theme, "light");
+  // The design picker is gone: no design storage key or renderer branches remain.
+  assert.doesNotMatch(template, /sandcastle-design|setDesign|data-design/);
 });
 
-test("board and evidence share navigation, theme and safe previews", async () => {
+test("run model groups every stage, flags attention and rejects unsafe links", () => {
+  const m = load("model", ["layout", "summarize", "stageInfo", "matches", "safeHref", "validSnapshot", "shouldPoll", "diffRuns"]);
+  const now = Date.parse("2026-11-10T12:00:00Z");
+  const at = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString();
+  const run = (key: string, stage: string, minAgo = 1, extra = {}) => ({ key, iid: key, stage, stageSince: at(minAgo), startedAt: at(minAgo + 5), updatedAt: at(minAgo), ...extra });
+  const runs = ["queued", "waiting", "setup", "implementing", "verifying", "posting", "pushing", "ci", "done", "stopped", "mystery"].map((s) => run(`a--${s}`, s));
+  runs.push(run("b--1", "implementing", 45), run("c--1", "implementing", 2, { project: "c" }));
+  const groups = m.layout(runs, now);
+  assert.equal(groups.waiting.map((r: any) => r.stage).sort().join(), "queued,waiting");
+  assert.equal(groups.history.map((r: any) => r.stage).sort().join(), "done,stopped");
+  assert.equal(groups.active.length, 9);
+  assert.equal(groups.active[0].key, "b--1", "a quiet run sorts first");
+  assert.equal(m.stageInfo("mystery").label, "mystery");
+  assert.equal(m.stageInfo("constructor").unknown, true);
+  assert.equal(JSON.stringify(m.summarize(runs, now)), JSON.stringify({ all: 13, active: 9, waiting: 2, attention: 2, done: 1 }));
+  assert.equal(m.matches(runs[0], "waiting", "", now), true);
+  assert.equal(m.matches(runs[0], "waiting", "c", now), false);
+
+  assert.equal(m.safeHref("javascript:alert(1)", false), null);
+  assert.equal(m.safeHref(" JavaScript:alert(1)", false), null);
+  assert.equal(m.safeHref("//evil.example/x", false), null);
+  assert.equal(m.safeHref("file:///tmp/evidence/", false), null);
+  assert.equal(m.safeHref("file:///tmp/evidence/", true), "file:///tmp/evidence/");
+  assert.equal(m.safeHref("/evidence/a--1/", false), "/evidence/a--1/");
+  assert.equal(m.safeHref("https://github.com/o/r/pull/3", false), "https://github.com/o/r/pull/3");
+
+  assert.equal(m.validSnapshot({ runs: [{ key: "a", stage: "done" }], generatedAt: "x" }), true);
+  assert.equal(m.validSnapshot({ runs: [{ stage: "done" }], generatedAt: "x" }), false);
+  assert.equal(m.validSnapshot("<html>"), false);
+  assert.equal(m.shouldPoll({ runs: [] }, "http:"), true);
+  assert.equal(m.shouldPoll({ runs: [] }, "file:"), false);
+  assert.equal(m.shouldPoll({ evidence: {} }, "http:"), false);
+
+  const prev = new Map([["a", "setup"], ["b", "ci"], ["gone", "done"]]);
+  const d = m.diffRuns(prev, [{ key: "a", stage: "setup" }, { key: "b", stage: "done" }, { key: "new", stage: "queued" }]);
+  assert.equal(JSON.stringify(d), JSON.stringify({ added: ["new"], changed: ["b"], removed: ["gone"] }));
+});
+
+test("poller keeps one loop, pauses while hidden and keeps last data on failure", async () => {
+  const { createPoller } = load("poller", ["createPoller"], { Promise, Error });
+  const timers = new Map<number, () => void>();
+  let nextId = 0, hidden = false, inFlight = 0, maxInFlight = 0, calls = 0;
+  const responses: Array<() => Promise<any>> = [];
+  const got: any[] = [], errors: string[] = [];
+  const p = createPoller({
+    url: "/api/runs", interval: 10_000,
+    setTimeout: (fn: () => void) => { timers.set(++nextId, fn); return nextId; },
+    clearTimeout: (id: number) => { timers.delete(id); },
+    isHidden: () => hidden,
+    valid: (d: any) => Array.isArray(d?.runs),
+    fetch: async () => {
+      calls++; inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      try { return await responses.shift()!(); } finally { inFlight--; }
+    },
+    onData: (d: any) => got.push(d),
+    onError: (e: Error) => errors.push(e.message),
+  });
+  const ok = (body: any) => async () => ({ ok: true, json: async () => body });
+  const fire = async () => { const [id, fn] = [...timers][0]; timers.delete(id); fn(); await new Promise((r) => setTimeout(r, 0)); };
+
+  p.start();
+  assert.equal(timers.size, 1);
+  responses.push(ok({ runs: [1] }));
+  await fire();
+  assert.equal(got.length, 1);
+  assert.equal(timers.size, 1, "reschedules exactly once");
+
+  responses.push(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+  await fire();
+  responses.push(ok("<html>not json data</html>"));
+  await fire();
+  assert.deepEqual(errors, ["HTTP 500", "malformed snapshot"]);
+  assert.equal(got.length, 1, "failures keep the last good data");
+  assert.equal(timers.size, 1);
+
+  hidden = true;
+  p.visibilityChanged();
+  assert.equal(timers.size, 0, "no polling in a hidden tab");
+  hidden = false;
+  responses.push(ok({ runs: [2] }));
+  p.visibilityChanged();
+  p.visibilityChanged(); // a second event while the request is in flight must not start another
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(got.length, 2);
+  assert.equal(maxInFlight, 1);
+  assert.equal(calls, 4);
+  assert.equal(timers.size, 1);
+});
+
+test("board, /api/runs and evidence agree and render safely", async () => {
   const dir = mkdtempSync(resolve(tmpdir(), "sandcastle-board-test-"));
   const evidence = resolve(dir, "evidence");
   mkdirSync(evidence);
@@ -46,7 +142,9 @@ test("board and evidence share navigation, theme and safe previews", async () =>
   writeFileSync(resolve(evidence, "archive.zip"), "archive bytes");
   writeFileSync(resolve(evidence, ".hidden"), "hidden");
   const now = new Date().toISOString();
-  writeFileSync(resolve(dir, "demo--1.json"), JSON.stringify({ iid: "1", title: "Example", project: "demo", stage: "done", stageSince: now, startedAt: now, updatedAt: now, pid: process.pid, evidenceDir: evidence }));
+  const record = { stage: "done", stageSince: now, startedAt: now, updatedAt: now, pid: process.pid };
+  writeFileSync(resolve(dir, "demo--1.json"), JSON.stringify({ ...record, iid: "1", title: "Example $& </script><b>", project: "demo", evidenceDir: evidence }));
+  writeFileSync(resolve(dir, "other--1.json"), JSON.stringify({ ...record, iid: "1", title: "Same number, other project", project: "other", stage: "queued" }));
   const child = spawn(process.execPath, [resolve("board/board-server.mts")], {
     env: { ...process.env, SANDCASTLE_STATE_DIR: dir, PORT: "0" }, stdio: ["ignore", "pipe", "pipe"],
   });
@@ -55,15 +153,25 @@ test("board and evidence share navigation, theme and safe previews", async () =>
     const base = String(output).match(/http:\/\/[^\s]+/)![0];
     const board = await (await fetch(base)).text();
     assert.match(board, /class="app-nav"/);
-    assert.match(board, /sandcastle-theme/);
     assert.match(board, /id="settings"/);
-    assert.match(board, /<meta name="sandcastle-refresh"/);
-    assert.match(board, /\/evidence\/demo--1\//);
+    assert.doesNotMatch(board, /fonts\.googleapis|sandcastle-refresh|location\.reload/);
+    assert.doesNotMatch(board, /<b>/);
+    const embedded = JSON.parse(board.match(/<script id="data" type="application\/json">(.*?)<\/script>/s)![1]);
+    assert.equal(embedded.runs.find((r: any) => r.key === "demo--1").title, "Example $& </script><b>");
+
+    const api = await fetch(base + "/api/runs");
+    assert.match(api.headers.get("content-type")!, /^application\/json/);
+    assert.equal(api.headers.get("cache-control"), "no-store");
+    const snapshot = await api.json();
+    const view = (d: any) => d.runs.map((r: any) => [r.key, r.stage, r.project, r.evidenceUrl]);
+    assert.deepEqual(view(snapshot), view(embedded));
+    assert.deepEqual(view(snapshot).map((r: any) => r[0]).sort(), ["demo--1", "other--1"]);
+    assert.equal(snapshot.runs.find((r: any) => r.key === "demo--1").evidenceUrl, "/evidence/demo--1/");
+
     const response = await fetch(base + "/evidence/demo--1/");
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.match(html, /class="app-nav"/);
-    assert.doesNotMatch(html, /<meta name="sandcastle-refresh"/);
     assert.doesNotMatch(html, /<script>alert/);
     const data = JSON.parse(html.match(/<script id="data" type="application\/json">(.*?)<\/script>/s)![1]);
     const files = data.evidence.files;
@@ -79,6 +187,7 @@ test("board and evidence share navigation, theme and safe previews", async () =>
     assert.equal((await fetch(base + "/evidence/missing/")).status, 404);
     assert.equal((await fetch(base + "/evidence/demo--1/not-a-file")).status, 404);
     assert.equal((await fetch(base + "/evidence/demo--1/%E0%A4%A")).status, 404);
+    assert.equal((await fetch(base + "/api/runs/x")).status, 404);
     for (const name of ["verdict.md", "large.log", "screen shot.png", "demo.webm", "archive.zip"]) rmSync(resolve(evidence, name));
     const emptyHtml = await (await fetch(base + "/evidence/demo--1/")).text();
     assert.match(emptyHtml, /"files":\[\]/);

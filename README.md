@@ -1,28 +1,22 @@
-<!-- Factory CLI: board service, project registry and init; the personal profile runs Pi on pi-claude-subscription models.; links the experimental herdr-core spike. -->
+<!-- Factory CLI: board service, project registry and init; the personal profile runs Pi on pi-claude-subscription models; the single Factory board design with live updates; links the experimental herdr-core spike. -->
 # sandcastle-helper
 
 > **Experimental:** [Interactive agents under herdr-core](docs/research/interactive-agents-herdr-core.md) (spike #6) tested attaching to and steering a running agent. It is research only and not supported by Factory.
-
-## Board design concepts
-
-Three static designs with fictional run data are available as 1600 × 1100 PNGs and editable SVGs in this folder:
-
-- [Tidal atlas](board-design-01-tidal-atlas.png): an illustrated coastal map with a run inspector.
-- [Mission control](board-design-02-mission-control.png): a dark dashboard with run paths and a failure inspector.
-- [Builders' workbench](board-design-03-builders-workbench.png): print-inspired job cards and a workflow stage ruler.
-
-These are review images, not changes to the running Board.
 
 Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups.
 
 - `skills/sandcastle-setup/` - Claude Code skill that scaffolds `.sandcastle/` from layers (GitLab or GitHub tracker, Pi agent, web runtime, Drupal/WordPress, ddev shim, Playwright), and optionally installs the workflow below. Copy to `~/.claude/skills/` (and `~/.agents/skills/` for other agents).
 - `orchestrator/` - one-ticket loop: implement, verify with screenshot/video evidence, post to the ticket, push, open the MR. Two reference configs share the code: `config.mts` for client and Affinity Bridge work (GitLab, Claude Code, a person merges the MR) and `config.personal.mts` for personal projects (GitHub, Pi with the `pi-claude-subscription` provider, `claude-sonnet-5-5` or `claude-opus-5-5` picked by a `model:sonnet`/`model:opus` label on each ticket, PR merged once every CI check passes). See "Two reference configs" in `orchestrator/ADAPTING.md`. Plus a dispatcher that starts many runs, held back by an agent-built ticket graph (dependencies and file conflicts). A ready issue with GitLab Tasks gets one run per Task; once MRs merge, the dispatcher closes the Tasks and moves finished tickets to the next stage (`Internal QA` by default). `dispatch.sh` runs a pass with the defaults. Start with `orchestrator/ADAPTING.md`.
-- `board/` - run-state store and treasure-map status board. `board.mts` writes `.sandcastle/state/<project>--<iid>.json` per run and regenerates a self-contained `board.html` from `board.template.html`. Copy both into a project's `.sandcastle/`.
+- `board/` - run-state store and the Factory operations board. `board.mts` writes `.sandcastle/state/<project>--<iid>.json` per run and regenerates a self-contained `board.html` from `board.template.html`. Copy both into a project's `.sandcastle/`.
   - `board-server.mts`, `sandcastle-board.service`, `install-service.sh` - always-on version: a systemd user service (macOS: `com.sandcastle.board.plist` + `install-launchd.sh`, a launchd user agent) serving the board at `http://127.0.0.1:4444` (and each run's evidence under `/evidence/`) from one shared state folder. Node 22.18+. Run `board/install-service.sh` (Linux) or `board/install-launchd.sh` (macOS), so every project and worktree reports to the one board. `dispatch.sh` uses that folder unless `SANDCASTLE_STATE_DIR` says otherwise; to start `main.mts` directly, `export SANDCASTLE_STATE_DIR=$HOME/.local/state/sandcastle` first.
 
-The board and HTTP evidence pages share a sticky navigation bar. Its Settings button slides in a panel from the right with two choices, both saved in your browser. Design is Ship's Log (the default), Tide Chart, Castle Row or Treasure Map; mockups are in `board/designs/`. Mode is Light, Dark or System; System follows your OS setting live. Evidence opens in the same tab with image, video and text previews, a Back to board link, and normal browser Back/Forward navigation, styled to match the chosen design. The board reloads every 10s but waits while Settings is open. Evidence pages do not auto-refresh, so videos are not interrupted. Text previews stop at 64 KiB; Open original serves the full file.
+The board has one design: a graphite/cyan operations console. It shows counts (active, queued/waiting, attention, completed), filters by status and project, and groups runs into active operations, queued & waiting, and history. Each run card shows its stage on a pipeline, branch, timing, note, verdict and ticket/PR/evidence links. Amber means waiting, red means stopped or quiet for 20+ minutes, green means done; every status also has a text label. The Appearance button (sticky navigation bar) picks Light, Dark or System, saved in your browser; System follows your OS setting live. Old saved design choices are ignored.
 
-Without the service, the board assumes it runs from a repo root containing `.sandcastle/` and writes `.sandcastle/board.html`. The saved theme works there too, but evidence links open local folders rather than the HTTP preview pages.
+The HTTP board does not reload. It polls `GET /api/runs` (read-only JSON, the same data as the page) every 10s, pauses in background tabs, and patches cards by run key: new runs fade in, moved runs slide, stage changes get a short highlight and counts slide to the new value. Focus, scroll and filters survive updates. If a poll fails, the board keeps the last good data and says Offline until the next poll works. Navigating between board and evidence uses a short cross-page transition in browsers that support it. With reduced motion turned on, all of this happens without animation.
+
+Evidence opens in the same tab with image, video and text previews, a Back to board link, and normal browser Back/Forward navigation. Evidence pages never poll, so videos are not interrupted. Text previews stop at 64 KiB; Open original serves the full file.
+
+Without the service, the board assumes it runs from a repo root containing `.sandcastle/` and writes `.sandcastle/board.html`, a static snapshot marked "Snapshot": refresh the file to see newer data. Its evidence links open local folders rather than the HTTP preview pages.
 
 Run the board regression tests with `node --test board/board.test.mts`.
 
@@ -60,7 +54,7 @@ The registry is `~/.config/factory/projects.json` (`{version:1, projects:[{name,
 
 The personal config runs Pi through the `pi-claude-subscription` provider (a Pi extension that drives the Claude Code CLI on your Claude subscription). Labels select the runtime model: `model:sonnet` is `pi-claude-subscription/claude-sonnet-5-5`, `model:opus` is `pi-claude-subscription/claude-opus-5-5`. A ticket needs exactly one; a model name in the ticket body alone schedules nothing. The verifier uses Opus, ticket analysis uses Sonnet. Host: `claude auth login` and install the extension (`git clone --depth 1 --branch <tag> https://github.com/markdlabrecque/pi-claude-subscription.git ~/.pi/agent/extensions/pi-claude-subscription && cd ~/.pi/agent/extensions/pi-claude-subscription && npm ci --omit=dev --ignore-scripts`; `pi install git:…` fails on the package's husky hook). Container: the image carries the CLI and extension (`skills/sandcastle-setup/layers/agent-pi/`), and the CLI authenticates with `CLAUDE_CODE_OAUTH_TOKEN` from `.sandcastle/.env` (`claude setup-token`). No OpenAI login is needed. Client config keeps Claude Code and its token as before. Details: `orchestrator/ADAPTING.md`.
 
-The [CLI plan](docs/factory-cli.md#roadmap) tracks the remaining slices, including a separate single animated Factory board design. Slice two keeps `.sandcastle`; migration to `.factory` is deferred to a future slice.
+The [CLI plan](docs/factory-cli.md#roadmap) tracks the remaining slices. Slice two keeps `.sandcastle`; migration to `.factory` is deferred to a future slice.
 
 ## Setting up a project
 
