@@ -3,7 +3,7 @@
 
 **Status: experimental, not supported.** Nothing in Factory's runner or dispatcher changed.
 
-**Recommendation: investigate further, leaning adopt for the attach/steer layer.** Persistent terminal, attach, steering, resize and detach all worked end to end. Completion, failure reporting and cleanup are not safe yet and need Factory-side work (see Gaps).
+**Recommendation: adopt for the attach/steer layer, behind Factory-side work on completion, failure reporting and cleanup (see Gaps).** Persistent terminal, attach, steering, resize and detach worked end to end. The follow-up run added multiple containers and core restart/crash recovery; both passed. Only reboot recovery and a person's real terminal remain untested.
 
 ## What was tested
 
@@ -38,6 +38,12 @@ hc send --wait spike-r5 "<text>"; hc interrupt spike-r5; hc get spike-r5; hc eve
 | 6b | Container lost mid-work (`docker kill`) | **Pass, but see Gaps** | Sandcastle returned `interactive exit=137`. The herdr-core terminal showed `finished`, `exit_code: 0`. Agent status was `null`, not an error. |
 | 7 | Lifecycle events through the Docker boundary, no broad socket | **Pass (screen-based)** | `hc events` streamed `status` events (`working`, `done`, with text such as "Writing e.txt") and `turn` events. The container had no mounted socket, no `HC_*` env and no `hc` binary. |
 | 8 | Cleanup, no orphans | **Pass after manual step** | `hc kill` left the container running (orphan); it was removed by hand. Final container list matched the start. |
+| 9 | Two containers at once (follow-up) | **Pass** | Two terminals, two containers, two Claude sessions at the same pace. Interrupt plus a revised instruction sent to A only: A stopped at 24 files and wrote `revised-a.txt`; B finished all 30 and had no revised file. |
+| 10 | `server restart` mid-work (follow-up) | **Pass** | Core pid changed; same holder, same terminals `t5`/`t6`; work continued (c-files 2 -> 7 -> 20); same `claude` pid (43) and one session file per container. |
+| 11 | Core crash, `kill -9` of `serve` mid-work (follow-up) | **Pass** | Next `hc ls` started a new core; terminals and `working` status came back; work continued; a new instruction to B worked; attach worked; same `claude` pid. |
+| 12 | Holder crash, `kill -9` of `hold` (follow-up) | **Fail, as designed** | Both terminals went `finished`, reason `holder_lost`, no exit code, and the runners died. Both containers kept running (orphans). Removed by exact id. |
+| 13 | Reboot recovery | **Blocked** | Cannot be tested safely: it would reboot the owner's machine and sessions. |
+| 14 | A person's real terminal | **Blocked** | No human at a keyboard. Attach was only driven through a scripted PTY (again, after the crash). |
 
 ## Findings
 
@@ -55,9 +61,14 @@ hc send --wait spike-r5 "<text>"; hc interrupt spike-r5; hc get spike-r5; hc eve
 
 **Inference, not tested**
 
-- Reboot or daemon-crash recovery. Only `server stop` of an empty session was run.
+- Reboot recovery. A reboot kills the holder, which test 12 shows loses the terminals. So expect the same result: terminals `finished`, containers possibly running. Not run.
 - A person attaching from a real terminal rather than a scripted PTY.
-- Multiple simultaneous containers or terminals.
+
+**Follow-up findings (runtime evidence)**
+
+10. **Core restart and crash are survivable.** The separate `hold` process owns the PTYs; the core can restart or be killed and the terminals, agents and containers carry on. A new core starts on the next `hc` command.
+11. **Holder death is not survivable.** It ends the terminals with `holder_lost`. No exit code. The containers keep running. Factory must treat `holder_lost` like container loss and sweep orphans.
+12. **Any `hc` command can start a core.** `hc ls` on a session with no core starts one. Always name `HC_SESSION` and check before scripting a read.
 
 ## Security
 
@@ -73,8 +84,10 @@ hc send --wait spike-r5 "<text>"; hc interrupt spike-r5; hc get spike-r5; hc eve
 3. **Cleanup:** killing the terminal leaves the container. The runner needs a signal handler that calls `sandbox.close()`, or Factory must sweep orphans.
 4. **First-run config:** the image or the setup hook must seed Claude's config.
 5. **Durability:** events are live only; Factory must reconcile from `hc get` after a gap.
-6. **Recovery** after reboot or core restart is untested.
+6. **Recovery:** core restart and crash are fine (tests 10 and 11). Holder death or reboot loses the terminals (test 12); Factory must detect `holder_lost`, close the container and mark the run failed. Reboot itself was not run.
 
 ## Cleanup evidence
 
 Terminals removed; container list identical to before the first run; test repo and worktrees deleted; `factory-spike-6` stopped with `hc server stop`. The `default` session stayed at 0 terminals. The `ovis` session went from 2 to 3 live terminals during the spike; no command here targeted it, so I believe that was the owner's own use, but I could not prove it. The old Herdr 0.9.5 files were left alone.
+
+**Follow-up run:** own session `factory-spike-6b`, two containers (`0a96bd59b39e`, `69a389c8ec84`), fixture repos under `~/.cache/factory-spike6`, Sandcastle 0.14.0 installed in a scratch directory, owner-supplied token file `~/.factory-spike.env` (mode 600, never printed). The two containers were removed by exact id; the container list is identical to the start (a pre-existing `sandcastle:main` container was not touched). Terminals removed, session stopped with `hc server stop`, stale holder socket and fixtures deleted. The `ovis` session's processes (`serve`, `connect`, `hold`) were never addressed and are unchanged. One slip: a read-only `hc ls` on the `default` session started an empty core (the `default` session had no core before). I stopped that empty core at once; nothing else lived in it.
