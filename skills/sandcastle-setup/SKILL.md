@@ -3,12 +3,18 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab issue tracker via `glab` (client work) or GitHub via `gh` with the Pi agent (personal projects), then optionally the Docker setup (single-container web runtime with Apache, PHP-FPM, MariaDB and Composer, Drupal (Drush) or WordPress (WP-CLI), Playwright for self-checking) and the workflow from sandcastle-helper (orchestrator, dispatcher with ticket graph, board). Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
-<!-- Workflow board: shared evidence previews, sticky navigation and a Settings panel for design and light/dark/system mode. Root board-design-* images are review-only. -->
+<!-- Planned CLI init retains .sandcastle and adds Pi subscription-provider support; optional layers remain here. -->
 # Sandcastle setup (layers)
 
 When copying the workflow, use the shipped `board/` files. Root `board-design-*.png` and `.svg` files are static design proposals with fictional data, not installation assets. See the repository README's Board design concepts section for previews.
 
 Sandcastle has no built-in GitLab tracker (maintainer points to `Custom`; upstream #511, #521). Instead of improvising from `SETUP_ISSUE_TRACKER.md`, apply fixed layers from `layers/`. The scaffold is copied into the project, so no fork of Sandcastle is needed.
+
+## Factory-managed board
+
+If the user chooses the Factory CLI, follow the repository README's "Install the Factory CLI" section instead of running the legacy board installers. Set `SANDCASTLE_STATE_DIR=$HOME/.local/state/factory` for project dispatchers. Confirm `factory board status` is active and `factory doctor` reports a responding board. The CLI does not yet scaffold projects or install dispatcher timers, so keep following this skill for those. If an old Sandcastle board uses port 4444, ask the user to stop it before installing Factory. The CLI warns about old services without changing them.
+
+The planned second CLI slice adds minimal workflow initialization, leaving optional environment layers in this skill. It keeps `.sandcastle`; migration to `.factory` belongs to a later slice in `docs/factory-cli.md`. Until that migration is implemented, use the existing project paths below. Slice two also plans personal-profile `model:sonnet` and `model:opus` mappings to `pi-claude-subscription/claude-sonnet-5-5` and `pi-claude-subscription/claude-opus-5-5`, plus provider loading and subscription auth for sandbox runs and host analysis. Do not treat newly assigned ticket labels as proof the current GPT-based runtime supports these models.
 
 ## Detect (defaults; confirm with the user, don't ask from scratch)
 Inspect the project root first and propose these as the answers:

@@ -1,9 +1,15 @@
-<!-- Board design review images are excluded from deployment. -->
+<!-- Planned CLI initialization retains .sandcastle and adds Pi subscription models; current runtime details remain below. -->
 # Orchestrator
 
 The root `board-design-*.png` and matching SVG files are static review concepts, documented in [README.md](../README.md#board-design-concepts). Keep them out of project installations; the shipped Board template is unchanged by these concepts.
 
 `main.mts` takes one ticket through: branch off an integration branch, implementer run, verifier run (screenshot/video evidence plus a verdict), evidence posted to the ticket, then on PASS push and deliver. It never closes the ticket; once the work is merged, the next dispatcher pass closes a Task or moves a ticket to `LABELS.done` (see below). Written against `@ai-hero/sandcastle` 0.14.0 with the Docker provider.
+
+## Factory-managed board
+
+The optional [Factory CLI](../README.md#install-the-factory-cli) installs a manifest-owned `factory-board` user service. It does not replace the project installation steps or dispatcher timers below. When using it, set `SANDCASTLE_STATE_DIR=$HOME/.local/state/factory` in the dispatcher environment so runs reach its board. Do not also install the legacy board service on port 4444. Existing Sandcastle services and state are only warned about, never migrated.
+
+Planned CLI initialization will add missing workflow files without overwriting customizations. It retains `.sandcastle`; a later migration to `.factory` is recorded in the [CLI roadmap](../docs/factory-cli.md#roadmap). Do not rename project directories as part of slice two. That slice also replaces the personal profile's current GPT/OpenAI assumptions with `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with Opus verification and Sonnet analysis. Provider installation/loading and subscription authentication are part of that work. These are planned settings; the current reference configuration below is not yet migrated.
 
 ## Two reference configs
 

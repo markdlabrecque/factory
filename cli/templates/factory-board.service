@@ -1,0 +1,13 @@
+# Factory CLI managed board. Absolute paths are substituted at install time.
+[Unit]
+Description=Factory board
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=@NODE@ @SERVER@
+Environment=@STATE@
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
