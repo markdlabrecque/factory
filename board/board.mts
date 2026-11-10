@@ -3,10 +3,11 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Run-state store + shared board/evidence page with sticky navigation and a Settings panel (design + light/dark/system mode).
+// Run-state store + the Factory board/evidence page (one design; light/dark/system appearance).
 // Writers (main.mts) call setStage(); each call writes <stateDir>/<key>.json and regenerates
-// .sandcastle/board.html (data embedded, reloads itself every 10s, opens from disk). The always-on service
-// (board-server.mts) serves the same page over HTTP from the same state dir.
+// .sandcastle/board.html, a self-contained snapshot that opens from disk and does not poll. The always-on
+// service (board-server.mts) serves the same page over HTTP, plus buildBoardData() as JSON at /api/runs,
+// which the page polls to animate live changes.
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
 
@@ -124,22 +125,26 @@ export function readRuns(): BoardRun[] {
   return runs.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
 
-/** Build the page. mode "http" links evidence through the service's /evidence route; "file" links the folder directly. */
-export function buildPage(mode: "file" | "http"): string {
+/** Board snapshot shared by the embedded page data and GET /api/runs. mode "http" links evidence through the
+ *  service's /evidence route; "file" links the folder directly. */
+export function buildBoardData(mode: "file" | "http"): { runs: BoardRun[]; generatedAt: string } {
   const runs = readRuns().map((r) => ({
     ...r,
     evidenceUrl: !r.evidenceDir ? undefined : mode === "http" ? `/evidence/${encodeURIComponent(r.key)}/` : `file://${r.evidenceDir}/`,
   }));
-  const data = JSON.stringify({ runs, generatedAt: now() }).replace(/</g, "\\u003c");
-  return readFileSync(templateFile, "utf8").replace("/*__DATA__*/null", data);
+  return { runs, generatedAt: now() };
 }
 
-/** Render evidence using the board's shell. Evidence never auto-refreshes while media is playing. */
+const embed = (data: unknown) =>
+  readFileSync(templateFile, "utf8").replace("/*__DATA__*/null", () => JSON.stringify(data).replace(/</g, "\\u003c"));
+
+export function buildPage(mode: "file" | "http"): string {
+  return embed(buildBoardData(mode));
+}
+
+/** Render evidence using the board's shell. Evidence pages never poll, so media keeps playing. */
 export function buildEvidencePage(run: BoardRun, files: { name: string; kind: string; url: string; text?: string; truncated?: boolean }[]): string {
-  const data = JSON.stringify({ evidence: { run, files, url: `/evidence/${encodeURIComponent(run.key)}/` } }).replace(/</g, "\\u003c");
-  return readFileSync(templateFile, "utf8")
-    .replace('<meta name="sandcastle-refresh" content="10">', '')
-    .replace("/*__DATA__*/null", data);
+  return embed({ evidence: { run, files, url: `/evidence/${encodeURIComponent(run.key)}/` } });
 }
 
 export function renderBoard(): void {

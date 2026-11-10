@@ -1,9 +1,10 @@
 import { createServer } from "node:http";
 import { closeSync, createReadStream, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import { buildEvidencePage, buildPage, readRuns } from "./board.mts";
+import { buildBoardData, buildEvidencePage, buildPage, readRuns } from "./board.mts";
 
 // Always-on board: GET / renders the page from the shared state dir on every request.
+// GET /api/runs returns the same run snapshot as uncached JSON; the page polls it every 10s (read-only).
 // GET /evidence/<run-key>/ uses the board shell with image/video/text previews and back navigation.
 // GET /evidence/<run-key>/<file> serves originals. Text previews are bounded to 64 KiB.
 // Run directly: node board-server.mts   (Node 22.18+; no build step)
@@ -32,6 +33,10 @@ const server = createServer((req, res) => {
     if (url.pathname === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return void res.end(buildPage("http"));
+    }
+    if (url.pathname === "/api/runs") {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+      return void res.end(JSON.stringify(buildBoardData("http")));
     }
     const m = /^\/evidence\/([^/]+)\/(.*)$/.exec(url.pathname);
     if (m) {

@@ -1,4 +1,4 @@
-<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred. -->
+<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented. -->
 # Factory CLI
 
 Status: first and second slices implemented locally, pending PR delivery and real-service verification. Later slices remain proposed.
@@ -114,7 +114,7 @@ Rules:
 6. Retire `install-service.sh`, `install-launchd.sh` and `install-dispatch.sh`. Update `README.md`, `orchestrator/ADAPTING.md` and the setup skill (see `AGENTS.md`).
 7. Migrate project files from `.sandcastle` to `.factory` in a future slice. Plan runtime path changes, compatibility and safe migration separately; do not rename directories in slice two.
 
-The board redesign is tracked separately in [#3](https://github.com/markdlabrecque/factory/issues/3): one Minority Report-inspired Factory design for board and evidence pages, retaining light/dark/system modes, with polished page, navigation and live-data transitions. Respect reduced motion and preserve focus, scroll and media playback. Full implementation plans and Q&A are posted on all three tickets.
+The board redesign from [#3](https://github.com/markdlabrecque/factory/issues/3) is implemented: one Factory operations-console design for board and evidence pages with light/dark/system modes, page and navigation transitions, and live updates from a read-only `GET /api/runs` snapshot patched in place every 10s (no reloads; focus, scroll, filters and media playback preserved; reduced motion respected). A local `board.html` stays a static snapshot. Full implementation plans and Q&A are posted on all three tickets.
 
 ---
 
