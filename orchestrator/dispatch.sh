@@ -2,7 +2,9 @@
 # One dispatcher pass with the defaults, against the branch checked out in the current directory.
 #   .sandcastle/dispatch.sh [--dry-run] [--max N] [--whole-issues]
 # Extra arguments go to dispatch.mts. Checks the tools, logins and .sandcastle/.env first (which ones
-# follows TRACKER.kind and AGENT.provider in config.mts: glab or gh, claude or pi), then the image: from a
+# follows TRACKER.kind and AGENT.provider in config.mts: glab or gh, claude or pi; with the personal
+# config's pi-claude-subscription provider, claude's login, the provider extension and the models, see
+# preflight.mts, and the container's CLAUDE_CODE_OAUTH_TOKEN), then the image: from a
 # terminal a missing or mismatched image is built; without one (the timer) the pass stops and says
 # how to build it, so a background pass never starts a long build.
 set -euo pipefail
@@ -41,26 +43,35 @@ else
   host="$(cfg_value host)"; host="${host:-github.com}"
   gh auth status --hostname "$host" >/dev/null 2>&1 || fail "gh isn't logged in to $host. Run: gh auth login --hostname $host"
 fi
-# The ticket analysis runs this agent on the host with its own login (with pi, so do the container runs).
+# The ticket analysis runs this agent on the host with its own login. With pi and the pi-claude-subscription
+# provider that login is claude's, and the container runs use CLAUDE_CODE_OAUTH_TOKEN (checked below).
+subscription=0
 if [ "$agent" = claude ]; then
   claude auth status 2>/dev/null | grep -q '"loggedIn": *true' || fail "claude isn't logged in. Run: claude auth login"
+elif grep -q '"pi-claude-subscription/' .sandcastle/config.mts; then
+  subscription=1
+  [ -f .sandcastle/preflight.mts ] || fail "no .sandcastle/preflight.mts in $root."
+  node .sandcastle/preflight.mts >&2 || exit 1
 else
+  # A custom pi config on openai/ models: the container runs use the host's pi login.
   pi auth check --provider openai >/dev/null 2>&1 || fail "pi has no working OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT."
 fi
 docker info >/dev/null 2>&1 || fail "Docker isn't running, or this user can't reach it."
 
-# Claude Code in the container logs in with .sandcastle/.env, not the host's login. Check the credential
-# with an empty Messages request: a bad one gets 401, a good one 400. No tokens are used, and the value is
-# never printed or put on a command line. Pi needs nothing here: each run gets a fresh token from the
-# host's pi login, checked above.
+# Claude Code in the container logs in with .sandcastle/.env, not the host's login: the client config's
+# agent, and the CLI behind pi-claude-subscription. Check the credential with an empty Messages request: a
+# bad one gets 401, a good one 400. No tokens are used, and the value is never printed or put on a command
+# line. A pi config on openai/ models needs nothing here: each run gets a fresh token from the host's pi
+# login, checked above.
 env_file=.sandcastle/.env
 [ -f "$env_file" ] || fail "no $env_file. Run: cp .sandcastle/.env.example $env_file, then fill it in."
-if [ "$agent" = claude ]; then
+if [ "$agent" = claude ] || [ "$subscription" = 1 ]; then
   env_value() { sed -nE "s/^[[:space:]]*(export[[:space:]]+)?$1=[\"']?([^\"'#[:space:]]*).*/\2/p" "$env_file" | tail -n 1; }
   if token="$(env_value CLAUDE_CODE_OAUTH_TOKEN)" && [ -n "$token" ]; then
     key_name=CLAUDE_CODE_OAUTH_TOKEN
     auth_header="Authorization: Bearer $token"
-  elif token="$(env_value ANTHROPIC_API_KEY)" && [ -n "$token" ]; then
+  elif [ "$agent" = claude ] && token="$(env_value ANTHROPIC_API_KEY)" && [ -n "$token" ]; then
+    # Only the client config's Claude Code accepts an API key. pi-claude-subscription strips ANTHROPIC_API_KEY.
     key_name=ANTHROPIC_API_KEY
     auth_header="x-api-key: $token"
   else

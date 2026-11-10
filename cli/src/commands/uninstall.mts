@@ -2,7 +2,9 @@
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readManifest, validate } from '../manifest.mts';
+import { scaffoldName, shq } from '../paths.mts';
 import type { Paths } from '../paths.mts';
+import { readRegistry } from '../projects.mts';
 import { run } from '../platform/index.mts';
 import type { ServiceBackend } from '../platform/index.mts';
 export async function uninstall(p: Paths, service: ServiceBackend, options: { dryRun?: boolean; purge?: boolean } = {}) {
@@ -14,6 +16,13 @@ export async function uninstall(p: Paths, service: ServiceBackend, options: { dr
     }
     return;
   }
+  // List before --purge deletes the registry. Project scaffolds are never removed by uninstall.
+  try {
+    for (const project of readRegistry(p).projects) {
+      const scaffold = join(project.root, scaffoldName);
+      console.log(`Project scaffold, not removed: ${scaffold}\n  To remove it yourself: rm -rf ${shq(scaffold)}`);
+    }
+  } catch (e) { console.log(`Could not read the project registry: ${(e as Error).message}`); }
   for (const entry of [...m.entries].reverse()) {
     validate(p, entry);
     console.log(`${options.dryRun ? 'Would remove' : 'Removing'} ${entry.kind}: ${entry.path}`);
@@ -34,7 +43,7 @@ export async function uninstall(p: Paths, service: ServiceBackend, options: { dr
       if (images.length) run('docker', ['image', 'rm', ...new Set(images)]);
     }
   } else console.log(`Keeping config and history: ${p.config}, ${p.state}`);
-  console.log('Projects are untouched. No project registry exists in this slice.');
+  console.log('Projects are untouched; the project registry is kept unless --purge removed Factory config.');
   if (process.platform === 'linux') console.log('If linger was enabled, it has been left enabled.');
   console.log(`${options.dryRun ? 'Would remove' : 'Removing'} manifest: ${p.manifest}`);
   if (!options.dryRun) rmSync(p.manifest, { force: true });

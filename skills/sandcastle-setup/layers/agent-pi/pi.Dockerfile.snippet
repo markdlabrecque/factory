@@ -1,3 +1,17 @@
 # Pi coding agent (pinned). Replaces the init template's `RUN npm install -g @mariozechner/pi-coding-agent`
-# line: that package is deprecated in favour of @earendil-works/pi-coding-agent.
+# line: that package is deprecated in favour of @earendil-works/pi-coding-agent. Goes before `USER agent`.
 RUN npm install -g @earendil-works/pi-coding-agent@{{PI_VERSION}}
+
+# --- Personal config only (models `pi-claude-subscription/...`): add the rest AFTER the template's `USER agent` line. ---
+# The pi-claude-subscription provider is a Pi extension that runs the Claude Code CLI, so the image needs both.
+# Neither step copies host credentials into the image: the CLI logs in at run time with CLAUDE_CODE_OAUTH_TOKEN
+# from .sandcastle/.env (`claude setup-token`), which Sandcastle passes to the container.
+# {{PI_SUBSCRIPTION_VERSION}} is a git tag of github.com/markdlabrecque/pi-claude-subscription (e.g. v1.6.0).
+# `--ignore-scripts` skips the package's `prepare: husky`, a dev tool that is not installed with --omit=dev.
+ENV PATH="/home/agent/.local/bin:$PATH"
+# {{CLAUDE_CODE_VERSION}} is an exact Claude Code version (e.g. 2.1.321), passed to the installer so the build is pinned.
+RUN curl -fsSL https://claude.ai/install.sh | bash -s {{CLAUDE_CODE_VERSION}}
+RUN git clone --depth 1 --branch {{PI_SUBSCRIPTION_VERSION}} https://github.com/markdlabrecque/pi-claude-subscription.git /home/agent/.pi/agent/extensions/pi-claude-subscription \
+ && cd /home/agent/.pi/agent/extensions/pi-claude-subscription \
+ && npm ci --omit=dev --ignore-scripts \
+ && rm -rf .git
