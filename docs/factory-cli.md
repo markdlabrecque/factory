@@ -1,7 +1,7 @@
-<!-- CLI roadmap: slice two adds Pi subscription models and retains .sandcastle; .factory migration is deferred. -->
+<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred. -->
 # Factory CLI
 
-Status: first slice implemented locally, pending PR delivery and real-service verification. Later slices remain proposed.
+Status: first and second slices implemented locally, pending PR delivery and real-service verification. Later slices remain proposed.
 
 ## Goal
 
@@ -26,7 +26,7 @@ factory uninstall            stop and remove everything in the manifest
     --purge                  also delete config, run state, evidence, images
     --keep-state             (default) keep config and run history
 
-factory init                 in a project: scaffold .sandcastle/ (replaces the setup skill)
+factory init                 in a project: scaffold .sandcastle/ (replaces the workflow copy; environment layers stay in the setup skill)
 factory project add|ls|rm    the list of projects Factory looks after
 
 factory dispatch             one pass (--dry-run, --max N, --whole-issues)
@@ -107,7 +107,7 @@ Rules:
 ## Roadmap
 
 1. **First slice** (spec below): install, doctor, uninstall, board service. Tracked in [#1](https://github.com/markdlabrecque/factory/issues/1), including existing implementation and outstanding verification.
-2. `factory project add|ls|rm` and minimal `factory init`, tracked in [#2](https://github.com/markdlabrecque/factory/issues/2). Add missing workflow files only; keep optional environment layers in the setup skill. Retain `.sandcastle` for this slice. Also configure the personal dispatcher for `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with subscription-provider loading/auth for implementation, verification and analysis. Labels select the runtime model; the ticket body records the same full ID. Use Opus for verification and Sonnet for analysis. This replaces the current OpenAI-only assumptions, not just the model strings.
+2. `factory project add|ls|rm` and minimal `factory init`, tracked in [#2](https://github.com/markdlabrecque/factory/issues/2). Implemented locally: add missing workflow files only; optional environment layers stay in the setup skill. `.sandcastle` retained for this slice. The personal dispatcher uses `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with the provider loaded for implementation, verification and analysis (labels select the runtime model; the ticket body records the same full ID; Opus verifies, Sonnet analyses). Not yet verified: a container image build with the provider and an authenticated sandbox run. See "Slice two spec" below.
 3. `factory dispatch`, `run`, `retry`, `status`, `logs`.
 4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`.
 5. `factory update` and project copy refresh.
@@ -115,6 +115,30 @@ Rules:
 7. Migrate project files from `.sandcastle` to `.factory` in a future slice. Plan runtime path changes, compatibility and safe migration separately; do not rename directories in slice two.
 
 The board redesign is tracked separately in [#3](https://github.com/markdlabrecque/factory/issues/3): one Minority Report-inspired Factory design for board and evidence pages, retaining light/dark/system modes, with polished page, navigation and live-data transitions. Respect reduced motion and preserve focus, scroll and media playback. Full implementation plans and Q&A are posted on all three tickets.
+
+---
+
+# Slice two spec
+
+## Registry
+
+`~/.config/factory/projects.json`: `{"version":1,"projects":[{"name","root"}]}`. Identity is the canonical (realpath) Git root; name is its basename. Writes use a temp file plus rename (mode 0600) under an exclusive `projects.json.lock`; contention fails with a retry message. A malformed or unsupported file is reported and never replaced. Missing file means empty. Git worktrees are distinct roots; symlink aliases and subdirectories collapse to the root.
+
+- `factory project add [path]` adds once, writes nothing into the project.
+- `factory project ls [--json]` lists in root order, flagging a missing checkout or missing `.sandcastle`; JSON is `{version:1, projects:[{name,root,exists,scaffold}]}`.
+- `factory project rm [path]` removes only the entry. A deleted checkout is removed by its recorded absolute path. Unknown is a no-op.
+
+## Init
+
+`factory init [path] --profile personal|client --repo <ns/project> --image <image>` (client also `--host` and `--project-id`). Inputs are validated before any write. Missing files from an explicit allowlist are created exclusively (never overwritten) in `.sandcastle/`; symlinked scaffold paths and file/directory conflicts fail before the first write. Existing files are reported as skipped; an existing `config.mts` or `main.mts` is authoritative. The project is registered only after all writes succeed; a partial copy leaves a repairable scaffold and a rerun fills the gaps. `config.mts`/`main.mts` are generated from the reference files via `// factory:<tag>` markers (project, host, project id, milestone, image, empty `sandboxSetup`). `factory-dispatch.sh` sets `SANDCASTLE_STATE_DIR` to Factory's state folder unless the caller set it. No tracker calls, logins, image builds, package installs or services.
+
+## Uninstall
+
+Lists each registered project's `.sandcastle` with a quoted removal command it never runs, before `--purge` removes Factory config (including the registry). Project files are never touched.
+
+## Pi subscription provider
+
+`pi-claude-subscription` is a Pi extension (not built into Pi) that runs `claude -p`. Host: cloned into `~/.pi/agent/extensions/pi-claude-subscription` (`git clone --depth 1 --branch <tag> https://github.com/markdlabrecque/pi-claude-subscription.git ~/.pi/agent/extensions/pi-claude-subscription && cd ~/.pi/agent/extensions/pi-claude-subscription && npm ci --omit=dev --ignore-scripts`; `pi install git:…` fails on the package's husky hook); analysis loads it via `-e <ext>/index.ts` with `--no-extensions`. Container: Sandcastle runs `pi -p --mode json --model <id>`; the image installs the CLI and extension (agent-pi layer) and the CLI authenticates with `CLAUDE_CODE_OAUTH_TOKEN` from `.sandcastle/.env`. No OpenAI login or credential is used for these models.
 
 ---
 

@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 import { PARKED, readRuns, setProject, setStage, TERMINAL } from "./board.mts";
 import { parentText } from "./analyze.mts";
 import { AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./config.mts";
-import { disallowedModels, ticketModel } from "./models.mts";
+import { disallowedModels, piEnvFor, ticketModel } from "./models.mts";
 import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest } from "./manifests.mts";
@@ -29,32 +29,35 @@ import * as tracker from "./tracker.mts";
 // Tracker, agent, merge policy, milestone and labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
 // Environment section of prompt.md, and the fixture advice in prompt.verify.md. See ADAPTING.md.)
 const CONFIG = {
-  image: "sandcastle-islandhealth",
+  image: "sandcastle-islandhealth", // factory:image - `factory init --image` replaces the value
   ciWaitMinutes: 30, // give up waiting for CI after this long
   // No CI seen in this time: GitLab opens the MR anyway; with MERGE.auto the PR is not merged.
   noPipelineMinutes: 2,
   // Runs in order inside the container once it is up; the working directory is the worktree.
+  // factory:sandbox-setup:start - `factory init` replaces everything up to the :end tag with an empty list
   sandboxSetup: [
     { command: "cd /home/agent/workspace && composer install --no-interaction --prefer-dist", timeoutMs: 20 * 60_000 },
     { command: "start-web.sh /home/agent/workspace/web", sudo: true },
     { command: "/opt/sandcastle/bootstrap-site.sh", timeoutMs: 10 * 60_000 },
   ],
+  // factory:sandbox-setup:end
 };
 const PROJECT = TRACKER.project;
 const IMAGE = CONFIG.image;
-// Pi logs in with the host's own pi login: a fresh ChatGPT OAuth access token (about an hour) minted for
-// each run, or the stored API key if that login is a key. It reaches the container as OPENAI_API_KEY for
-// that one run; no long-lived credential goes into the container or .sandcastle/.env.
-function piCredential(): string {
+// What the container's Pi run needs depends on its model's provider (models.mts). pi-claude-subscription (the
+// personal config) needs nothing from here: the image's Claude Code CLI logs in with CLAUDE_CODE_OAUTH_TOKEN,
+// which Sandcastle reads from .sandcastle/.env itself. Only an `openai/` model (a custom config) gets a
+// per-run token from the host's pi login, handed over as OPENAI_API_KEY for that one run.
+function openaiCredential(): string {
   for (const cmd of [["print-bearer-token", "--min-expiry", "50m"], ["print-api-key"]]) {
     const res = spawnSync("pi", ["auth", ...cmd, "--provider", "openai"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     if (res.status === 0 && res.stdout.trim()) return res.stdout.trim();
   }
   fail("pi on the host has no usable OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT.");
 }
-// Called as each run starts, so each run gets its own fresh token.
+// Called as each run starts.
 const agent = (model: string) =>
-  AGENT.provider === "pi" ? pi(model, { thinking: AGENT.thinking, env: { OPENAI_API_KEY: piCredential() } }) : claudeCode(model);
+  AGENT.provider === "pi" ? pi(model, { thinking: AGENT.thinking, env: piEnvFor(model, openaiCredential) }) : claudeCode(model);
 
 let currentIid: string | undefined;
 let finished = false;
@@ -136,6 +139,7 @@ console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${b
 const evidenceHost = resolve(".sandcastle/evidence", iid);
 const evidenceBox = `/home/agent/evidence/${iid}`;
 mkdirSync(evidenceHost, { recursive: true });
+mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true }); // mounted read-only at /opt/sandcastle; empty unless the project adds helpers
 // A relaunched ticket (it was waiting on a blocker) must not pick up the last run's reports.
 for (const f of ["blocked.json", "verdict.md"]) rmSync(resolve(evidenceHost, f), { force: true });
 

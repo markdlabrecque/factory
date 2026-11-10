@@ -1,4 +1,4 @@
-<!-- Factory CLI owns its board service; the roadmap includes subscription-model support and board redesign. -->
+<!-- Factory CLI: board service, project registry and init; the personal profile runs Pi on pi-claude-subscription models. -->
 # sandcastle-helper
 
 ## Board design concepts
@@ -14,7 +14,7 @@ These are review images, not changes to the running Board.
 Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups.
 
 - `skills/sandcastle-setup/` - Claude Code skill that scaffolds `.sandcastle/` from layers (GitLab or GitHub tracker, Pi agent, web runtime, Drupal/WordPress, ddev shim, Playwright), and optionally installs the workflow below. Copy to `~/.claude/skills/` (and `~/.agents/skills/` for other agents).
-- `orchestrator/` - one-ticket loop: implement, verify with screenshot/video evidence, post to the ticket, push, open the MR. Two reference configs share the code: `config.mts` for client and Affinity Bridge work (GitLab, Claude Code, a person merges the MR) and `config.personal.mts` for personal projects (GitHub, Pi with `gpt-6.1-sol`/`gpt-6.1-terra`/`gpt-6-luna` picked by a `model:*` label on each ticket, PR merged once every CI check passes). See "Two reference configs" in `orchestrator/ADAPTING.md`. Plus a dispatcher that starts many runs, held back by an agent-built ticket graph (dependencies and file conflicts). A ready issue with GitLab Tasks gets one run per Task; once MRs merge, the dispatcher closes the Tasks and moves finished tickets to the next stage (`Internal QA` by default). `dispatch.sh` runs a pass with the defaults. Start with `orchestrator/ADAPTING.md`.
+- `orchestrator/` - one-ticket loop: implement, verify with screenshot/video evidence, post to the ticket, push, open the MR. Two reference configs share the code: `config.mts` for client and Affinity Bridge work (GitLab, Claude Code, a person merges the MR) and `config.personal.mts` for personal projects (GitHub, Pi with the `pi-claude-subscription` provider, `claude-sonnet-5-5` or `claude-opus-5-5` picked by a `model:sonnet`/`model:opus` label on each ticket, PR merged once every CI check passes). See "Two reference configs" in `orchestrator/ADAPTING.md`. Plus a dispatcher that starts many runs, held back by an agent-built ticket graph (dependencies and file conflicts). A ready issue with GitLab Tasks gets one run per Task; once MRs merge, the dispatcher closes the Tasks and moves finished tickets to the next stage (`Internal QA` by default). `dispatch.sh` runs a pass with the defaults. Start with `orchestrator/ADAPTING.md`.
 - `board/` - run-state store and treasure-map status board. `board.mts` writes `.sandcastle/state/<project>--<iid>.json` per run and regenerates a self-contained `board.html` from `board.template.html`. Copy both into a project's `.sandcastle/`.
   - `board-server.mts`, `sandcastle-board.service`, `install-service.sh` - always-on version: a systemd user service (macOS: `com.sandcastle.board.plist` + `install-launchd.sh`, a launchd user agent) serving the board at `http://127.0.0.1:4444` (and each run's evidence under `/evidence/`) from one shared state folder. Node 22.18+. Run `board/install-service.sh` (Linux) or `board/install-launchd.sh` (macOS), so every project and worktree reports to the one board. `dispatch.sh` uses that folder unless `SANDCASTLE_STATE_DIR` says otherwise; to start `main.mts` directly, `export SANDCASTLE_STATE_DIR=$HOME/.local/state/sandcastle` first.
 
@@ -42,7 +42,23 @@ This first slice installs only the board, at `http://127.0.0.1:4444`, reading `~
 
 `FACTORY_HOME` substitutes for HOME for isolated filesystem tests. It does not isolate the real service manager. Run `node --test cli/test/*.test.mts` to use the fake backend instead.
 
-The [CLI plan](docs/factory-cli.md#roadmap) tracks project registration and minimal initialization, followed separately by a single animated Factory board design. Slice two keeps `.sandcastle`; migration to `.factory` is deferred to a future slice. It also adds personal-profile support for `pi-claude-subscription/claude-sonnet-5-5` and `pi-claude-subscription/claude-opus-5-5`, selected by `model:sonnet` and `model:opus`, including the required provider/auth changes. The current GPT-based runtime is not changed by assigning those labels to tickets.
+### Projects: `factory project` and `factory init`
+
+```sh
+factory project add [path]      # record a Git checkout; writes nothing into it
+factory project ls [--json]     # registered projects, flagging missing checkouts and missing scaffolds
+factory project rm [path]       # forget a project; never deletes files (a deleted checkout: pass its recorded absolute path)
+factory init [path] --profile personal --repo owner/repo --image sandcastle-myproject
+factory init [path] --profile client --repo group/sub/project --image sandcastle-client --host git.example.com --project-id 42
+```
+
+The registry is `~/.config/factory/projects.json` (`{version:1, projects:[{name,root}]}`), keyed by the canonical checkout root, written atomically under a lock. `init` adds only the **missing** minimal workflow files to `.sandcastle/` (orchestrator, dispatcher, ticket graph, board module, neutral prompts, `.env.example`, empty `.env` mode 0600, `.gitignore`, and `factory-dispatch.sh`, which runs `dispatch.sh` against Factory's shared state folder), never overwrites, lists what it skipped, and registers the project only after every write succeeded. An existing `config.mts` or `main.mts` stays authoritative; the flags configure new files only. Rerun to repair a partial scaffold. It does not install packages, build images, contact a tracker or provision an environment: Docker, CMS, web-runtime, ddev and Playwright layers remain in the `sandcastle-setup` skill. `.sandcastle` stays the folder name; a move to `.factory` is a later slice. `factory uninstall` lists each registered project's `.sandcastle` with a removal command it never runs.
+
+### Personal profile: Claude subscription models
+
+The personal config runs Pi through the `pi-claude-subscription` provider (a Pi extension that drives the Claude Code CLI on your Claude subscription). Labels select the runtime model: `model:sonnet` is `pi-claude-subscription/claude-sonnet-5-5`, `model:opus` is `pi-claude-subscription/claude-opus-5-5`. A ticket needs exactly one; a model name in the ticket body alone schedules nothing. The verifier uses Opus, ticket analysis uses Sonnet. Host: `claude auth login` and install the extension (`git clone --depth 1 --branch <tag> https://github.com/markdlabrecque/pi-claude-subscription.git ~/.pi/agent/extensions/pi-claude-subscription && cd ~/.pi/agent/extensions/pi-claude-subscription && npm ci --omit=dev --ignore-scripts`; `pi install git:…` fails on the package's husky hook). Container: the image carries the CLI and extension (`skills/sandcastle-setup/layers/agent-pi/`), and the CLI authenticates with `CLAUDE_CODE_OAUTH_TOKEN` from `.sandcastle/.env` (`claude setup-token`). No OpenAI login is needed. Client config keeps Claude Code and its token as before. Details: `orchestrator/ADAPTING.md`.
+
+The [CLI plan](docs/factory-cli.md#roadmap) tracks the remaining slices, including a separate single animated Factory board design. Slice two keeps `.sandcastle`; migration to `.factory` is deferred to a future slice.
 
 ## Setting up a project
 

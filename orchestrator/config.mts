@@ -1,16 +1,17 @@
 // Project settings shared by main.mts and dispatch.mts. Edit this file when adapting to a project.
 // Reference config for client and Affinity Bridge work: GitLab, Claude Code, and MRs a person merges.
-// For personal projects (GitHub, Pi with GPT models, PRs merged once CI passes) start from
-// config.personal.mts instead, installed as config.mts.
+// For personal projects (GitHub, Pi with Claude subscription models, PRs merged once CI passes) start from
+// config.personal.mts instead, installed as config.mts. Lines tagged `// factory:<name>` are the values
+// `factory init` fills in; keep each tag exactly once.
 
 export const TRACKER = {
   kind: "gitlab" as "gitlab" | "github", // picks tracker.gitlab.mts or tracker.github.mts
-  gitlabHost: "git.affinitybridge.com",
-  project: "islandhealth/public-site", // path with namespace
-  projectId: 699,
+  gitlabHost: "git.affinitybridge.com", // factory:host
+  project: "islandhealth/public-site", // factory:project - path with namespace
+  projectId: 699, // factory:project-id
   // Project-level milestone (title). The dispatcher only picks tickets in it, and the ticket graph
   // looks for blockers among its open tickets. undefined = every open ticket in the project.
-  milestone: undefined as string | undefined,
+  milestone: undefined as string | undefined, // factory:milestone
 };
 
 // The coding agent for the implementer and verifier runs (in the container) and the ticket analysis
