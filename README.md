@@ -1,4 +1,4 @@
-<!-- Board concept images are review artifacts, separate from the shipped template. -->
+<!-- Factory CLI owns its board service; the roadmap includes subscription-model support and board redesign. -->
 # sandcastle-helper
 
 ## Board design concepts
@@ -23,6 +23,26 @@ The board and HTTP evidence pages share a sticky navigation bar. Its Settings bu
 Without the service, the board assumes it runs from a repo root containing `.sandcastle/` and writes `.sandcastle/board.html`. The saved theme works there too, but evidence links open local folders rather than the HTTP preview pages.
 
 Run the board regression tests with `node --test board/board.test.mts`.
+
+## Install the Factory CLI
+
+Requires Node 22.18+ and a Linux systemd user session or macOS launchd session. From this checkout:
+
+```sh
+node cli/bin/factory.mts install
+factory doctor
+factory board status
+factory uninstall --dry-run
+factory uninstall
+```
+
+Add `~/.local/bin` to your PATH if the installer asks. The default install copies the runtime into `~/.local/share/factory/app`; `install --link` uses this checkout instead. The manifest in `~/.local/share/factory/manifest.json` records the app, command and board service. Reinstall refreshes owned files without duplicating entries and refuses to overwrite unowned paths. Config and run history survive uninstall; `--purge` also removes those folders and Docker images labelled `factory.managed=true`.
+
+This first slice installs only the board, at `http://127.0.0.1:4444`, reading `~/.local/state/factory`. Set `SANDCASTLE_STATE_DIR=$HOME/.local/state/factory` when running the existing orchestrator or dispatcher to report there. Project setup, dispatch commands, scheduling and updates still use the existing scripts. Legacy Sandcastle services are detected but never adopted or stopped. Stop an existing board yourself before installing if it occupies port 4444.
+
+`FACTORY_HOME` substitutes for HOME for isolated filesystem tests. It does not isolate the real service manager. Run `node --test cli/test/*.test.mts` to use the fake backend instead.
+
+The [CLI plan](docs/factory-cli.md#roadmap) tracks project registration and minimal initialization, followed separately by a single animated Factory board design. Slice two keeps `.sandcastle`; migration to `.factory` is deferred to a future slice. It also adds personal-profile support for `pi-claude-subscription/claude-sonnet-5-5` and `pi-claude-subscription/claude-opus-5-5`, selected by `model:sonnet` and `model:opus`, including the required provider/auth changes. The current GPT-based runtime is not changed by assigning those labels to tickets.
 
 ## Setting up a project
 

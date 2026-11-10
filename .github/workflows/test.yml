@@ -1,3 +1,4 @@
+# Run orchestrator, board and isolated Factory CLI lifecycle regressions.
 name: Tests
 
 on:
@@ -19,4 +20,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node --test 'orchestrator/*.test.mts'
+      - run: node --test orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
