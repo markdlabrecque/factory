@@ -132,6 +132,15 @@ test("units: tasks replace their parent, closed tasks advance it, whole-issue mo
   assert.deepEqual(expandUnits([1, 2, 3], childrenOf, false), { units: [{ iid: 1 }, { iid: 2 }, { iid: 3 }], advance: [] });
 });
 
+test("units: a task that is ready along with its parent appears once, with its parent, in either order", () => {
+  const childrenOf = new Map([[30, [{ iid: 31, open: true }, { iid: 32, open: true }]]]);
+  const want = [{ iid: 31, parent: 30 }, { iid: 32, parent: 30 }];
+  assert.deepEqual(expandUnits([30, 31, 32], childrenOf, true).units, want);
+  assert.deepEqual(expandUnits([31, 32, 30], childrenOf, true).units, [{ iid: 31, parent: 30 }, { iid: 32, parent: 30 }]);
+  assert.deepEqual(expandUnits([31], childrenOf, true).units, [{ iid: 31 }], "child-only: dispatch resolves it from the catalogue");
+  assert.deepEqual(expandUnits([30, 31], childrenOf, false).units, [{ iid: 30 }, { iid: 31 }], "whole-issue mode unchanged");
+});
+
 test("a task's hash changes when its parent is edited", () => {
   const task = { title: "t", description: "d", parent: { iid: 1, title: "p", description: "v1" } };
   assert.notEqual(unitHash(task), unitHash({ ...task, parent: { ...task.parent, description: "v2" } }));
