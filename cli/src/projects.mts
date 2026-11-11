@@ -1,13 +1,17 @@
-// Project registry: ~/.config/factory/projects.json, {version:1, projects:[{name,root}]}. A project's
+// Project registry: ~/.config/factory/projects.json, {version:1, projects:[{name,root,schedule?}]}. A project's
 // identity is its canonical (realpath) Git checkout root, never its name. Writes are temp-file + rename under
 // an exclusive sibling lock, so concurrent adds are never silently lost. A malformed or unsupported file is
-// reported and left untouched. Holds no tokens, and never touches a project's files.
+// reported and left untouched. Holds no tokens, and never touches a project's files. `schedule` is the project's
+// scheduler switch and the branch saved when it was switched on (schedule.mts); missing means off, so a newly
+// added project is never scheduled until someone opts it in.
 import { execFileSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { scaffoldName } from './paths.mts';
 import type { Paths } from './paths.mts';
-export type Project = { name: string; root: string };
+/** A project's scheduler switch. `branch` is the branch checked out when it was switched on; scheduled passes use it. */
+export type ProjectSchedule = { enabled: boolean; branch: string; since: string };
+export type Project = { name: string; root: string; schedule?: ProjectSchedule };
 export type Registry = { version: 1; projects: Project[] };
 export type ProjectRow = Project & { exists: boolean; scaffold: boolean };
 
@@ -25,11 +29,12 @@ export function readRegistry(p: Paths): Registry {
   let data: any;
   try { data = JSON.parse(readFileSync(p.projects, 'utf8')); } catch { throw new Error(`Project registry is not valid JSON: ${p.projects}. Fix or remove it; Factory will not overwrite it.`); }
   const ok = data?.version === 1 && Array.isArray(data.projects)
-    && data.projects.every((x: any) => typeof x?.name === 'string' && typeof x?.root === 'string' && isAbsolute(x.root));
+    && data.projects.every((x: any) => typeof x?.name === 'string' && typeof x?.root === 'string' && isAbsolute(x.root)
+      && (x.schedule === undefined || (typeof x.schedule?.enabled === 'boolean' && typeof x.schedule.branch === 'string' && x.schedule.branch !== '' && typeof x.schedule.since === 'string')));
   if (!ok) throw new Error(`Unsupported project registry: ${p.projects}. Fix or remove it; Factory will not overwrite it.`);
   return data;
 }
-function mutate(p: Paths, change: (r: Registry) => boolean): boolean {
+export function mutate(p: Paths, change: (r: Registry) => boolean): boolean {
   mkdirSync(p.config, { recursive: true });
   const lock = `${p.projects}.lock`;
   let fd: number;

@@ -1,4 +1,4 @@
-<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec". -->
+<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler switches (storage and project opt-in, cli/src/schedule.mts) implemented, see "Slice four: scheduler switches". -->
 # Factory CLI
 
 Status: first and second slices implemented locally, pending PR delivery and real-service verification. Slice three (dispatch, run, retry, status, logs) implemented; see "Slice three spec". Later slices remain proposed.
@@ -109,12 +109,25 @@ Rules:
 1. **First slice** (spec below): install, doctor, uninstall, board service. Tracked in [#1](https://github.com/markdlabrecque/factory/issues/1), including existing implementation and outstanding verification.
 2. `factory project add|ls|rm` and minimal `factory init`, tracked in [#2](https://github.com/markdlabrecque/factory/issues/2). Implemented locally: add missing workflow files only; optional environment layers stay in the setup skill. `.sandcastle` retained for this slice. The personal dispatcher uses `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with the provider loaded for implementation, verification and analysis (labels select the runtime model; the ticket body records the same full ID; Opus verifies, Sonnet analyses). Not yet verified: a container image build with the provider and an authenticated sandbox run. See "Slice two spec" below.
 3. `factory dispatch`, `run`, `retry`, `status`, `logs`, tracked in [#10](https://github.com/markdlabrecque/factory/issues/10). Implemented: the shared lookup ([#13](https://github.com/markdlabrecque/factory/issues/13)), `dispatch` ([#14](https://github.com/markdlabrecque/factory/issues/14)), `run` with `dispatch.sh --issue` ([#15](https://github.com/markdlabrecque/factory/issues/15)), `retry` ([#16](https://github.com/markdlabrecque/factory/issues/16)), `status` ([#17](https://github.com/markdlabrecque/factory/issues/17)), `logs` ([#18](https://github.com/markdlabrecque/factory/issues/18)) and these docs ([#19](https://github.com/markdlabrecque/factory/issues/19)). One project per command; no timers. See "Slice three spec" below.
-4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`.
+4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: the global and per-project switches ([#31](https://github.com/markdlabrecque/factory/issues/31)); see "Slice four: scheduler switches" below.
 5. `factory update` and project copy refresh.
 6. Retire `install-service.sh`, `install-launchd.sh` and `install-dispatch.sh`. Update `README.md`, `orchestrator/ADAPTING.md` and the setup skill (see `AGENTS.md`).
 7. Migrate project files from `.sandcastle` to `.factory` in a future slice. Plan runtime path changes, compatibility and safe migration separately; do not rename directories in slice two.
 
 The board redesign from [#3](https://github.com/markdlabrecque/factory/issues/3) is implemented: one Factory operations-console design for board and evidence pages with light/dark/system modes, page and navigation transitions, and live updates from a read-only `GET /api/runs` snapshot patched in place every 10s (no reloads; focus, scroll, filters and media playback preserved; reduced motion respected). A local `board.html` stays a static snapshot. Full implementation plans and Q&A are posted on all three tickets.
+
+---
+
+# Slice four: scheduler switches
+
+Storage and opt-in contracts only (`cli/src/schedule.mts`); no command flips them yet and no service reads them.
+
+- **Global switch.** `~/.config/factory/scheduler.json`, `{"version":1,"enabled":bool,"since":ISO|null}`, written atomically (mode 0600). Missing means off. A malformed or unsupported file is reported and never replaced. `setScheduler` leaves an unchanged switch unwritten.
+- **Project switch.** The optional `schedule: {enabled, branch, since}` on a registry entry, written under the registry lock. Missing means off, so `project add` (and a re-add after `rm`) starts off. `setProjectSchedule(root, true)` requires a registered, present checkout with a branch checked out (no detached HEAD) and saves that branch; `false` keeps the saved branch and stores nothing for a project never opted in. An entry with a malformed `schedule` makes the registry unsupported.
+- **Why not.** `scheduleBlocker(global, project, exists, branch)` returns null when a scheduled pass may run, else the first of: `scheduler is off`, `project not opted in`, `project paused`, `checkout missing`, `checkout is on <x>, scheduled branch is <y>`. Scheduled work never switches branches.
+- `factory project ls` shows `[scheduled: <branch>]` or `[schedule paused]`; `--json` rows carry `schedule` when set.
+
+Tests: `cli/test/schedule.test.mts`.
 
 ---
 
@@ -218,6 +231,7 @@ cli/
   src/paths.mts              all paths in one place, honours FACTORY_HOME for tests
   src/projects.mts           project registry (slice two)
   src/runs.mts               which project a command is for, its run records and run logs (slice three)
+  src/schedule.mts           global scheduler switch and project opt-in (slice four)
   src/platform/
     index.mts                picks the adapter
     systemd.mts              install, start, stop, remove a user unit

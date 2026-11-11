@@ -1,5 +1,5 @@
 // Factory's paths. FACTORY_HOME substitutes for HOME in isolated tests. `projects` is the project registry
-// (projects.mts); the project scaffold folder stays `.sandcastle` this slice (`.factory` is a later migration).
+// (projects.mts) and `scheduler` the global scheduler switch (schedule.mts); the project scaffold folder stays `.sandcastle` this slice (`.factory` is a later migration).
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 export function paths(home = process.env.FACTORY_HOME || homedir()) {
@@ -7,6 +7,7 @@ export function paths(home = process.env.FACTORY_HOME || homedir()) {
   const data = join(home, '.local/share/factory');
   return { home, data, app: join(data, 'app'), manifest: join(data, 'manifest.json'),
     bin: join(home, '.local/bin/factory'), config: join(home, '.config/factory'), projects: join(home, '.config/factory/projects.json'),
+    scheduler: join(home, '.config/factory/scheduler.json'),
     state: join(home, '.local/state/factory'),
     systemd: join(home, '.config/systemd/user/factory-board.service'),
     launchd: join(home, 'Library/LaunchAgents/com.factory.board.plist') };
