@@ -1,6 +1,6 @@
 // Scheduler logic against the in-memory FakeSchedule (the production adapter is covered in schedule-linux.test.mts):
 // `schedule on|off|status`, install/uninstall/reinstall ordering, the tick's gating on the service manager, its
-// project visits, state file, exit codes and lock, and the unit directives. The service manager is the only global
+// project visits and their rotation, state file, exit codes and lock, and the unit directives. The service manager is the only global
 // state: no test reads or writes a local on/off flag. Disposable HOME and Git repos only.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -357,4 +357,37 @@ test('doctor reads the manager: on passes, enabled-but-stopped fails, running-bu
   sched.fail.add('status');
   assert.match(await check(), /FAIL Scheduler: the service manager can't be read .*Simulated status failure.*scheduled work is blocked/);
   assert.deepEqual(stub.rejected(), []);
+});
+
+test('each tick starts at the next opted-in project in rotation, also after a cancelled tick; paused and unregistered projects take no turn', async t => {
+  const { p, sched, roots: [a, b, c, d] } = await armed(t);
+  for (const root of [a, b, d]) setProjectSchedule(p, root, true);
+  const run = async (o: Partial<Parameters<typeof tick>[1]> = {}) => {
+    const visited: string[] = [];
+    const r = await tick(p, { backend: sched, log: () => {}, pass: async ctx => { visited.push(ctx.name); return 0; }, ...o });
+    return { r, visited, next: readTickState(p).nextRoot };
+  };
+  assert.deepEqual((await run()).visited, ['a', 'b', 'd']);
+  assert.equal(readTickState(p).nextRoot, b);
+  const second = await run();
+  assert.deepEqual(second.visited, ['b', 'd', 'a']);
+  assert.equal(second.next, d, 'c is not opted in, so it never takes a turn');
+  assert.deepEqual(second.r.skipped, { c: 'project not opted in' }, 'every project is still visited and gated');
+  // A cancelled tick still uses up its turn, and starts nothing after the cancellation.
+  const abort = new AbortController();
+  const visited: string[] = [];
+  const cancelled = await tick(p, { backend: sched, signal: abort.signal, log: () => {}, pass: async ctx => { visited.push(ctx.name); abort.abort(); return 0; } });
+  assert.equal(cancelled.result, 'interrupted');
+  assert.deepEqual(visited, ['d'], 'no later project after cancellation');
+  assert.equal(readTickState(p).nextRoot, a);
+  // The next project is paused before its turn: the turn passes to the one after it.
+  setProjectSchedule(p, a, false);
+  const fourth = await run();
+  assert.deepEqual(fourth.visited, ['b', 'd']);
+  assert.equal(fourth.next, d);
+  // A saved nextRoot that is no longer registered starts again from the top.
+  const { removeProject } = await import('../src/projects.mts');
+  removeProject(p, d);
+  assert.deepEqual((await run()).visited, ['b']);
+  assert.equal(readTickState(p).nextRoot, b, 'a single project keeps the turn');
 });
