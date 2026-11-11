@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Factory CLI: install, diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
-// failed run so the next pass retries it, show the board service and every run's stage, and show a run's log.
+// failed run so the next pass retries it, show the board service and every run's stage, show a run's log, and
+// switch the scheduler (and each project's opt-in) on or off. `tick` is internal: it is what the scheduler service runs.
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
 import { paths } from '../src/paths.mts';
@@ -17,6 +18,9 @@ import { logs } from '../src/commands/logs.mts';
 import { run } from '../src/commands/run.mts';
 import { retry } from '../src/commands/retry.mts';
 import { status } from '../src/commands/status.mts';
+import { schedule } from '../src/commands/schedule.mts';
+import { tick, tickExitCode } from '../src/commands/tick.mts';
+import { scheduleBackend } from '../src/platform/scheduler.mts';
 const USAGE = `factory install [--link]
 factory doctor
 factory board start|stop|status
@@ -27,7 +31,8 @@ factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]
 factory run <ticket> [--project <name>]
 factory retry <ticket> [--project <name>]
 factory status [--json] [--project <name>]
-factory logs [ticket] [-f] [--project <name>]`;
+factory logs [ticket] [-f] [--project <name>]
+factory schedule on|off|status [--project <name|path>] [--json (status)]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
@@ -38,6 +43,8 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   retry: { project: { type: 'string' } },
   status: { json: { type: 'boolean' }, project: { type: 'string' } },
   logs: { follow: { type: 'boolean', short: 'f' }, project: { type: 'string' } },
+  schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
+  tick: {},
 };
 try {
   const [command, ...rest] = process.argv.slice(2);
@@ -67,6 +74,16 @@ try {
       if (extra.length) throw new Error('Unexpected arguments');
       if (v.json && first !== 'ls') throw new Error('--json applies to project ls');
       await project(p, first, second, { json: v.json });
+    } else if (command === 'schedule') {
+      if (second || extra.length) throw new Error('Unexpected arguments (name a project with --project)');
+      if (v.json && first !== 'status') throw new Error('--json applies to schedule status');
+      process.exitCode = await schedule(p, scheduleBackend(p), first, { json: v.json, project: v.project });
+    } else if (command === 'tick') {
+      // Internal: what factory-tick.service runs. SIGTERM (systemctl stop) and SIGINT cancel the tick and its dispatcher pass.
+      if (first) throw new Error('Unexpected arguments');
+      const abort = new AbortController();
+      for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => abort.abort());
+      process.exitCode = tickExitCode(await tick(p, { backend: scheduleBackend(p), signal: abort.signal }));
     } else if (command === 'dispatch') {
       if (first) throw new Error('Unexpected arguments');
       process.exitCode = await dispatch(p, { project: v.project, dryRun: v['dry-run'], max: v.max, wholeIssues: v['whole-issues'] });
@@ -74,7 +91,7 @@ try {
       if (second || extra.length || (first && command !== 'board')) throw new Error('Unexpected arguments');
       if (v.purge && v['keep-state']) throw new Error('Choose --purge or --keep-state');
       if (command === 'install') await install(p, backend(p), { link: v.link });
-      else if (command === 'doctor') process.exitCode = await doctor(p);
+      else if (command === 'doctor') process.exitCode = await doctor(p, scheduleBackend(p));
       else if (command === 'uninstall') await uninstall(p, backend(p), { dryRun: v['dry-run'], purge: v.purge });
       else if (command === 'board') await board(backend(p), first);
     }

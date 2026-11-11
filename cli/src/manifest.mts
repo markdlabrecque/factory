@@ -1,4 +1,5 @@
-// Atomic ownership ledger. Validate every entry before uninstall can delete anything.
+// Atomic ownership ledger. Validate every entry before uninstall can delete anything. Systemd entries are the board
+// service and the scheduler's tick service and timer, each only at its own path.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
 import type { Paths } from './paths.mts';
@@ -13,10 +14,11 @@ export function readManifest(p: Paths): Manifest | undefined {
   return m;
 }
 export function validate(p: Paths, entry: ManifestEntry) {
-  const expected = { file: p.bin, dir: p.app, systemd: p.systemd, launchd: p.launchd };
+  const units: Record<string, string> = { 'factory-board.service': p.systemd, 'factory-tick.service': p.tickService, 'factory-tick.timer': p.tickTimer };
+  const expected = { file: p.bin, dir: p.app, systemd: units[entry?.unit ?? ''] ?? p.systemd, launchd: p.launchd };
   if (!entry || entry.path !== expected[entry.kind] || !resolve(entry.path).startsWith(p.home + sep))
     throw new Error(`Unsafe manifest entry: ${JSON.stringify(entry)}`);
-  if (entry.kind === 'systemd' && entry.unit !== 'factory-board.service') throw new Error('Unexpected unit');
+  if (entry.kind === 'systemd' && !Object.hasOwn(units, entry.unit ?? '')) throw new Error('Unexpected unit');
   if (entry.kind === 'launchd' && entry.label !== 'com.factory.board') throw new Error('Unexpected launch agent');
   // Check parents, not the final component: --link deliberately points outside HOME.
   let parent = dirname(entry.path);
