@@ -3,12 +3,14 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab issue tracker via `glab` (client work) or GitHub via `gh` with the Pi agent (personal projects), then optionally the Docker setup (single-container web runtime with Apache, PHP-FPM, MariaDB and Composer, Drupal (Drush) or WordPress (WP-CLI), Playwright for self-checking) and the workflow from sandcastle-helper (orchestrator, dispatcher with ticket graph, board). Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
-<!-- `factory init` now writes the minimal workflow (.sandcastle kept); optional environment layers and the Pi layer remain here; the herdr-core spike is linked as experimental; `factory dispatch` runs a pass for a registered project, `factory run` runs one ticket, `factory retry` clears a failed run, `factory status` shows the board service and each run's stage, and `factory logs` shows a run's log; dispatched launches count against the shared cap from spawn. -->
+<!-- `factory init` now writes the minimal workflow (.sandcastle kept); optional environment layers and the Pi layer remain here; the herdr-core spike is linked as experimental; `factory dispatch` runs a pass for a registered project, `factory run` runs one ticket, `factory retry` clears a failed run, `factory status` shows the board service and each run's stage, and `factory logs` shows a run's log; dispatched launches count against the shared cap from spawn; AGENTS.md requires Factory-run implementation in this repository; self-recovery is documentation only. -->
 # Sandcastle setup (layers)
 
 > **Experimental, not supported:** interactive agents under herdr-core are research only; see `docs/research/interactive-agents-herdr-core.md`. Do not add them to a project setup.
 
 When copying the workflow, use the shipped `board/` files.
+
+When developing this helper repository, follow its `AGENTS.md` and hand implementation to Factory through prepared tickets. For the planned self-recovery slice, read `docs/design/self-recovery.md` in the helper repository. Its retained prompt is a design draft, not a setup asset or an available recovery feature.
 
 Sandcastle has no built-in GitLab tracker (maintainer points to `Custom`; upstream #511, #521). Instead of improvising from `SETUP_ISSUE_TRACKER.md`, apply fixed layers from `layers/`. The scaffold is copied into the project, so no fork of Sandcastle is needed.
 
