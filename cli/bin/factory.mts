@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Factory CLI: install, diagnose, control the board, reverse the manifest, register projects and init them, and show
-// a run's log (`logs`, for the registered project you stand in or `--project <name>`).
+// Factory CLI: install, diagnose, control the board, reverse the manifest, register projects, init them, run a
+// dispatcher pass for one project (the registered checkout you are in, or --project <name>) and show a run's log.
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
 import { paths } from '../src/paths.mts';
@@ -11,6 +11,7 @@ import { doctor } from '../src/commands/doctor.mts';
 import { board } from '../src/commands/board.mts';
 import { project } from '../src/commands/project.mts';
 import { init } from '../src/commands/init.mts';
+import { dispatch } from '../src/commands/dispatch.mts';
 import { logs } from '../src/commands/logs.mts';
 const USAGE = `factory install [--link]
 factory doctor
@@ -18,12 +19,14 @@ factory board start|stop|status
 factory uninstall [--dry-run] [--purge | --keep-state]
 factory project add|ls|rm [path] [--json (ls)]
 factory init [path] --profile personal|client --repo <namespace/project> --image <image> [--host <gitlab host> --project-id <n>]
+factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]
 factory logs [ticket] [-f] [--project <name>]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
   project: { json: { type: 'boolean' } },
   init: { profile: { type: 'string' }, repo: { type: 'string' }, image: { type: 'string' }, host: { type: 'string' }, 'project-id': { type: 'string' } },
+  dispatch: { 'dry-run': { type: 'boolean' }, max: { type: 'string' }, 'whole-issues': { type: 'boolean' }, project: { type: 'string' } },
   logs: { follow: { type: 'boolean', short: 'f' }, project: { type: 'string' } },
 };
 try {
@@ -45,6 +48,9 @@ try {
       if (extra.length) throw new Error('Unexpected arguments');
       if (v.json && first !== 'ls') throw new Error('--json applies to project ls');
       await project(p, first, second, { json: v.json });
+    } else if (command === 'dispatch') {
+      if (first) throw new Error('Unexpected arguments');
+      process.exitCode = await dispatch(p, { project: v.project, dryRun: v['dry-run'], max: v.max, wholeIssues: v['whole-issues'] });
     } else {
       if (second || extra.length || (first && command !== 'board')) throw new Error('Unexpected arguments');
       if (v.purge && v['keep-state']) throw new Error('Choose --purge or --keep-state');

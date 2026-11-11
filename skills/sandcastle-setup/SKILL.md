@@ -3,7 +3,7 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab issue tracker via `glab` (client work) or GitHub via `gh` with the Pi agent (personal projects), then optionally the Docker setup (single-container web runtime with Apache, PHP-FPM, MariaDB and Composer, Drupal (Drush) or WordPress (WP-CLI), Playwright for self-checking) and the workflow from sandcastle-helper (orchestrator, dispatcher with ticket graph, board). Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
-<!-- `factory init` now writes the minimal workflow (.sandcastle kept); optional environment layers and the Pi layer remain here; the herdr-core spike is linked as experimental. -->
+<!-- `factory init` now writes the minimal workflow (.sandcastle kept); optional environment layers and the Pi layer remain here; the herdr-core spike is linked as experimental; `factory dispatch` runs a pass for a registered project. -->
 # Sandcastle setup (layers)
 
 > **Experimental, not supported:** interactive agents under herdr-core are research only; see `docs/research/interactive-agents-herdr-core.md`. Do not add them to a project setup.
@@ -82,7 +82,7 @@ Source: a sandcastle-helper checkout. Ask for its path (default `~/Projects/sand
 4. Adapt `sandbox/bootstrap-site.sh`, the Environment section of `prompt.md`, and `prompt.verify.md` to this project's stack. The shipped `bootstrap-site.sh` is Drupal-only; WordPress needs a new one that ends with the site answering on `http://127.0.0.1`.
 5. Add `@ai-hero/sandcastle` and `tsx` as dev dependencies, and `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The host needs Node 22.18+, and `glab` and `claude` (or `gh` and `pi`) logged in.
    For HTTP evidence previews, install the board service using `board/install-service.sh` or `board/install-launchd.sh`. Keep `board.mts`, `board-server.mts` and `board.template.html` together when updating it. Board and evidence share one Factory design, sticky navigation and an Appearance panel that saves the mode (light, dark, system). The HTTP board polls the service's read-only `/api/runs` every 10s and animates changes in place (no reloads; reduced motion respected). Evidence opens in the same tab, with media/text previews and a link back to the board. Text previews stop at 64 KiB; originals remain available. Evidence pages never poll. Without the service, local `board.html` opens evidence folders directly.
-6. Verify: with the integration branch checked out, `.sandcastle/dispatch.sh --dry-run` from a terminal (it builds the image if it's missing) and show the user the output. It checks the labels exist; ask before letting it create any.
+6. Verify: with the integration branch checked out, `.sandcastle/dispatch.sh --dry-run` (or, for a project registered with the Factory CLI, `factory dispatch --dry-run`) from a terminal (it builds the image if it's missing) and show the user the output. It checks the labels exist; ask before letting it create any.
 
 ## Reuse
 Commit the edited `.sandcastle/`. Next project: rerun this skill, changing only host, label and CMS.
