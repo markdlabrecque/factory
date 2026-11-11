@@ -1,4 +1,4 @@
-<!-- Factory CLI: board service, project registry and init, scheduler switches (global and per-project opt-in, storage only); the personal profile runs Pi on pi-claude-subscription models; the single Factory board design with live updates; links the experimental herdr-core spike; slice three's `factory dispatch`, `run`, `retry`, `status` and `logs`, documented together under "Running work". -->
+<!-- Factory CLI: board service, project registry and init, scheduler switches (global and per-project opt-in, storage only); the personal profile runs Pi on pi-claude-subscription models; the single Factory board design with live updates; links the experimental herdr-core spike; slice three's `factory dispatch`, `run`, `retry`, `status` and `logs`, documented together under "Running work"; dispatched launches count against the shared cap from spawn. -->
 # sandcastle-helper
 
 > **Experimental:** [Interactive agents under herdr-core](docs/research/interactive-agents-herdr-core.md) (spike #6) tested attaching to and steering a running agent. It is research only and not supported by Factory.
@@ -120,13 +120,13 @@ From the project, with the integration branch checked out:
 .sandcastle/dispatch.sh --issue 42  # run ticket 42 now, in the foreground
 ```
 
-It uses the checked-out branch as the base (it must be on origin), checks that `node`, Docker and the tracker and agent CLIs (`glab` and `claude`, or `gh` and `pi`) are there and logged in, and that the image in `CONFIG.image` exists and was built for your user. From a terminal it builds a missing or mismatched image; under the timer it stops and prints the build command instead. Other arguments go to `dispatch.mts`: `--max N` (concurrent runs, default 3) and `--whole-issues` (one run per issue, ignoring Tasks). With the Factory CLI, `factory dispatch [--dry-run]` and `factory run 42` do the same from anywhere in a registered project (see "Running work" above).
+It uses the checked-out branch as the base (it must be on origin), checks that `node`, Docker and the tracker and agent CLIs (`glab` and `claude`, or `gh` and `pi`) are there and logged in, and that the image in `CONFIG.image` exists and was built for your user. From a terminal it builds a missing or mismatched image; under the timer it stops and prints the build command instead. Other arguments go to `dispatch.mts`: `--max N` (concurrent runs across every project sharing the state folder, default 3, counting launches whose run has not started yet) and `--whole-issues` (one run per issue, ignoring Tasks). With the Factory CLI, `factory dispatch [--dry-run]` and `factory run 42` do the same from anywhere in a registered project (see "Running work" above).
 
 See every run's stage with `factory status` and a run's log with `factory logs <iid> [-f]`. Retry a failed run with `factory retry <iid>`, or by deleting its record, `<state dir>/<project>--<iid>.json`. The next pass picks the ticket up again. The `factory` commands, `factory-dispatch.sh`, plain `dispatch.sh` and the dispatcher timer all use Factory's state folder, `~/.local/state/factory`, unless `SANDCASTLE_STATE_DIR` is set.
 
 ### On a schedule (Linux)
 
-Each project gets its own systemd user timer, `sandcastle-dispatch@<name>.timer`, which runs a pass 5 minutes after the last one finished. All projects share the run cap and the board. There's no launchd version for the dispatcher yet, so on macOS run passes by hand.
+Each project gets its own systemd user timer, `sandcastle-dispatch@<name>.timer`, which runs a pass 5 minutes after the last one finished. All projects share the run cap and the board; a launched run counts against the cap from the moment it is spawned, before it writes its own record, so passes that follow closely (or another project's) never overfill it. There's no launchd version for the dispatcher yet, so on macOS run passes by hand.
 
 ```sh
 cd ~/Projects/<project>                       # with the integration branch checked out

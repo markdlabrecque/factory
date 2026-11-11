@@ -1,4 +1,4 @@
-<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler switches (storage and project opt-in, cli/src/schedule.mts) implemented, see "Slice four: scheduler switches". -->
+<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler switches (storage and project opt-in, cli/src/schedule.mts) implemented, see "Slice four: scheduler switches"; launch reservations (#32) implemented, see "Slice four: launch admission". -->
 # Factory CLI
 
 Status: first and second slices implemented locally, pending PR delivery and real-service verification. Slice three (dispatch, run, retry, status, logs) implemented; see "Slice three spec". Later slices remain proposed.
@@ -109,7 +109,7 @@ Rules:
 1. **First slice** (spec below): install, doctor, uninstall, board service. Tracked in [#1](https://github.com/markdlabrecque/factory/issues/1), including existing implementation and outstanding verification.
 2. `factory project add|ls|rm` and minimal `factory init`, tracked in [#2](https://github.com/markdlabrecque/factory/issues/2). Implemented locally: add missing workflow files only; optional environment layers stay in the setup skill. `.sandcastle` retained for this slice. The personal dispatcher uses `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with the provider loaded for implementation, verification and analysis (labels select the runtime model; the ticket body records the same full ID; Opus verifies, Sonnet analyses). Not yet verified: a container image build with the provider and an authenticated sandbox run. See "Slice two spec" below.
 3. `factory dispatch`, `run`, `retry`, `status`, `logs`, tracked in [#10](https://github.com/markdlabrecque/factory/issues/10). Implemented: the shared lookup ([#13](https://github.com/markdlabrecque/factory/issues/13)), `dispatch` ([#14](https://github.com/markdlabrecque/factory/issues/14)), `run` with `dispatch.sh --issue` ([#15](https://github.com/markdlabrecque/factory/issues/15)), `retry` ([#16](https://github.com/markdlabrecque/factory/issues/16)), `status` ([#17](https://github.com/markdlabrecque/factory/issues/17)), `logs` ([#18](https://github.com/markdlabrecque/factory/issues/18)) and these docs ([#19](https://github.com/markdlabrecque/factory/issues/19)). One project per command; no timers. See "Slice three spec" below.
-4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: the global and per-project switches ([#31](https://github.com/markdlabrecque/factory/issues/31)); see "Slice four: scheduler switches" below.
+4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: the global and per-project switches ([#31](https://github.com/markdlabrecque/factory/issues/31)) and launch reservations ([#32](https://github.com/markdlabrecque/factory/issues/32)); see "Slice four: scheduler switches" and "Slice four: launch admission" below.
 5. `factory update` and project copy refresh.
 6. Retire `install-service.sh`, `install-launchd.sh` and `install-dispatch.sh`. Update `README.md`, `orchestrator/ADAPTING.md` and the setup skill (see `AGENTS.md`).
 7. Migrate project files from `.sandcastle` to `.factory` in a future slice. Plan runtime path changes, compatibility and safe migration separately; do not rename directories in slice two.
@@ -128,6 +128,17 @@ Storage and opt-in contracts only (`cli/src/schedule.mts`); no command flips the
 - `factory project ls` shows `[scheduled: <branch>]` or `[schedule paused]`; `--json` rows carry `schedule` when set.
 
 Tests: `cli/test/schedule.test.mts`.
+
+# Slice four: launch admission
+
+The three-slot cap (`SELECT.maxConcurrent` in `dispatch.mts`) is counted from the shared board. A dispatched `main.mts` writes its first record only after its tracker calls and fetch, so without more a pass that followed closely (the next project in a scheduled tick) could miss the runs just launched and overfill the cap, or launch the same ticket twice.
+
+- **Reservation.** As it spawns each run, `dispatch.mts` calls `reserveRun()` (`board/board.mts`): the record gets stage `setup`, note `starting`, `starting: true` and the child's pid. It counts against the cap and holds the ticket and its files like any run in flight.
+- **Hand-over.** `main.mts`'s first write clears `starting` and takes over the record with its own pid; from then on a dead process means a stopped run, as before.
+- **Unstarted launch.** If the reserved pid exits while `starting` is still set (the run failed before it began), `readRuns()` deletes the record and `factory status` skips it, so the next pass retries the ticket as it did before reservations.
+- Manual starts (`factory run`, `dispatch.sh --issue`) take no reservation and are not held to the cap; they still count once running.
+
+Tests: `board/board.test.mts` ("a launched run counts as active before its child writes").
 
 ---
 
