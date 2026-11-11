@@ -1,4 +1,4 @@
-<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler switches (storage and project opt-in, cli/src/schedule.mts) implemented, see "Slice four: scheduler switches"; launch reservations (#32) implemented, see "Slice four: launch admission". -->
+<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler switches (storage and project opt-in, cli/src/schedule.mts) implemented, see "Slice four: scheduler switches"; launch reservations (#32) implemented, see "Slice four: launch admission"; the Linux scheduler (#33: `factory schedule`, factory-tick units, cli/src/tick.mts) implemented, see "Slice four: the Linux scheduler". -->
 # Factory CLI
 
 Status: first and second slices implemented locally, pending PR delivery and real-service verification. Slice three (dispatch, run, retry, status, logs) implemented; see "Slice three spec". Later slices remain proposed.
@@ -32,10 +32,11 @@ factory project add|ls|rm    the list of projects Factory looks after
 factory dispatch             one pass (--dry-run, --max N, --whole-issues)
 factory run <ticket>         run one ticket now
 factory retry <ticket>       clear a failed run's record so the next pass retries it
-factory status               board service and every run's stage (--json; timers come with slice four)
+factory status               board service and every run's stage (--json; scheduler health comes later in slice four)
 factory logs [ticket] [-f]   a run's log file (newest without a ticket; -f follows)
 
-factory schedule on|off|status [project]    the timers
+factory schedule on|off [project]           the scheduler, or one project's opt-in (Linux)
+factory schedule status [--json]            switches, timer, and why each project would or would not run
 factory board start|stop|status|open        the always-on board
 factory config get|set
 ```
@@ -58,9 +59,7 @@ Units and agents are renamed from `sandcastle-*` to `factory-*`. `factory instal
 
 ## Timers
 
-Proposed: one `factory-tick.timer` that walks the project list, instead of one timer per project. Reasons: `schedule on|off` is a single switch, uninstall removes one unit, and the shared run cap is enforced in one place. Per-project pause is a flag in the project list, not a unit.
-
-Open decision: per-project timers (today's model) are more isolated, but multiply units and uninstall work.
+Decided: one `factory-tick.timer` that walks the project list, instead of one timer per project. Reasons: `schedule on|off` is a single switch, uninstall removes one unit, and the shared run cap is enforced in one place. Per-project pause is a flag in the project list, not a unit. Implemented on Linux; see "Slice four: the Linux scheduler".
 
 ## Language
 
@@ -109,7 +108,7 @@ Rules:
 1. **First slice** (spec below): install, doctor, uninstall, board service. Tracked in [#1](https://github.com/markdlabrecque/factory/issues/1), including existing implementation and outstanding verification.
 2. `factory project add|ls|rm` and minimal `factory init`, tracked in [#2](https://github.com/markdlabrecque/factory/issues/2). Implemented locally: add missing workflow files only; optional environment layers stay in the setup skill. `.sandcastle` retained for this slice. The personal dispatcher uses `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with the provider loaded for implementation, verification and analysis (labels select the runtime model; the ticket body records the same full ID; Opus verifies, Sonnet analyses). Not yet verified: a container image build with the provider and an authenticated sandbox run. See "Slice two spec" below.
 3. `factory dispatch`, `run`, `retry`, `status`, `logs`, tracked in [#10](https://github.com/markdlabrecque/factory/issues/10). Implemented: the shared lookup ([#13](https://github.com/markdlabrecque/factory/issues/13)), `dispatch` ([#14](https://github.com/markdlabrecque/factory/issues/14)), `run` with `dispatch.sh --issue` ([#15](https://github.com/markdlabrecque/factory/issues/15)), `retry` ([#16](https://github.com/markdlabrecque/factory/issues/16)), `status` ([#17](https://github.com/markdlabrecque/factory/issues/17)), `logs` ([#18](https://github.com/markdlabrecque/factory/issues/18)) and these docs ([#19](https://github.com/markdlabrecque/factory/issues/19)). One project per command; no timers. See "Slice three spec" below.
-4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: the global and per-project switches ([#31](https://github.com/markdlabrecque/factory/issues/31)) and launch reservations ([#32](https://github.com/markdlabrecque/factory/issues/32)); see "Slice four: scheduler switches" and "Slice four: launch admission" below.
+4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: the global and per-project switches ([#31](https://github.com/markdlabrecque/factory/issues/31)), launch reservations ([#32](https://github.com/markdlabrecque/factory/issues/32)) and the Linux scheduler from enable to uninstall ([#33](https://github.com/markdlabrecque/factory/issues/33)); see "Slice four: scheduler switches", "Slice four: launch admission" and "Slice four: the Linux scheduler" below. Still to come: rotating the first project (#34), macOS (#35), timing history (#36), scheduler health in `factory status` (#37) and the cutover runbook (#38).
 5. `factory update` and project copy refresh.
 6. Retire `install-service.sh`, `install-launchd.sh` and `install-dispatch.sh`. Update `README.md`, `orchestrator/ADAPTING.md` and the setup skill (see `AGENTS.md`).
 7. Migrate project files from `.sandcastle` to `.factory` in a future slice. Plan runtime path changes, compatibility and safe migration separately; do not rename directories in slice two.
@@ -120,7 +119,7 @@ The board redesign from [#3](https://github.com/markdlabrecque/factory/issues/3)
 
 # Slice four: scheduler switches
 
-Storage and opt-in contracts only (`cli/src/schedule.mts`); no command flips them yet and no service reads them.
+Storage and opt-in contracts (`cli/src/schedule.mts`); `factory schedule` flips them and the tick reads them (see "Slice four: the Linux scheduler").
 
 - **Global switch.** `~/.config/factory/scheduler.json`, `{"version":1,"enabled":bool,"since":ISO|null}`, written atomically (mode 0600). Missing means off. A malformed or unsupported file is reported and never replaced. `setScheduler` leaves an unchanged switch unwritten.
 - **Project switch.** The optional `schedule: {enabled, branch, since}` on a registry entry, written under the registry lock. Missing means off, so `project add` (and a re-add after `rm`) starts off. `setProjectSchedule(root, true)` requires a registered, present checkout with a branch checked out (no detached HEAD) and saves that branch; `false` keeps the saved branch and stores nothing for a project never opted in. An entry with a malformed `schedule` makes the registry unsupported.
@@ -139,6 +138,19 @@ The three-slot cap (`SELECT.maxConcurrent` in `dispatch.mts`) is counted from th
 - Manual starts (`factory run`, `dispatch.sh --issue`) take no reservation and are not held to the cap; they still count once running.
 
 Tests: `board/board.test.mts` ("a launched run counts as active before its child writes").
+
+# Slice four: the Linux scheduler
+
+`cli/src/commands/schedule.mts`, `cli/src/tick.mts`, `cli/templates/factory-tick.{service,timer}`.
+
+- **`factory schedule on`** requires the manifest (`factory install`), refuses tick unit files it does not own, writes `factory-tick.service` then `factory-tick.timer` (each recorded in the manifest as soon as it is written), daemon-reloads, turns the global switch on and enables the timer. The service is `Type=oneshot` running `node <app>/cli/bin/factory.mts schedule tick`, with the PATH captured at `on`, `FACTORY_HOME`, `KillMode=process` (launched runs outlive the tick) and `TimeoutStartSec=infinity` (no dispatcher timeout). The timer is `OnActiveSec=1min` and `OnUnitInactiveSec=5min`: the first tick a minute after the timer starts, then five minutes after each tick completes; `Persistent=false`, so missed ticks are not replayed. Rerunning `on` rewrites the units. On macOS it refuses before writing anything (#35).
+- **`factory schedule off`** turns the global switch off and disables the timer. Units stay until `factory uninstall`, which removes them through the manifest (timer first).
+- **`factory schedule on|off <project>`** (registered name or path) sets the project switch. `on` refuses a project without `.sandcastle/dispatch.sh`, or whose `dispatch.mts`/`board.mts` lack `reserveRun` (they predate #32, so scheduled admission could overfill the cap); it never refreshes the copy itself.
+- **Tick.** Takes the per-user lock (`~/.local/state/factory/scheduler.lock`, holding its pid; a live holder makes the tick log and exit, a dead one is replaced). Off: logs `tick skipped: scheduler is off`. Otherwise visits the registry in order (rotation is #34), re-reading both switches before each project, and runs `.sandcastle/dispatch.sh` from the root against the shared run-state folder for each project `scheduleBlocker` clears; others log `skip <name>: <reason>`. Each pass logs its start and its exit code with duration; the tick logs its end with counts and duration, or `tick interrupted` on SIGTERM/SIGINT, which also stops the current pass. Output goes to the journal; bounded history is #36.
+- **`factory schedule status [--json]`** prints the global switch, the timer (`active`, `inactive`, `missing`, `unknown (...)`), whether a tick is running, the last trigger, enabled legacy dispatcher timers, and each project's switch and `scheduleBlocker` reason or `ready`.
+- **`factory doctor`** fails when the switch is on but the timer is not active, and warns about enabled legacy `sandcastle-dispatch` timers (`~/.config/systemd/user/timers.target.wants/`). Nothing disables them automatically; the cutover is #38.
+
+Tests: `cli/test/scheduler.test.mts` (fake service manager; real systemd not exercised in CI).
 
 ---
 
@@ -243,6 +255,8 @@ cli/
   src/projects.mts           project registry (slice two)
   src/runs.mts               which project a command is for, its run records and run logs (slice three)
   src/schedule.mts           global scheduler switch and project opt-in (slice four)
+  src/tick.mts               one scheduler tick: lock, visit projects, run passes (slice four)
+  src/commands/schedule.mts  factory schedule on|off|status|tick (slice four)
   src/platform/
     index.mts                picks the adapter
     systemd.mts              install, start, stop, remove a user unit

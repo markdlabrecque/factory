@@ -1,4 +1,6 @@
-// Read-only prerequisite checks. Missing linger warns but never changes the host.
+// Read-only prerequisite checks. Missing linger warns but never changes the host. With the scheduler switch on, the
+// tick timer must be running; enabled legacy `sandcastle-dispatch` timers warn (they would double passes) and are
+// never touched.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { boardURL } from '../paths.mts';
@@ -6,7 +8,10 @@ import type { Paths } from '../paths.mts';
 import { readManifest } from '../manifest.mts';
 import { run } from '../platform/index.mts';
 import { nodeSupported } from './install.mts';
-export async function doctor(p: Paths) {
+import type { ServiceBackend } from '../platform/index.mts';
+import { readScheduler } from '../schedule.mts';
+import { legacyAdvice } from './schedule.mts';
+export async function doctor(p: Paths, service?: Pick<ServiceBackend, 'schedulerStatus'>) {
   let failures = 0;
   const check = (name: string, ok: boolean, fix: string, warning = false) => {
     console.log(`${ok ? 'PASS' : warning ? 'WARN' : 'FAIL'} ${name}${ok ? '' : `: ${fix}`}`);
@@ -35,5 +40,14 @@ export async function doctor(p: Paths) {
   let responds = false;
   try { responds = (await fetch(boardURL, { signal: AbortSignal.timeout(3000) })).ok; } catch {}
   check('Board HTTP', responds, 'Run factory board start; check for another service using port 4444');
+  try {
+    if (readScheduler(p).enabled) {
+      let timer = 'unknown';
+      try { timer = (await service?.schedulerStatus())?.timer ?? 'unknown'; } catch {}
+      check('Scheduler timer', timer === 'active', `the scheduler switch is on but its timer is ${timer}. Run factory schedule on`);
+    } else console.log('INFO Scheduler off (factory schedule on to start it)');
+  } catch (error) { check('Scheduler switch', false, String(error)); }
+  const legacy = legacyAdvice(p);
+  check('No legacy dispatcher timers', !legacy.length, legacy.join('\n'), true);
   return failures ? 1 : 0;
 }

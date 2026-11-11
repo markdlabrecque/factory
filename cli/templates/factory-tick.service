@@ -1,0 +1,14 @@
+# Factory scheduler tick (`factory schedule on` writes this; absolute paths are substituted then). One tick visits
+# the opted-in projects one after another and runs one dispatcher pass for each. No start timeout: a tick runs
+# until its passes finish. Runs are detached from the passes; KillMode=process keeps them alive when a tick ends
+# or is stopped. There is no terminal here, so dispatch.sh stops instead of building a missing image.
+[Unit]
+Description=Factory scheduler tick
+
+[Service]
+Type=oneshot
+ExecStart=@NODE@ @FACTORY@ schedule tick
+Environment=@PATH@
+Environment=@HOME@
+KillMode=process
+TimeoutStartSec=infinity

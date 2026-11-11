@@ -5,7 +5,8 @@
 //   scheduled passes use only that branch and never switch branches. Switching a project off keeps the saved branch
 //   for display; switching it on again saves the branch checked out at that moment.
 // `scheduleBlocker` gives the one-line reason a project would not get a scheduled pass, or null when it would.
-// This module only stores and reads switches: it installs no service and starts no work.
+// This module only stores and reads switches: `factory schedule` (commands/schedule.mts) flips them and installs the
+// scheduler service, and each tick (tick.mts) reads them.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import type { Paths } from './paths.mts';

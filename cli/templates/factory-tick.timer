@@ -1,0 +1,13 @@
+# Factory scheduler timer (`factory schedule on` enables it, `factory schedule off` disables it). The first tick
+# comes one minute after the timer starts, then each tick five minutes after the previous one finished, so ticks
+# never overlap. Missed ticks are not replayed.
+[Unit]
+Description=Factory scheduler: a tick 5 minutes after the last one finished
+
+[Timer]
+OnActiveSec=1min
+OnUnitInactiveSec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
