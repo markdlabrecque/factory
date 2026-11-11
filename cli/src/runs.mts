@@ -3,7 +3,8 @@
 // standing in), reads its tracker name from `.sandcastle/config.mts` (the name its run records carry), and
 // finds its run records in the shared run-state folder and its run log files. Read-only: it never writes a
 // record, the registry or a project file. A run whose process is gone without finishing is reported as
-// stopped (as the board does) but its record is left for the board and dispatcher to update.
+// stopped (as the board does) but its record is left for the board and dispatcher to update. A launch the
+// dispatcher reserved whose process died before the run started is skipped, as the board drops it.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -68,6 +69,7 @@ function load(dir: string, file: string): Run | undefined {
     const s: RunState = JSON.parse(readFileSync(join(dir, file), 'utf8'));
     if (typeof s?.iid !== 'string' || typeof s.stage !== 'string') return undefined;
     if (!TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && !alive(s.pid)) {
+      if (s.starting) return undefined;
       s.note = `process ${s.pid} exited without finishing (last stage: ${s.stage})`;
       s.stage = 'stopped';
     }

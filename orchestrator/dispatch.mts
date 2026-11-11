@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
-import { PARKED, readRuns, removeRun, setProject, setStage, TERMINAL } from "./board.mts";
+import { PARKED, readRuns, removeRun, reserveRun, setProject, setStage, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
 import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
@@ -22,6 +22,8 @@ import type { Ticket } from "./tracker.mts";
 // base or closed, and its files don't overlap a live run (in flight, or MR still open).
 // Tickets that aren't free get a "queued" card on the board saying why. A ticket whose run failed
 // is not retried every pass: delete its file in the state dir to retry it.
+// Each launch is recorded on the board (stage "setup", note "starting", the child's pid) the moment it is spawned,
+// so the cap counts it in every later pass, this project's or another's, before main.mts writes its own record.
 // With SUBTASKS.enabled (config.mts), a ready issue that has Tasks gets one run per open Task instead.
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
@@ -272,5 +274,6 @@ for (const [n, d] of launch.entries()) {
     env: process.env,
   });
   child.unref();
+  if (child.pid) reserveRun(iid, child.pid, { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base });
   if (n < launch.length - 1) await new Promise((r) => setTimeout(r, SELECT.staggerSeconds * 1000));
 }

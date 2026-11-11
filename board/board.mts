@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 // .sandcastle/board.html, a self-contained snapshot that opens from disk and does not poll. The always-on
 // service (board-server.mts) serves the same page over HTTP, plus buildBoardData() as JSON at /api/runs,
 // which the page polls to animate live changes.
+// The dispatcher calls reserveRun() as it spawns each run, so the run counts against the shared cap (in this and
+// every other project's pass) before main.mts writes its own record; a launch whose process dies before that is
+// forgotten rather than stopped, so the next pass retries it.
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
 
@@ -36,6 +39,7 @@ export interface RunState {
   ticketHash?: string; // content hash of the ticket the run was built from
   parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
   mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on
+  starting?: boolean; // reserved by the dispatcher at launch; main.mts clears it with its first write
 }
 
 export interface BoardRun extends RunState {
@@ -91,12 +95,18 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
     ...patch,
     iid,
     project,
-    pid: process.pid,
+    pid: patch.pid ?? process.pid,
     updatedAt: now(),
     stageSince: stageChanged || !cur.stageSince ? now() : cur.stageSince,
   } as RunState;
   write(file, JSON.stringify(next, null, 2));
   renderBoard();
+}
+
+/** Record a run the dispatcher has just spawned (process `pid`), before the run writes for itself. It counts as
+ *  in flight while `pid` lives; if `pid` exits before main.mts clears `starting`, readRuns() drops the record. */
+export function reserveRun(iid: string, pid: number, patch: Partial<RunState> = {}): void {
+  setStage(iid, { ...patch, stage: "setup", note: "starting", starting: true, pid });
 }
 
 /** Delete a run record (the dispatcher clears parked records for tickets that left the queue). */
@@ -105,7 +115,8 @@ export function removeRun(iid: string): void {
   renderBoard();
 }
 
-/** Read every run. A run whose process is gone without a terminal stage crashed: mark it washed away. */
+/** Read every run. A run whose process is gone without a terminal stage crashed: mark it washed away. A reserved
+ *  launch whose process died before the run started is removed instead, as if never launched. */
 export function readRuns(): BoardRun[] {
   if (!existsSync(stateDir())) return [];
   const runs: BoardRun[] = [];
@@ -114,6 +125,10 @@ export function readRuns(): BoardRun[] {
       const file = resolve(stateDir(), f);
       const s: RunState = JSON.parse(readFileSync(file, "utf8"));
       if (!TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
+        if (s.starting) {
+          rmSync(file, { force: true });
+          continue;
+        }
         s.note = `process ${s.pid} exited without finishing (last stage: ${s.stage})`;
         s.stage = "stopped";
         s.stageSince = now();

@@ -1,5 +1,5 @@
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
-// /api/runs snapshot and the evidence routes (bounded previews, original files, path safety).
+// /api/runs snapshot, the evidence routes (bounded previews, original files, path safety) and launch reservations.
 // The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
 import { test } from "node:test";
@@ -214,6 +214,40 @@ test("an in-progress run shows the last line of its newest agent log; parked and
     assert.equal(latestActivity({ ...run, stage: "done" }), undefined);
     assert.equal(latestActivity({ ...run, branch: "missing" }), undefined);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a launched run counts as active before its child writes, and vanishes if the child dies unstarted", async () => {
+  const board = await import("./board.mts");
+  const dir = mkdtempSync(resolve(tmpdir(), "board-reserve-"));
+  const cwd = process.cwd();
+  const prevState = process.env.SANDCASTLE_STATE_DIR;
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  try {
+    process.chdir(dir);
+    process.env.SANDCASTLE_STATE_DIR = resolve(dir, "state");
+    board.setProject("p");
+    board.setStage("7", { stage: "queued", title: "Seven", note: "no room" });
+    board.reserveRun("7", child.pid!);
+    let [run] = board.readRuns();
+    assert.equal(run.stage, "setup", "a reservation is in flight, so it counts against the cap");
+    assert.equal(run.pid, child.pid);
+    assert.equal(run.title, "Seven");
+    child.kill();
+    await once(child, "exit");
+    assert.deepEqual(board.readRuns(), [], "an unstarted launch is forgotten, not stopped, so the next pass retries it");
+
+    // Once the run writes for itself, it owns the record: a later crash is a stopped run as before.
+    board.reserveRun("8", process.pid);
+    board.setStage("8", { stage: "setup", starting: undefined, pid: 2 ** 22 + 12345 });
+    [run] = board.readRuns();
+    assert.equal(run.stage, "stopped");
+  } finally {
+    child.kill();
+    process.chdir(cwd);
+    if (prevState === undefined) delete process.env.SANDCASTLE_STATE_DIR;
+    else process.env.SANDCASTLE_STATE_DIR = prevState;
     rmSync(dir, { recursive: true, force: true });
   }
 });
