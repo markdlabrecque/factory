@@ -1,6 +1,6 @@
 // One scheduler tick: the internal command `factory tick`, run by factory-tick.service (not for people to type; it takes
-// no flags). It visits the registered projects one after another in registry order (rotating the first project is #34)
-// and runs one dispatcher pass, the project's own `.sandcastle/dispatch.sh` through runDispatchSh, for each project that
+// no flags). It visits the registered projects one after another, in registry order rotated so that a different project
+// goes first each tick (rotation(), with state.json's `nextRoot`), and runs one dispatcher pass, the project's own `.sandcastle/dispatch.sh` through runDispatchSh, for each project that
 // scheduleBlocker() clears. Each pass runs as `dispatch.sh --max 3` with FACTORY_SCHEDULED=1, the saved PATH, and
 // SANDCASTLE_STATE_DIR set to Factory's state folder whatever the caller had set. The dispatcher itself enforces the
 // three-slot cap across projects, counting launches not yet on the board (#32). Stdin is inherited: the service has
@@ -23,6 +23,11 @@
 // the lock keeps the record, no pass starts over it, the tick exits 1, and state.json keeps what the leader did: `ok`
 // or `error` by its exit code, with exit code, finish time and duration, and a reason naming the unconfirmed group
 // (`interrupted` is reserved for a cancellation that was requested).
+// Rotation: the tick starts at the first opted-in, unpaused project at or after `nextRoot` in registry order (the top of
+// the registry when `nextRoot` is unset or no longer registered), and before any pass saves `nextRoot` as the next
+// opted-in, unpaused project after it. Only those projects take turns, so one not opted in never hands an extra turn to
+// its neighbour. The turn advances even if the tick is cancelled, fails or dies mid-pass, so a project whose pass keeps
+// failing cannot hold the front. Every project is still visited in order after the first, and gated individually.
 // Observations go to `<state>/scheduler/state.json` (schedule-state.mts): a `running` entry with the pass pid is saved
 // before the pass can do anything, and the result, finish time and monotonic duration after it. Bounded timing history
 // is #36. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
@@ -77,6 +82,18 @@ export function scheduledEnv(p: Paths, config: ScheduleConfig, base: NodeJS.Proc
   return { ...base, PATH: config.path, SANDCASTLE_STATE_DIR: p.state, FACTORY_SCHEDULED: '1' };
 }
 
+const takesTurns = (x: Project) => !!x.schedule?.enabled;
+/** The registry rotated to start at this tick's first project, and the project that goes first next tick. */
+export function rotation(projects: Project[], nextRoot: string | undefined): { order: Project[]; nextRoot?: string } {
+  const n = projects.length;
+  const from = Math.max(0, projects.findIndex(x => x.root === nextRoot));
+  const at = (i: number) => projects[(from + i) % n];
+  const firstAt = Array.from({ length: n }, (_, i) => i).find(i => takesTurns(at(i)));
+  if (firstAt === undefined) return { order: projects.slice(from).concat(projects.slice(0, from)) };
+  const order = Array.from({ length: n }, (_, i) => at(firstAt + i));
+  return { order, nextRoot: (order.slice(1).find(takesTurns) ?? order[0]).root };
+}
+
 export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
   const log = o.log ?? (line => console.log(line));
   const wall = o.now ?? (() => new Date());
@@ -108,10 +125,12 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
     state.startedAt = wall().toISOString();
     delete state.finishedAt; delete state.durationMs;
     state.pid = process.pid;
+    const turn = rotation(readRegistry(p).projects, state.nextRoot);
+    if (turn.nextRoot) state.nextRoot = turn.nextRoot; else delete state.nextRoot;
     writeTickState(p, state);
-    log('tick start');
+    log(`tick start${turn.order.length && turn.nextRoot ? `: ${turn.order[0].name} first` : ''}`);
     let cancelled = false;
-    for (const { root } of readRegistry(p).projects) {
+    for (const { root } of turn.order) {
       if (signal.aborted) { cancelled = true; break; }
       const stopNow = await gate();
       if (stopNow) { out.result = stopNow.result; break; }
