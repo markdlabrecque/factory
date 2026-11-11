@@ -101,7 +101,7 @@ From the project, with the integration branch checked out:
 
 It uses the checked-out branch as the base (it must be on origin), checks that `node`, Docker and the tracker and agent CLIs (`glab` and `claude`, or `gh` and `pi`) are there and logged in, and that the image in `CONFIG.image` exists and was built for your user. From a terminal it builds a missing or mismatched image; under the timer it stops and prints the build command instead. Other arguments go to `dispatch.mts`: `--max N` (concurrent runs, default 3) and `--whole-issues` (one run per issue, ignoring Tasks).
 
-Retry a failed run by deleting its record, `~/.local/state/sandcastle/<project>--<iid>.json` (or `.sandcastle/state/` without the shared state dir). The next pass picks the ticket up again.
+Retry a failed run by deleting its record, `~/.local/state/factory/<project>--<iid>.json` (or `.sandcastle/state/` without the shared state dir). The next pass picks the ticket up again.
 
 ### On a schedule (Linux)
 
