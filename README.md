@@ -3,7 +3,7 @@
 
 > **Experimental:** [Interactive agents under herdr-core](docs/research/interactive-agents-herdr-core.md) (spike #6) tested attaching to and steering a running agent. It is research only and not supported by Factory.
 
-Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups.
+Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups. Terms used here are defined in [docs/GLOSSARY.md](docs/GLOSSARY.md).
 
 - `skills/sandcastle-setup/` - Claude Code skill that scaffolds `.sandcastle/` from layers (GitLab or GitHub tracker, Pi agent, web runtime, Drupal/WordPress, ddev shim, Playwright), and optionally installs the workflow below. Copy to `~/.claude/skills/` (and `~/.agents/skills/` for other agents).
 - `orchestrator/` - one-ticket loop: implement, verify with screenshot/video evidence, post to the ticket, push, open the MR. Two reference configs share the code: `config.mts` for client and Affinity Bridge work (GitLab, Claude Code, a person merges the MR) and `config.personal.mts` for personal projects (GitHub, Pi with the `pi-claude-subscription` provider, `claude-sonnet-5-5` or `claude-opus-5-5` picked by a `model:sonnet`/`model:opus` label on each ticket, PR merged once every CI check passes). See "Two reference configs" in `orchestrator/ADAPTING.md`. Plus a dispatcher that starts many runs, held back by an agent-built ticket graph (dependencies and file conflicts). A ready issue with GitLab Tasks gets one run per Task; once MRs merge, the dispatcher closes the Tasks and moves finished tickets to the next stage (`Internal QA` by default). `dispatch.sh` runs a pass with the defaults. Start with `orchestrator/ADAPTING.md`.
