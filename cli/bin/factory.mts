@@ -2,7 +2,8 @@
 // Factory CLI: install, diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
 // failed run so the next pass retries it, show the board service and every run's stage, show a run's log, and
-// switch the scheduler (and each project's opt-in) on or off. `tick` is internal: it is what the scheduler service runs.
+// switch the scheduler (and each project's opt-in) on or off. `tick` and `supervise` are internal: `tick` is what the Linux
+// scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
 import { paths } from '../src/paths.mts';
@@ -20,6 +21,7 @@ import { retry } from '../src/commands/retry.mts';
 import { status } from '../src/commands/status.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { tick, tickExitCode } from '../src/commands/tick.mts';
+import { superviseProcess } from '../src/commands/supervise.mts';
 import { scheduleBackend } from '../src/platform/scheduler.mts';
 const USAGE = `factory install [--link]
 factory doctor
@@ -44,7 +46,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   status: { json: { type: 'boolean' }, project: { type: 'string' } },
   logs: { follow: { type: 'boolean', short: 'f' }, project: { type: 'string' } },
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
-  tick: {},
+  tick: {}, supervise: {},
 };
 try {
   const [command, ...rest] = process.argv.slice(2);
@@ -84,6 +86,10 @@ try {
       const abort = new AbortController();
       for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => abort.abort());
       process.exitCode = tickExitCode(await tick(p, { backend: scheduleBackend(p), signal: abort.signal }));
+    } else if (command === 'supervise') {
+      // Internal: what the com.factory.tick launch agent runs (macOS). SIGTERM (launchctl bootout) cancels and exits 0.
+      if (first) throw new Error('Unexpected arguments');
+      process.exitCode = await superviseProcess(p, scheduleBackend(p));
     } else if (command === 'dispatch') {
       if (first) throw new Error('Unexpected arguments');
       process.exitCode = await dispatch(p, { project: v.project, dryRun: v['dry-run'], max: v.max, wholeIssues: v['whole-issues'] });

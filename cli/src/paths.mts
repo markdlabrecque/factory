@@ -1,7 +1,8 @@
 // Factory's paths. FACTORY_HOME substitutes for HOME in isolated tests. `projects` is the project registry
 // (projects.mts). `scheduleConfig` is the scheduler's launch configuration (PATH and Node, schedule.mts); it never says
 // whether scheduling is on, because the service manager owns that. `schedulerState` holds the tick's own files:
-// state.json (schedule-state.mts) and tick.lock (tick-lock.mts). `tickService`/`tickTimer` are the Linux scheduler units.
+// state.json (schedule-state.mts), tick.lock (tick-lock.mts) and, on macOS, tick.log (the supervisor's output).
+// `tickService`/`tickTimer` are the Linux scheduler units; `tickPlist` is the macOS scheduler's launch agent.
 // The project scaffold folder stays `.sandcastle` this slice (`.factory` is a later migration).
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -15,10 +16,12 @@ export function paths(home = process.env.FACTORY_HOME || homedir()) {
     state,
     schedulerState: join(state, 'scheduler'),
     tickLock: join(state, 'scheduler/tick.lock'),
+    tickLog: join(state, 'scheduler/tick.log'),
     systemd: join(home, '.config/systemd/user/factory-board.service'),
     tickService: join(home, '.config/systemd/user/factory-tick.service'),
     tickTimer: join(home, '.config/systemd/user/factory-tick.timer'),
-    launchd: join(home, 'Library/LaunchAgents/com.factory.board.plist') };
+    launchd: join(home, 'Library/LaunchAgents/com.factory.board.plist'),
+    tickPlist: join(home, 'Library/LaunchAgents/com.factory.tick.plist') };
 }
 export type Paths = ReturnType<typeof paths>;
 export const boardURL = 'http://127.0.0.1:4444';

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Factory scheduler (macOS). `factory schedule on` writes this, with XML-escaped absolute paths, and enables and loads it;
+     `factory schedule off` disables the label, then boots it out. The job is a supervisor, `factory supervise`, that runs the
+     ticks itself: the first a minute after it starts, then each five minutes after the previous one finished, so ticks never
+     overlap and missed ones are not replayed. There is no tick or pass timeout.
+     KeepAlive restarts it only after a crash: on SIGTERM it cancels its own dispatcher pass and exits 0, so a stop stays
+     stopped. AbandonProcessGroup keeps launchd from signalling anything but the supervisor (dispatcher passes and ticket runs
+     are in their own process groups anyway). ExitTimeOut leaves room for that cancellation (SIGTERM grace, then SIGKILL of
+     the pass group). No terminal and no shell profile: stdin is /dev/null, so dispatch.sh never builds an image here. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.factory.tick</string>
+<key>ProgramArguments</key><array><string>@NODE@</string><string>@FACTORY@</string><string>supervise</string></array>
+<key>EnvironmentVariables</key><dict>
+<key>PATH</key><string>@PATH@</string>
+<key>FACTORY_HOME</key><string>@HOME@</string>
+<key>SANDCASTLE_STATE_DIR</key><string>@STATE@</string>
+</dict>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+<key>AbandonProcessGroup</key><true/>
+<key>ExitTimeOut</key><integer>120</integer>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>@LOG@</string>
+<key>StandardErrorPath</key><string>@LOG@</string>
+</dict></plist>

@@ -1,16 +1,19 @@
 // `factory schedule on|off|status [--project <name|path>] [--json]`. Without --project the command is for the one global
 // scheduler, even inside a checkout; with it, for one registered project (a name, or a path in the checkout or the
 // recorded root of a deleted one). `--json` is for status only.
-// - Global state belongs to the service manager. Factory stores no on/off flag: `on` and `off` change the timer, and
-//   `status` asks it, reporting the timer's enablement and activity and the tick service's activity separately; a failed
-//   query shows as `unknown`, never as on.
+// - Global state belongs to the service manager (systemd on Linux, launchd on macOS). Factory stores no on/off flag: `on`
+//   and `off` change the timer (macOS: the com.factory.tick supervisor agent), and `status` asks it, reporting the job's
+//   enablement and activity (and on macOS whether it is loaded) and whether a tick is running separately; a failed query
+//   shows as `unknown`, never as on.
 // - `on` needs `factory install` first. It saves the current PATH and absolute Node (schedule.mts), writes
-//   factory-tick.service then factory-tick.timer (Linux; macOS is #35), ledgering each as written, then enables and starts
-//   the timer: the first tick about a minute later, then one five minutes after each tick finishes. If installing or
+//   factory-tick.service then factory-tick.timer (Linux) or com.factory.tick.plist (macOS), ledgering each as written,
+//   then enables and starts the job: the first tick about a minute later, then one five minutes after each tick finishes
+//   (macOS: the supervisor keeps that cadence itself, commands/supervise.mts). If installing or
 //   enabling fails, the ledger stays, and the error is reported with what the manager says now. Repeat it to retry or to
 //   refresh PATH/Node. It refuses unit files Factory does not own, never touches legacy `sandcastle-dispatch` timers
 //   (it prints the commands to disable them) and starts no project that was not opted in.
-// - `off` disables and stops the timer, then stops the tick service and waits for it, then confirms the tick and its
+// - `off` disables and stops the timer, then stops the tick service and waits for it (macOS: disables the label, then boots
+//   the agent out, which SIGTERMs the supervisor and waits for it), then confirms the tick and its
 //   dispatcher pass group are gone (stopScheduling, tick-cancel.mts). The active tick, its pass and the pass's non-detached
 //   children are cancelled and no later project starts; ticket runs already detached keep going. If cancellation can't be
 //   confirmed it fails and keeps the runtime files. What it prints comes from what was observed (the manager's tick
@@ -99,7 +102,9 @@ export function describeStop(r: StopReport): string {
   return `No tick was running.${done}`;
 }
 
-const describe = (s: ScheduleStatus) => `timer ${s.enabled ? 'enabled' : 'disabled'}/${s.timer}, tick service ${s.tick}`;
+const describe = (s: ScheduleStatus) => s.loaded !== undefined
+  ? `supervisor ${s.enabled ? 'enabled' : 'disabled'}/${s.loaded ? 'loaded' : 'not loaded'}/${s.timer === 'active' ? 'running' : 'not running'}, tick ${s.tick}`
+  : `timer ${s.enabled ? 'enabled' : 'disabled'}/${s.timer}, tick service ${s.tick}`;
 async function observed(backend: ScheduleBackend): Promise<string> {
   try { return describe(await backend.status()); } catch (e) { return `unknown (${(e instanceof Error ? e.message : String(e)).split('\n')[0]})`; }
 }
@@ -133,7 +138,7 @@ async function globalOn(p: Paths, backend: ScheduleBackend): Promise<number> {
   const manifest = readManifest(p);
   if (!manifest) throw new Error('Factory is not installed. Run factory install first.');
   const owned = manifest.entries.map(e => e.path);
-  for (const path of [p.tickService, p.tickTimer]) if (existsSync(path) && !owned.includes(path)) throw new Error(`Refusing to overwrite unowned path: ${path}`);
+  for (const path of backend.files) if (existsSync(path) && !owned.includes(path)) throw new Error(`Refusing to overwrite unowned path: ${path}`);
   const config = writeScheduleConfig(p, { path: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', node: process.execPath });
   try {
     await backend.install({ node: config.node, app: p.app, state: p.state, path: config.path }, e => record(p, e));
@@ -171,12 +176,13 @@ async function status(p: Paths, backend: ScheduleBackend, o: ScheduleOptions) {
         tickActive: manager ? manager.tick === 'active' : null, ...(unknown ? { reason: unknown } : {}), phase, cap: 3, intervalMs: 300000,
         ...(tickState.startedAt ? { startedAt: tickState.startedAt } : {}), ...(tickState.finishedAt ? { finishedAt: tickState.finishedAt } : {}),
         ...(tickState.durationMs !== undefined ? { durationMs: tickState.durationMs } : {}), ...(tickState.pid ? { pid: tickState.pid } : {}),
-        ...(tickState.currentRoot ? { currentRoot: tickState.currentRoot } : {}), logHint: 'journalctl --user -u factory-tick' },
+        ...(tickState.currentRoot ? { currentRoot: tickState.currentRoot } : {}), ...(manager?.loaded !== undefined ? { loaded: manager.loaded } : {}), logHint: backend.logHint },
         config: config ? { path: config.path, node: config.node } : null, legacyTimers: legacy, projects }, null, 2));
     return;
   }
   console.log(`Scheduler: ${scheduling.state}${scheduling.reason ? ` (${scheduling.reason})` : ''}`);
-  console.log(manager ? `Timer: ${manager.enabled ? 'enabled' : 'disabled'}, ${manager.timer}; tick service: ${manager.tick === 'active' ? 'a tick is running' : manager.tick}${manager.lastTick ? `  last tick ${manager.lastTick}` : ''}` : `Timer: unknown (${unknown})`);
+  if (manager?.loaded !== undefined) console.log(`Supervisor (launchd com.factory.tick): ${manager.enabled ? 'enabled' : 'disabled'}, ${manager.loaded ? 'loaded' : 'not loaded'}, ${manager.timer === 'active' ? 'running' : 'not running'}; ${manager.tick === 'active' ? 'a tick is running' : 'no tick running'}`);
+  else console.log(manager ? `Timer: ${manager.enabled ? 'enabled' : 'disabled'}, ${manager.timer}; tick service: ${manager.tick === 'active' ? 'a tick is running' : manager.tick}${manager.lastTick ? `  last tick ${manager.lastTick}` : ''}` : `Timer: unknown (${unknown})`);
   if (manager && manager.enabled && manager.timer !== 'active') console.log('  The timer is enabled but not running. Run: factory schedule on');
   if (manager && !manager.enabled && manager.timer === 'active') console.log('  The timer is running but not enabled, so ticks skip every project. Run: factory schedule off (or on).');
   for (const line of legacyAdvice(p)) console.log(line);
@@ -186,5 +192,5 @@ async function status(p: Paths, backend: ScheduleBackend, o: ScheduleOptions) {
     const lastPass = l && l.result !== 'skipped' ? `  last pass ${l.result}${l.exitCode !== undefined ? ` (exit ${l.exitCode})` : ''}${l.pid && l.result === 'running' ? ` pid ${l.pid}` : ''}${l.reason ? `: ${l.reason}` : ''}` : '';
     console.log(`${x.name}  ${x.schedule ? `${x.schedule.enabled ? 'on' : 'paused'} (${x.schedule.branch})` : 'off'}  ${x.blocker ?? 'ready'}${lastPass}`);
   }
-  console.log('Tick log: journalctl --user -u factory-tick');
+  console.log(`Tick log: ${backend.logHint}`);
 }

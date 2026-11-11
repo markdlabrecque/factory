@@ -1,12 +1,12 @@
-// One scheduler tick: the internal command `factory tick`, run by factory-tick.service (not for people to type; it takes
-// no flags). It visits the registered projects one after another, in registry order rotated so that a different project
+// One scheduler tick: the internal command `factory tick`, run by factory-tick.service on Linux (not for people to type;
+// it takes no flags), and on macOS called in-process by the launchd supervisor (commands/supervise.mts). It visits the registered projects one after another, in registry order rotated so that a different project
 // goes first each tick (rotation(), with state.json's `nextRoot`), and runs one dispatcher pass, the project's own `.sandcastle/dispatch.sh` through runDispatchSh, for each project that
 // scheduleBlocker() clears. Each pass runs as `dispatch.sh --max 3` with FACTORY_SCHEDULED=1, the saved PATH, and
 // SANDCASTLE_STATE_DIR set to Factory's state folder whatever the caller had set. The dispatcher itself enforces the
 // three-slot cap across projects, counting launches not yet on the board (#32). Stdin is inherited: the service has
 // none, and a tick started by hand from a terminal keeps the dispatcher's interactive behaviour.
 // Global state comes from the service manager only. Before taking the lock, after taking it, and before every
-// project, the tick asks the manager: work needs the timer enabled and active. A timer that is off ends the tick, and an
+// project, the tick asks the manager: work needs the timer enabled and active (macOS: the agent enabled and running). A timer that is off ends the tick, and an
 // unreadable manager ends it too (unknown fails closed), exit 1. Missing or malformed launch configuration, registry or
 // tick state also ends it without guessing. There is no pass timeout.
 // One tick per user (tick-lock.mts). The pass is spawned as the leader of its own process group and recorded in the lock
