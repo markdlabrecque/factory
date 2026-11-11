@@ -7,7 +7,7 @@ Description=Sandcastle dispatcher (%i)
 
 [Service]
 Type=oneshot
-Environment=SANDCASTLE_STATE_DIR=%h/.local/state/sandcastle
+Environment=SANDCASTLE_STATE_DIR=%h/.local/state/factory
 EnvironmentFile=%h/.config/sandcastle/dispatch/%i.env
 # Runs are detached from the dispatcher so a pass returns quickly; KillMode=process keeps them alive.
 KillMode=process
