@@ -32,7 +32,7 @@ const CONFIG = {
   image: "sandcastle-islandhealth", // factory:image - `factory init --image` replaces the value
   ciWaitMinutes: 30, // give up waiting for CI after this long
   // No CI seen in this time: GitLab opens the MR anyway; with MERGE.auto the PR is not merged.
-  noPipelineMinutes: 2,
+  noPipelineMinutes: 5,
   // Runs in order inside the container once it is up; the working directory is the worktree.
   // factory:sandbox-setup:start - `factory init` replaces everything up to the :end tag with an empty list
   sandboxSetup: [
