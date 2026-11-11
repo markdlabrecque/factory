@@ -7,6 +7,9 @@
 // (exit 64, logged as `rejected`), so a call that would have reached a real manager is visible. A line in $STUB_DIR/fail is an
 // exact space-joined argv that exits 1 when called; `once:` in front makes it fail only the first time. In state.json,
 // units[<name>].forcedActiveState overrides the reported ActiveState (tests use it to say a tick is running).
+// STUB_LEGACY=1 (the cutover rehearsal only) also accepts `disable --now` on a legacy `sandcastle-dispatch[@<name>].timer`,
+// the command the runbook has the developer run, and does its one documented effect Factory reads: the timer's
+// timers.target.wants symlink is removed. Without it, any call naming a legacy unit is rejected, so Factory never sends one.
 const fs = require('node:fs');
 const path = require('node:path');
 const D = process.env.STUB_DIR, U = process.env.STUB_UNIT_DIR;
@@ -36,6 +39,15 @@ if (argv[0] !== '--user') reject('missing --user');
 const [verb, ...rest] = argv.slice(1);
 const NAME = /^[A-Za-z0-9@._:-]+\.(service|timer)$/;
 const ALLOWED = ['factory-tick.service', 'factory-tick.timer', 'factory-board.service'];
+const LEGACY = /^sandcastle-dispatch(@[A-Za-z0-9._-]+)?\.timer$/;
+if (process.env.STUB_LEGACY === '1' && argv.length === 4 && argv[1] === 'disable' && argv[2] === '--now' && LEGACY.test(argv[3])) {
+  const n = argv[3];
+  // An instance's unit file is its template (sandcastle-dispatch@.timer).
+  if (!fs.existsSync(path.join(U, n.replace(/@[^.]+\./, '@.')))) { log({ error: 'unit file missing' }); console.error(`Failed to disable unit: Unit file ${n} does not exist.`); process.exit(1); }
+  fs.rmSync(path.join(U, 'timers.target.wants', n), { force: true });
+  unit(n).enabled = false; unit(n).active = false;
+  log({ ok: true }); save(); process.exit(0);
+}
 switch (verb) {
   case 'show-environment': if (rest.length) reject('show-environment args'); console.log('PATH=/usr/bin'); break;
   case 'daemon-reload': if (rest.length) reject('daemon-reload args'); state.reloads++; break;
