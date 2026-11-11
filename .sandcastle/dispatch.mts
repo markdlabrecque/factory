@@ -129,7 +129,8 @@ for (const p of advance) {
 const workById = new Map(work.tickets.map((t) => [t.iid, t]));
 const parentById = new Map(parents.map((p) => [p.iid, p]));
 const issues = units
-  .map((u) => (u.parent ? workById.get(u.iid) : parentById.get(u.iid)))
+  // The catalogue copy is canonical: it carries parent context, so analysis, hashing and dispatch agree.
+  .map((u) => workById.get(u.iid) ?? parentById.get(u.iid))
   .filter((t): t is Ticket => !!t && !t.labels?.some((l) => LABELS.exclude.includes(l)));
 
 sh("git", ["fetch", "origin", "--prune"]);
