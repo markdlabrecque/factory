@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Factory CLI: install, diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
-// failed run so the next pass retries it, show the board service and every run's stage, show a run's log, and
+// failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's log, and
 // switch the scheduler (and each project's opt-in) on or off. `tick` and `supervise` are internal: `tick` is what the Linux
 // scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
@@ -71,7 +71,7 @@ try {
       await retry(p, first, { project: v.project });
     } else if (command === 'status') {
       if (first) throw new Error('Unexpected arguments');
-      await status(p, { status: () => backend(p).status() }, { project: v.project, json: v.json });
+      await status(p, { status: () => backend(p).status() }, { project: v.project, json: v.json, schedule: scheduleBackend(p) });
     } else if (command === 'project') {
       if (extra.length) throw new Error('Unexpected arguments');
       if (v.json && first !== 'ls') throw new Error('--json applies to project ls');

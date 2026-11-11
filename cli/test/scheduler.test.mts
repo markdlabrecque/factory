@@ -105,6 +105,11 @@ test('status reports timer enablement, timer activity and tick activity separate
   const json = async (project?: string) => { lines.length = 0; await schedule(p, sched, 'status', { json: true, project }); return JSON.parse(lines.join('\n')); };
   let s = await json();
   assert.deepEqual([s.scheduler.serviceEnabled, s.scheduler.timerActive, s.scheduler.tickActive, s.scheduler.phase], [true, true, false, 'waiting']);
+  assert.deepEqual([s.scheduler.lastTick, s.scheduler.problems, s.projects[0].timings], [null, [], { count: 0, timed: 0, results: {} }]);
+  appendHistory(p, [{ kind: 'pass', root: s.projects[0].root, startedAt: new Date().toISOString(), durationMs: 5000, result: 'ok' },
+    { kind: 'tick', startedAt: new Date().toISOString(), durationMs: 6000, result: 'done' }]);
+  s = await json();
+  assert.deepEqual([s.scheduler.lastTick.result, s.scheduler.ticks.maxMs, s.projects[0].timings.medianMs], ['done', 6000, 5000], 'timings come from the history');
   sched.tick = 'active';
   s = await json();
   assert.deepEqual([s.scheduler.timerActive, s.scheduler.tickActive, s.scheduler.phase], [true, true, 'running']);
