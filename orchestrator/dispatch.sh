@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # One dispatcher pass with the defaults, against the branch checked out in the current directory.
 #   .sandcastle/dispatch.sh [--dry-run] [--max N] [--whole-issues]
-# Extra arguments go to dispatch.mts. Checks the tools, logins and .sandcastle/.env first (which ones
+#   .sandcastle/dispatch.sh --issue N [--no-push]
+# Extra arguments go to dispatch.mts. With --issue N it runs that one ticket now instead, in the
+# foreground (main.mts --issue N, extra arguments to main.mts), after the same checks; the output also
+# goes to .sandcastle/logs/run-N.log, where a dispatched run's log goes. `factory run N` uses this.
+# Checks the tools, logins and .sandcastle/.env first (which ones
 # follows TRACKER.kind and AGENT.provider in config.mts: glab or gh, claude or pi; with the personal
 # config's pi-claude-subscription provider, claude's login, the provider extension and the models, see
 # preflight.mts, and the container's CLAUDE_CODE_OAUTH_TOKEN), then the image: from a
@@ -12,6 +16,23 @@ set -euo pipefail
 export SANDCASTLE_STATE_DIR="${SANDCASTLE_STATE_DIR:-$HOME/.local/state/factory}"
 
 fail() { echo "dispatch.sh: $*" >&2; exit 1; }
+
+# --issue N picks one ticket. Parsed before the checks so a bad argument fails at once.
+issue=""
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --issue) [ $# -ge 2 ] || fail "--issue needs a ticket number."; issue="$2"; shift 2 ;;
+    --issue=*) issue="${1#--issue=}"; shift ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+if [ -n "$issue" ]; then
+  [[ "$issue" =~ ^[1-9][0-9]*$ ]] || fail "--issue needs a ticket number, got \"$issue\"."
+  for a in ${args[@]+"${args[@]}"}; do
+    case "$a" in --dry-run | --max | --max=*) fail "$a is for a dispatcher pass, not --issue." ;; esac
+  done
+fi
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "not inside a git repository."
 cd "$root"
@@ -109,4 +130,12 @@ if [ ! -d node_modules/@ai-hero/sandcastle ] || [ package-lock.json -nt node_mod
   if [ -f package-lock.json ]; then npm ci; else npm install; fi
 fi
 
-exec node .sandcastle/dispatch.mts --base "$base" "$@"
+if [ -n "$issue" ]; then
+  mkdir -p .sandcastle/logs
+  log=".sandcastle/logs/run-$issue.log"
+  echo "Running #$issue on $base in the foreground; the output also goes to $log."
+  set +e
+  npx tsx .sandcastle/main.mts --base "$base" --issue "$issue" ${args[@]+"${args[@]}"} 2>&1 | tee -a "$log"
+  exit "${PIPESTATUS[0]}"
+fi
+exec node .sandcastle/dispatch.mts --base "$base" ${args[@]+"${args[@]}"}
