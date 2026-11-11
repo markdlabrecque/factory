@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Factory CLI: install, diagnose, control the board, reverse the manifest, register projects and init them.
+// Factory CLI: install, diagnose, control the board, reverse the manifest, register projects and init them, and show
+// a run's log (`logs`, for the registered project you stand in or `--project <name>`).
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
 import { paths } from '../src/paths.mts';
@@ -10,17 +11,20 @@ import { doctor } from '../src/commands/doctor.mts';
 import { board } from '../src/commands/board.mts';
 import { project } from '../src/commands/project.mts';
 import { init } from '../src/commands/init.mts';
+import { logs } from '../src/commands/logs.mts';
 const USAGE = `factory install [--link]
 factory doctor
 factory board start|stop|status
 factory uninstall [--dry-run] [--purge | --keep-state]
 factory project add|ls|rm [path] [--json (ls)]
-factory init [path] --profile personal|client --repo <namespace/project> --image <image> [--host <gitlab host> --project-id <n>]`;
-const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string' }>> = {
+factory init [path] --profile personal|client --repo <namespace/project> --image <image> [--host <gitlab host> --project-id <n>]
+factory logs [ticket] [-f] [--project <name>]`;
+const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
   project: { json: { type: 'boolean' } },
   init: { profile: { type: 'string' }, repo: { type: 'string' }, image: { type: 'string' }, host: { type: 'string' }, 'project-id': { type: 'string' } },
+  logs: { follow: { type: 'boolean', short: 'f' }, project: { type: 'string' } },
 };
 try {
   const [command, ...rest] = process.argv.slice(2);
@@ -34,6 +38,9 @@ try {
     if (command === 'init') {
       if (second || extra.length) throw new Error('Unexpected arguments');
       await init(p, first, v);
+    } else if (command === 'logs') {
+      if (second || extra.length) throw new Error('Unexpected arguments');
+      await logs(p, first, { project: v.project, follow: v.follow });
     } else if (command === 'project') {
       if (extra.length) throw new Error('Unexpected arguments');
       if (v.json && first !== 'ls') throw new Error('--json applies to project ls');

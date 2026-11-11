@@ -1,4 +1,4 @@
-<!-- `factory init` copies this workflow into a project (.sandcastle kept); the personal config runs on pi-claude-subscription models.; one Factory board design polling /api/runs; links the experimental herdr-core spike. -->
+<!-- `factory init` copies this workflow into a project (.sandcastle kept); the personal config runs on pi-claude-subscription models.; one Factory board design polling /api/runs; links the experimental herdr-core spike; `factory logs` prints run logs. -->
 # Orchestrator
 
 > **Experimental, not supported:** attaching to a running agent (herdr-core) was only tested in a spike; see [the report](../docs/research/interactive-agents-herdr-core.md). This workflow still runs its agents non-interactively.
@@ -77,7 +77,7 @@ Branching, the two agent runs and the verifier guard (it must not commit, move H
 - **Merged work.** Every pass checks the runs whose MR merged into their base: a Task is closed, a whole ticket moves to `LABELS.done` (the ready labels come off; it stays open). A parent moves to `LABELS.done` once every one of its Tasks is closed, however they were closed; it is never closed by Sandcastle.
 - **Skipped tickets:** any ticket with a running or finished run record, or a `<iid>-*` branch. A failed run is not retried automatically; delete its JSON file from the state dir to retry it. Tickets the ticket graph holds back stay on the board as `queued` with the reason.
 - **Capacity:** runs in flight are counted from the board, across all projects sharing the state dir.
-- **Logs:** each run writes to `.sandcastle/logs/run-<iid>.log`. Add `logs/` to `.sandcastle/.gitignore`.
+- **Logs:** each run writes to `.sandcastle/logs/run-<iid>.log`; `factory logs <iid> [-f]` prints (and follows) it from anywhere in a registered project. Add `logs/` to `.sandcastle/.gitignore`.
 - **On a schedule (Linux/systemd):** from the project, run `<sandcastle-helper>/orchestrator/install-dispatch.sh` (or pass the repo path, and `--name` if two repos share a folder name). It installs the template units `sandcastle-dispatch@.service` and `.timer` once, writes `~/.config/sandcastle/dispatch/<name>.env` (the repo path, and a PATH that reaches `node`, `glab`, `claude` and `docker`), and enables `sandcastle-dispatch@<name>.timer`. Each project gets its own timer; the base is the branch checked out in that repo. Each timer re-arms 5 minutes after its pass finishes, so a project's passes never overlap, and a random delay of up to 2 minutes keeps projects from reading the shared run cap at the same moment. List them with `systemctl --user list-timers 'sandcastle-dispatch@*'`, read a project's log with `journalctl --user -u sandcastle-dispatch@<name>`, remove one with `install-dispatch.sh --uninstall <name>`. Run `loginctl enable-linger $USER` so timers keep running when you log out. Replaces the old single-project `sandcastle-dispatch.service`/`.timer`; the installer tells you if one is still installed.
 
 ## Ticket graph
