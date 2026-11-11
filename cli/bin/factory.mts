@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Factory CLI: install, diagnose, control the board, reverse the manifest, register projects, init them, run a
-// dispatcher pass for one project (the registered checkout you are in, or --project <name>) and show a run's log.
+// dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>) and show
+// a run's log.
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
 import { paths } from '../src/paths.mts';
@@ -13,6 +14,7 @@ import { project } from '../src/commands/project.mts';
 import { init } from '../src/commands/init.mts';
 import { dispatch } from '../src/commands/dispatch.mts';
 import { logs } from '../src/commands/logs.mts';
+import { run } from '../src/commands/run.mts';
 const USAGE = `factory install [--link]
 factory doctor
 factory board start|stop|status
@@ -20,6 +22,7 @@ factory uninstall [--dry-run] [--purge | --keep-state]
 factory project add|ls|rm [path] [--json (ls)]
 factory init [path] --profile personal|client --repo <namespace/project> --image <image> [--host <gitlab host> --project-id <n>]
 factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]
+factory run <ticket> [--project <name>]
 factory logs [ticket] [-f] [--project <name>]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
@@ -27,6 +30,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   project: { json: { type: 'boolean' } },
   init: { profile: { type: 'string' }, repo: { type: 'string' }, image: { type: 'string' }, host: { type: 'string' }, 'project-id': { type: 'string' } },
   dispatch: { 'dry-run': { type: 'boolean' }, max: { type: 'string' }, 'whole-issues': { type: 'boolean' }, project: { type: 'string' } },
+  run: { project: { type: 'string' } },
   logs: { follow: { type: 'boolean', short: 'f' }, project: { type: 'string' } },
 };
 try {
@@ -44,6 +48,9 @@ try {
     } else if (command === 'logs') {
       if (second || extra.length) throw new Error('Unexpected arguments');
       await logs(p, first, { project: v.project, follow: v.follow });
+    } else if (command === 'run') {
+      if (second || extra.length) throw new Error('Unexpected arguments');
+      process.exitCode = await run(p, first, { project: v.project });
     } else if (command === 'project') {
       if (extra.length) throw new Error('Unexpected arguments');
       if (v.json && first !== 'ls') throw new Error('--json applies to project ls');
