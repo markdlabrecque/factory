@@ -1,7 +1,7 @@
-<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler switches (storage and project opt-in, cli/src/schedule.mts) implemented, see "Slice four: scheduler switches"; launch reservations (#32) implemented, see "Slice four: launch admission". -->
+<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler switches (storage and project opt-in, cli/src/schedule.mts) implemented, see "Slice four: scheduler switches"; launch reservations (#32) implemented, see "Slice four: launch admission"; slice four self-recovery requirements are agreed but unimplemented, with decisions in docs/slice-4/plan.md. -->
 # Factory CLI
 
-Status: first and second slices implemented locally, pending PR delivery and real-service verification. Slice three (dispatch, run, retry, status, logs) implemented; see "Slice three spec". Later slices remain proposed.
+Status: first and second slices implemented locally, pending PR delivery and real-service verification. Slice three (dispatch, run, retry, status, logs) implemented; see "Slice three spec". Later slices remain proposed except for the scheduler storage and launch-admission work documented below. Slice four self-recovery scope is agreed but not implemented; see the [plan](slice-4/plan.md).
 
 ## Goal
 
@@ -35,6 +35,8 @@ factory retry <ticket>       clear a failed run's record so the next pass retrie
 factory status               board service and every run's stage (--json; timers come with slice four)
 factory logs [ticket] [-f]   a run's log file (newest without a ticket; -f follows)
 
+factory recovery status --project <name>   project recovery state and reports (planned slice four)
+factory recovery reset --project <name>    reset recovery budget and confirmation (planned slice four)
 factory schedule on|off|status [project]    the timers
 factory board start|stop|status|open        the always-on board
 factory config get|set
@@ -109,7 +111,7 @@ Rules:
 1. **First slice** (spec below): install, doctor, uninstall, board service. Tracked in [#1](https://github.com/markdlabrecque/factory/issues/1), including existing implementation and outstanding verification.
 2. `factory project add|ls|rm` and minimal `factory init`, tracked in [#2](https://github.com/markdlabrecque/factory/issues/2). Implemented locally: add missing workflow files only; optional environment layers stay in the setup skill. `.sandcastle` retained for this slice. The personal dispatcher uses `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with the provider loaded for implementation, verification and analysis (labels select the runtime model; the ticket body records the same full ID; Opus verifies, Sonnet analyses). Not yet verified: a container image build with the provider and an authenticated sandbox run. See "Slice two spec" below.
 3. `factory dispatch`, `run`, `retry`, `status`, `logs`, tracked in [#10](https://github.com/markdlabrecque/factory/issues/10). Implemented: the shared lookup ([#13](https://github.com/markdlabrecque/factory/issues/13)), `dispatch` ([#14](https://github.com/markdlabrecque/factory/issues/14)), `run` with `dispatch.sh --issue` ([#15](https://github.com/markdlabrecque/factory/issues/15)), `retry` ([#16](https://github.com/markdlabrecque/factory/issues/16)), `status` ([#17](https://github.com/markdlabrecque/factory/issues/17)), `logs` ([#18](https://github.com/markdlabrecque/factory/issues/18)) and these docs ([#19](https://github.com/markdlabrecque/factory/issues/19)). One project per command; no timers. See "Slice three spec" below.
-4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: the global and per-project switches ([#31](https://github.com/markdlabrecque/factory/issues/31)) and launch reservations ([#32](https://github.com/markdlabrecque/factory/issues/32)); see "Slice four: scheduler switches" and "Slice four: launch admission" below.
+4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: the global and per-project switches ([#31](https://github.com/markdlabrecque/factory/issues/31)) and launch reservations ([#32](https://github.com/markdlabrecque/factory/issues/32)); see "Slice four: scheduler switches" and "Slice four: launch admission" below. Self-recovery is also agreed for this slice but not implemented; see [self-recovery requirements](#slice-four-self-recovery-requirements) and the [slice 4 plan](slice-4/plan.md).
 5. `factory update` and project copy refresh.
 6. Retire `install-service.sh`, `install-launchd.sh` and `install-dispatch.sh`. Update `README.md`, `orchestrator/ADAPTING.md` and the setup skill (see `AGENTS.md`).
 7. Migrate project files from `.sandcastle` to `.factory` in a future slice. Plan runtime path changes, compatibility and safe migration separately; do not rename directories in slice two.
@@ -117,6 +119,23 @@ Rules:
 The board redesign from [#3](https://github.com/markdlabrecque/factory/issues/3) is implemented: one Factory operations-console design for board and evidence pages with light/dark/system modes, page and navigation transitions, and live updates from a read-only `GET /api/runs` snapshot patched in place every 10s (no reloads; focus, scroll, filters and media playback preserved; reduced motion respected). A local `board.html` stays a static snapshot. Full implementation plans and Q&A are posted on all three tickets.
 
 ---
+
+# Slice four: self-recovery requirements
+
+Status: agreed product scope, not implemented or queued. The [slice 4 plan](slice-4/plan.md) records all decisions and acceptance coverage. Implementation must run through prepared Factory tickets, as required by [AGENTS.md](../AGENTS.md).
+
+Factory should recover jammed work without a human deleting run state or branches:
+
+- Reuse the existing dispatcher timer. After normal dispatch, require the same project jam on two consecutive completed passes: eligible queued demand and no active ticket runs.
+- Include ready stopped tickets and unresolved dependency holds. Respect explicit exclusions, open PRs awaiting merge, progressing prerequisites and shared-capacity limits.
+- Run at most one recovery agent per project inside Docker, using `AGENT.model`. Make the smallest necessary repair on the affected ticket's branch, preserving commits, dirty worktrees and evidence. Stop on ambiguous branch/worktree ownership.
+- Give the repair agent 15 minutes after container readiness. Setup, independent verification and delivery retain their normal limits. Cancel timed-out repair processes, preserve work and count the attempt as failed.
+- Require normal separate verification and delivery after repair. Host services, credentials, other tickets' branches and remote branch deletion remain outside the helper's authority; it does not merge PRs.
+- Allow two repair attempts per unchanged jam episode. Reset only after independently verified delivery progress by affected work, relevant human requirements/label changes, or explicit human reset. The helper's own activity and unrelated queue/base changes must not renew the budget.
+- Add project-scoped `factory recovery status` and `factory recovery reset`. Reset refuses active recovery, preserves ticket work/evidence and leaves reevaluation to the normal timer. Keep it separate from `factory retry`.
+- Show confirmation, attempts and outcomes through `factory status`, repair logs through `factory logs`, and report/reset details through recovery status. Defer a dedicated recovery board UI.
+- Support new scaffolds plus a documented, reviewed manual upgrade for existing projects, preserving customizations. Recovery stays inactive until an existing project's upgrade is complete. Automated scaffold merging is out of scope.
+- If a repair requires updating the host's copied workflow, report the action and stop. Do not automatically apply it to the host checkout or restart services.
 
 # Slice four: scheduler switches
 
