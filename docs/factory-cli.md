@@ -1,4 +1,4 @@
-<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three's shared project and run lookup (cli/src/runs.mts) and `factory dispatch` added. -->
+<!-- CLI roadmap: slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three's shared project and run lookup (cli/src/runs.mts), `factory dispatch` and `factory logs` added. -->
 # Factory CLI
 
 Status: first and second slices implemented locally, pending PR delivery and real-service verification. Later slices remain proposed.
@@ -33,7 +33,7 @@ factory dispatch             one pass (--dry-run, --max N, --whole-issues)
 factory run <ticket>         run one ticket now
 factory retry <ticket>       clear a failed run's record so the next pass retries it
 factory status               runs, timers and board on one screen
-factory logs [project]       dispatcher logs (journalctl or the log file)
+factory logs [ticket] [-f]   a run's log file (newest without a ticket; -f follows)
 
 factory schedule on|off|status [project]    the timers
 factory board start|stop|status|open        the always-on board
@@ -108,7 +108,7 @@ Rules:
 
 1. **First slice** (spec below): install, doctor, uninstall, board service. Tracked in [#1](https://github.com/markdlabrecque/factory/issues/1), including existing implementation and outstanding verification.
 2. `factory project add|ls|rm` and minimal `factory init`, tracked in [#2](https://github.com/markdlabrecque/factory/issues/2). Implemented locally: add missing workflow files only; optional environment layers stay in the setup skill. `.sandcastle` retained for this slice. The personal dispatcher uses `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with the provider loaded for implementation, verification and analysis (labels select the runtime model; the ticket body records the same full ID; Opus verifies, Sonnet analyses). Not yet verified: a container image build with the provider and an authenticated sandbox run. See "Slice two spec" below.
-3. `factory dispatch`, `run`, `retry`, `status`, `logs`, tracked in [#10](https://github.com/markdlabrecque/factory/issues/10). In progress: the shared lookup they use is in `cli/src/runs.mts` ([#13](https://github.com/markdlabrecque/factory/issues/13)). A command's project is `--project <name>` (a registered name, or a path inside a registered checkout; a name several projects share must be given as a path), else the registered checkout the current directory is in; anything else fails and names the registered projects. The project must have `.sandcastle/config.mts`; its `TRACKER.project` is the name its run records carry. Records come from `SANDCASTLE_STATE_DIR` when set, else `~/.local/state/factory` (as `factory-dispatch.sh` does). A run whose process is gone without finishing reads as stopped, without rewriting its record. A run's log is `.sandcastle/logs/run-<ticket>.log`, where `dispatch.mts` writes it. `factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]` ([#14](https://github.com/markdlabrecque/factory/issues/14)) runs the project's own `.sandcastle/dispatch.sh` from its root with those flags (`--max` must be a positive whole number) and `SANDCASTLE_STATE_DIR` set to the run-state folder above, streams its output and exits with its code; the checks stay in `dispatch.sh`. `run`, `retry`, `status` and `logs` come next.
+3. `factory dispatch`, `run`, `retry`, `status`, `logs`, tracked in [#10](https://github.com/markdlabrecque/factory/issues/10). In progress: the shared lookup they use is in `cli/src/runs.mts` ([#13](https://github.com/markdlabrecque/factory/issues/13)). A command's project is `--project <name>` (a registered name, or a path inside a registered checkout; a name several projects share must be given as a path), else the registered checkout the current directory is in; anything else fails and names the registered projects. The project must have `.sandcastle/config.mts`; its `TRACKER.project` is the name its run records carry. Records come from `SANDCASTLE_STATE_DIR` when set, else `~/.local/state/factory` (as `factory-dispatch.sh` does). A run whose process is gone without finishing reads as stopped, without rewriting its record. A run's log is `.sandcastle/logs/run-<ticket>.log`, where `dispatch.mts` writes it. `factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]` ([#14](https://github.com/markdlabrecque/factory/issues/14)) runs the project's own `.sandcastle/dispatch.sh` from its root with those flags (`--max` must be a positive whole number) and `SANDCASTLE_STATE_DIR` set to the run-state folder above, streams its output and exits with its code; the checks stay in `dispatch.sh`. `factory logs [ticket] [-f]` ([#18](https://github.com/markdlabrecque/factory/issues/18)) prints that file, or the project's most recently written `run-*.log` without a ticket; `-f` polls for appended output (starting over if the file is truncated) until interrupted. It reads no journalctl (timers are slice four). `run`, `retry` and `status` come next.
 4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`.
 5. `factory update` and project copy refresh.
 6. Retire `install-service.sh`, `install-launchd.sh` and `install-dispatch.sh`. Update `README.md`, `orchestrator/ADAPTING.md` and the setup skill (see `AGENTS.md`).
@@ -168,6 +168,7 @@ cli/
     board.mts
     uninstall.mts
     dispatch.mts             one dispatcher pass: runs the project's .sandcastle/dispatch.sh (slice three)
+    logs.mts                 factory logs (slice three)
   src/manifest.mts           read, add entry, atomic write
   src/paths.mts              all paths in one place, honours FACTORY_HOME for tests
   src/projects.mts           project registry (slice two)
