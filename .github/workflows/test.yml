@@ -4,13 +4,7 @@ name: Tests
 on:
   pull_request:
     branches: [main]
-    # Only when code changes; docs, prompts and Dockerfile snippets don't need a test run.
-    paths:
-      - "**/*.mts"
-      - "**/*.ts"
-      - "**/*.js"
-      - "**/*.cjs"
-      - ".github/workflows/test.yml"
+    # No `paths` filter: Factory only merges a PR after CI passes, so docs-only PRs need a run too.
 
 jobs:
   test:
