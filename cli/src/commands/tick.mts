@@ -29,8 +29,10 @@
 // its neighbour. The turn advances even if the tick is cancelled, fails or dies mid-pass, so a project whose pass keeps
 // failing cannot hold the front. Every project is still visited in order after the first, and gated individually.
 // Observations go to `<state>/scheduler/state.json` (schedule-state.mts): a `running` entry with the pass pid is saved
-// before the pass can do anything, and the result, finish time and monotonic duration after it. Bounded timing history
-// is #36. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
+// before the pass can do anything, and the result, finish time and monotonic duration after it. Each finished pass and
+// the tick's end (done, failed, interrupted, or off/unknown when the manager turned it off mid-tick) are also appended
+// to the bounded timing history (`history.json`, schedule-state.mts); a tick or pass that died is added there as
+// `interrupted` by the next tick or cancellation. History is best effort and never stops a tick. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
 import { existsSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import type { Paths } from '../paths.mts';
@@ -39,8 +41,8 @@ import type { Project } from '../projects.mts';
 import { resolveProject } from '../runs.mts';
 import { copyProblem, currentBranch, readScheduleConfig, scheduleBlocker } from '../schedule.mts';
 import type { ScheduleConfig, Scheduling } from '../schedule.mts';
-import { markInterrupted, readTickState, writeTickState } from '../schedule-state.mts';
-import type { ProjectState, TickState } from '../schedule-state.mts';
+import { appendHistory, markInterrupted, readTickState, writeTickState } from '../schedule-state.mts';
+import type { HistoryEntry, PassHistory, ProjectState, TickHistory, TickState } from '../schedule-state.mts';
 import { acquireTickLock, passAlive } from '../tick-lock.mts';
 import type { HeldLock } from '../tick-lock.mts';
 import { terminateGroup } from '../tick-cancel.mts';
@@ -114,13 +116,15 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
   if ('busy' in lock) return stop('busy', `tick skipped: ${lock.busy}`);
   let keepLock = false;
   const startedMono = mono();
+  // Timing history is best effort: a malformed file or failed write is logged and never stops the tick.
+  const history = (...entries: HistoryEntry[]) => { try { appendHistory(p, entries); } catch (e) { log(`timing history not recorded: ${(e as Error).message}`); } };
   try {
     const again = await gate();
     if (again) return again;
     const config = readScheduleConfig(p);
     if (!config) throw new Error(`No launch configuration (${p.scheduleConfig}). Run factory schedule on.`);
     // We hold the lock, so no tick is running: anything still marked running is left over from one that died.
-    if (markInterrupted(p, 'the tick that started it ended without finishing')) log('recovered state from an interrupted tick');
+    if (markInterrupted(p, 'the tick that started it ended without finishing', e => log(`timing history not recorded: ${e.message}`))) log('recovered state from an interrupted tick');
     const state: TickState = readTickState(p);
     state.startedAt = wall().toISOString();
     delete state.finishedAt; delete state.durationMs;
@@ -130,6 +134,14 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
     writeTickState(p, state);
     log(`tick start${turn.order.length && turn.nextRoot ? `: ${turn.order[0].name} first` : ''}`);
     let cancelled = false;
+    const tickEntry = (result: TickHistory['result']): TickHistory => {
+      state.finishedAt = wall().toISOString();
+      state.durationMs = Math.max(0, Math.round(mono() - startedMono));
+      return { kind: 'tick', startedAt: state.startedAt!, finishedAt: state.finishedAt, durationMs: state.durationMs, pid: process.pid, result };
+    };
+    const passEntry = (root: string, name: string, x: ProjectState): PassHistory => ({ kind: 'pass', tick: state.startedAt, root, name, startedAt: x.attemptedAt,
+      ...(x.finishedAt ? { finishedAt: x.finishedAt } : {}), ...(x.durationMs !== undefined ? { durationMs: x.durationMs } : {}), ...(x.pid ? { pid: x.pid } : {}),
+      result: x.result as PassHistory['result'], ...(x.exitCode !== undefined ? { exitCode: x.exitCode } : {}), ...(x.reason ? { reason: x.reason } : {}) });
     for (const { root } of turn.order) {
       if (signal.aborted) { cancelled = true; break; }
       const stopNow = await gate();
@@ -167,7 +179,10 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
           entry.reason = `${result.code !== 0 ? `exit ${result.code}; ` : ''}termination of leftover processes unconfirmed: ${alive}`;
           out.errors[project.name] = entry.reason;
         }
+        // The tick ends here: its end is recorded, while pid and currentRoot stay with the kept lock.
+        const ended = tickEntry('failed');
         writeTickState(p, state);
+        history(passEntry(root, project.name, entry), { ...ended, reason: `process group ${result.unconfirmed} unconfirmed gone` });
         keepLock = true; out.unconfirmed = result.unconfirmed;
         log(`pass ${project.name}: termination unconfirmed, ${alive}; scheduler lock kept`);
         return { ...out, result: 'failed' };
@@ -183,18 +198,20 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       }
       if (result.code !== undefined) entry.exitCode = result.code;
       writeTickState(p, state);
+      history(passEntry(root, project.name, entry));
       lock.clearPass();
       out.passes.push(project.name);
       log(`pass ${project.name}: ${result.error ? `failed: ${result.error}` : `exit ${result.code}`} after ${secs(from)}${result.cancelled ? ' (cancelled)' : ''}${result.leftover ? ' (leftover processes terminated)' : ''}`);
       if (result.cancelled) cancelled = true;
     }
-    state.finishedAt = wall().toISOString();
-    state.durationMs = Math.max(0, Math.round(mono() - startedMono));
+    const interrupted = cancelled || signal.aborted;
+    if (!interrupted && out.result === 'done' && Object.keys(out.errors).length) out.result = 'failed';
+    const ended = tickEntry(interrupted ? 'interrupted' : out.result as TickHistory['result']);
     delete state.pid; delete state.currentRoot;
     writeTickState(p, state);
-    if (cancelled || signal.aborted) return stop('interrupted', `tick interrupted after ${secs(startedMono)}`);
-    if (out.result !== 'done') return stop(out.result, `tick stopped after ${secs(startedMono)}: scheduler is no longer on`);
-    if (Object.keys(out.errors).length) out.result = 'failed';
+    history(interrupted ? { ...ended, reason: 'cancelled' } : out.result === 'off' || out.result === 'unknown' ? { ...ended, reason: 'scheduler is no longer on' } : ended);
+    if (interrupted) return stop('interrupted', `tick interrupted after ${secs(startedMono)}`);
+    if (out.result !== 'done' && out.result !== 'failed') return stop(out.result, `tick stopped after ${secs(startedMono)}: scheduler is no longer on`);
     log(`tick end: ${out.passes.length} passes, ${Object.keys(out.skipped).length} skipped, ${Object.keys(out.errors).length} failed, ${secs(startedMono)}`);
     return out;
   } finally { if (!keepLock) lock.release(); }

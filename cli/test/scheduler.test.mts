@@ -1,11 +1,11 @@
 // Scheduler logic against the in-memory FakeSchedule (the production adapter is covered in schedule-linux.test.mts):
 // `schedule on|off|status`, install/uninstall/reinstall ordering, the tick's gating on the service manager, its
-// project visits and their rotation, state file, exit codes and lock, and the unit directives. The service manager is the only global
+// project visits and their rotation, state file, bounded timing history, exit codes and lock, and the unit directives. The service manager is the only global
 // state: no test reads or writes a local on/off flag. Disposable HOME and Git repos only.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { Fake, FakeSchedule } from '../src/platform/fake.mts';
 import { schedulerUnits } from '../src/platform/scheduler-systemd.mts';
 import { install } from '../src/commands/install.mts';
@@ -14,7 +14,7 @@ import { schedule } from '../src/commands/schedule.mts';
 import { schedulingState, tick, tickExitCode } from '../src/commands/tick.mts';
 import { readManifest } from '../src/manifest.mts';
 import { readScheduleConfig, setProjectSchedule } from '../src/schedule.mts';
-import { readTickState } from '../src/schedule-state.mts';
+import { appendHistory, markInterrupted, readHistory, readTickState } from '../src/schedule-state.mts';
 import { doctor } from '../src/commands/doctor.mts';
 import { git, home, repo, systemctlStub } from './schedule-helpers.mts';
 function fixture(t: TestContext) {
@@ -312,6 +312,51 @@ test('an aborted tick cancels its pass, records it interrupted, starts no later 
   assert.deepEqual([s.projects[a].result, s.projects[a].reason], ['interrupted', 'cancelled']);
   assert.equal(s.projects[b], undefined, 'the later project was never attempted');
   assert.equal(existsSync(p.tickLock), false);
+  const h = readHistory(p);
+  assert.deepEqual(h.map(x => [x.kind, x.result, x.reason]), [['pass', 'interrupted', 'cancelled'], ['tick', 'interrupted', 'cancelled']],
+    'the cancelled pass and tick are flushed to the history; the later project has no entry');
+  assert.ok(h.every(x => x.finishedAt && x.durationMs! >= 0), 'available timing is kept for a cancellation the tick saw through');
+});
+
+test('timing history: each pass and tick is recorded with start, end, monotonic duration and result', async t => {
+  const { p, sched, roots: [a, b] } = await armed(t, ['a', 'b']);
+  for (const root of [a, b]) setProjectSchedule(p, root, true);
+  let clock = 1_000;
+  const now = () => new Date(Date.UTC(2026, 0, 1) + clock);
+  await tick(p, { backend: sched, log: () => {}, now, mono: () => clock, pass: async (ctx, args, o) => { o.onSpawn(4242); clock += ctx.name === 'a' ? 7_000 : 2_000; return ctx.name === 'a' ? 3 : 0; } });
+  const [pa, pb, tk] = readHistory(p);
+  assert.deepEqual(pa, { kind: 'pass', tick: '2026-01-01T00:00:01.000Z', root: a, name: 'a', startedAt: '2026-01-01T00:00:01.000Z', finishedAt: '2026-01-01T00:00:08.000Z',
+    durationMs: 7000, pid: 4242, result: 'error', exitCode: 3, reason: 'exit 3' });
+  assert.deepEqual([pb.result, pb.durationMs, pb.startedAt], ['ok', 2000, '2026-01-01T00:00:08.000Z']);
+  assert.deepEqual(tk, { kind: 'tick', startedAt: '2026-01-01T00:00:01.000Z', finishedAt: '2026-01-01T00:00:10.000Z', durationMs: 9000, pid: process.pid, result: 'failed' });
+  setProjectSchedule(p, a, false); setProjectSchedule(p, b, false);
+  await tick(p, { backend: sched, log: () => {}, now, mono: () => clock, pass: async () => 0 });
+  assert.deepEqual(readHistory(p).slice(3).map(x => [x.kind, x.result]), [['tick', 'done']], 'skipped projects are not history');
+});
+
+test('timing history is bounded, a malformed file is left alone without stopping the tick, and a dead tick is recorded interrupted', async t => {
+  const { p, sched, roots: [a] } = await armed(t, ['a']);
+  setProjectSchedule(p, a, true);
+  const entry = (i: number) => ({ kind: 'tick' as const, startedAt: new Date(i * 1000).toISOString(), result: 'done' as const });
+  appendHistory(p, [1, 2, 3, 4].map(entry), 3);
+  appendHistory(p, [entry(5)], 3);
+  assert.deepEqual(readHistory(p).map(x => x.startedAt), [2, 3, 4, 5].slice(1).map(i => new Date(i * 1000).toISOString()), 'the oldest entries are dropped');
+  const file = `${p.schedulerState}/history.json`;
+  writeFileSync(file, '{"version":1,"entries":[{"kind":"tick"}]}');
+  const lines: string[] = [];
+  const r = await tick(p, { backend: sched, log: l => lines.push(l), pass: async () => 0 });
+  assert.equal(r.result, 'done', 'history is observation only and never blocks scheduled work');
+  assert.ok(lines.some(l => /timing history not recorded: Unsupported scheduler history/.test(l)));
+  assert.equal(readFileSync(file, 'utf8'), '{"version":1,"entries":[{"kind":"tick"}]}', 'the bad file is not overwritten');
+  rmSync(file);
+  writeFileSync(`${p.schedulerState}/state.json`, JSON.stringify({ version: 1, startedAt: '2026-01-01T00:00:00.000Z', pid: 5, currentRoot: a,
+    projects: { [a]: { attemptedAt: '2026-01-01T00:00:01.000Z', pid: 77, result: 'running' } } }));
+  markInterrupted(p, 'cancelled');
+  assert.deepEqual(readHistory(p), [
+    { kind: 'pass', tick: '2026-01-01T00:00:00.000Z', root: a, startedAt: '2026-01-01T00:00:01.000Z', pid: 77, result: 'interrupted', reason: 'cancelled' },
+    { kind: 'tick', startedAt: '2026-01-01T00:00:00.000Z', pid: 5, result: 'interrupted', reason: 'cancelled' }], 'no finish or duration is invented');
+  markInterrupted(p, 'again');
+  assert.equal(readHistory(p).length, 2, 'recovery records a dead tick once');
 });
 
 test('systemd units: first tick after a minute, then 5 minutes after each finishes; no start timeout; KillMode=process; journal', () => {

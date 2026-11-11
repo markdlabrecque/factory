@@ -7,7 +7,8 @@
 // Once cancellation starts, the owned group gets SIGTERM and DEFAULT_GRACE_MS to exit, then SIGKILL (to that group
 // only) and CONFIRM_MS to disappear. A tick asked to stop is given the group's whole deadline plus a margin before
 // it too is killed. If anything owned is still alive after that, cancelTick throws and the lock and runtime files
-// stay so a retry still knows what to cancel.
+// stay so a retry still knows what to cancel. Once confirmed, markInterrupted records any pass or tick that never wrote
+// its own end as `interrupted` in state.json and the timing history.
 import { reclaimDeadLock, groupAlive, ownGroup, passAlive, readLock, sameProcess } from './tick-lock.mts';
 import type { ProcRef } from './tick-lock.mts';
 import { markInterrupted } from './schedule-state.mts';

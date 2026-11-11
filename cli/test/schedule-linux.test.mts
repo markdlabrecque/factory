@@ -24,7 +24,7 @@ import { stopScheduling } from '../src/commands/schedule.mts';
 import { tick } from '../src/commands/tick.mts';
 import { readManifest, validate } from '../src/manifest.mts';
 import { readRegistry } from '../src/projects.mts';
-import { readTickState } from '../src/schedule-state.mts';
+import { readHistory, readTickState } from '../src/schedule-state.mts';
 import { cancelTick } from '../src/tick-cancel.mts';
 import { acquireTickLock, groupAlive, groupOf, readLock, sameProcess } from '../src/tick-lock.mts';
 import { writeScheduleConfig } from '../src/schedule.mts';
@@ -803,6 +803,8 @@ test('a leftover that ignores SIGTERM is killed after the grace period (that gro
   assert.deepEqual([kept.result, kept.exitCode], ['ok', 0], 'the leader exited 0, so that is what is recorded, not interrupted');
   assert.ok(kept.finishedAt && kept.durationMs !== undefined && kept.durationMs >= 0, 'its observed finish time and duration are kept');
   assert.match(kept.reason!, /termination of leftover processes unconfirmed: process group \d+ is still running/);
+  const ended = readHistory(w.p).slice(-2);
+  assert.deepEqual(ended.map(x => [x.kind, x.result]), [['pass', 'ok'], ['tick', 'failed']], 'the history records what was observed, once');
   let started = false;
   const r3 = await tick(w.p, { backend, log: () => {}, pass: async () => { started = true; return 0; } });
   assert.equal(r3.result, 'busy');
