@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -194,6 +194,26 @@ test("board, /api/runs and evidence agree and render safely", async () => {
   } finally {
     child.kill();
     await once(child, "exit");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an in-progress run shows the last line of its newest agent log; parked and finished runs show none", async () => {
+  const { latestActivity } = await import("./board.mts");
+  const dir = mkdtempSync(resolve(tmpdir(), "board-activity-"));
+  try {
+    const logs = resolve(dir, ".sandcastle/logs");
+    mkdirSync(logs, { recursive: true });
+    writeFileSync(resolve(logs, "feat-implementer.log"), "old\n");
+    writeFileSync(resolve(logs, "other-implementer.log"), "not this branch\n");
+    writeFileSync(resolve(logs, "feat-verifier.log"), "\u001b[1mStarted\u001b[0m\nRunning the tests now\n\n");
+    utimesSync(resolve(logs, "feat-implementer.log"), 1000, 1000); // older than the verifier's log
+    const run = { iid: "1", stage: "verifying", branch: "feat", evidenceDir: resolve(dir, ".sandcastle/evidence/1") } as any;
+    assert.equal(latestActivity(run)?.activity, "Running the tests now");
+    assert.equal(latestActivity({ ...run, stage: "queued" }), undefined);
+    assert.equal(latestActivity({ ...run, stage: "done" }), undefined);
+    assert.equal(latestActivity({ ...run, branch: "missing" }), undefined);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
