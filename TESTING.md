@@ -1,4 +1,4 @@
-<!-- Factory test policy: exercise our real code across a stubbed systemd boundary; real service-manager trials are optional deployment checks, not verification gates. -->
+<!-- Factory test policy: exercise our real code across a stubbed systemd or launchd boundary; real service-manager trials are optional deployment checks, not verification gates. -->
 # Testing
 
 ## Run the tests
@@ -72,5 +72,6 @@ The sentence above about Factory's disable/removal logic not killing an active p
 
 - `cli/test/stubs/systemctl` is the stateful, failure-injecting `systemctl` stub. `cli/test/schedule-helpers.mts` puts it first on a test's PATH, exposes its call log and states, and injects failures (`fail('--user stop factory-tick.service')`). Its `calls.jsonl` also records any rejected call, and tests assert that list is empty.
 - `cli/test/schedule-linux.test.mts` runs the real CLI and the production adapter (`cli/src/platform/scheduler-systemd.mts`) against that stub, and cancels synthetic process trees: a dispatcher holding a nested shell, a nested analysis process with its own child, and one detached ticket run in its own group. Where it sends the tick SIGTERM itself, it stands in for what `systemctl stop` is documented to do under `KillMode=process`.
+- `cli/test/stubs/launchctl` is the same kind of stub for macOS: it models the label's enablement, loaded and running states separately, exits 113 for a missing service, and for `bootout` does the one documented launchd effect Factory relies on, SIGTERM to the job's registered process and a wait for it to exit. `cli/test/schedule-macos.test.mts` runs the production launchd adapter, the generated plist and a real supervisor process (`cli/test/fixtures/supervisor.mts`: the same supervisor code with a short first delay) against it, on Linux. It does not prove launchd's own loading, `KeepAlive` or `ExitTimeOut` behaviour, which is trusted the same way systemd's is.
 - `cli/test/scheduler.test.mts` covers the same logic against the in-memory `FakeSchedule` (`cli/src/platform/fake.mts`).
 - The tick and its cancellation are Factory code, so they are tested with real processes: `cli/src/commands/tick.mts`, `cli/src/tick-lock.mts`, `cli/src/tick-cancel.mts`.

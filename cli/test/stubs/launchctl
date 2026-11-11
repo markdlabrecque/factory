@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+// Test-owned `launchctl` stub for Factory's macOS scheduler tests. It is a command-boundary stub, NOT launchd: it models only
+// what Factory reads (the label's enablement override, whether the job is loaded, whether it is running) and the one
+// documented effect Factory relies on: `bootout` of a loaded job sends SIGTERM to the job's process (services[label].pid,
+// which a test registers when it runs a real supervisor) and waits for it to exit, then SIGKILL after exitTimeoutMs. It
+// never starts a job or runs a plist. All of its state lives in $STUB_DIR.
+// Env: STUB_DIR (calls.jsonl, state.json, fail), STUB_AGENT_DIR (the fixture's ~/Library/LaunchAgents).
+// Every call is appended to calls.jsonl as its exact argv. Anything but the shapes Factory is expected to send is REJECTED
+// (exit 64, logged as `rejected`). A line in $STUB_DIR/fail is an exact space-joined argv that exits 1 when called; `once:` in
+// front makes it fail only the first time. A missing service exits 113, as launchctl does.
+const fs = require('node:fs');
+const path = require('node:path');
+const D = process.env.STUB_DIR, A = process.env.STUB_AGENT_DIR;
+if (!D || !A) { console.error('stub: STUB_DIR/STUB_AGENT_DIR unset'); process.exit(70); }
+const argv = process.argv.slice(2);
+const log = (extra) => fs.appendFileSync(path.join(D, 'calls.jsonl'), JSON.stringify({ argv, ...extra }) + '\n');
+const stateFile = path.join(D, 'state.json');
+const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { services: {} };
+state.services ??= {};
+const save = () => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+const svc = (l) => (state.services[l] ??= { disabled: false, loaded: false, running: false });
+const reject = (why) => { log({ rejected: why }); console.error(`stub: rejected ${why}: ${argv.join(' ')}`); process.exit(64); };
+const fail = (code, message) => { log({ ok: true, exit: code }); save(); console.error(message); process.exit(code); };
+
+const failFile = path.join(D, 'fail');
+if (fs.existsSync(failFile)) {
+  const lines = fs.readFileSync(failFile, 'utf8').split('\n').filter(Boolean);
+  const joined = argv.join(' ');
+  const i = lines.findIndex((l) => l.replace(/^once:/, '') === joined);
+  if (i >= 0) {
+    if (lines[i].startsWith('once:')) { lines.splice(i, 1); fs.writeFileSync(failFile, lines.join('\n') + (lines.length ? '\n' : '')); }
+    log({ injectedFailure: true });
+    console.error(`stub: injected failure for: ${joined}`);
+    process.exit(1);
+  }
+}
+const DOMAIN = `gui/${process.getuid()}`;
+const LABELS = ['com.factory.tick', 'com.factory.board'];
+const target = (s) => { const m = /^gui\/(\d+)\/(.+)$/.exec(s ?? ''); return m && `gui/${m[1]}` === DOMAIN && LABELS.includes(m[2]) ? m[2] : null; };
+// A zombie (exited, not yet reaped by its parent) has exited as far as launchd's wait is concerned.
+const alive = (pid) => {
+  try { process.kill(pid, 0); } catch { return false; }
+  try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return !/^[ZX]/.test(st.slice(st.lastIndexOf(')') + 2)); } catch { return true; }
+};
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const [verb, ...rest] = argv;
+switch (verb) {
+  case 'print': {
+    if (rest.length !== 1) reject('print shape');
+    if (rest[0] === DOMAIN) { console.log(`${DOMAIN} = {\n\ttype = gui\n}`); break; }
+    const l = target(rest[0]);
+    if (!l) reject('print target');
+    const s = svc(l);
+    if (!s.loaded) fail(113, `Could not find service "${l}" in domain for port`);
+    console.log(`${rest[0]} = {\n\tactive count = ${s.running ? 1 : 0}\n\tpath = ${path.join(A, `${l}.plist`)}\n\tstate = ${s.running ? 'running' : 'not running'}\n${s.pid ? `\tpid = ${s.pid}\n` : ''}}`);
+    break;
+  }
+  case 'print-disabled': {
+    if (rest.length !== 1 || rest[0] !== DOMAIN) reject('print-disabled shape');
+    const old = state.oldFormat;
+    console.log(`disabled services = {\n${Object.entries(state.services).filter(([, s]) => s.override).map(([l, s]) => `\t"${l}" => ${old ? String(s.disabled) : s.disabled ? 'disabled' : 'enabled'}\n`).join('')}}`);
+    break;
+  }
+  case 'enable': case 'disable': {
+    const l = target(rest[0]);
+    if (!l || rest.length !== 1) reject(`${verb} shape`);
+    Object.assign(svc(l), { disabled: verb === 'disable', override: true });
+    break;
+  }
+  case 'bootstrap': {
+    if (rest.length !== 2 || rest[0] !== DOMAIN) reject('bootstrap shape');
+    const l = path.basename(rest[1], '.plist');
+    if (!LABELS.includes(l) || rest[1] !== path.join(A, `${l}.plist`)) reject('bootstrap plist');
+    const s = svc(l);
+    if (!fs.existsSync(rest[1])) fail(5, 'Bootstrap failed: 5: Input/output error');
+    if (s.disabled) fail(5, 'Bootstrap failed: 5: Input/output error (service is disabled)');
+    if (s.loaded) fail(5, 'Bootstrap failed: 5: Input/output error (already loaded)');
+    Object.assign(s, { loaded: true, running: true });
+    break;
+  }
+  case 'kickstart': {
+    const l = target(rest[0]);
+    if (!l || rest.length !== 1) reject('kickstart shape');
+    if (!svc(l).loaded) fail(113, `Could not find service "${l}" in domain for port`);
+    svc(l).running = true;
+    break;
+  }
+  case 'bootout': {
+    const l = target(rest[0]);
+    if (!l || rest.length !== 1) reject('bootout shape');
+    const s = svc(l);
+    if (!s.loaded) fail(113, `Boot-out failed: 113: Could not find specified service`);
+    if (s.pid && alive(s.pid)) {
+      process.kill(s.pid, 'SIGTERM');
+      const end = Date.now() + (state.exitTimeoutMs ?? 20000);
+      while (alive(s.pid) && Date.now() < end) pause(25);
+      if (alive(s.pid)) { process.kill(s.pid, 'SIGKILL'); s.killed = true; }
+    }
+    Object.assign(s, { loaded: false, running: false });
+    delete s.pid;
+    break;
+  }
+  default: reject(`unknown verb ${verb}`);
+}
+log({ ok: true });
+save();

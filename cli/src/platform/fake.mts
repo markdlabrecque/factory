@@ -1,6 +1,7 @@
 // In-memory service managers with real fixture files; they never invoke a host manager. `Fake` is the board service.
 // `FakeSchedule` models the tick timer's enablement and activity and the tick service's activity as separate states,
 // logs every call in order (`calls`), and fails on demand (`fail`: method names, or 'stop' for the tick service stop).
+// Its `files` and `logHint` are the Linux ones.
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ServiceBackend, ServiceSpec, ServiceStatus } from './index.mts';
@@ -37,7 +38,9 @@ export class FakeSchedule implements ScheduleBackend {
   /** Runs inside disable() after the timer is stopped, before the tick service stop; tests use it to order events. */
   onStop?: () => void | Promise<void>;
   readonly p: Paths;
-  constructor(p: Paths) { this.p = p; }
+  readonly files: string[];
+  readonly logHint = 'journalctl --user -u factory-tick';
+  constructor(p: Paths) { this.p = p; this.files = [p.tickService, p.tickTimer]; }
   private step(name: string, op = name) { this.calls.push(name); if (this.fail.has(op)) throw new Error(`Simulated ${op} failure`); }
   async install(_spec: ScheduleSpec, record: (entry: ManifestEntry) => void) {
     this.step('install', 'install');

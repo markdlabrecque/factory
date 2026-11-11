@@ -2,7 +2,7 @@
 // templates/ with exact quoted paths. Only the timer is enabled. Every systemctl call is `systemctl --user ...` with a
 // fixed argument list, run through `run` (so a stub on PATH sees exactly these calls). Timer enablement is read from
 // UnitFileState and timer activity from ActiveState, separate from the tick service's activity. Output that does not
-// parse is an error, not a guess. Tick stop and kill behaviour comes from the unit's directives (KillMode=process,
+// parse is an error, not a guess. `files` are the two unit files; the log is the journal. Tick stop and kill behaviour comes from the unit's directives (KillMode=process,
 // TimeoutStopSec, TimeoutStartSec=infinity); systemd implements them, Factory only supplies them.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -29,7 +29,9 @@ const prop = (out: string, key: string): string => {
 const loaded = (unit: string) => prop(show(unit, 'LoadState'), 'LoadState') !== 'not-found';
 export class SystemdSchedule implements ScheduleBackend {
   readonly p: Paths;
-  constructor(p: Paths) { this.p = p; }
+  readonly files: string[];
+  readonly logHint = 'journalctl --user -u factory-tick';
+  constructor(p: Paths) { this.p = p; this.files = [p.tickService, p.tickTimer]; }
   async install(spec: ScheduleSpec, record: (entry: ManifestEntry) => void) {
     mkdirSync(dirname(this.p.tickService), { recursive: true });
     const units = schedulerUnits(spec, this.p.home);

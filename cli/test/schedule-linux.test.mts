@@ -28,7 +28,7 @@ import { readTickState } from '../src/schedule-state.mts';
 import { cancelTick } from '../src/tick-cancel.mts';
 import { acquireTickLock, groupAlive, groupOf, readLock, sameProcess } from '../src/tick-lock.mts';
 import { writeScheduleConfig } from '../src/schedule.mts';
-import { factoryBin, home, repo, systemctlStub } from './schedule-helpers.mts';
+import { HELD, QUICK, factoryBin, held, heldScript, home, repo, systemctlStub } from './schedule-helpers.mts';
 
 // A regression must fail a test, not hang the run waiting for a tick that never ends.
 const test = (name: string, fn: (t: TestContext) => Promise<void> | void) => nodeTest(name, { timeout: 60_000 }, fn);
@@ -59,25 +59,6 @@ function startTick(world: World, env: Record<string, string> = {}) {
   return { child, exited, output: () => out };
 }
 
-// The held dispatcher. It records its argv, cwd, environment and stdin, starts a nested shell, a nested "analysis"
-// process (which has its own child) and a detached "ticket run", writes every pid to held.json, then waits. A project
-// whose dispatcher is `quick` just records that it ran and exits.
-const HELD = `import { spawn } from 'node:child_process';
-import { existsSync, readlinkSync, writeFileSync, appendFileSync } from 'node:fs';
-const dir = new URL('.', import.meta.url).pathname;
-appendFileSync(dir + 'ran.log', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), pid: process.pid, stdin: (() => { try { return readlinkSync('/proc/self/fd/0'); } catch { return '?'; } })(),
-  env: { PATH: process.env.PATH, SANDCASTLE_STATE_DIR: process.env.SANDCASTLE_STATE_DIR, FACTORY_SCHEDULED: process.env.FACTORY_SCHEDULED, HOME: process.env.HOME } }) + '\\n');
-if (existsSync(dir + 'ignore-term')) process.on('SIGTERM', () => {});
-const shell = spawn('sh', ['-c', 'sleep 300 & wait'], { stdio: 'ignore' });
-const analysis = spawn(process.execPath, ['-e', "require('node:child_process').spawn('sleep', ['300'], { stdio: 'ignore' }); setInterval(() => {}, 1000)"], { stdio: 'ignore' });
-const ticket = spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });
-ticket.unref();
-writeFileSync(dir + 'held.json', JSON.stringify({ dispatcher: process.pid, shell: shell.pid, analysis: analysis.pid, ticket: ticket.pid }));
-setInterval(() => {}, 1000);
-`;
-const QUICK = `#!/bin/sh\necho "$@" > "$(dirname "$0")/quick.args"\npwd > "$(dirname "$0")/quick.cwd"\n: > "$(dirname "$0")/ran"\nexit "\${QUICK_EXIT:-0}"\n`;
-const heldScript = (root: string) => { writeFileSync(join(root, '.sandcastle/held.mjs'), HELD); return `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/held.mjs" "$@"\n`; };
-
 type World = ReturnType<typeof world>;
 function world(t: TestContext) {
   const { p } = home(t, 'factory-linux-');
@@ -94,7 +75,6 @@ function world(t: TestContext) {
   const w = { p, stub, cleanup };
   return w;
 }
-const held = (root: string): Record<'dispatcher' | 'shell' | 'analysis' | 'ticket', number> => JSON.parse(readFileSync(join(root, '.sandcastle/held.json'), 'utf8'));
 /** A project whose dispatcher is the held process tree; registered and opted in. */
 async function heldProject(w: World, name: string, extra: Record<string, string> = {}) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });

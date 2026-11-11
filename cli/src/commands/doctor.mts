@@ -1,5 +1,5 @@
 // Read-only prerequisite checks. Missing linger warns but never changes the host. Once the scheduler's units are in the
-// ledger, the service manager's answer is checked: timer enabled and active passes, enabled but stopped fails, running
+// ledger, the service manager's answer is checked (the timer on Linux, the com.factory.tick agent on macOS): enabled and active passes, enabled but stopped fails, running
 // but disabled warns, and an unreadable manager fails (unknown is never on). A scheduler that is simply off is
 // information, not a failure. Enabled legacy `sandcastle-dispatch` timers warn (they would double passes) and are
 // never touched.
