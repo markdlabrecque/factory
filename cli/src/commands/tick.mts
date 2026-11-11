@@ -8,7 +8,8 @@
 // Global state comes from the service manager only. Before taking the lock, after taking it, and before every
 // project, the tick asks the manager: work needs the timer enabled and active (macOS: the agent enabled and running). A timer that is off ends the tick, and an
 // unreadable manager ends it too (unknown fails closed), exit 1. Missing or malformed launch configuration, registry or
-// tick state also ends it without guessing. There is no pass timeout.
+// tick state also ends it without guessing. There is no pass timeout. schedulingFrom() is that rule for one observation;
+// status (scheduler-health.mts) uses it too.
 // One tick per user (tick-lock.mts). The pass is spawned as the leader of its own process group and recorded in the lock
 // the moment it exists, so cancelling can reach its nested children (npx, ticket analysis) and nothing else; ticket
 // runs the dispatcher detached are in their own groups and keep going. SIGTERM or SIGINT (what `systemctl stop` sends
@@ -47,7 +48,7 @@ import { acquireTickLock, passAlive } from '../tick-lock.mts';
 import type { HeldLock } from '../tick-lock.mts';
 import { terminateGroup } from '../tick-cancel.mts';
 import type { CancelOptions } from '../tick-cancel.mts';
-import type { ScheduleBackend } from '../platform/scheduler.mts';
+import type { ScheduleBackend, ScheduleStatus } from '../platform/scheduler.mts';
 import { runDispatchSh } from './dispatch.mts';
 import type { ProjectContext } from '../runs.mts';
 import type { SpawnOptions } from './dispatch.mts';
@@ -73,6 +74,10 @@ export async function schedulingState(backend: ScheduleBackend): Promise<Schedul
   let s;
   try { s = await backend.status(); }
   catch (e) { return { state: 'unknown', reason: `service manager query failed: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}` }; }
+  return schedulingFrom(s);
+}
+/** What one service-manager observation means for scheduled work (see schedulingState). */
+export function schedulingFrom(s: ScheduleStatus): Scheduling {
   if (s.timer === 'missing') return { state: 'off', reason: 'timer not installed' };
   if (!s.enabled) return { state: 'off', reason: s.timer === 'active' ? 'timer is running but disabled' : 'timer disabled' };
   if (s.timer !== 'active') return { state: 'off', reason: 'timer enabled but not running' };

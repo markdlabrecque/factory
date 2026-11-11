@@ -24,8 +24,10 @@
 //   project with no `origin` branch of that name, a non-executable or missing dispatch.sh, or a `.sandcastle` copy that
 //   predates launch reservations (#32); refresh that copy by hand first. `off` touches no project file, keeps the
 //   saved branch, and lets a pass already running finish.
-// - `status` shows the manager's state and, for every registered project, its switch and why it would not get a pass,
-//   or `ready`, and the result of its last pass (state.json). The full status contract is #37.
+// - `status` shows the manager's state, the last tick, tick timings and health problems (scheduler-health.mts), and, for
+//   every registered project, its switch and why it would not get a pass, or `ready`, the result of its last pass
+//   (state.json) and its pass timings (history.json). A malformed state or history file is shown as a problem. `factory
+//   status` shows the same health and timings for one project (#37).
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { Paths } from '../paths.mts';
@@ -36,6 +38,7 @@ import { canonicalRoot, readRegistry } from '../projects.mts';
 import type { Project } from '../projects.mts';
 import { copyProblem, currentBranch, readScheduleConfig, scheduleBlocker, setProjectSchedule, writeScheduleConfig } from '../schedule.mts';
 import { readTickState } from '../schedule-state.mts';
+import { INTERVAL_MS, describeTick, describeTimings, formatMs, passEntries, schedulerHealth, summarize, tickEntries } from '../scheduler-health.mts';
 import { cancelTick } from '../tick-cancel.mts';
 import type { CancelOptions } from '../tick-cancel.mts';
 import { schedulingState } from './tick.mts';
@@ -157,40 +160,42 @@ async function globalOn(p: Paths, backend: ScheduleBackend): Promise<number> {
 
 async function status(p: Paths, backend: ScheduleBackend, o: ScheduleOptions) {
   const only = o.project !== undefined ? findProject(p, o.project) : undefined;
-  const scheduling = await schedulingState(backend);
-  let manager: ScheduleStatus | null = null;
-  let unknown: string | undefined;
-  try { manager = await backend.status(); } catch (e) { unknown = (e instanceof Error ? e.message : String(e)).split('\n')[0]; }
-  const tickState = readTickState(p);
-  const config = readScheduleConfig(p);
+  const now = Date.now();
+  const h = await schedulerHealth(p, backend, now);
+  const { scheduling, manager, unknown, tickState, phase } = h;
+  const config = (() => { try { return readScheduleConfig(p); } catch { return null; } })();
   const projects = readRegistry(p).projects.filter(x => !only || x.root === only.root).map(x => {
     const exists = existsSync(x.root);
     const last = tickState.projects[x.root];
-    return { name: x.name, root: x.root, schedule: x.schedule ?? null, blocker: scheduleBlocker(scheduling, x, exists, exists ? currentBranch(x.root) : null), last: last ?? null };
+    return { name: x.name, root: x.root, schedule: x.schedule ?? null, blocker: scheduleBlocker(scheduling, x, exists, exists ? currentBranch(x.root) : null), last: last ?? null,
+      timings: summarize(passEntries(h.history, x.root)) };
   });
   const legacy = legacyTimers(p);
-  const phase = unknown ? 'unknown' : !manager || scheduling.state === 'off' ? (manager?.tick === 'active' ? 'running' : 'off') : manager.tick === 'active' ? 'running' : 'waiting';
+  const ticks = summarize(tickEntries(h.history));
   if (o.json) {
     console.log(JSON.stringify({ version: 1,
       scheduler: { service: manager ? manager.timer : 'unknown', serviceEnabled: manager ? manager.enabled : null, timerActive: manager ? manager.timer === 'active' : null,
-        tickActive: manager ? manager.tick === 'active' : null, ...(unknown ? { reason: unknown } : {}), phase, cap: 3, intervalMs: 300000,
+        tickActive: manager ? manager.tick === 'active' : null, ...(unknown ? { reason: unknown } : {}), phase, cap: 3, intervalMs: INTERVAL_MS,
         ...(tickState.startedAt ? { startedAt: tickState.startedAt } : {}), ...(tickState.finishedAt ? { finishedAt: tickState.finishedAt } : {}),
         ...(tickState.durationMs !== undefined ? { durationMs: tickState.durationMs } : {}), ...(tickState.pid ? { pid: tickState.pid } : {}),
-        ...(tickState.currentRoot ? { currentRoot: tickState.currentRoot } : {}), ...(manager?.loaded !== undefined ? { loaded: manager.loaded } : {}), logHint: backend.logHint },
+        ...(tickState.currentRoot ? { currentRoot: tickState.currentRoot } : {}), ...(manager?.loaded !== undefined ? { loaded: manager.loaded } : {}), logHint: backend.logHint,
+        lastTick: h.lastTick, ticks, problems: h.problems },
         config: config ? { path: config.path, node: config.node } : null, legacyTimers: legacy, projects }, null, 2));
     return;
   }
   console.log(`Scheduler: ${scheduling.state}${scheduling.reason ? ` (${scheduling.reason})` : ''}`);
   if (manager?.loaded !== undefined) console.log(`Supervisor (launchd com.factory.tick): ${manager.enabled ? 'enabled' : 'disabled'}, ${manager.loaded ? 'loaded' : 'not loaded'}, ${manager.timer === 'active' ? 'running' : 'not running'}; ${manager.tick === 'active' ? 'a tick is running' : 'no tick running'}`);
   else console.log(manager ? `Timer: ${manager.enabled ? 'enabled' : 'disabled'}, ${manager.timer}; tick service: ${manager.tick === 'active' ? 'a tick is running' : manager.tick}${manager.lastTick ? `  last tick ${manager.lastTick}` : ''}` : `Timer: unknown (${unknown})`);
-  if (manager && manager.enabled && manager.timer !== 'active') console.log('  The timer is enabled but not running. Run: factory schedule on');
-  if (manager && !manager.enabled && manager.timer === 'active') console.log('  The timer is running but not enabled, so ticks skip every project. Run: factory schedule off (or on).');
+  if (h.lastTick) console.log(`Last tick: ${describeTick(h.lastTick, now)}`);
+  if (ticks.count) console.log(`Tick timings: ${describeTimings(ticks, 'tick')}`);
+  for (const x of h.problems) console.log(`  Problem: ${x}`);
   for (const line of legacyAdvice(p)) console.log(line);
   if (!projects.length) console.log('No projects registered.');
   for (const x of projects) {
     const l = x.last;
-    const lastPass = l && l.result !== 'skipped' ? `  last pass ${l.result}${l.exitCode !== undefined ? ` (exit ${l.exitCode})` : ''}${l.pid && l.result === 'running' ? ` pid ${l.pid}` : ''}${l.reason ? `: ${l.reason}` : ''}` : '';
+    const lastPass = l && l.result !== 'skipped' ? `  last pass ${l.result}${l.exitCode !== undefined ? ` (exit ${l.exitCode})` : ''}${l.pid && l.result === 'running' ? ` pid ${l.pid}` : ''}${l.durationMs !== undefined ? ` took ${formatMs(l.durationMs)}` : ''}${l.reason ? `: ${l.reason}` : ''}` : '';
     console.log(`${x.name}  ${x.schedule ? `${x.schedule.enabled ? 'on' : 'paused'} (${x.schedule.branch})` : 'off'}  ${x.blocker ?? 'ready'}${lastPass}`);
+    if (x.timings.count) console.log(`  pass timings: ${describeTimings(x.timings, 'pass')}`);
   }
   console.log(`Tick log: ${backend.logHint}`);
 }
