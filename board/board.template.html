@@ -166,6 +166,8 @@
   .facts [hidden] { display: none; }
   .note { margin: 0; padding: 8px 10px; border-left: 2px solid var(--tone); background: var(--tone-soft); border-radius: 0 4px 4px 0; font-size: 13px; }
   .note[hidden] { display: none; }
+  .activity { margin: 0; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .activity[hidden] { display: none; }
   .card-foot { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
   .card-foot:empty { display: none; }
   .verdict { font: 700 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; border-radius: 4px; border: 1px solid currentColor; }
@@ -641,10 +643,11 @@
     function fact(name) { var dt = el('dt', null, name), dd = el('dd'); add(facts, dt, dd); return { dt: dt, dd: dd }; }
     var branch = fact('Branch'), timing = fact('Time');
     var note = el('p', 'note');
+    var activity = el('p', 'activity');
     var foot = el('div', 'card-foot');
-    add(card, top, title, pipe, facts, note, foot);
+    add(card, top, title, pipe, facts, note, activity, foot);
     return { el: card, tid: tid, proj: proj, statusText: statusText, title: title, pipe: pipe, segs: segs,
-      branch: branch, timing: timing, note: note, foot: foot, sig: '', stage: run.stage };
+      branch: branch, timing: timing, note: note, activity: activity, foot: foot, sig: '', stage: run.stage };
   }
 
   function updateCard(c, run, now) {
@@ -672,6 +675,9 @@
     c.timing.dd.textContent = t;
     c.note.textContent = run.note || '';
     c.note.hidden = !run.note;
+    c.activity.textContent = run.activity || '';
+    c.activity.title = run.activity ? 'Latest agent output, ' + ago(run.activityAt, now) + ' ago' : '';
+    c.activity.hidden = !run.activity;
     // Links are rebuilt only when they change, so a focused link survives a refresh.
     var sig = JSON.stringify([run.iid, run.ticketUrl, run.mr, run.evidenceUrl, run.verdict]);
     if (sig !== c.sig) {

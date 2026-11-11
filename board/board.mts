@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,8 @@ export interface RunState {
 export interface BoardRun extends RunState {
   key: string;
   evidenceUrl?: string;
+  activity?: string; // newest line of the agent's log, for a run that is in progress
+  activityAt?: string; // when that log was last written
 }
 
 const expand = (p: string) => (p.startsWith("~/") ? resolve(homedir(), p.slice(2)) : resolve(p));
@@ -125,12 +127,41 @@ export function readRuns(): BoardRun[] {
   return runs.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
 
+/** What an in-progress run is doing now: the last line of its newest agent log (`<branch>-*.log` in the project's
+ *  `.sandcastle/logs`, found next to the evidence folder). Read-only, and only for runs that are neither parked nor finished. */
+export function latestActivity(run: RunState): { activity: string; activityAt: string } | undefined {
+  if (TERMINAL.includes(run.stage) || PARKED.includes(run.stage) || !run.branch || !run.evidenceDir) return undefined;
+  const dir = resolve(run.evidenceDir, "..", "..", "logs");
+  try {
+    const newest = readdirSync(dir)
+      .filter((n) => n.startsWith(`${run.branch}-`) && n.endsWith(".log"))
+      .map((n) => ({ file: resolve(dir, n), at: statSync(resolve(dir, n)) }))
+      .sort((a, b) => b.at.mtimeMs - a.at.mtimeMs)[0];
+    if (!newest) return undefined;
+    const size = Math.min(newest.at.size, 8192);
+    const fd = openSync(newest.file, "r");
+    let text: string;
+    try {
+      const buf = Buffer.alloc(size);
+      readSync(fd, buf, 0, size, newest.at.size - size);
+      text = buf.toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
+    const last = text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop();
+    return last ? { activity: last.length > 200 ? last.slice(0, 199) + "…" : last, activityAt: newest.at.mtime.toISOString() } : undefined;
+  } catch {
+    return undefined; // no log yet, or an unreadable one
+  }
+}
+
 /** Board snapshot shared by the embedded page data and GET /api/runs. mode "http" links evidence through the
  *  service's /evidence route; "file" links the folder directly. */
 export function buildBoardData(mode: "file" | "http"): { runs: BoardRun[]; generatedAt: string } {
   const runs = readRuns().map((r) => ({
     ...r,
     evidenceUrl: !r.evidenceDir ? undefined : mode === "http" ? `/evidence/${encodeURIComponent(r.key)}/` : `file://${r.evidenceDir}/`,
+    ...latestActivity(r),
   }));
   return { runs, generatedAt: now() };
 }
