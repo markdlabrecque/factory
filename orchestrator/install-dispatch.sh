@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Schedule dispatcher passes for one project on Linux (systemd user units). One timer per project;
-# all of them share the run cap and board through ~/.local/state/sandcastle.
+# all of them share the run cap and board through ~/.local/state/factory.
 #   install-dispatch.sh [<repo>] [--name <name>]   install or update; <repo> defaults to the current
 #                                                  repo, <name> to the repo folder's name
 #   install-dispatch.sh --uninstall <name>
@@ -51,7 +51,7 @@ for dir in "${dirs[@]}" /usr/local/bin /usr/bin /bin; do
   case ":$path:" in *":$dir:"*) ;; *) path="${path:+$path:}$dir" ;; esac
 done
 
-mkdir -p "$UNITS" "$CONF" "$HOME/.local/state/sandcastle"
+mkdir -p "$UNITS" "$CONF" "$HOME/.local/state/factory"
 printf 'SANDCASTLE_REPO="%s"\nPATH="%s"\n' "$repo" "$path" > "$CONF/$name.env"
 cp "$HERE/sandcastle-dispatch@.service" "$HERE/sandcastle-dispatch@.timer" "$UNITS/"
 systemctl --user daemon-reload
