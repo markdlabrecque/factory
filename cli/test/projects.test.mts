@@ -67,7 +67,7 @@ test('missing registry is empty; malformed or unsupported registry is reported a
   const { home, p } = fixture(t);
   assert.deepEqual(readRegistry(p), { version: 1, projects: [] });
   mkdirSync(p.config, { recursive: true });
-  for (const bad of ['{nope', JSON.stringify({ version: 2, projects: [] }), JSON.stringify({ version: 1, projects: [{ name: 'x', root: 'relative' }] })]) {
+  for (const bad of ['{nope', JSON.stringify({ version: 2, projects: [] }), JSON.stringify({ version: 1, projects: [{ name: 'x', root: 'relative' }] }), JSON.stringify({ version: 1, projects: [{ name: 'x', root: '/x', schedule: { enabled: 'yes' } }] })]) {
     writeFileSync(p.projects, bad);
     assert.throws(() => addProject(p, repo(t, home, 'x' + bad.length)), /registry/);
     assert.equal(readFileSync(p.projects, 'utf8'), bad);
