@@ -1,31 +1,44 @@
-// `factory schedule on|off [project]`, `factory schedule status [--json]` and `factory schedule tick`.
-// - `on` (no project) needs `factory install` first. It writes factory-tick.service and factory-tick.timer (Linux;
-//   macOS is #35), recording each in the manifest as it is written, turns the global switch on and enables the
-//   timer: the first tick about a minute later, then one five minutes after each tick finishes. It records the
-//   current PATH in the service, since the units get no shell profile; rerun it to refresh. Refuses unit files
-//   Factory does not own. It never touches legacy `sandcastle-dispatch` timers: it prints the exact commands to
-//   disable them, since running both would double passes.
-// - `off` (no project) turns the global switch off and disables the timer. A tick in progress finishes its
-//   current pass and visits no more projects; runs already launched keep going. `factory uninstall` removes the units.
-// - `on|off <project>` (a registered name or a path in its checkout) flips one project's switch (schedule.mts):
-//   `on` saves the branch checked out now. `on` refuses a project whose `.sandcastle` dispatcher copy predates
-//   launch reservations (#32), since scheduled admission would undercount; refresh that copy by hand first.
-// - `status` shows both switches, the timer and, for every registered project, why it would not get a scheduled
-//   pass, or `ready`.
-// - `tick` is what the service runs (tick.mts); SIGTERM interrupts it.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+// `factory schedule on|off|status [--project <name|path>] [--json]`. Without --project the command is for the one global
+// scheduler, even inside a checkout; with it, for one registered project (a name, or a path in the checkout or the
+// recorded root of a deleted one). `--json` is for status only.
+// - Global state belongs to the service manager. Factory stores no on/off flag: `on` and `off` change the timer, and
+//   `status` asks it, reporting the timer's enablement and activity and the tick service's activity separately; a failed
+//   query shows as `unknown`, never as on.
+// - `on` needs `factory install` first. It saves the current PATH and absolute Node (schedule.mts), writes
+//   factory-tick.service then factory-tick.timer (Linux; macOS is #35), ledgering each as written, then enables and starts
+//   the timer: the first tick about a minute later, then one five minutes after each tick finishes. If installing or
+//   enabling fails, the ledger stays, and the error is reported with what the manager says now. Repeat it to retry or to
+//   refresh PATH/Node. It refuses unit files Factory does not own, never touches legacy `sandcastle-dispatch` timers
+//   (it prints the commands to disable them) and starts no project that was not opted in.
+// - `off` disables and stops the timer, then stops the tick service and waits for it, then confirms the tick and its
+//   dispatcher pass group are gone (stopScheduling, tick-cancel.mts). The active tick, its pass and the pass's non-detached
+//   children are cancelled and no later project starts; ticket runs already detached keep going. If cancellation can't be
+//   confirmed it fails and keeps the runtime files. What it prints comes from what was observed (the manager's tick
+//   state before the stop, the lock, and the pass entries that became `interrupted`), so a tick that systemd's stop
+//   already cancelled is reported as stopped, and a failed manager query is reported as unknown, never as "no tick".
+//   `factory uninstall` removes the units.
+// - `on|off --project` flips one project's switch (schedule.mts). `on` saves the branch checked out now and refuses a
+//   project with no `origin` branch of that name, a non-executable or missing dispatch.sh, or a `.sandcastle` copy that
+//   predates launch reservations (#32); refresh that copy by hand first. `off` touches no project file, keeps the
+//   saved branch, and lets a pass already running finish.
+// - `status` shows the manager's state and, for every registered project, its switch and why it would not get a pass,
+//   or `ready`, and the result of its last pass (state.json). The full status contract is #37.
+import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { Paths } from '../paths.mts';
-import { scaffoldName } from '../paths.mts';
 import { readManifest, record } from '../manifest.mts';
-import type { ServiceBackend } from '../platform/index.mts';
+import { isTickEntry } from '../platform/scheduler.mts';
+import type { ScheduleBackend, ScheduleStatus } from '../platform/scheduler.mts';
 import { canonicalRoot, readRegistry } from '../projects.mts';
 import type { Project } from '../projects.mts';
-import { currentBranch, readScheduler, scheduleBlocker, setProjectSchedule, setScheduler } from '../schedule.mts';
-import { tick } from '../tick.mts';
-import type { TickOptions } from '../tick.mts';
+import { copyProblem, currentBranch, readScheduleConfig, scheduleBlocker, setProjectSchedule, writeScheduleConfig } from '../schedule.mts';
+import { readTickState } from '../schedule-state.mts';
+import { cancelTick } from '../tick-cancel.mts';
+import type { CancelOptions } from '../tick-cancel.mts';
+import { schedulingState } from './tick.mts';
 
-/** A registered project by name, or by a path inside (or the recorded root of) its checkout. */
+/** A registered project by name, or by a path inside (or the recorded root of) its checkout. Uses the registry only,
+ *  so a deleted checkout can still be selected. */
 export function findProject(p: Paths, arg: string): Project {
   const registered = readRegistry(p).projects;
   const named = registered.filter(x => x.name === arg);
@@ -50,81 +63,128 @@ export function legacyAdvice(p: Paths): string[] {
     ...timers.map(t => `  systemctl --user disable --now ${t}`)];
 }
 
-/** Why a project's `.sandcastle` copy can't be scheduled safely, or null. */
-function copyProblem(root: string): string | null {
-  const scaffold = join(root, scaffoldName);
-  if (!existsSync(join(scaffold, 'dispatch.sh'))) return `no ${scaffoldName}/dispatch.sh. Run: factory init ${root}`;
-  const read = (name: string) => { try { return readFileSync(join(scaffold, name), 'utf8'); } catch { return ''; } };
-  if (!read('dispatch.mts').includes('reserveRun(') || !read('board.mts').includes('export function reserveRun'))
-    return `its ${scaffoldName} dispatcher copy predates launch reservations, so scheduled passes could overfill the run cap. Copy dispatch.mts, main.mts and board.mts from Factory's orchestrator/ and board/ into ${scaffold} (see "Updating a project's copy of the workflow"), then opt in again.`;
-  return null;
+/** What stopScheduling saw. `tickActive` is the manager's answer before it stopped anything (null when the query failed,
+ *  with the reason in `unknown`); `cancelled` is whether Factory itself had to signal a tick or pass; `interrupted` names the
+ *  projects whose `running` entry in state.json is `interrupted` afterwards (cancelled by the stop); `finished` names those whose
+ *  entry became `ok`, `error` or `skipped` in the meantime (the pass ended by itself before the stop took effect). */
+export type StopReport = { tickActive: boolean | null; unknown?: string; cancelled: boolean; escalated: boolean; interrupted: string[]; finished: string[] };
+
+/** Stops scheduling, in this order: disable and stop the timer, stop the tick service and wait for it, then confirm
+ *  the tick and its dispatcher pass group are gone. Throws at the first step that fails; nothing later runs and no file
+ *  is removed, so the same call retries safely. Ticket runs are not touched. The report says what was observed, so a
+ *  tick that systemd's stop cancelled (and so left no lock) is still reported as stopped. */
+export async function stopScheduling(backend: ScheduleBackend, p: Paths, cancel?: CancelOptions): Promise<StopReport> {
+  let tickActive: boolean | null = null;
+  let unknown: string | undefined;
+  try { tickActive = (await backend.status()).tick === 'active'; } catch (e) { unknown = (e instanceof Error ? e.message : String(e)).split('\n')[0]; }
+  const results = () => { try { return Object.fromEntries(Object.entries(readTickState(p).projects).map(([root, x]) => [root, x.result])); } catch { return {} as Record<string, string>; } };
+  const before = Object.entries(results()).filter(([, result]) => result === 'running').map(([root]) => root);
+  await backend.disable();
+  const r = await cancelTick(p, cancel);
+  const after = results();
+  const names = new Map<string, string>();
+  try { for (const x of readRegistry(p).projects) names.set(x.root, x.name); } catch { /* roots are shown as they are */ }
+  return { tickActive, ...(unknown ? { unknown } : {}), cancelled: r.active, escalated: r.escalated,
+    interrupted: before.filter(root => after[root] === 'interrupted').map(root => names.get(root) ?? root),
+    finished: before.filter(root => after[root] !== undefined && after[root] !== 'running' && after[root] !== 'interrupted').map(root => names.get(root) ?? root) };
+}
+/** One sentence for what a stop did, from the report: stopped a tick, found none, or could not tell. */
+export function describeStop(r: StopReport): string {
+  const who = r.interrupted.length ? ` Its pass for ${r.interrupted.join(', ')} was cancelled and recorded as interrupted.` : '';
+  const done = r.finished.length ? ` The pass for ${r.finished.join(', ')} had already finished on its own.` : '';
+  const kill = r.escalated ? ' SIGKILL was needed for the pass group.' : '';
+  if (r.tickActive || r.cancelled) return `The active tick was stopped.${who}${done}${kill}`;
+  if (r.interrupted.length) return `No tick was running, but ${r.interrupted.join(', ')} had a pass recorded as running; it is now recorded as interrupted.${done}`;
+  if (r.unknown) return `The service manager could not be read before stopping (${r.unknown}), so Factory can't say whether a tick was running. It found no tick lock or running pass.${done}`;
+  return `No tick was running.${done}`;
 }
 
-export async function schedule(p: Paths, service: ServiceBackend, action: string | undefined, target: string | undefined,
-  o: { json?: boolean; tick?: TickOptions } = {}): Promise<number> {
-  if (action === 'tick') {
-    if (target) throw new Error('Unexpected arguments');
-    const r = await tick(p, o.tick);
-    return r.result === 'interrupted' ? 143 : 0;
-  }
-  if (action === 'status') {
-    if (target) throw new Error('Unexpected arguments');
-    return status(p, service, o.json), 0;
-  }
-  if (action !== 'on' && action !== 'off') throw new Error('Usage: factory schedule on|off [project] | status [--json]');
+const describe = (s: ScheduleStatus) => `timer ${s.enabled ? 'enabled' : 'disabled'}/${s.timer}, tick service ${s.tick}`;
+async function observed(backend: ScheduleBackend): Promise<string> {
+  try { return describe(await backend.status()); } catch (e) { return `unknown (${(e instanceof Error ? e.message : String(e)).split('\n')[0]})`; }
+}
+
+export type ScheduleOptions = { json?: boolean; project?: string; cancel?: CancelOptions };
+export async function schedule(p: Paths, backend: ScheduleBackend, action: string | undefined, o: ScheduleOptions = {}): Promise<number> {
+  if (action === 'status') { await status(p, backend, o); return 0; }
+  if (action !== 'on' && action !== 'off') throw new Error('Usage: factory schedule on|off|status [--project <name|path>] [--json (status)]');
+  if (o.json) throw new Error('--json applies to schedule status');
   const on = action === 'on';
-  if (target) {
-    const project = findProject(p, target);
-    if (on) { const problem = copyProblem(project.root); if (problem) throw new Error(`Not scheduling ${project.name}: ${problem}`); }
-    const s = setProjectSchedule(p, project.root, on);
-    if (on) {
-      console.log(`Scheduled ${project.name} on branch ${s!.branch}. Scheduled passes use only that branch and skip the project while another is checked out.`);
-      if (!readScheduler(p).enabled) console.log('The scheduler is off, so nothing runs yet. Turn it on with: factory schedule on');
-    } else console.log(s ? `Paused ${project.name}. A pass already running finishes; runs it launched keep going.` : `${project.name} was not scheduled.`);
-    return 0;
-  }
-  if (on) {
-    if (!readManifest(p)) throw new Error('Factory is not installed. Run factory install first.');
-    const owned = readManifest(p)!.entries.map(e => e.path);
-    for (const path of [p.tickService, p.tickTimer]) if (existsSync(path) && !owned.includes(path)) throw new Error(`Refusing to overwrite unowned path: ${path}`);
-    await service.installScheduler({ node: process.execPath, factory: join(p.app, 'cli/bin/factory.mts'), path: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', home: p.home }, e => record(p, e));
-    setScheduler(p, true);
-    await service.startScheduler();
-    console.log('Scheduler on: the first tick in about a minute, then one 5 minutes after each tick finishes.');
-    console.log('The tick uses the PATH recorded now; after installing tools elsewhere, run factory schedule on again.');
-    const scheduled = readRegistry(p).projects.filter(x => x.schedule?.enabled);
-    console.log(scheduled.length ? `Scheduled projects: ${scheduled.map(x => x.name).join(', ')}` : 'No project is scheduled yet. Opt one in with: factory schedule on <project>');
-    for (const line of legacyAdvice(p)) console.warn(line);
-  } else {
-    setScheduler(p, false);
-    await service.stopScheduler();
-    console.log('Scheduler off. A tick in progress finishes its current pass and visits no more projects; launched runs keep going.');
-  }
+  if (o.project !== undefined) return setProject(p, backend, on, o.project);
+  if (on) return globalOn(p, backend);
+  const r = await stopScheduling(backend, p, o.cancel);
+  console.log(`Scheduler off: timer disabled and stopped. ${describeStop(r)} Ticket runs already launched keep going.`);
   return 0;
 }
 
-async function status(p: Paths, service: ServiceBackend, json?: boolean) {
-  const global = readScheduler(p);
-  let timer: string;
-  let tickState = '';
-  let lastTick: string | undefined;
-  try { const s = await service.schedulerStatus(); timer = s.timer; tickState = s.tick; lastTick = s.lastTick; }
-  catch (e) { timer = `unknown (${e instanceof Error ? e.message.split('\n')[0] : e})`; }
-  const projects = readRegistry(p).projects.map(x => {
+async function setProject(p: Paths, backend: ScheduleBackend, on: boolean, target: string): Promise<number> {
+  const project = findProject(p, target);
+  if (on) { const problem = copyProblem(project.root); if (problem) throw new Error(`Not scheduling ${project.name}: ${problem}`); }
+  const s = setProjectSchedule(p, project.root, on);
+  if (on) {
+    console.log(`Scheduled ${project.name} on branch ${s!.branch}. Scheduled passes use only that branch and skip the project while another is checked out.`);
+    const g = await schedulingState(backend);
+    if (g.state !== 'on') console.log(`The scheduler is ${g.state === 'off' ? 'off' : 'in an unknown state'}${g.reason ? ` (${g.reason})` : ''}, so nothing runs yet. Turn it on with: factory schedule on`);
+  } else console.log(s ? `Paused ${project.name}. A pass already running finishes; runs it launched keep going.` : `${project.name} was not scheduled.`);
+  return 0;
+}
+
+async function globalOn(p: Paths, backend: ScheduleBackend): Promise<number> {
+  const manifest = readManifest(p);
+  if (!manifest) throw new Error('Factory is not installed. Run factory install first.');
+  const owned = manifest.entries.map(e => e.path);
+  for (const path of [p.tickService, p.tickTimer]) if (existsSync(path) && !owned.includes(path)) throw new Error(`Refusing to overwrite unowned path: ${path}`);
+  const config = writeScheduleConfig(p, { path: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', node: process.execPath });
+  try {
+    await backend.install({ node: config.node, app: p.app, state: p.state, path: config.path }, e => record(p, e));
+    await backend.enable();
+  } catch (e) {
+    throw new Error(`${(e as Error).message}\nScheduler state now: ${await observed(backend)}. The unit ledger is kept; run factory schedule on again to retry, or factory schedule off.`);
+  }
+  console.log('Scheduler on: the first tick in about a minute, then one 5 minutes after each tick finishes.');
+  console.log(`Timer now: ${await observed(backend)}.`);
+  console.log('The tick uses the PATH recorded now; after installing tools elsewhere, run factory schedule on again.');
+  const scheduled = readRegistry(p).projects.filter(x => x.schedule?.enabled);
+  console.log(scheduled.length ? `Scheduled projects: ${scheduled.map(x => x.name).join(', ')}` : 'No project is scheduled yet. Opt one in with: factory schedule on --project <name>');
+  for (const line of legacyAdvice(p)) console.warn(line);
+  return 0;
+}
+
+async function status(p: Paths, backend: ScheduleBackend, o: ScheduleOptions) {
+  const only = o.project !== undefined ? findProject(p, o.project) : undefined;
+  const scheduling = await schedulingState(backend);
+  let manager: ScheduleStatus | null = null;
+  let unknown: string | undefined;
+  try { manager = await backend.status(); } catch (e) { unknown = (e instanceof Error ? e.message : String(e)).split('\n')[0]; }
+  const tickState = readTickState(p);
+  const config = readScheduleConfig(p);
+  const projects = readRegistry(p).projects.filter(x => !only || x.root === only.root).map(x => {
     const exists = existsSync(x.root);
-    return { name: x.name, root: x.root, schedule: x.schedule ?? null, blocker: scheduleBlocker(global, x, exists, exists ? currentBranch(x.root) : null) };
+    const last = tickState.projects[x.root];
+    return { name: x.name, root: x.root, schedule: x.schedule ?? null, blocker: scheduleBlocker(scheduling, x, exists, exists ? currentBranch(x.root) : null), last: last ?? null };
   });
   const legacy = legacyTimers(p);
-  if (json) {
-    console.log(JSON.stringify({ version: 1, scheduler: { ...global, timer, tick: tickState || null, lastTick: lastTick ?? null }, legacyTimers: legacy, projects }, null, 2));
+  const phase = unknown ? 'unknown' : !manager || scheduling.state === 'off' ? (manager?.tick === 'active' ? 'running' : 'off') : manager.tick === 'active' ? 'running' : 'waiting';
+  if (o.json) {
+    console.log(JSON.stringify({ version: 1,
+      scheduler: { service: manager ? manager.timer : 'unknown', serviceEnabled: manager ? manager.enabled : null, timerActive: manager ? manager.timer === 'active' : null,
+        tickActive: manager ? manager.tick === 'active' : null, ...(unknown ? { reason: unknown } : {}), phase, cap: 3, intervalMs: 300000,
+        ...(tickState.startedAt ? { startedAt: tickState.startedAt } : {}), ...(tickState.finishedAt ? { finishedAt: tickState.finishedAt } : {}),
+        ...(tickState.durationMs !== undefined ? { durationMs: tickState.durationMs } : {}), ...(tickState.pid ? { pid: tickState.pid } : {}),
+        ...(tickState.currentRoot ? { currentRoot: tickState.currentRoot } : {}), logHint: 'journalctl --user -u factory-tick' },
+        config: config ? { path: config.path, node: config.node } : null, legacyTimers: legacy, projects }, null, 2));
     return;
   }
-  console.log(`Scheduler: ${global.enabled ? 'on' : 'off'}${global.since ? ` since ${global.since}` : ''}`);
-  console.log(`Timer: ${timer}${tickState === 'running' ? '  (a tick is running)' : ''}${lastTick ? `  last tick ${lastTick}` : ''}`);
-  if (global.enabled && (timer === 'missing' || timer === 'inactive')) console.log('  The switch is on but the timer is not running. Run: factory schedule on');
-  if (!global.enabled && timer === 'active') console.log('  The switch is off; ticks skip every project.');
+  console.log(`Scheduler: ${scheduling.state}${scheduling.reason ? ` (${scheduling.reason})` : ''}`);
+  console.log(manager ? `Timer: ${manager.enabled ? 'enabled' : 'disabled'}, ${manager.timer}; tick service: ${manager.tick === 'active' ? 'a tick is running' : manager.tick}${manager.lastTick ? `  last tick ${manager.lastTick}` : ''}` : `Timer: unknown (${unknown})`);
+  if (manager && manager.enabled && manager.timer !== 'active') console.log('  The timer is enabled but not running. Run: factory schedule on');
+  if (manager && !manager.enabled && manager.timer === 'active') console.log('  The timer is running but not enabled, so ticks skip every project. Run: factory schedule off (or on).');
   for (const line of legacyAdvice(p)) console.log(line);
   if (!projects.length) console.log('No projects registered.');
-  for (const x of projects) console.log(`${x.name}  ${x.schedule ? `${x.schedule.enabled ? 'on' : 'paused'} (${x.schedule.branch})` : 'off'}  ${x.blocker ?? 'ready'}`);
+  for (const x of projects) {
+    const l = x.last;
+    const lastPass = l && l.result !== 'skipped' ? `  last pass ${l.result}${l.exitCode !== undefined ? ` (exit ${l.exitCode})` : ''}${l.pid && l.result === 'running' ? ` pid ${l.pid}` : ''}${l.reason ? `: ${l.reason}` : ''}` : '';
+    console.log(`${x.name}  ${x.schedule ? `${x.schedule.enabled ? 'on' : 'paused'} (${x.schedule.branch})` : 'off'}  ${x.blocker ?? 'ready'}${lastPass}`);
+  }
   console.log('Tick log: journalctl --user -u factory-tick');
 }

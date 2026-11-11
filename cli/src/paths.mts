@@ -1,17 +1,20 @@
 // Factory's paths. FACTORY_HOME substitutes for HOME in isolated tests. `projects` is the project registry
-// (projects.mts) and `scheduler` the global scheduler switch (schedule.mts); `tickService`/`tickTimer` are the Linux
-// scheduler units and `tickLock` keeps to one tick per user (tick.mts); the project scaffold folder stays `.sandcastle`
-// this slice (`.factory` is a later migration).
+// (projects.mts). `scheduleConfig` is the scheduler's launch configuration (PATH and Node, schedule.mts); it never says
+// whether scheduling is on, because the service manager owns that. `schedulerState` holds the tick's own files:
+// state.json (schedule-state.mts) and tick.lock (tick-lock.mts). `tickService`/`tickTimer` are the Linux scheduler units.
+// The project scaffold folder stays `.sandcastle` this slice (`.factory` is a later migration).
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 export function paths(home = process.env.FACTORY_HOME || homedir()) {
   home = resolve(home);
   const data = join(home, '.local/share/factory');
+  const state = join(home, '.local/state/factory');
   return { home, data, app: join(data, 'app'), manifest: join(data, 'manifest.json'),
     bin: join(home, '.local/bin/factory'), config: join(home, '.config/factory'), projects: join(home, '.config/factory/projects.json'),
-    scheduler: join(home, '.config/factory/scheduler.json'),
-    state: join(home, '.local/state/factory'),
-    tickLock: join(home, '.local/state/factory/scheduler.lock'),
+    scheduleConfig: join(home, '.config/factory/schedule.json'),
+    state,
+    schedulerState: join(state, 'scheduler'),
+    tickLock: join(state, 'scheduler/tick.lock'),
     systemd: join(home, '.config/systemd/user/factory-board.service'),
     tickService: join(home, '.config/systemd/user/factory-tick.service'),
     tickTimer: join(home, '.config/systemd/user/factory-tick.timer'),

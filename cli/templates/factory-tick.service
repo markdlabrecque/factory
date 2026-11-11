@@ -1,14 +1,21 @@
 # Factory scheduler tick (`factory schedule on` writes this; absolute paths are substituted then). One tick visits
 # the opted-in projects one after another and runs one dispatcher pass for each. No start timeout: a tick runs
-# until its passes finish. Runs are detached from the passes; KillMode=process keeps them alive when a tick ends
-# or is stopped. There is no terminal here, so dispatch.sh stops instead of building a missing image.
+# until its passes finish. KillMode=process makes systemd signal only the tick itself (SIGTERM on stop); the tick
+# cancels its own dispatcher pass and that pass's children, and ticket runs the dispatcher detached are not touched.
+# TimeoutStopSec leaves room for that cancellation (SIGTERM grace, then SIGKILL of the pass group).
+# No terminal and no shell profile: systemd's default stdin is /dev/null, so dispatch.sh never builds an image here.
+# Output goes to the journal.
 [Unit]
 Description=Factory scheduler tick
 
 [Service]
 Type=oneshot
-ExecStart=@NODE@ @FACTORY@ schedule tick
+ExecStart=@NODE@ @FACTORY@ tick
 Environment=@PATH@
 Environment=@HOME@
+Environment=@STATE@
 KillMode=process
 TimeoutStartSec=infinity
+TimeoutStopSec=2min
+StandardOutput=journal
+StandardError=journal

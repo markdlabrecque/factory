@@ -1,9 +1,8 @@
-// macOS user agent. Probe registration before bootout so repeated removal is safe. The scheduler is not on macOS
-// yet (#35): installing it fails before anything is written.
+// macOS user agent. Probe registration before bootout so repeated removal is safe.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { run } from './index.mts';
-import type { SchedulerStatus, ServiceBackend, ServiceSpec, ServiceStatus } from './index.mts';
+import type { ServiceBackend, ServiceSpec, ServiceStatus } from './index.mts';
 import type { Paths } from '../paths.mts';
 export class Launchd implements ServiceBackend {
   readonly domain = `gui/${process.getuid!()}`;
@@ -33,8 +32,4 @@ export class Launchd implements ServiceBackend {
     catch { return 'missing'; }
   }
   async remove() { await this.stop(); run('launchctl', ['disable', this.name]); if (existsSync(this.p.launchd)) rmSync(this.p.launchd); }
-  async installScheduler(): Promise<void> { throw new Error('The scheduler is not available on macOS yet. Run passes with factory dispatch.'); }
-  async startScheduler() { await this.installScheduler(); }
-  async stopScheduler() {}
-  async schedulerStatus(): Promise<SchedulerStatus> { return { timer: 'missing', tick: 'idle' }; }
 }

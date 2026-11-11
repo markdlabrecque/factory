@@ -1,5 +1,7 @@
-// Read-only prerequisite checks. Missing linger warns but never changes the host. With the scheduler switch on, the
-// tick timer must be running; enabled legacy `sandcastle-dispatch` timers warn (they would double passes) and are
+// Read-only prerequisite checks. Missing linger warns but never changes the host. Once the scheduler's units are in the
+// ledger, the service manager's answer is checked: timer enabled and active passes, enabled but stopped fails, running
+// but disabled warns, and an unreadable manager fails (unknown is never on). A scheduler that is simply off is
+// information, not a failure. Enabled legacy `sandcastle-dispatch` timers warn (they would double passes) and are
 // never touched.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,10 +10,10 @@ import type { Paths } from '../paths.mts';
 import { readManifest } from '../manifest.mts';
 import { run } from '../platform/index.mts';
 import { nodeSupported } from './install.mts';
-import type { ServiceBackend } from '../platform/index.mts';
-import { readScheduler } from '../schedule.mts';
+import type { ScheduleBackend } from '../platform/scheduler.mts';
+import { isTickEntry } from '../platform/scheduler.mts';
 import { legacyAdvice } from './schedule.mts';
-export async function doctor(p: Paths, service?: Pick<ServiceBackend, 'schedulerStatus'>) {
+export async function doctor(p: Paths, schedule?: Pick<ScheduleBackend, 'status'>) {
   let failures = 0;
   const check = (name: string, ok: boolean, fix: string, warning = false) => {
     console.log(`${ok ? 'PASS' : warning ? 'WARN' : 'FAIL'} ${name}${ok ? '' : `: ${fix}`}`);
@@ -41,12 +43,17 @@ export async function doctor(p: Paths, service?: Pick<ServiceBackend, 'scheduler
   try { responds = (await fetch(boardURL, { signal: AbortSignal.timeout(3000) })).ok; } catch {}
   check('Board HTTP', responds, 'Run factory board start; check for another service using port 4444');
   try {
-    if (readScheduler(p).enabled) {
-      let timer = 'unknown';
-      try { timer = (await service?.schedulerStatus())?.timer ?? 'unknown'; } catch {}
-      check('Scheduler timer', timer === 'active', `the scheduler switch is on but its timer is ${timer}. Run factory schedule on`);
-    } else console.log('INFO Scheduler off (factory schedule on to start it)');
-  } catch (error) { check('Scheduler switch', false, String(error)); }
+    if (readManifest(p)?.entries.some(isTickEntry)) {
+      let s;
+      try { s = await schedule!.status(); } catch (e) { check('Scheduler', false, `the service manager can't be read (${(e as Error).message.split('\n')[0]}), so scheduled work is blocked. Run factory schedule status`); }
+      if (s) {
+        if (s.enabled && s.timer === 'active') check('Scheduler', true, '');
+        else if (s.enabled) check('Scheduler', false, `the timer is enabled but ${s.timer}. Run factory schedule on`);
+        else if (s.timer === 'active') check('Scheduler', false, 'the timer is running but not enabled, so ticks do nothing. Run factory schedule off, or on', true);
+        else console.log('INFO Scheduler off (factory schedule on to start it)');
+      }
+    } else console.log('INFO Scheduler not installed (factory schedule on to set it up)');
+  } catch (error) { check('Scheduler', false, String(error)); }
   const legacy = legacyAdvice(p);
   check('No legacy dispatcher timers', !legacy.length, legacy.join('\n'), true);
   return failures ? 1 : 0;
