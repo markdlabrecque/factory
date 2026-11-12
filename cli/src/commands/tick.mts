@@ -33,8 +33,17 @@
 // before the pass can do anything, and the result, finish time and monotonic duration after it. Each finished pass and
 // the tick's end (done, failed, interrupted, or off/unknown when the manager turned it off mid-tick) are also appended
 // to the bounded timing history (`history.json`, schedule-state.mts); a tick or pass that died is added there as
-// `interrupted` by the next tick or cancellation. History is best effort and never stops a tick. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
-import { existsSync } from 'node:fs';
+// `interrupted` by the next tick or cancellation. History is best effort and never stops a tick.
+// Jam confirmation (slice four self-recovery, #61): each pass gets a pass id and its own report file,
+// `<state>/scheduler/jam/<pass id>.json` (FACTORY_PASS_ID, FACTORY_JAM_REPORT), where the dispatcher says whether the
+// project is jammed after its normal work. Only a pass that exited 0 and was not cancelled is handed to jam-detect.mts
+// afterPass (settle the project's recovery attempt, observe the tickets, count the pass, and for a confirmed jam start at
+// most one repair attempt, detached like ticket runs) once the pass is recorded, so its time is not the pass's. It asks
+// the service manager again before launching and launches nothing once cancellation or off has taken effect. Its errors
+// are logged, never a failed pass. The report file is removed after; reports a dead tick left are removed by the next. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { Paths } from '../paths.mts';
 import { readRegistry } from '../projects.mts';
@@ -50,6 +59,7 @@ import { terminateGroup } from '../tick-cancel.mts';
 import type { CancelOptions } from '../tick-cancel.mts';
 import type { ScheduleBackend, ScheduleStatus } from '../platform/scheduler.mts';
 import { runDispatchSh } from './dispatch.mts';
+import { afterPass } from '../jam-detect.mts';
 import type { ProjectContext } from '../runs.mts';
 import type { SpawnOptions } from './dispatch.mts';
 /** Runs one pass for a project; resolves to dispatch.sh's exit code. The default is runDispatchSh. */
@@ -58,6 +68,8 @@ export type TickOptions = {
   backend: ScheduleBackend; pass?: Pass; log?: (line: string) => void; signal?: AbortSignal; cancel?: CancelOptions;
   /** Wall clock (UTC timestamps) and monotonic clock (durations). */
   now?: () => Date; mono?: () => number;
+  /** Jam confirmation after a completed pass (jam-detect.mts afterPass); replaceable in tests. */
+  recovery?: typeof afterPass;
 };
 export type TickResult = {
   result: 'done' | 'busy' | 'off' | 'unknown' | 'interrupted' | 'failed';
@@ -130,6 +142,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
     if (!config) throw new Error(`No launch configuration (${p.scheduleConfig}). Run factory schedule on.`);
     // We hold the lock, so no tick is running: anything still marked running is left over from one that died.
     if (markInterrupted(p, 'the tick that started it ended without finishing', e => log(`timing history not recorded: ${e.message}`))) log('recovered state from an interrupted tick');
+    rmSync(join(p.schedulerState, 'jam'), { recursive: true, force: true }); // reports a dead tick left behind
     const state: TickState = readTickState(p);
     state.startedAt = wall().toISOString();
     delete state.finishedAt; delete state.durationMs;
@@ -167,7 +180,10 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       const from = mono();
       state.currentRoot = root;
       record({ attemptedAt: attempt, result: 'running' });
-      const result = await runPass(p, o, lock, ctx, project, root, config, state, signal, log);
+      const passId = randomUUID();
+      const report = join(p.schedulerState, 'jam', `${passId}.json`);
+      mkdirSync(dirname(report), { recursive: true });
+      const result = await runPass(p, o, lock, ctx, project, root, config, state, signal, log, { FACTORY_PASS_ID: passId, FACTORY_JAM_REPORT: report });
       const entry = state.projects[root];
       entry.finishedAt = wall().toISOString();
       entry.durationMs = Math.max(0, Math.round(mono() - from));
@@ -188,6 +204,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
         const ended = tickEntry('failed');
         writeTickState(p, state);
         history(passEntry(root, project.name, entry), { ...ended, reason: `process group ${result.unconfirmed} unconfirmed gone` });
+        rmSync(report, { force: true });
         keepLock = true; out.unconfirmed = result.unconfirmed;
         log(`pass ${project.name}: termination unconfirmed, ${alive}; scheduler lock kept`);
         return { ...out, result: 'failed' };
@@ -207,6 +224,12 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       lock.clearPass();
       out.passes.push(project.name);
       log(`pass ${project.name}: ${result.error ? `failed: ${result.error}` : `exit ${result.code}`} after ${secs(from)}${result.cancelled ? ' (cancelled)' : ''}${result.leftover ? ' (leftover processes terminated)' : ''}`);
+      // Jam confirmation, after the pass is recorded so its time is not the pass's. Only a completed pass counts.
+      if (result.code === 0 && !result.cancelled && !result.error && !signal.aborted) {
+        await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall,
+          mayLaunch: async () => !signal.aborted && (await schedulingState(o.backend)).state === 'on' && !signal.aborted });
+      }
+      rmSync(report, { force: true });
       if (result.cancelled) cancelled = true;
     }
     const interrupted = cancelled || signal.aborted;
@@ -225,7 +248,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
 type PassOutcome = { code?: number; error?: string; unconfirmed?: number; cancelled?: boolean; leftover?: { escalated: boolean } };
 /** Runs one pass and cancels it if `signal` aborts. The pass group is recorded in the lock and the state file at spawn. */
 async function runPass(p: Paths, o: TickOptions, lock: HeldLock, ctx: ProjectContext, project: Project, root: string, config: ScheduleConfig,
-  state: TickState, signal: AbortSignal, log: (line: string) => void): Promise<PassOutcome> {
+  state: TickState, signal: AbortSignal, log: (line: string) => void, extraEnv: Record<string, string>): Promise<PassOutcome> {
   const pass: Pass = o.pass ?? ((c, args, spawnOptions) => runDispatchSh(p, c, args, spawnOptions));
   let pid: number | undefined;
   let cancelling: Promise<{ confirmed: boolean }> | undefined;
@@ -243,7 +266,7 @@ async function runPass(p: Paths, o: TickOptions, lock: HeldLock, ctx: ProjectCon
   };
   signal.addEventListener('abort', cancel, { once: true });
   try {
-    const done = pass(ctx, SCHEDULED_ARGS, { env: scheduledEnv(p, config), onSpawn, group: true });
+    const done = pass(ctx, SCHEDULED_ARGS, { env: { ...scheduledEnv(p, config), ...extraEnv }, onSpawn, group: true });
     if (signal.aborted) cancel();
     const code = await done;
     if (cancelling) return (await cancelling).confirmed ? { code, cancelled: true } : { code, unconfirmed: pid, cancelled: true };

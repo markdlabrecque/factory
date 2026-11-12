@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 //   mistaken for the owner) and, for recovery, the attempt's UUID. A normal claim lives while its owner does. A recovery
 //   claim is never released by its owner dying: only the recovery launcher's settle step releases it, after the
 //   attempt's exact container is confirmed gone (cli/src/recovery-run.mts).
-// - `generations`: per project, a counter that every normal admission increments. The jam detector compares it across
+// - `generations`: per project, a counter that every normal admission increments. The jam confirmation (#61, cli/src/jam-detect.mts) compares it across
 //   passes, so a normal launch breaks a pending jam confirmation (cli/src/recovery-state.mts).
 // - `recovery`: per project, the number of recovery attempts admitted and the admitted attempts whose charge has not yet
 //   been applied to the project's recovery record (`pending`). A recovery claim and its attempt charge are written in one

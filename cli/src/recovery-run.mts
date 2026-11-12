@@ -1,6 +1,7 @@
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
-// settles attempts that ended. The jam detector (#61) is to call settleRecovery after each completed pass and
-// launchRecovery for a confirmed jam's ticket; nothing calls them yet, so recovery stays inactive.
+// settles attempts that ended. The tick's jam confirmation (#61, jam-detect.mts) calls settleRecovery after each completed
+// scheduled pass and launchRecovery for a confirmed jam's ticket, only when the project's copy has the recovery workflow
+// (recoveryCopyProblem), so recovery stays inactive until that copy is upgraded (#63).
 // launchRecovery, in order: settle the project's running attempt, if any (refusing while it still runs or its container
 // is unconfirmed); read the ticket's ownership receipt (orchestrator/ownership.mts, keyed by the project's id from its
 // checkout and tracker, read from .sandcastle/config.mts) and check its recorded branch and worktree may be resumed

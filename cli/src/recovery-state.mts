@@ -22,7 +22,8 @@
 //   compares each new observation with it: a changed fingerprint is an attributable human requirement change, a new
 //   delivery marker is verified delivery progress by the ticket; either renews the ticket's spent budget. The first
 //   observation only sets the baseline, and an unchanged one changes nothing, so repeated passes never renew.
-// This module stores and checks only; it never detects jams, launches repairs or reads the tracker. Transitions run under
+// This module stores and checks only; it never detects jams, launches repairs or reads the tracker. Since #61 the tick's
+// jam confirmation (jam-detect.mts) calls observeTicket and observePass after each completed scheduled pass. Transitions run under
 // an exclusive per-project lock and write temp-file + rename (mode 0600). A missing file is an empty record; a malformed
 // one throws and is never overwritten (fail closed: no attempt is allowed).
 import { createHash } from 'node:crypto';
