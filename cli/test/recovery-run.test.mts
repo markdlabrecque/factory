@@ -3,7 +3,8 @@
 // holds the claim; a finished attempt is recorded from its attempt record; a crashed one is settled as interrupted only
 // after its exact container is confirmed gone, never touching another container (even one mounting the same worktree);
 // a cleanup-pending attempt keeps its intended outcome; a death during delivery is never replayed; a ticket stops after
-// two attempts. Disposable Git repo, run-state folder and recovery record; a sleeping process stands in for the repair
+// two attempts; the recovery claim in the admission record outlives the worker until settled (#75); a pre-upgrade run is
+// adopted into an ownership receipt; a remote-only branch is fetched exactly, and ambiguous or mismatched refs refused. Disposable Git repo, run-state folder and recovery record; a sleeping process stands in for the repair
 // process and a fake docker (exact-name inspect and rm -f only; anything else throws). No tracker, agent or real Docker.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -11,10 +12,12 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readAdmission } from '../../board/admission.mts';
 import { claimRun, readRuns } from '../../board/board.mts';
+import { projectId, readReceipt, receiptFile, recordIntent } from '../../orchestrator/ownership.mts';
 import { containerFor, readAttemptRecord, writeAttemptRecord } from '../../orchestrator/recovery.mts';
 import type { AttemptRecord, Docker } from '../../orchestrator/recovery.mts';
 import { paths } from '../src/paths.mts';
@@ -49,6 +52,8 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   }
   const evidence = join(root, '.sandcastle/evidence/7');
   mkdirSync(evidence, { recursive: true });
+  // The tracker identity the project's ownership receipts are keyed by.
+  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  kind: "github",\n  host: "github.com",\n  project: "proj",\n};\n');
   writeFileSync(join(evidence, 'before-1.png'), 'old evidence');
   if (o.copy !== false) {
     writeFileSync(join(root, '.sandcastle/main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
@@ -167,6 +172,7 @@ test('a crashed attempt waits for its exact container to be confirmed gone, keep
   assert.equal(held.state, 'unconfirmed');
   assert.match((held as { reason: string }).reason, /still present after docker rm -f/);
   assert.equal(readRecovery(f.p, f.root).attempts[0].result, 'running', 'unconfirmed: the attempt stays running');
+  assert.equal(readAdmission(f.dir).claims['proj--7']?.attempt, IDS[0], 'and its claim still holds after the worker died');
   assert.match((launchRecovery(f.p, { ...f.common, ticket: 7, at: at(12) }) as { reason: string }).reason, /not confirmed gone/);
   assert.equal(f.launched.length, 1, 'no new attempt over an unconfirmed container');
 
@@ -192,17 +198,17 @@ test('a crashed attempt waits for its exact container to be confirmed gone, keep
   assert.equal((second as { attempt: { seq: number } }).attempt.seq, 2);
   f.advance(1, { phase: 'cleanup-pending', intended: 'timed-out', reason: 'repair agent stopped after 15 minutes; container not confirmed gone' });
   await f.kill(f.launched[1].child);
-  // main.mts leaves a hold on the record when its cleanup is unconfirmed: the claim outlives the worker until settled.
-  const rf = join(f.dir, 'proj--7.json');
-  writeFileSync(rf, JSON.stringify({ ...f.run(), hold: { attempt: f.run().recovery!.id, reason: 'container not confirmed gone' } }));
-  assert.equal(claimRun({ dir: f.dir, project: 'other', iid: '1', pid: process.pid, cap: 0 }).ok, false);
-  assert.ok(f.run().hold, 'held while unsettled');
+  // The recovery claim outlives the worker in the admission record until settled: ticket, slot and project stay held.
+  assert.equal(f.run().stage, 'stopped');
+  assert.equal(readAdmission(f.dir).claims['proj--7']?.attempt, IDS[1], 'held while unsettled');
+  assert.equal(claimRun({ dir: f.dir, project: 'other', iid: '1', pid: process.pid, cap: 1 }).ok, false, 'its capacity slot');
+  assert.match((claimRun({ dir: f.dir, project: 'proj', iid: '9', pid: process.pid, cap: 9 }) as { reason: string }).reason, /held by recovery on #7/);
   const third = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(40) });
   assert.equal(third.ok, false);
   assert.match((third as { reason: string }).reason, /used its 2 recovery attempts/);
   assert.deepEqual(readRecovery(f.p, f.root).attempts.map(x => x.result), ['interrupted', 'timed-out']);
   assert.equal(f.launched.length, 2);
-  assert.equal(f.run().hold, undefined, 'settling after the container is confirmed gone lifts the hold');
+  assert.equal(readAdmission(f.dir).claims['proj--7'], undefined, 'settling after the container is confirmed gone releases the claim');
 });
 
 test('a death during delivery is settled without replaying it; an attempt without a container identity is never guessed at', async t => {
@@ -232,4 +238,72 @@ test('a missing Factory worktree for the recorded branch is added without any re
   assert.equal(f.git(f.worktree, 'rev-parse', 'HEAD'), tip);
   assert.equal(f.git(f.root, 'rev-parse', 'main') !== tip, true, 'main untouched');
   assert.equal(f.readRecord(0).worktree, f.worktree);
+});
+
+const receiptOf = (f: { dir: string; root: string }) =>
+  readReceipt(receiptFile(f.dir, projectId(f.root, { kind: 'github', host: 'github.com', project: 'proj' }), '7'));
+
+test('a pre-upgrade run is adopted into an ownership receipt, and a missing worktree is recorded before it is added', t => {
+  const f = fixture(t, { worktree: false });
+  const tip = f.git(f.root, 'rev-parse', '7-fix-login');
+  assert.equal(receiptOf(f), null, 'no receipt before the upgrade');
+  // A worktree outside the canonical path is refused for a pre-upgrade run, touching nothing.
+  const odd = join(f.root, '.sandcastle/worktrees/elsewhere');
+  f.git(f.root, 'worktree', 'add', '-q', odd, '7-fix-login');
+  assert.match((launchRecovery(f.p, { ...f.common, ticket: 7, at: at(9) }) as { reason: string }).reason, /not its canonical Factory worktree/);
+  assert.equal(readRecovery(f.p, f.root).attempts.length, 0);
+  f.git(f.root, 'worktree', 'remove', odd);
+
+  const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
+  assert.equal(r.ok, true, (r as { reason?: string }).reason);
+  const rc = receiptOf(f)!;
+  assert.deepEqual([rc.ticket, rc.branch, rc.base, rc.branchSha, rc.runId, rc.projectRoot, rc.worktreePath, rc.creationIntent.branch, rc.creationIntent.worktree, !!rc.worktreeAt],
+    ['7', '7-fix-login', 'main', tip, IDS[1], f.root, f.worktree, false, true, true]);
+  assert.equal(rc.gitCommonDir, realpathSync(join(f.root, '.git')));
+  assert.equal(statSync(receiptFile(f.dir, rc.projectId, '7')).mode & 0o777, 0o600);
+});
+
+test('a remote-only recorded branch is fetched exactly and created without force; ambiguous or mismatched refs are refused', t => {
+  const f = fixture(t, { worktree: false });
+  const origin = join(f.home, 'origin.git');
+  f.git(f.home, 'init', '-q', '--bare', '-b', 'main', origin);
+  f.git(f.root, 'remote', 'add', 'origin', origin);
+  f.git(f.root, 'push', '-q', 'origin', 'main', '7-fix-login');
+  const tip = f.git(f.root, 'rev-parse', '7-fix-login');
+  f.git(f.root, 'branch', '-D', '7-fix-login');
+  // Ambiguous: origin advertises another ref ending in the same name.
+  f.git(f.root, 'push', '-q', 'origin', `${tip}:refs/heads/x/refs/heads/7-fix-login`);
+  const amb = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
+  assert.match((amb as { reason: string }).reason, /several matching refs/);
+  assert.equal(f.git(f.root, 'branch', '--list', '7-fix-login'), '', 'no local branch created');
+  assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'nothing claimed');
+  f.git(f.root, 'push', '-q', 'origin', '--delete', 'x/refs/heads/7-fix-login');
+
+  // Fetched and created at exactly origin's commit, under a receipt that said so first.
+  const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(11) });
+  assert.equal(r.ok, true, (r as { reason?: string }).reason);
+  assert.equal(f.git(f.root, 'rev-parse', '7-fix-login'), tip);
+  assert.equal(f.git(f.worktree, 'rev-parse', 'HEAD'), tip);
+  assert.equal(receiptOf(f)!.branchSha, tip);
+});
+
+test('a remote-only branch that no longer contains the receipt\'s commit is refused', t => {
+  const f = fixture(t, { worktree: false });
+  const origin = join(f.home, 'origin.git');
+  f.git(f.home, 'init', '-q', '--bare', '-b', 'main', origin);
+  f.git(f.root, 'remote', 'add', 'origin', origin);
+  const recorded = f.git(f.root, 'rev-parse', '7-fix-login');
+  recordIntent(f.dir, { root: f.root, tracker: { kind: 'github', host: 'github.com', project: 'proj' }, ticket: '7', branch: '7-fix-login', base: 'main',
+    runId: 'r', branchToCreate: true, worktreeToCreate: false, branchSha: recorded });
+  // Someone replaced the branch on origin with unrelated history.
+  f.git(f.root, 'checkout', '-q', '--orphan', 'other');
+  f.git(f.root, 'commit', '-q', '--allow-empty', '-m', 'unrelated');
+  f.git(f.root, 'push', '-q', 'origin', 'other:refs/heads/7-fix-login');
+  f.git(f.root, 'checkout', '-q', 'main');
+  f.git(f.root, 'branch', '-D', '7-fix-login');
+  const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
+  assert.match((r as { reason: string }).reason, /does not contain/);
+  assert.equal(f.git(f.root, 'branch', '--list', '7-fix-login'), '');
+  assert.equal(receiptOf(f)!.branchSha, recorded, 'the recorded commit survives the refusal');
+  assert.match((launchRecovery(f.p, { ...f.common, ticket: 7, at: at(11) }) as { reason: string }).reason, /does not contain/, 'and keeps refusing');
 });

@@ -19,8 +19,8 @@ import { buildAssets } from '../src/scaffold.mts';
 
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
-const EXPECTED = ['.env', '.env.example', '.gitignore', 'analyze.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
-  'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'main.mts', 'manifests.mts', 'models.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
+const EXPECTED = ['.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
+  'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
   'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'];
 
 function fixture(t: TestContext, homeName = 'home') {
@@ -107,7 +107,7 @@ test('rerun keeps existing bytes and modes, fills gaps, reports skips, never dup
   assert.deepEqual(readFileSync(s('prompt.md')), keep);
   assert.equal(mode(s('prompt.md')), 0o640);
   assert.ok(existsSync(s('ci.mts')), 'missing file recreated');
-  assert.match(out, /Created 1 file\(s\), skipped 24/);
+  assert.match(out, /Created 1 file\(s\), skipped 26/);
   assert.match(out, /skipped .*config\.mts/);
   assert.match(out, /nothing was reconfigured/);
   assert.match(out, /Add: \.env evidence\/ state\/ logs\/ board\.html/);

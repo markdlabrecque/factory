@@ -4,7 +4,9 @@
 // delivery, and back through settleRecovery. Only external programs are stubbed, as executables first on the child's
 // PATH or a module in the project's node_modules (orchestrator/fixtures/entrypoint): `gh` (tracker), `docker`, and
 // @ai-hero/sandcastle (agent providers; its createSandbox and docker() throw if recovery ever touches them). Git is real,
-// with a local bare repository as origin. Unknown gh/docker calls exit non-zero.
+// with a local bare repository as origin. Unknown gh/docker calls exit non-zero. Since #75 it also checks the admission
+// claim outlives the repair process until settled, the adopted ownership receipt, the prerequisite recheck against a
+// written ticket analysis, and that a dispatched normal run adopts its claim and writes its receipt before Sandcastle.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -13,7 +15,9 @@ import { once } from "node:events";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { readAdmission } from "../board/admission.mts";
 import { claimRun, readRuns } from "../board/board.mts";
+import { projectId, readReceipt, receiptFile } from "./ownership.mts";
 import { paths } from "../cli/src/paths.mts";
 import { buildAssets } from "../cli/src/scaffold.mts";
 import { launchRecovery, settleRecovery } from "../cli/src/recovery-run.mts";
@@ -89,6 +93,14 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
   observePass(p, root, { pass: "b", at: at(5), jam: [7] });
 
+  // The dispatcher's analysis of #7 (no prerequisites), at the ticket's current hash as the scaffolded code computes it.
+  const hash = execFileSync(process.execPath, ["--input-type=module", "-e",
+    `const t = await import("./.sandcastle/tracker.mts"); const g = await import("./.sandcastle/graph.mts"); process.stdout.write(g.unitHash(t.ticket(7), t.notes(7)));`],
+  { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
+  mkdirSync(join(state, "graph"), { recursive: true });
+  writeFileSync(join(state, "graph", "owner_repo--7.json"), JSON.stringify({ iid: 7, project: "owner/repo", hash, analyzedAt: at(1), base: "main", baseSha: "",
+    provides: [], requires: [], footprint: ["app.txt"], catalogueIids: [], blockerHashes: {} }));
+
   // The launcher's own spawn, minus npx/tsx: node runs the scaffolded main.mts directly.
   let child!: ChildProcess;
   const spawner: Spawner = (cmd, args, o) => {
@@ -128,7 +140,12 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   const runRec = readRuns(state).find((r) => r.iid === "7")!;
   assert.deepEqual([runRec.stage, runRec.verdict, runRec.mr], ["done", "PASS", "https://github.com/owner/repo/pull/9"]);
 
+  // The pre-upgrade run's exact branch was adopted into an ownership receipt; the recovery claim holds until settled.
+  const receipt = readReceipt(receiptFile(state, projectId(root, { kind: "github", host: "github.com", project: "owner/repo" }), "7"))!;
+  assert.deepEqual([receipt.branch, receipt.runId, receipt.worktreePath], ["7-fix-login", ID, realpathSync(worktree)]);
+  assert.equal(readAdmission(state).claims["owner_repo--7"]?.attempt, ID, "the claim outlives the repair process until settled");
   const settled = settleRecovery(p, { root, tracker: "owner/repo", dir: state, docker, at: at(30) });
+  assert.equal(readAdmission(state).claims["owner_repo--7"], undefined, "settling released the claim");
   assert.equal((settled as { attempt: { result: string } }).attempt.result, "delivered");
   assert.equal(readRecovery(p, root).attempts.filter((a) => a.result === "delivered").length, 1, "consumed attempt recorded once");
 
@@ -146,4 +163,19 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   assert.equal(normal.status, 1);
   assert.match(normal.stderr, /Branch 7-fix-login already exists locally or on origin/);
   assert.equal(readFileSync(join(fake, "docker.jsonl"), "utf8").trim().split("\n").length, before);
+
+  // A dispatched normal run adopts its launch claim and writes its ownership receipt before Sandcastle creates anything
+  // (here the stubbed Sandcastle docker() throws, as a crash right after the receipt would leave it); stopping releases the claim.
+  const pre = claimRun({ dir: state, project: "owner/repo", iid: "9", pid: process.pid, cap: 99 });
+  assert.equal(pre.ok, true);
+  const n9 = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", "9", "--base", "main"],
+    { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
+  assert.notEqual(n9.status, 0);
+  assert.match(n9.stderr, /docker\(\) must not be used/);
+  const r9 = readReceipt(receiptFile(state, projectId(root, { kind: "github", host: "github.com", project: "owner/repo" }), "9"))!;
+  assert.deepEqual([r9.branch, r9.creationIntent.branch, r9.creationIntent.worktree, r9.branchSha, r9.runId],
+    ["9-fix-login", true, true, undefined, (pre as { run: { claim: string } }).run.claim]);
+  const rec9 = readRuns(state).find((r) => r.iid === "9")!;
+  assert.deepEqual([rec9.stage, rec9.claim], ["stopped", (pre as { run: { claim: string } }).run.claim]);
+  assert.equal(readAdmission(state).claims["owner_repo--9"], undefined, "a stopped run released its launch claim");
 });

@@ -2,6 +2,9 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { claimLive, keyFor, newToken, ownerOf, releaseClaim, transferClaim, withAdmission } from "./admission.mts";
+import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
+export { keyFor } from "./admission.mts";
 
 // Run-state store + the Factory board/evidence page (one design; light/dark/system appearance).
 // Writers (main.mts) call setStage(); each call writes <stateDir>/<key>.json and regenerates
@@ -11,13 +14,18 @@ import { fileURLToPath } from "node:url";
 // The dispatcher calls reserveRun() as it spawns each run, so the run counts against the shared cap (in this and
 // every other project's pass) before main.mts writes its own record; a launch whose process dies before that is
 // forgotten rather than stopped, so the next pass retries it.
-// claimRun() makes that reservation atomic: under <stateDir>/claim.lock it counts in-flight runs across every project,
-// refuses when the cap is reached or the ticket already has a run in flight, and only then writes the record. The
-// dispatcher claims each ticket before spawning it; recovery (cli/src/recovery-claim.mts) claims the same way and also
-// records its project's attempt under the lock, so capacity, ticket and project ownership are taken together or not at all.
-// While a recovery attempt owns a ticket, or its record carries a cleanup `hold` (owned container removal unconfirmed,
-// #74), claimRun refuses every other run of that project; a held record counts as in flight and survives its dead
-// worker until settleRecovery lifts it. A recovery claim (`exclusive`) is likewise refused while its project has any other run in flight.
+// claimRun() makes that reservation atomic through the admission record (admission.mts, #75): under its one lock it
+// counts live claims and in-flight run records across every project, refuses when the cap is reached or the ticket already
+// has a claim or a run in flight, then commits a claim (a token, kind `normal`, the owning pid and its start identity,
+// and one more for the project's activity generation) and only then writes the record, carrying the token as `claim`.
+// The dispatcher claims each ticket before spawning it and hands the claim to the child (reserveRun); main.mts adopts it
+// (adoptClaim). From then on that process's board writes, its heartbeat and exit handler included, are token-fenced: a
+// record that now carries another claim's token is left alone, so a stale run cannot overwrite a newer claim. A normal
+// claim ends when its run reaches a terminal or parked stage, or when its owner process is gone.
+// Recovery (cli/src/recovery-claim.mts) admits through admitRun in the same lock, with kind `recovery`: such a claim holds
+// its ticket, a capacity slot and its whole project (no other run of the project is admitted, and it is refused while
+// another run of the project is in flight) whatever its record's stage or process, until the recovery launcher's settle
+// step releases it after the attempt's exact container is confirmed gone.
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
 
@@ -49,9 +57,8 @@ export interface RunState {
   starting?: boolean; // reserved by the dispatcher at launch; main.mts clears it with its first write
   // Set while a recovery attempt owns the ticket: its attempt number, its UUID (#74) and the record's stage/note before the claim.
   recovery?: { attempt: number; id?: string; from?: { stage: Stage; note?: string; stageSince?: string } };
-  // Set by a recovery attempt that ended with its owned container's removal unconfirmed (#74). The claim then outlives the
-  // process: the record counts as in flight whatever its stage or pid, until settleRecovery confirms the container gone.
-  hold?: { attempt: string; reason: string };
+  // The admission claim token this record was written under (#75); writes from a process holding another token are dropped.
+  claim?: string;
 }
 
 export interface BoardRun extends RunState {
@@ -72,7 +79,30 @@ let project: string | undefined;
 export function setProject(name: string): void {
   project = name;
 }
-export const keyFor = (iid: string, proj?: string) => (proj ? `${proj.replace(/[^A-Za-z0-9._-]+/g, "_")}--${iid}` : iid);
+
+// The claim token this process holds (adoptClaim/holdClaim). Set: setStage writes only a record carrying that token.
+let held: string | undefined;
+/** Fence this process's board writes with `token`. */
+export function holdClaim(token: string | undefined): void {
+  held = token;
+}
+
+/** Take over the claim the record of `iid` carries (the dispatcher's reservation) for this process and fence later
+ *  writes with it. Returns the token, undefined when the record carries none (a manual start), or throws when the claim
+ *  is no longer that record's (superseded or released). */
+export function adoptClaim(iid: string, dir = stateDir()): string | undefined {
+  const key = keyFor(iid, project);
+  let token: string | undefined;
+  try {
+    token = (JSON.parse(readFileSync(resolve(dir, `${key}.json`), "utf8")) as RunState).claim;
+  } catch {
+    return undefined;
+  }
+  if (!token) return undefined;
+  if (!transferClaim(dir, key, token, process.pid)) throw new Error(`#${iid}'s launch claim is no longer held; another run owns the ticket now`);
+  held = token;
+  return token;
+}
 
 function write(file: string, text: string) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -100,6 +130,7 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
       /* corrupt or mid-write: start fresh */
     }
   }
+  if (held && cur.claim !== held) return; // fenced: the record belongs to a newer claim
   const stageChanged = patch.stage && patch.stage !== cur.stage;
   const next = {
     startedAt: now(),
@@ -112,107 +143,108 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
     stageSince: stageChanged || !cur.stageSince ? now() : cur.stageSince,
   } as RunState;
   write(file, JSON.stringify(next, null, 2));
+  // A normal run that finished or parked lets go of its claim (a recovery claim is released only by settling).
+  if (held && patch.stage && (TERMINAL.includes(patch.stage) || PARKED.includes(patch.stage))) {
+    try {
+      releaseClaim(stateDir(), keyFor(iid, project), held, "normal");
+    } catch {
+      /* its owner exiting releases it too */
+    }
+  }
   renderBoard();
 }
 
 /** Record a run the dispatcher has just spawned (process `pid`), before the run writes for itself. It counts as
- *  in flight while `pid` lives; if `pid` exits before main.mts clears `starting`, readRuns() drops the record. */
+ *  in flight while `pid` lives; if `pid` exits before main.mts clears `starting`, readRuns() drops the record. With
+ *  `patch.claim`, the claim this process took is handed to `pid` (unless the run already adopted it). */
 export function reserveRun(iid: string, pid: number, patch: Partial<RunState> = {}): void {
+  if (patch.claim) transferClaim(stateDir(), keyFor(iid, project), patch.claim, pid, process.pid);
   setStage(iid, { ...patch, stage: "setup", note: "starting", starting: true, pid });
 }
 
 export type Claim = { ok: true; run: RunState } | { ok: false; reason: string };
-const inFlight = (r: RunState) => !!r.hold || (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage));
-const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
 
-/** Hold <dir>/claim.lock while `fn` runs. The lock names its holder's pid; a lock whose holder is gone is taken over. */
-function withClaimLock<T>(dir: string, fn: () => T, waitMs = 10_000): T {
-  mkdirSync(dir, { recursive: true });
-  const lock = resolve(dir, "claim.lock");
-  const deadline = Date.now() + waitMs;
-  for (;;) {
-    try {
-      const fd = openSync(lock, "wx", 0o600);
-      try {
-        writeFileSync(fd, String(process.pid));
-      } finally {
-        closeSync(fd);
-      }
-      break;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      let holder = NaN;
-      let age = 0;
-      try {
-        holder = Number(readFileSync(lock, "utf8"));
-        age = Date.now() - statSync(lock).mtimeMs;
-      } catch {
-        continue; // released meanwhile
-      }
-      // A holder that died, or a lock left empty by a crash between create and write, is stale.
-      if ((Number.isInteger(holder) && holder > 0 && !alive(holder)) || (!holder && age > 5_000)) {
-        rmSync(lock, { force: true });
-        continue;
-      }
-      if (Date.now() > deadline) throw new Error(`Run claims are locked by process ${holder || "unknown"} (${lock}). Retry shortly.`);
-      sleep(50);
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    rmSync(lock, { force: true });
-  }
-}
-
-/** Atomically claim a slot under the shared cap and ownership of ticket `iid` for process `pid`. Refused, writing
- *  nothing, when `cap` runs are already in flight across every project in the state folder, or when the ticket has a
- *  run in flight. `also` runs under the lock after those checks, with the ticket's current record; it may throw to
- *  refuse (its message is the reason, nothing is written) or return more fields for the record. The record is written
- *  as a reservation (stage `setup`, note `starting`, `starting: true`) over the ticket's existing record, keeping its
- *  other fields (branch, evidence). It does not render the board; reserveRun() or the run's own writes do. */
-export function claimRun(o: {
+export interface AdmitOptions {
   iid: string;
   pid: number;
   cap: number;
   project?: string;
-  dir?: string;
   patch?: Partial<RunState>;
+  /** `recovery`: holds the project and is refused while any other run of the project is in flight. Default `normal`. */
+  kind?: ClaimKind;
+  /** Recovery: the attempt's UUID, recorded on the claim. */
+  attempt?: string;
+  /** Runs under the lock after the shared checks, with the ticket's current record; may throw to refuse (its message is
+   *  the reason, nothing is written) or return more fields for the record. */
   also?: (current: RunState | undefined) => Partial<RunState> | void;
-  /** A recovery claim: refused while any other run of the project is in flight. */
-  exclusive?: boolean;
-}): Claim {
-  const dir = o.dir ?? stateDir();
+}
+export type Admitted = { ok: true; key: string; token: string; claim: AdmissionClaim; current?: RunState; run: RunState } | { ok: false; reason: string };
+
+/** The admission check, inside withAdmission (claimRun, and recovery's claim): adds the claim to `tx.state` and returns
+ *  the record to write, or the reason. Commits and writes nothing itself. */
+export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitted {
   const proj = o.project ?? project;
   const key = keyFor(o.iid, proj);
-  return withClaimLock(dir, () => {
-    const runs = readRuns(dir);
-    const current = runs.find((r) => r.key === key);
-    if (current && inFlight(current)) return { ok: false, reason: `#${o.iid} already has a run in flight (${current.stage}, process ${current.pid})` };
-    // Recovery holds its project: while an attempt (or an unconfirmed cleanup) owns a ticket, no other run of that project starts.
-    const holder = runs.find((r) => r.key !== key && r.project === proj && inFlight(r) && (r.recovery || r.hold));
-    if (holder) return { ok: false, reason: `project ${proj ?? "(unnamed)"} is held by recovery on #${holder.iid}` };
-    const other = o.exclusive ? runs.find((r) => r.key !== key && r.project === proj && inFlight(r)) : undefined;
-    if (other) return { ok: false, reason: `project ${proj ?? "(unnamed)"} has #${other.iid} in flight; recovery needs the project to itself` };
-    const active = runs.filter(inFlight).length;
-    if (active >= o.cap) return { ok: false, reason: `no capacity: ${active} run(s) in flight, cap ${o.cap}` };
-    let extra: Partial<RunState> | void;
-    try {
-      extra = o.also?.(current);
-    } catch (e) {
-      return { ok: false, reason: (e as Error).message };
-    }
-    const { key: _key, evidenceUrl: _url, activity: _a, activityAt: _at, ...cur } = (current ?? {}) as Partial<BoardRun>;
-    const at = now();
-    const run = { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
-      iid: o.iid, project: proj, pid: o.pid, updatedAt: at, stageSince: at } as RunState;
-    write(resolve(dir, `${key}.json`), JSON.stringify(run, null, 2));
-    return { ok: true, run };
+  const kind = o.kind ?? "normal";
+  const runs = readRuns(dir);
+  const claims = Object.entries(tx.state.claims).filter(([, c]) => claimLive(c));
+  const current = runs.find((r) => r.key === key);
+  const own = tx.state.claims[key];
+  if (own && claimLive(own)) return { ok: false, reason: `#${o.iid} already has a run in flight (${own.kind} claim, process ${own.owner.pid})` };
+  if (current && inFlight(current)) return { ok: false, reason: `#${o.iid} already has a run in flight (${current.stage}, process ${current.pid})` };
+  // Recovery holds its project: while an attempt (running, or with its container's removal unconfirmed) owns a ticket, no other run of that project starts.
+  const holder = claims.find(([k, c]) => k !== key && c.project === proj && c.kind === "recovery");
+  if (holder) return { ok: false, reason: `project ${proj ?? "(unnamed)"} is held by recovery on #${holder[1].iid}` };
+  if (kind === "recovery") {
+    const other = claims.find(([k, c]) => k !== key && c.project === proj)?.[1].iid ?? runs.find((r) => r.key !== key && r.project === proj && inFlight(r))?.iid;
+    if (other) return { ok: false, reason: `project ${proj ?? "(unnamed)"} has #${other} in flight; recovery needs the project to itself` };
+  }
+  const busy = new Set([...claims.map(([k]) => k), ...runs.filter(inFlight).map((r) => r.key)]);
+  if (busy.size >= o.cap) return { ok: false, reason: `no capacity: ${busy.size} run(s) in flight, cap ${o.cap}` };
+  let extra: Partial<RunState> | void;
+  try {
+    extra = o.also?.(current);
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message };
+  }
+  const at = now();
+  const token = newToken();
+  const claim: AdmissionClaim = { token, project: proj ?? "", iid: o.iid, kind, owner: ownerOf(o.pid), at, ...(o.attempt ? { attempt: o.attempt } : {}) };
+  tx.state.claims[key] = claim;
+  if (kind === "normal") tx.state.generations[claim.project] = (tx.state.generations[claim.project] ?? 0) + 1;
+  const { key: _key, evidenceUrl: _url, activity: _a, activityAt: _at, ...cur } = (current ?? {}) as Partial<BoardRun>;
+  const run = { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
+    iid: o.iid, project: proj, pid: o.pid, claim: token, updatedAt: at, stageSince: at } as RunState;
+  return { ok: true, key, token, claim, current, run };
+}
+
+/** Write a claimed run's record (temp file + rename). */
+export function writeRecord(dir: string, key: string, run: RunState): void {
+  mkdirSync(dir, { recursive: true });
+  write(resolve(dir, `${key}.json`), JSON.stringify(run, null, 2));
+}
+
+/** Atomically claim a slot under the shared cap and ownership of ticket `iid` for process `pid` (see admitRun). Refused,
+ *  writing nothing, when `cap` runs are already in flight across every project in the state folder, when the ticket has
+ *  a claim or a run in flight, or when recovery holds the project. The record is written as a reservation (stage
+ *  `setup`, note `starting`, `starting: true`, the claim token) over the ticket's existing record, keeping its other
+ *  fields (branch, evidence). It does not render the board; reserveRun() or the run's own writes do. */
+export function claimRun(o: AdmitOptions & { dir?: string }): Claim {
+  const dir = o.dir ?? stateDir();
+  return withAdmission(dir, (tx) => {
+    const a = admitRun(tx, dir, o);
+    if (!a.ok) return a;
+    tx.commit();
+    writeRecord(dir, a.key, a.run);
+    return { ok: true, run: a.run };
   });
 }
 
-/** Delete a run record (the dispatcher clears parked records for tickets that left the queue). */
-export function removeRun(iid: string): void {
+/** Delete a run record (the dispatcher clears parked records for tickets that left the queue, and a launch it claimed
+ *  but could not spawn). With `claim`, that normal claim is released too. */
+export function removeRun(iid: string, claim?: string): void {
+  if (claim) releaseClaim(stateDir(), keyFor(iid, project), claim, "normal");
   rmSync(resolve(stateDir(), `${keyFor(iid, project)}.json`), { force: true });
   renderBoard();
 }
@@ -226,7 +258,7 @@ export function readRuns(dir = stateDir()): BoardRun[] {
     try {
       const file = resolve(dir, f);
       const s: RunState = JSON.parse(readFileSync(file, "utf8"));
-      if (!s.hold && !TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
+      if (!TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
         if (s.starting) {
           rmSync(file, { force: true });
           continue;

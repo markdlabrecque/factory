@@ -1,5 +1,6 @@
 // `factory retry` tests: it deletes only a stopped run's record (failed, or its process gone), refuses done, live and
-// queued runs and a ticket without a record, and warns about a leftover `<ticket>-*` branch, which it keeps.
+// queued runs and a ticket without a record, and warns about a leftover `<ticket>-*` branch, which it keeps. Since #75 it
+// refuses a card a recovery claim, a live launch claim or an unreadable admission record protects, and keeps receipts.
 // Disposable HOME, Git repo and run-state folder; no tracker, Docker or service manager.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -69,4 +70,35 @@ test('the CLI takes the ticket and --project, and rejects extra arguments', t =>
   const ok = cli('6', '--project', 'site');
   assert.equal(ok.status, 0, ok.stderr);
   assert.equal(existsSync(f), false);
+});
+
+test('refuses a stopped card an active or unknown claim protects, and keeps ownership receipts', async t => {
+  const { p, root, record } = fixture(t);
+  const { claimRun } = await import('../../board/board.mts');
+  const { admissionFile, keyFor, readAdmission, writeDurable } = await import('../../board/admission.mts');
+  // A recovery claim whose worker died with its container unconfirmed: the record reads stopped, the claim holds.
+  const c = claimRun({ dir: p.state, project: 'me/site', iid: '4', pid: 2 ** 22 + 1, cap: 9, kind: 'recovery', attempt: 'a-1', patch: { stage: 'stopped', starting: undefined } });
+  assert.equal(c.ok, true);
+  const receipt = join(p.state, 'ownership', 'abc', '4.json');
+  mkdirSync(join(p.state, 'ownership', 'abc'), { recursive: true });
+  writeFileSync(receipt, '{}');
+  await assert.rejects(retry(p, '4', { cwd: root }), /held by recovery attempt a-1/);
+  assert.equal(existsSync(join(p.state, 'me_site--4.json')), true);
+  // A launch claim whose owner still runs.
+  const live = record(5, 'stopped');
+  const s = readAdmission(p.state);
+  s.claims[keyFor('5', 'me/site')] = { token: 't', project: 'me/site', iid: '5', kind: 'normal', owner: { pid: process.pid }, at: new Date().toISOString() };
+  writeDurable(admissionFile(p.state), JSON.stringify(s));
+  await assert.rejects(retry(p, '5', { cwd: root }), /claimed by process/);
+  assert.equal(existsSync(live), true);
+  // An unreadable admission record: unknown, refused.
+  writeFileSync(admissionFile(p.state), '{nope');
+  await assert.rejects(retry(p, '5', { cwd: root }), /claim is unknown/);
+  // A dead launch claim does not protect; clearing keeps the receipt.
+  s.claims[keyFor('5', 'me/site')].owner = { pid: 2 ** 22 + 2 };
+  writeDurable(admissionFile(p.state), JSON.stringify(s));
+  t.mock.method(console, 'log', () => {});
+  await retry(p, '5', { cwd: root });
+  assert.equal(existsSync(live), false);
+  assert.equal(existsSync(receipt), true, 'receipts are kept');
 });

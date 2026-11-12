@@ -3,7 +3,8 @@
 // real Git on a synthetic project: committed ticket work, staged/unstaged/untracked input, an unrelated branch and
 // earlier evidence. Only external boundaries are stubbed: docker (fixtures/recovery-fakes.mts, which runs a container's
 // commands on the host with its mounts), the agent (a shell script per scenario), the tracker/push, and a fake clock
-// for the 900000 ms deadline. Unknown docker or host git calls throw.
+// for the 900000 ms deadline. Unknown docker or host git calls throw. Prerequisite holds (#75) use the real
+// handoff.mts prerequisiteHold over a synthetic ticket analysis.
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +13,9 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import type { Host } from "./handoff.mts";
+import { prerequisiteHold } from "./handoff.mts";
+import type { Host, PrerequisiteView } from "./handoff.mts";
+import type { Manifest } from "./graph.mts";
 import { attemptEvidence, attemptGitDir, containerFor, ownedContainerGone, readAttemptRecord, REPAIR_DEADLINE_MS, runRecoveryAttempt, writeAttemptRecord } from "./recovery.mts";
 import type { AttemptRecord, RecoveryContext, RecoveryDeps } from "./recovery.mts";
 import { createOwnedSandbox, gitWorkspace, PRIVATE_GIT, WORKSPACE } from "./recovery-sandbox.mts";
@@ -321,6 +324,20 @@ test("setup failure and container creation failure end the attempt failed with t
   assertPreserved(g);
 });
 
+// The recheck main.mts builds: the dispatcher's analysis says #7 needs #12. At admission #12 was merged; `state` is what
+// the tracker says at each recheck.
+const needs12: Manifest = { iid: 7, project: "o/r", hash: "h7", analyzedAt: "", base: "main", baseSha: "", provides: [], footprint: [], catalogueIids: [12],
+  blockerHashes: {}, requires: [{ what: "the API", providedBy: 12, evidence: "ticket says so", confidence: 0.9 }] };
+const prereqs = (state: Partial<Record<"verify" | "deliver", "merged" | "open-pr" | "in-flight" | "unknown" | "no-analysis">>) => (st: "verify" | "deliver") => {
+  const now = state[st] ?? "merged";
+  const view: PrerequisiteView = {
+    manifest: now === "no-analysis" ? undefined : needs12, hash: "h7",
+    satisfied: () => { if (now === "unknown") throw new Error("tracker unreachable"); return now === "merged"; },
+    active: () => (now === "open-pr" ? "an open PR" : now === "in-flight" ? "a run in flight" : undefined),
+  };
+  return prerequisiteHold(7, view);
+};
+
 for (const [name, s, outcome, verifierRan] of [
   ["a missing report", { repair: COMMIT }, "unresolved", false],
   ["a malformed report", { repair: `${COMMIT} && echo '{"cause":1}' > "$EVIDENCE/recovery-report.json" && echo r > "$EVIDENCE/recovery-report.md"` }, "unresolved", false],
@@ -332,6 +349,10 @@ for (const [name, s, outcome, verifierRan] of [
   ["a verifier that changes the branch", { verify: `echo x > v.txt && git add v.txt && git -c user.name=v -c user.email=v@v commit -qm v && ${PASS}` }, "failed", true],
   ["changed requirements before verification", { recheck: (st: string) => (st === "verify" ? "requirements changed" : undefined) }, "unresolved", false],
   ["changed requirements before delivery", { recheck: (st: string) => (st === "deliver" ? "requirements changed" : undefined) }, "unresolved", true],
+  ["a dependency hold added after admission (before verification)", { recheck: prereqs({ verify: "in-flight" }) }, "unresolved", false],
+  ["an open-PR prerequisite appearing before delivery", { recheck: prereqs({ deliver: "open-pr" }) }, "unresolved", true],
+  ["unknown prerequisites before delivery", { recheck: prereqs({ deliver: "unknown" }) }, "unresolved", true],
+  ["a missing ticket analysis before verification", { recheck: prereqs({ verify: "no-analysis" }) }, "unresolved", false],
 ] as [string, Scenario, string, boolean][]) {
   test(`${name} never pushes or delivers`, async (t) => {
     const f = fixture(t, s);

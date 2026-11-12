@@ -3,10 +3,15 @@
 // when the run is stopped: failed, or its process exited without finishing. A done, live, queued or waiting run is
 // refused, and so is a ticket with no record. It never deletes branches, logs or evidence: if a `<ticket>-*` branch
 // is left (locally or on origin, as last fetched), it says so, because the dispatcher skips a ticket that has one.
+// Since #75 it also refuses a card an admission claim protects (board/admission.mts): any recovery claim (released only
+// once its attempt's container is confirmed gone), a launch claim whose owner may still run, or an admission record it
+// cannot read (unknown). It keeps the ticket's ownership receipt (<state>/ownership/), so a later repair still knows
+// which branch and worktree Factory created.
 import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
+import { keyFor, ownerState, readAdmission } from '../../../board/admission.mts';
 import type { Paths } from '../paths.mts';
-import { findRun, resolveProject, ticketId } from '../runs.mts';
+import { findRun, resolveProject, runStateDir, ticketId } from '../runs.mts';
 export type RetryOptions = { project?: string; cwd?: string };
 
 /** Local and origin branches named `<iid>-*`, as the dispatcher looks for them. */
@@ -24,6 +29,15 @@ export async function retry(p: Paths, ticket: string | undefined, o: RetryOption
   if (run.stage !== 'stopped') {
     const why = run.stage === 'done' ? 'finished' : run.stage === 'queued' || run.stage === 'waiting' ? `${run.stage}; the dispatcher re-checks it every pass` : `still running (stage ${run.stage}, pid ${run.pid})`;
     throw new Error(`#${iid} in ${ctx.name} is ${why}. Only a stopped run can be retried.`);
+  }
+  let claims;
+  try { claims = readAdmission(runStateDir(p)).claims; }
+  catch (e) { throw new Error(`#${iid} in ${ctx.name} may be claimed, and the claim is unknown: ${(e as Error).message}`); }
+  const claim = claims[keyFor(iid, ctx.tracker)];
+  if (claim && (claim.kind === 'recovery' || ownerState(claim.owner) !== 'dead')) {
+    throw new Error(claim.kind === 'recovery'
+      ? `#${iid} in ${ctx.name} is held by recovery attempt ${claim.attempt} until its container is confirmed gone; not cleared.`
+      : `#${iid} in ${ctx.name} is claimed by process ${claim.owner.pid}, which may still be running; not cleared.`);
   }
   rmSync(file, { force: true });
   console.log(`Cleared #${iid} in ${ctx.name}${run.note ? ` (was stopped: ${run.note})` : ''}. The next pass picks it up.`);
