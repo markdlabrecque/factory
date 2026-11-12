@@ -1,4 +1,4 @@
-<!-- Throwaway decision record for #70's Board design lab and #71's browser fixes. Records host Chromium observations separately from Factory verdicts. Prototype branch only; simulated data; no winner chosen yet. -->
+<!-- Throwaway decision record for #70's Board design lab, #71's browser fixes and #72's black and chrome Orbital finish. Records host Chromium observations separately from Factory verdicts. Prototype branch only; simulated data; no winner chosen yet. -->
 # Board design prototype
 
 Status: **Decision pending user comparison.** No design has been chosen.
@@ -19,7 +19,7 @@ Separate-branch demos with simulated progress and no live Board changes. `board.
 ## The three designs
 
 - **A / Assembly**: dark petrol floor, mint edges, amber machinery. Isometric production floor with build, verify and deliver stations, moving conveyor treads and rollers, two articulated robot arms, a verification scanner gantry, a sliding delivery gate, weld sparks while building, pointer parallax and a CSS 3D crate for the selected ticket.
-- **B / Orbital**: pale titanium aerospace console, cobalt ink and vermilion accents. Tilted CSS 3D station with three counter-rotating rings, a stacked core with turning vanes, glowing stage arcs, ticket capsules that travel between docks (capsules and dock labels are drawn flat above the 3D scene at their projected positions, so the rings never cut through their text), a radial verification sweep, a telescoping docking arm, two drones and a segmented radial progress gauge.
+- **B / Orbital**: black and chrome finish (#72): polished black ground and disc, chrome rings, core, capsules and docking arm, chrome-white progress, and one hot red accent for the selection, verification sweep and kicker. Tilted CSS 3D station with three counter-rotating rings, a stacked core with turning vanes, glowing stage arcs, ticket capsules that travel between docks (capsules and dock labels are drawn flat above the 3D scene at their projected positions, so the rings never cut through their text), a radial verification sweep, a telescoping docking arm, two drones and a segmented radial progress gauge.
 - **C / Megastructure**: graphite, hot orange and brass. Vertical factory cutaway with perspective floors, an intake, a build press, a verify scan cage, a delivery hatch and a dispatch deck, a gantry crane trolley, shaft gears, a service fan, conduits that light up with progress, a CSS 3D cargo lift, a stage spine and a vertical dispatch meter.
 
 ## Shared controls
@@ -44,6 +44,8 @@ Factory passed the initial artifact and runtime-contract checks at `3b720e7`, in
 Factory implemented the fixes in [#71](https://github.com/markdlabrecque/factory/issues/71), commit `717a59a`. Its verifier kept an INCONCLUSIVE verdict because the container has no rendering engine. That verdict is retained, not rewritten as a browser pass.
 
 The separate host review opened the updated page in Chromium at 1440x1000 and 390x844. All six orbital capsule labels now render. All three variants advance ticket progress, stop their animation timelines on Pause and resume afterward. Orbital stayed 390 pixels wide across 22 samples over 66 seconds. No JavaScript exceptions occurred. Screenshots and video are retained under the original checkout's `.sandcastle/evidence/71/host-browser/`.
+
+The black and chrome Orbital finish (#72) is a palette change only, made after this host review; its look has not yet been reviewed in a host browser.
 
 Exact paused screenshot equality was not used as a gate. Megastructure differed in ten antialiased glow pixels within a 2x10-pixel area despite stable animation timelines. Assembly and Orbital paused screenshots were byte-identical. This is exploratory review, not a permanent test suite. On narrow phones, some decorative dock labels are clipped or overlap; the readable ticket manifests remain available. These concepts are best compared on a desktop.
 
