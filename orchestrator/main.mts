@@ -209,7 +209,11 @@ if (recovering) {
     log: (line) => console.log(line),
   });
   finished = true;
-  if (result.outcome !== "delivered") setStage(iid, { stage: "stopped", note: `recovery attempt ${seq} ${result.outcome}: ${result.reason}` });
+  // Cleanup unconfirmed: the claim stays (hold) so capacity, the ticket and the project are not released; settleRecovery lifts it.
+  if (result.outcome !== "delivered" || result.cleanupPending) {
+    setStage(iid, { stage: "stopped", note: `recovery attempt ${seq} ${result.outcome}: ${result.reason}`,
+      hold: result.cleanupPending ? { attempt: rec.id, reason: result.reason } : undefined });
+  }
   console.log(`recovery attempt ${seq}: ${result.outcome}${result.cleanupPending ? " (cleanup pending)" : ""}: ${result.reason}`);
   process.exit(result.outcome === "delivered" && !result.cleanupPending ? 0 : result.outcome === "interrupted" ? 143 : 1);
 }

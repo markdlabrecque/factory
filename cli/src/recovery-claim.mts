@@ -27,7 +27,7 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
   let attempt: Attempt | undefined;
   try {
     const claim = claimRun({
-      iid: String(o.ticket), pid: o.pid, cap: o.cap ?? DEFAULT_CAP, project: o.tracker, dir: o.dir ?? runStateDir(p),
+      iid: String(o.ticket), pid: o.pid, cap: o.cap ?? DEFAULT_CAP, project: o.tracker, dir: o.dir ?? runStateDir(p), exclusive: true,
       also: current => {
         attempt = beginAttempt(p, o.root, { ticket: o.ticket, at: o.at, pid: o.pid, branch: o.branch ?? current?.branch, log: o.log,
           id: o.id, container: o.container, record: o.record });

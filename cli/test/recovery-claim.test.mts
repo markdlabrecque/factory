@@ -6,7 +6,7 @@ import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claimRun, readRuns } from '../../board/board.mts';
@@ -68,15 +68,42 @@ test('an accepted claim owns capacity, the ticket and the project together, and 
     ['setup', undefined, pid, '7-fix', '/ev/7', a.seq, 'stopped']);
 
   // The project's one recovery slot is taken: another jammed ticket waits, and nothing is written for it.
-  assert.match((claimRecovery(p, { root, tracker: 'proj', ticket: 8, pid, at: at(11), dir }) as { reason: string }).reason, /still running/);
+  assert.match((claimRecovery(p, { root, tracker: 'proj', ticket: 8, pid, at: at(11), dir }) as { reason: string }).reason, /still running|held by recovery/);
   assert.equal(run(dir, '8')!.stage, 'stopped');
   // A dispatcher cannot launch the ticket the attempt owns, and the attempt counts against the shared cap.
   assert.equal(claimRun({ dir, project: 'proj', iid: '7', pid, cap: 9 }).ok, false);
   assert.equal(claimRun({ dir, project: 'other', iid: '1', pid, cap: 1 }).ok, false);
+  // The attempt holds its project: another ticket's normal launch there is refused, one elsewhere is not.
+  assert.match((claimRun({ dir, project: 'proj', iid: '9', pid, cap: 9 }) as { reason: string }).reason, /held by recovery on #7/);
+  assert.equal(claimRun({ dir, project: 'other', iid: '1', pid, cap: 9 }).ok, true);
 
   // A claimant that dies leaves a stopped record with its evidence, not a vanished one.
   sleeper.kill();
   await once(sleeper, 'exit');
   assert.deepEqual([run(dir, '7')!.stage, run(dir, '7')!.evidenceDir], ['stopped', '/ev/7']);
   finishAttempt(p, root, a.seq, { at: at(20), result: 'interrupted' });
+});
+
+test('a recovery claim yields to a normal run already in flight in its project', t => {
+  const { p, dir, pid } = fixture(t);
+  stopped(dir, '7', { branch: '7-fix' });
+  assert.equal(claimRun({ dir, project: 'proj', iid: '9', pid, cap: 9 }).ok, true);
+  assert.match((claimRecovery(p, { root, tracker: 'proj', ticket: 7, pid, at: at(10), dir }) as { reason: string }).reason, /in flight/);
+  assert.equal(run(dir, '7')!.stage, 'stopped');
+});
+
+test('a cleanup hold keeps the ticket, slot and project claimed after the worker is gone', async t => {
+  const { dir, pid, sleeper } = fixture(t);
+  stopped(dir, '7', { branch: '7-fix' });
+  const file = join(dir, 'proj--7.json');
+  const rec = JSON.parse(readFileSync(file, 'utf8'));
+  writeFileSync(file, JSON.stringify({ ...rec, stage: 'stopped', pid: sleeper.pid, recovery: { attempt: 1, id: 'a' }, hold: { attempt: 'a', reason: 'rm failed' } }));
+  sleeper.kill();
+  await once(sleeper, 'exit');
+  assert.equal(run(dir, '7')!.stage, 'stopped', 'a held record is not washed away or deleted');
+  assert.equal(claimRun({ dir, project: 'proj', iid: '7', pid, cap: 9 }).ok, false, 'its ticket');
+  assert.equal(claimRun({ dir, project: 'proj', iid: '8', pid, cap: 9 }).ok, false, 'its project');
+  assert.equal(claimRun({ dir, project: 'other', iid: '1', pid, cap: 1 }).ok, false, 'its capacity slot');
+  writeFileSync(file, JSON.stringify({ ...run(dir, '7'), hold: undefined }));
+  assert.equal(claimRun({ dir, project: 'other', iid: '1', pid, cap: 1 }).ok, true, 'released once the hold lifts');
 });

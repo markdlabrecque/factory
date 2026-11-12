@@ -192,11 +192,17 @@ test('a crashed attempt waits for its exact container to be confirmed gone, keep
   assert.equal((second as { attempt: { seq: number } }).attempt.seq, 2);
   f.advance(1, { phase: 'cleanup-pending', intended: 'timed-out', reason: 'repair agent stopped after 15 minutes; container not confirmed gone' });
   await f.kill(f.launched[1].child);
+  // main.mts leaves a hold on the record when its cleanup is unconfirmed: the claim outlives the worker until settled.
+  const rf = join(f.dir, 'proj--7.json');
+  writeFileSync(rf, JSON.stringify({ ...f.run(), hold: { attempt: f.run().recovery!.id, reason: 'container not confirmed gone' } }));
+  assert.equal(claimRun({ dir: f.dir, project: 'other', iid: '1', pid: process.pid, cap: 0 }).ok, false);
+  assert.ok(f.run().hold, 'held while unsettled');
   const third = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(40) });
   assert.equal(third.ok, false);
   assert.match((third as { reason: string }).reason, /used its 2 recovery attempts/);
   assert.deepEqual(readRecovery(f.p, f.root).attempts.map(x => x.result), ['interrupted', 'timed-out']);
   assert.equal(f.launched.length, 2);
+  assert.equal(f.run().hold, undefined, 'settling after the container is confirmed gone lifts the hold');
 });
 
 test('a death during delivery is settled without replaying it; an attempt without a container identity is never guessed at', async t => {

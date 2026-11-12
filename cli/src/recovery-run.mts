@@ -67,7 +67,7 @@ export function recoveryCopyProblem(root: string): string | null {
     : null;
 }
 
-const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
+const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage); // by process; a cleanup `hold` is released only below
 const recordFile = (dir: string, tracker: string, ticket: number) => join(dir, `${keyFor(String(ticket), tracker)}.json`);
 /** Merge `patch` into the ticket's run record (temp file + rename). */
 function patchRecord(dir: string, tracker: string, ticket: number, patch: Partial<RunState>) {
@@ -118,6 +118,8 @@ export function settleRecovery(p: Paths, o: Common): Settled {
   }
   const evidence = read.ok ? read.record.evidence : undefined;
   const report = evidence && existsSync(join(evidence, 'recovery-report.md')) ? join(evidence, 'recovery-report.md') : undefined;
+  // The container is confirmed gone: only now does a cleanup hold let go of the ticket, its slot and the project.
+  if (run?.hold && run.recovery?.attempt === a.seq) patchRecord(dir, o.tracker, a.ticket, { hold: undefined });
   const done = finishAttempt(p, o.root, a.seq, { at, result, reason, ...(report ? { report } : {}) });
   return { state: 'settled', attempt: done };
 }
