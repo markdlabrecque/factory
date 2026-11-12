@@ -1,5 +1,7 @@
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
 // /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims.
+// Tracker coverage includes latest-ten Shipped selection, queue reasons, persisted stage visits, honest legacy stats
+// and focus returned to the actual stats control, including removed/hidden-control fallbacks.
 // The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
 import { test } from "node:test";
@@ -49,13 +51,13 @@ test("run model groups every stage, flags attention and rejects unsafe links", (
   const runs = ["queued", "waiting", "setup", "implementing", "verifying", "posting", "pushing", "ci", "done", "stopped", "mystery"].map((s) => run(`a--${s}`, s));
   runs.push(run("b--1", "implementing", 45), run("c--1", "implementing", 2, { project: "c" }));
   const groups = m.layout(runs, now);
-  assert.equal(groups.waiting.map((r: any) => r.stage).sort().join(), "queued,waiting");
-  assert.equal(groups.history.map((r: any) => r.stage).sort().join(), "done,stopped");
-  assert.equal(groups.active.length, 9);
+  assert.equal(groups.waiting.map((r: any) => r.stage).sort().join(), "queued");
+  assert.equal(groups.history.map((r: any) => r.stage).sort().join(), "done");
+  assert.equal(groups.active.length, 11);
   assert.equal(groups.active[0].key, "b--1", "a quiet run sorts first");
   assert.equal(m.stageInfo("mystery").label, "mystery");
   assert.equal(m.stageInfo("constructor").unknown, true);
-  assert.equal(JSON.stringify(m.summarize(runs, now)), JSON.stringify({ all: 13, active: 9, waiting: 2, attention: 2, done: 1 }));
+  assert.equal(JSON.stringify(m.summarize(runs, now)), JSON.stringify({ all: 13, active: 9, waiting: 1, attention: 3, done: 1 }));
   assert.equal(m.matches(runs[0], "waiting", "", now), true);
   assert.equal(m.matches(runs[0], "waiting", "c", now), false);
 
@@ -77,6 +79,113 @@ test("run model groups every stage, flags attention and rejects unsafe links", (
   const prev = new Map([["a", "setup"], ["b", "ci"], ["gone", "done"]]);
   const d = m.diffRuns(prev, [{ key: "a", stage: "setup" }, { key: "b", stage: "done" }, { key: "new", stage: "queued" }]);
   assert.equal(JSON.stringify(d), JSON.stringify({ added: ["new"], changed: ["b"], removed: ["gone"] }));
+});
+
+test("trackers filter secondary capacity and select the latest ten completions after filtering", () => {
+  const m = load("model", ["layout", "matches", "queueReasons", "trackerStep"]);
+  const now = Date.parse("2026-11-10T12:00:00Z");
+  const cap = { code: "docket_full", text: "capacity" }, dep = { code: "dependency", text: "Waiting on #4" };
+  assert.equal(m.queueReasons({ queueReasons: [cap] })[0].text, "Docket is full");
+  assert.equal(m.queueReasons({ queueReasons: [cap, dep, dep] }).map((r: any) => r.text).join(), "Waiting on #4");
+  assert.equal(m.queueReasons({ note: "waiting for a free slot" })[0].text, "Docket is full");
+  assert.equal(m.queueReasons({})[0].text, "Queue reason unavailable");
+  assert.equal(m.queueReasons({ note: 42 })[0].text, "Queue reason unavailable");
+  const runs = Array.from({ length: 15 }, (_, i) => ({ key: String(i).padStart(2, "0"), stage: "done", stageSince: new Date(now - i * 1000).toISOString(), project: i % 2 ? "p" : "q" }));
+  const all = m.layout(runs, now).history;
+  assert.equal(all.length, 10);
+  assert.equal(all.map((r: any) => r.key).join(), "00,01,02,03,04,05,06,07,08,09");
+  const project = m.layout(runs.filter(r => m.matches(r, "all", "p", now)), now).history;
+  assert.equal(project.length, 7);
+  assert.equal(project.at(-1).key, "13", "project filtering precedes the limit");
+  assert.equal(m.trackerStep({ stage: "waiting" }), -1, "legacy blocker has no invented current stage");
+  assert.equal(m.trackerStep({ stage: "waiting", stageHistory: [{ stage: "implementing", at: new Date(now - 2000).toISOString() }, { stage: "waiting", at: new Date(now - 1000).toISOString() }] }), 2);
+  assert.equal(m.trackerStep({ stage: "implementing" }), 2, "a bounce returns to the current stage");
+});
+
+test("real visit stats count holds, repeated stages and bounces without inventing legacy totals", () => {
+  const m = load("model", ["ticketStats", "duration"]);
+  const at = (s: number) => new Date(s * 1000).toISOString();
+  const stages = ["queued", "setup", "implementing", "waiting", "implementing", "verifying", "implementing", "verifying", "done"];
+  const run = { stage: "done", startedAt: at(0), stageSince: at(80), historyComplete: true,
+    stageHistory: stages.map((stage, i) => ({ stage, at: at(i * 10), note: stage === "waiting" ? "Needs approval" : undefined })) };
+  const stats = m.ticketStats(run, 500_000);
+  assert.equal(stats.complete, true);
+  assert.equal(stats.running, 60_000);
+  assert.equal(stats.queued, 10_000);
+  assert.equal(stats.blocked, 10_000);
+  assert.equal(stats.elapsed, 80_000);
+  assert.equal(stats.totals.implementing, 30_000);
+  assert.equal(stats.visits.implementing, 2, "a hold does not add a visit");
+  assert.equal(stats.bounces.length, 1);
+  const legacy = m.ticketStats({ stage: "done", startedAt: at(0), stageSince: at(80) }, 500_000);
+  assert.equal(legacy.complete, false);
+  assert.equal(legacy.elapsed, 80_000);
+  assert.equal(legacy.totals.implementing, undefined);
+  assert.equal(m.ticketStats({ stage: "done", startedAt: at(0), stageSince: "unknown" }, 500_000).elapsed, null);
+  const corrupt = m.ticketStats({ ...run, stageHistory: [null, { stage: "verifying", at: "bad" }] }, 500_000);
+  assert.equal(corrupt.complete, false);
+  const mixedWriter = m.ticketStats({ ...run, stage: "verifying", stageSince: at(75), stageHistory: run.stageHistory.slice(0, 7) }, 80_000);
+  assert.equal(mixedWriter.complete, false, "an older writer cannot silently extend complete history");
+  assert.equal(mixedWriter.totals.verifying, 15_000, "the known current stage is retained alongside earlier recorded visits");
+  assert.equal(m.duration(null), "Unavailable");
+  assert.equal(m.duration(3_723_000), "1:02:03");
+});
+
+test("stage history records changes and parked reasons, not heartbeats, and marks legacy history incomplete", async () => {
+  const { trackStage } = await import("./board.mts");
+  const at = (s: number) => new Date(s * 1000).toISOString();
+  let run = { iid: "1", pid: process.pid, stage: "queued", startedAt: at(0), stageSince: at(0), updatedAt: at(0), note: "waiting for a free slot" } as import("./board.mts").RunState;
+  run = trackStage({}, run, at(0));
+  assert.equal(run.historyComplete, true);
+  let next = trackStage(run, { ...run, updatedAt: at(1) }, at(1));
+  assert.equal(next.stageHistory!.length, 1);
+  next = trackStage(next, { ...next, note: "Needs approval" }, at(2));
+  assert.equal(next.stageHistory!.length, 2);
+  next = trackStage(next, { ...next, stage: "implementing", stageSince: at(3) }, at(3));
+  assert.equal(next.stageHistory!.length, 3);
+  const legacy = trackStage({ ...run, stageHistory: undefined, historyComplete: undefined }, { ...run, stage: "setup" }, at(4));
+  assert.equal(legacy.historyComplete, false);
+  assert.equal(legacy.stageHistory!.length, 2);
+  const mixedWriter = trackStage({ ...next, stage: "verifying", stageSince: at(4) }, { ...next, stage: "done", stageSince: at(5) }, at(5));
+  assert.equal(mixedWriter.historyComplete, false);
+  assert.deepEqual(mixedWriter.stageHistory!.slice(-2).map(v => v.stage), ["verifying", "done"]);
+  const reopened = trackStage({ ...next, stage: "done" }, { ...next, stage: "setup" }, at(5));
+  assert.equal(reopened.stageHistory!.length, 1);
+  assert.equal(reopened.historyComplete, true);
+  const bounded = trackStage({ ...next, stageHistory: Array.from({ length: 1000 }, () => ({ stage: "setup", at: at(0) })) }, { ...next, stage: "verifying" }, at(6));
+  assert.equal(bounded.stageHistory!.length, 1000);
+  assert.equal(bounded.historyComplete, false);
+});
+
+test("closing stats restores the invoking control or the Shipped fallback", () => {
+  let focused: any;
+  const control = () => ({ isConnected: true, hidden: false, closest() { return this.hidden; }, focus() { focused = this; } });
+  const title = control(), viewStats = control(), summary = control();
+  const listeners: Record<string, () => void> = {};
+  const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; listeners.close(); }, addEventListener(name: string, fn: () => void) { listeners[name] = fn; } };
+  const close = { addEventListener(_: string, fn: () => void) { listeners.click = fn; } };
+  const board: any = {};
+  const m = load("stats-focus", ["openStats"], { board, renderStats() {}, document: {
+    activeElement: title,
+    getElementById(id: string) { return id === "ticket-stats" ? dialog : close; },
+    querySelector() { return summary; },
+  } });
+  for (const invoking of [title, viewStats]) {
+    m.openStats("demo--1", invoking);
+    assert.equal(board.selectedKey, "demo--1");
+    listeners.click(); // Close button
+    assert.equal(focused, invoking);
+    assert.equal(board.selectedKey, null);
+    m.openStats("demo--1", invoking);
+    dialog.close(); // Native Escape reaches the same close event
+    assert.equal(focused, invoking);
+  }
+  viewStats.isConnected = false;
+  m.openStats("demo--1", viewStats); dialog.close();
+  assert.equal(focused, summary);
+  title.hidden = true;
+  m.openStats("demo--1", title); dialog.close();
+  assert.equal(focused, summary);
 });
 
 test("poller keeps one loop, pauses while hidden and keeps last data on failure", async () => {
@@ -234,6 +343,8 @@ test("a launched run counts as active before its child writes, and vanishes if t
     assert.equal(run.stage, "setup", "a reservation is in flight, so it counts against the cap");
     assert.equal(run.pid, child.pid);
     assert.equal(run.title, "Seven");
+    assert.deepEqual(run.stageHistory!.map(v => v.stage), ["queued", "setup"]);
+    assert.equal(run.historyComplete, true);
     child.kill();
     await once(child, "exit");
     assert.deepEqual(board.readRuns(), [], "an unstarted launch is forgotten, not stopped, so the next pass retries it");
@@ -243,6 +354,7 @@ test("a launched run counts as active before its child writes, and vanishes if t
     board.setStage("8", { stage: "setup", starting: undefined, pid: 2 ** 22 + 12345 });
     [run] = board.readRuns();
     assert.equal(run.stage, "stopped");
+    assert.equal(run.stageHistory!.at(-1)!.stage, "stopped");
   } finally {
     child.kill();
     process.chdir(cwd);

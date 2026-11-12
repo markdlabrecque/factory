@@ -1,1446 +1,330 @@
 <!doctype html>
-<!-- Throwaway design lab (#70): compares three animated Factory Board designs - A / Assembly (isometric assembly floor),
-     B / Orbital (orbital fabrication station) and C / Megastructure (vertical industrial cutaway) - on the
-     prototype/board-three-concepts branch only. Everything shown is SIMULATED fixture data (DEMO-241..DEMO-246) driven
-     by one deterministic demo clock; nothing is fetched, stored or read from the live Board. Pick a design with
-     ?variant=A|B|C or the bottom switcher (History API, back/forward, arrow keys). Pause/Resume stops all CSS motion
-     (animations via animation-play-state, in-flight transitions via the Web Animations API, #71) and progress; Restart restores the initial state; reduced motion starts paused. The production Board
-     (board.template.html, board.mts, board-server.mts) is unchanged and never loads this file. Not copied into projects,
-     not installed by Factory, not a supported Board design. B's capsules and dock labels sit in a flat layer above the 3D
-     scene, projected from anchors in the tilted plane, so rings never cut through their text (#71). B has a black and
-     chrome finish (#72): --chrome/--cap-chrome gradients on a polished black ground, with one hot red accent (--hot).
-     Each ring's top face strokes a local diagonal b-ring-chrome-<teeth>-2 gradient of reflected light bands (#73).
-     Preview: npm run prototype:board. -->
+<!-- Branch-only, throwaway Board prototype. One dot tracker per unfinished ticket;
+     centered connectors reach the current stage. Solid current dots have a soft halo, green for healthy states and red for bad states.
+     Each current dot emits a clock-driven sonar pulse; pause freezes it and reduced motion hides it.
+     Queue reasons suppress secondary docket capacity.
+     Shipped holds the ten latest completions; selectable tickets expose interval-based stats.
+     System/light/dark themes, one deterministic demo clock, no fetches or storage.
+     Direct implementation approved by the user, without Factory. The installed Board is unchanged. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Factory / Design lab</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Board / Ticket trackers</title>
 <style>
-  :root { --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-          --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-          --cond: "Arial Narrow", "Roboto Condensed", "Helvetica Neue", system-ui, sans-serif; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; }
-  body { font: 15px/1.45 var(--sans); min-height: 100vh; padding-bottom: 92px; overflow-x: hidden;
-         transition: background-color .4s, color .4s; }
-  body[data-variant="A"] { background: #07151b; color: #d9ece9; --focus: #7ff5df;
-    --fg: #d9ece9; --muted: #93b8b4; --acc: #6ff0d6; --on-acc: #03201b; --line: #26505a; --done-bg: #143a40;
-    --hold: #e7a93b; --bar-bg: #12303a; --lab-bg: rgba(5,16,21,.92); --lab-line: #1f3e46; --ctl-bg: #0d252d; }
-  body[data-variant="B"] { background: #050506; color: #e4e7ec; --focus: #f2f4f7;
-    --fg: #e4e7ec; --muted: #a2a8b2; --acc: #dde3eb; --acc2: #ff4a2e; --on-acc: #050506; --line: #3a3e45;
-    --done-bg: #24272c; --hold: #e3a83c; --bar-bg: #1d1f23; --lab-bg: rgba(8,8,10,.94); --lab-line: #2e3137;
-    --ctl-bg: #111215;
-    /* B / Orbital black and chrome finish (#72): polished black ground, chrome surfaces, one hot red accent */
-    --chrome: linear-gradient(180deg, #fbfcfd 0%, #c9ced6 34%, #6a7079 50%, #d3d8df 68%, #8d939c 100%);
-    --cap-chrome: linear-gradient(180deg, #fbfcfd 0%, #d9dde3 45%, #9ba1aa 52%, #dfe3e8 75%, #b3b9c1 100%);
-    --ink: #c3c8d0; --hot: #ff4a2e; }
-  body[data-variant="C"] { background: #0d0c0b; color: #f1e7d3; --focus: #ffb347;
-    --fg: #f1e7d3; --muted: #b9ab92; --acc: #ff7a1a; --on-acc: #1a0d00; --line: #3d352b; --done-bg: #2c2419;
-    --hold: #e0a63a; --bar-bg: #2a241d; --lab-bg: rgba(13,12,11,.93); --lab-line: #3a3128; --ctl-bg: #1b1814; }
-  .vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  button { font: inherit; color: inherit; cursor: pointer; }
-  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-  h1, h2, h3, h4 { margin: 0; }
-
-  /* One switch freezes every decorative animation: manual pause, hidden page, or reduced motion before opt-in. */
-  body.is-frozen *, body.is-frozen *::before, body.is-frozen *::after { animation-play-state: paused !important; }
-
-  /* ---------- Shared lab bar ---------- */
-  .lab { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
-         padding: 6px 16px; background: var(--lab-bg); border-bottom: 1px solid var(--lab-line);
-         -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-  .lab-name { font: 700 14px/1 var(--mono); letter-spacing: .06em; margin-right: 4px; }
-  .badge { font: 700 12px/1 var(--mono); letter-spacing: .08em; padding: 6px 8px; border: 1.5px solid currentColor;
-           border-radius: 4px; white-space: nowrap; }
-  .badge.sim { color: var(--hold); }
-  .lab-ctl { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .ctl { min-height: 40px; min-width: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--lab-line);
-         background: var(--ctl-bg); font-weight: 600; font-size: 14px; }
-  .ctl[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); border-color: var(--acc); }
-  .ctl.primary { border-color: var(--acc); }
-  .speed { display: inline-flex; gap: 2px; padding: 0; border: 0; margin: 0; }
-  .speed legend { float: left; font-size: 13px; color: var(--muted); padding: 0 6px 0 2px; align-self: center; line-height: 40px; }
-  .motion-note { margin: 0; font-size: 13px; color: var(--muted); flex: 1 1 220px; }
-  .motion-note.warn { color: var(--hold); font-weight: 600; }
-  .inspect { position: relative; }
-  .inspect summary { min-height: 40px; display: flex; align-items: center; padding: 0 12px; border-radius: 8px;
-                     border: 1px solid var(--lab-line); background: var(--ctl-bg); cursor: pointer; font-size: 14px; font-weight: 600; }
-  .inspect pre { position: absolute; right: 0; top: calc(100% + 6px); width: min(520px, 92vw); max-height: 62vh; overflow: auto;
-                 margin: 0; padding: 12px; font: 12px/1.45 var(--mono); background: var(--lab-bg); color: var(--fg);
-                 border: 1px solid var(--lab-line); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.35); white-space: pre-wrap; }
-
-  /* ---------- Floating design switcher (separate from every composition) ---------- */
-  .switcher { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 40; display: flex;
-              flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; padding: 6px;
-              border-radius: 14px; background: rgba(12,13,16,.94); color: #f3f3f3; border: 1px solid rgba(255,255,255,.22);
-              box-shadow: 0 12px 34px rgba(0,0,0,.4); max-width: calc(100vw - 16px); --focus: #9fd3ff; }
-  .switcher button { min-height: 40px; min-width: 40px; padding: 0 12px; border-radius: 9px; background: transparent;
-                     border: 1px solid rgba(255,255,255,.22); font-size: 14px; font-weight: 600; color: #f3f3f3; }
-  .switcher button[aria-pressed="true"] { background: #f3f3f3; color: #111; }
-  .switcher .sw-label { font: 700 12px/1 var(--mono); letter-spacing: .06em; opacity: .75; padding: 0 4px; }
-  .switcher .sw-index { font: 600 13px/1 var(--mono); padding: 0 6px; }
-  .sw-choices { display: flex; gap: 4px; }
-
-  /* ---------- Shared selected-ticket detail ---------- */
-  .detail { color: var(--fg); }
-  .d-kick { margin: 0; font: 600 12px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  .d-title { margin: 4px 0 6px; font-size: 1.22rem; line-height: 1.22; }
-  .d-id { display: block; font: 700 13px/1.3 var(--mono); color: var(--acc); letter-spacing: .04em; }
-  .d-status { margin: 0 0 10px; font-weight: 600; }
-  .d-status[data-status="blocked"] { color: var(--hold); }
-  .strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 4px; margin: 0 0 12px; padding: 0; list-style: none; }
-  .strip li { font: 600 12px/1.2 var(--sans); padding: 7px 4px; border-radius: 5px; border: 1px solid var(--line);
-              color: var(--muted); text-align: center; }
-  .strip .st-done { color: var(--fg); background: var(--done-bg); border-color: transparent; }
-  .strip .st-done::before { content: "\2713\00a0"; }
-  .strip .st-current { color: var(--on-acc); background: var(--acc); border-color: var(--acc); }
-  .strip .st-current.st-hold { background: var(--hold); border-color: var(--hold); color: #1b1200; }
-  .strip .st-current.st-hold::before { content: "Hold\00a0\00b7\00a0"; }
-  .d-prog { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-  .d-pct { font: 700 2rem/1 var(--mono); white-space: nowrap; }
-  .d-pct small { display: block; font: 600 11.5px/1.3 var(--sans); color: var(--muted); letter-spacing: .02em; }
-  .bar { height: 10px; border-radius: 5px; background: var(--bar-bg); overflow: hidden; flex: 1; }
-  .bar i { display: block; height: 100%; background: var(--acc); }
-  .d-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 0 0 10px; }
-  .d-facts div { border-left: 2px solid var(--line); padding-left: 8px; }
-  .d-facts dt { font-size: 12px; color: var(--muted); }
-  .d-facts dd { margin: 0; font: 600 15px/1.3 var(--mono); }
-  .detail h4 { font: 700 12px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
-  .d-act, .d-events { margin: 0; padding: 0; list-style: none; font-size: 14px; }
-  .d-act li { padding: 2px 0; }
-  .d-act li:first-child { font-weight: 600; }
-  .d-events li { display: flex; gap: 10px; padding: 2px 0; }
-  .d-events time { font: 600 12.5px/1.6 var(--mono); color: var(--muted); min-width: 64px; }
-
-  .v[hidden] { display: none !important; }
-  .hov { transition: filter .25s ease; }
-  .hov:hover { filter: brightness(1.18) drop-shadow(0 4px 6px rgba(0,0,0,.35)); }
-  svg [data-ticket] { cursor: pointer; }
-
-  /* ================= A / ASSEMBLY ================= */
-  .v-a { display: grid; grid-template-columns: 250px minmax(0, 1fr) 330px; gap: 0; min-height: calc(100vh - 140px);
-         background: radial-gradient(ellipse at 55% 40%, #0e2a33 0%, #07151b 70%); }
-  .a-rail { border-right: 1px solid #1d3b43; padding: 18px 16px; background: linear-gradient(180deg, #091c23, #06131a); min-width: 0; }
-  .a-mark { font: 900 34px/0.9 var(--sans); letter-spacing: .18em; color: #e9fbf7;
-            text-shadow: 0 0 18px rgba(111,240,214,.25); }
-  .a-mark-sub { margin: 6px 0 18px; font: 600 12px/1.3 var(--mono); color: #93b8b4; letter-spacing: .1em; text-transform: uppercase; }
-  .a-rail h2 { font: 700 12px/1.3 var(--mono); color: #93b8b4; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
-  .a-list { display: grid; gap: 6px; }
-  .a-item { text-align: left; display: grid; gap: 3px; width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 8px;
-            background: #0c242c; border: 1px solid #1f414a; border-left: 4px solid #2e5862; }
-  .a-item[data-status="active"] { border-left-color: #6ff0d6; }
-  .a-item[data-status="done"] { border-left-color: #4f8f86; opacity: .92; }
-  .a-item[data-status="blocked"] { border-left-color: #e7a93b; }
-  .a-item[aria-pressed="true"] { background: #123842; border-color: #6ff0d6; box-shadow: 0 0 0 1px #6ff0d6 inset; }
-  .a-item:hover { background: #11313a; }
-  .a-item-top { display: flex; justify-content: space-between; gap: 6px; font: 700 12.5px/1.3 var(--mono); }
-  .a-id { color: #6ff0d6; }
-  .a-st { color: #b7d3cf; font-weight: 600; }
-  .a-item[data-status="blocked"] .a-st { color: #f0b54d; }
-  .a-title { font-size: 14px; font-weight: 600; color: #e6f5f2; }
-  .a-meter { display: flex; align-items: center; gap: 8px; font: 600 12px/1 var(--mono); color: #a9c8c4; }
-  .a-meter .bar { height: 5px; }
-  .a-item[data-status="blocked"] .bar i { background: #e7a93b; }
-  .a-center { min-width: 0; display: flex; flex-direction: column; padding: 14px 18px 10px; }
-  .a-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px 20px; }
-  .a-head h1 { font: 800 30px/1.1 var(--sans); letter-spacing: -.01em; color: #f0fbf9; }
-  .a-head p { margin: 4px 0 0; color: #9dc0bb; font-size: 14px; max-width: 46ch; }
-  .a-counts { display: flex; gap: 8px; margin: 0; flex-wrap: wrap; }
-  .a-counts div { border: 1px solid #22454e; border-radius: 8px; padding: 5px 10px; background: rgba(9,30,37,.8); min-width: 76px; }
-  .a-counts dt { font: 600 11.5px/1.2 var(--mono); color: #93b8b4; text-transform: uppercase; letter-spacing: .06em; }
-  .a-counts dd { margin: 0; font: 700 20px/1.15 var(--mono); color: #eafffb; }
-  .a-counts .warn dd { color: #f0b54d; }
-  .a-counts .clock dd { color: #6ff0d6; }
-  .a-scene { position: relative; flex: 1; min-height: 0; margin-top: 6px; }
-  .a-tilt { transform: perspective(1600px) rotateX(calc(var(--py, 0) * -2.2deg)) rotateY(calc(var(--px, 0) * 3deg));
-            transform-origin: 50% 55%; transition: transform .6s ease-out; }
-  .a-scene svg { display: block; width: 100%; height: auto; max-height: calc(100vh - 250px); }
-  .a-ticker { display: flex; gap: 12px; align-items: center; border-top: 1px solid #1d3b43; padding-top: 8px; min-width: 0; }
-  .a-ticker h2 { font: 700 12px/1.2 var(--mono); color: #e7a93b; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
-  .a-ticker ol { display: flex; gap: 18px; margin: 0; padding: 0; list-style: none; overflow: hidden; font-size: 13px; color: #b5d2ce; white-space: nowrap; }
-  .a-ticker time { font-family: var(--mono); color: #6ff0d6; margin-right: 4px; }
-  .a-panel { border-left: 1px solid #1d3b43; padding: 18px 18px; background: linear-gradient(180deg, #0a1e25, #07161c); min-width: 0; }
-  .a-panel > h2 { font: 700 12px/1.3 var(--mono); color: #93b8b4; letter-spacing: .1em; text-transform: uppercase; }
-  .crate-stage { height: 130px; display: grid; place-items: center; perspective: 700px; margin: 6px 0 4px; }
-  .crate { position: relative; width: 84px; height: 84px; transform-style: preserve-3d; animation: crateSpin 22s linear infinite; }
-  .crate > div { position: absolute; inset: 0; display: grid; place-items: center; border: 2px solid #6ff0d6;
-                 background: linear-gradient(135deg, rgba(231,169,59,.95), rgba(160,104,25,.95));
-                 font: 800 12px/1.25 var(--mono); color: #1d1300; text-align: center; backface-visibility: visible; white-space: pre-line;
-                 box-shadow: inset 0 0 0 6px rgba(0,0,0,.12); }
-  .crate .cf { transform: translateZ(42px); } .crate .cb { transform: rotateY(180deg) translateZ(42px); }
-  .crate .cr { transform: rotateY(90deg) translateZ(42px); } .crate .cl { transform: rotateY(-90deg) translateZ(42px); }
-  .crate .ct { transform: rotateX(90deg) translateZ(42px); background: linear-gradient(135deg, #ffd27a, #e7a93b); }
-  .crate .cd { transform: rotateX(-90deg) translateZ(42px); background: #3b2a10; }
-  .crate[data-status="active"] > div { border-color: #6ff0d6; }
-  .crate[data-status="blocked"] > div { border-color: #f0b54d; filter: saturate(.6); }
-  .crate[data-status="done"] > div { background: linear-gradient(135deg, #5fc7b2, #2b7c6f); color: #021613; }
-  @keyframes crateSpin { from { transform: rotateX(-20deg) rotateY(0deg); } to { transform: rotateX(-20deg) rotateY(360deg); } }
-
-  /* A scene materials */
-  #a-svg polygon { stroke: rgba(140,225,214,.22); stroke-width: .8; stroke-linejoin: round; }
-  .m-floor .ft { fill: #0f2a33; } .m-floor .fl { fill: #0a1f26; } .m-floor .fr { fill: #06141a; }
-  .m-cab .ft { fill: #2a4d58; } .m-cab .fl { fill: #1a333c; } .m-cab .fr { fill: #12282f; }
-  .m-steel .ft { fill: #7899a1; } .m-steel .fl { fill: #4d6870; } .m-steel .fr { fill: #3a535a; }
-  .m-amber .ft { fill: #e7a93b; } .m-amber .fl { fill: #b67e23; } .m-amber .fr { fill: #8b5e17; }
-  .m-frame .ft { fill: #23383f; } .m-frame .fl { fill: #172a31; } .m-frame .fr { fill: #0f2026; }
-  .m-plat .ft { fill: #16343d; } .m-plat .fl { fill: #0f262d; } .m-plat .fr { fill: #0a1c22; }
-  .m-palbase .ft { fill: #5b4a2c; } .m-palbase .fl { fill: #3f3220; } .m-palbase .fr { fill: #2e2517; }
-  .m-crate .ft { fill: #f0b54d; } .m-crate .fl { fill: #c48a2b; } .m-crate .fr { fill: #976a1f; }
-  .pal[data-status="done"] .m-crate .ft { fill: #79dcc6; } .pal[data-status="done"] .m-crate .fl { fill: #4aa794; }
-  .pal[data-status="done"] .m-crate .fr { fill: #357d6f; }
-  .pal[data-status="queued"] .m-crate .ft { fill: #9fb3b7; } .pal[data-status="queued"] .m-crate .fl { fill: #73878b; }
-  .pal[data-status="queued"] .m-crate .fr { fill: #56686c; }
-  .pal[data-status="blocked"] .m-crate .ft { fill: #c7a15e; }
-  .pal { transition: transform 1s linear; }
-  .pal .sel-ring { fill: none; stroke: #7ff5df; stroke-width: 2.5; opacity: 0; }
-  .pal.is-sel .sel-ring { opacity: 1; }
-  .grid-l { stroke: #1b3d47; stroke-width: .8; }
-  .lane { stroke: #c9902f; stroke-width: 2; stroke-dasharray: 10 8; opacity: .7; }
-  .pipe { stroke: #315a63; stroke-width: 8; stroke-linecap: round; }
-  .pipe-hi { stroke: #8ccfcd; stroke-width: 1.6; opacity: .45; stroke-linecap: round; }
-  .support { stroke: #2b4a52; stroke-width: 3; }
-  .cable { fill: none; stroke: #0b1a1f; stroke-width: 3.2; stroke-linecap: round; }
-  .cable-hi { fill: none; stroke: #e7a93b; stroke-width: 1; opacity: .5; }
-  .belt { fill: #0a1316; }
-  .tread { stroke: #3a5a62; stroke-width: 2.2; }
-  .treads { animation: tread 1.1s linear infinite; }
-  @keyframes tread { from { transform: translate(0, 0); } to { transform: translate(13.86px, 8px); } }
-  .roller { fill: #20363d; stroke: #79a3a8; stroke-width: 1.2; }
-  .roller-x { stroke: #9cc7c7; stroke-width: 1.4; }
-  .spin { transform-box: fill-box; transform-origin: center; animation: spin 1.6s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .rail { stroke: #7fa2a8; stroke-width: 2; }
-  .rail-post { stroke: #5b7c82; stroke-width: 1.6; }
-  .grille-frame { fill: none; stroke: #5d8a91; stroke-width: 1.2; }
-  .screen { fill: #04161a; stroke: #2e6a70; }
-  .screen-bar { stroke: #6ff0d6; stroke-width: 2.2; opacity: .75; }
-  .vent { stroke: #0a171b; stroke-width: 2; }
-  .bolt { fill: #9cbfc2; }
-  .lamp { fill: #2c4a50; stroke: #0b181c; stroke-width: 1; }
-  .station.on .lamp { fill: #6ff0d6; animation: lampPulse 2.8s ease-in-out infinite; }
-  @keyframes lampPulse { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
-  .focus-ring { fill: none; stroke: #7ff5df; stroke-width: 2.5; opacity: 0; transition: opacity .3s; }
-  .station.is-focus .focus-ring, .zone.is-focus .focus-ring { opacity: 1; }
-  .a-lbl { font: 800 14px/1 var(--mono); fill: #e9fbf7; letter-spacing: .06em; }
-  .a-lbl-sub { font: 600 12px/1 var(--mono); fill: #93b8b4; }
-  .a-lbl-bg { fill: rgba(5,18,23,.82); stroke: #2b5660; }
-  .station.on .a-lbl-bg { stroke: #6ff0d6; }
-  .zone-hold .a-lbl { fill: #f0b54d; }
-  .haz { opacity: .9; }
-  .arm-foot { fill: #10252c; stroke: #3e636a; }
-  .arm-ped { fill: #2a4a53; stroke: #0b1a1f; }
-  .arm-cap { fill: #6c8f96; }
-  .arm-seg { fill: url(#a-armgrad); stroke: #5a3b0c; stroke-width: 1; }
-  .arm-hyd { stroke: #c7d9db; stroke-width: 2; }
-  .arm-joint { fill: #2a4a53; stroke: #9cc7c7; stroke-width: 1.4; }
-  .arm-bolt { fill: #e9fbf7; }
-  .arm-wrist { fill: #4d6870; }
-  .arm-claw { fill: #c7d9db; }
-  .arm-tip { fill: #7ff5df; }
-  .j { transform-box: view-box; transform-origin: 0 0; }
-  .j.sh { animation: armSh 4.8s ease-in-out infinite; animation-delay: var(--d, 0s); }
-  .j.el { animation: armEl 4.8s ease-in-out infinite; animation-delay: var(--d, 0s); }
-  .j.wr { animation: armWr 4.8s ease-in-out infinite; animation-delay: var(--d, 0s); }
-  @keyframes armSh { 0%, 100% { transform: rotate(-100deg); } 45%, 60% { transform: rotate(-80deg); } }
-  @keyframes armEl { 0%, 100% { transform: rotate(-150deg); } 45%, 60% { transform: rotate(-165deg); } }
-  @keyframes armWr { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(18deg); } }
-  .cl1 { animation: clawA 4.8s ease-in-out infinite; animation-delay: var(--d, 0s); }
-  .cl2 { animation: clawB 4.8s ease-in-out infinite; animation-delay: var(--d, 0s); }
-  @keyframes clawA { 0%, 100% { transform: translateY(-3px); } 50% { transform: translateY(0); } }
-  @keyframes clawB { 0%, 100% { transform: translateY(3px); } 50% { transform: translateY(0); } }
-  .sparks { opacity: 0; transition: opacity .4s; }
-  .a-scene .is-building .sparks { opacity: 1; }
-  .spark { fill: #ffd38a; animation: spark 1.8s ease-out infinite; }
-  @keyframes spark { 0% { transform: translate(0, 0); opacity: 0; } 12% { opacity: .95; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
-  .scanner { animation: scan 6s ease-in-out infinite alternate; }
-  @keyframes scan { from { transform: translate(0, 0); } to { transform: translate(69px, 40px); } }
-  .beam { fill: rgba(111,240,214,.16); stroke: rgba(111,240,214,.5); stroke-width: .8; }
-  .gate-door { animation: gate 9s ease-in-out infinite; }
-  @keyframes gate { 0%, 30% { transform: translateY(0); } 45%, 80% { transform: translateY(-34px); } 95%, 100% { transform: translateY(0); } }
-  .beacon { fill: #e7a93b; }
-  .is-delivering .beacon { animation: lampPulse 2.4s ease-in-out infinite; }
-  /* Idle machinery stays still: no build, scan or delivery work means no motion at that station. */
-  .a-floor:not(.is-building) .arm *, .a-floor:not(.is-verifying) .scanner,
-  .a-floor:not(.is-delivering) .gate-door, .a-floor:not(.is-moving) .treads,
-  .a-floor:not(.is-moving) .spin { animation-play-state: paused !important; }
-  .tag { transition: transform 1s linear; }
-  .tag rect { fill: rgba(5,19,24,.92); stroke: #3a6e77; stroke-width: 1.2; }
-  .tag line { stroke: #4f8a92; stroke-width: 1.2; }
-  .tg-id { font: 800 13px/1 var(--mono); fill: #eafffb; }
-  .tg-st { font: 700 11.5px/1 var(--mono); fill: #6ff0d6; }
-  .tag[data-status="blocked"] rect { stroke: #f0b54d; } .tag[data-status="blocked"] .tg-st { fill: #f0b54d; }
-  .tag[data-status="done"] .tg-st { fill: #8fd8c8; } .tag[data-status="queued"] .tg-st { fill: #b6c7ca; }
-  .tag.is-sel rect { fill: #6ff0d6; stroke: #e9fbf7; } .tag.is-sel .tg-id, .tag.is-sel .tg-st { fill: #03201b; }
-
-  /* ================= B / ORBITAL ================= */
-  .v-b { padding: 16px 22px 12px; background:
-           linear-gradient(90deg, rgba(220,226,234,.045) 1px, transparent 1px) 0 0 / 40px 40px,
-           linear-gradient(rgba(220,226,234,.045) 1px, transparent 1px) 0 0 / 40px 40px, radial-gradient(ellipse at 50% 35%, #15171a, #050506 70%); }
-  .b-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 30px; align-items: end;
-            border-bottom: 2px solid var(--ink); padding-bottom: 10px; }
-  .b-kick { margin: 0; font: 700 13px/1.2 var(--mono); letter-spacing: .22em; color: var(--hot); }
-  .b-head h1 { font: 300 clamp(28px, 3.2vw, 44px)/1.05 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: #e9ecf0;
-                background: var(--chrome); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-  .b-head h1 b { font-weight: 800; }
-  .b-head p { margin: 4px 0 0; color: #a2a8b2; font-size: 14px; }
-  .b-scale { height: 28px; width: min(380px, 40vw); align-self: end;
-             background: repeating-linear-gradient(90deg, var(--ink) 0 1px, transparent 1px 10px) bottom / 100% 10px no-repeat,
-                         repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 50px) bottom / 100% 22px no-repeat; opacity: .7; }
-  .b-scale-l { font: 600 12px/1 var(--mono); color: #a2a8b2; text-align: right; }
-  .b-main { display: grid; grid-template-columns: 250px minmax(0, 1fr) 250px; gap: 14px; align-items: center; margin-top: 8px; }
-  .b-man { display: grid; gap: 8px; min-width: 0; }
-  .b-man h2 { font: 700 12px/1.2 var(--mono); letter-spacing: .14em; color: #a2a8b2; text-transform: uppercase; }
-  .b-item { text-align: left; display: grid; gap: 4px; min-height: 44px; padding: 10px 12px; background: linear-gradient(180deg, #17191c, #0b0c0e);
-            border: 1px solid #2e3137; border-top: 3px solid #c9ced6; border-radius: 2px; box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
-  .b-item:hover { background: linear-gradient(180deg, #202328, #101114); box-shadow: 0 6px 16px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.1); }
-  .b-item[aria-pressed="true"] { border-top-color: var(--hot); box-shadow: 0 0 0 2px var(--hot); background: linear-gradient(180deg, #24272c, #121316); }
-  .b-item[data-status="blocked"] { border-top-color: #e3a83c; }
-  .b-item[data-status="done"] { border-top-color: #5d636c; }
-  .b-row { display: flex; justify-content: space-between; gap: 8px; font: 700 12.5px/1.2 var(--mono); }
-  .b-id { color: #eef1f5; letter-spacing: .04em; }
-  .b-st { color: #a2a8b2; }
-  .b-item[data-status="blocked"] .b-st { color: #e3a83c; }
-  .b-title { font-size: 14.5px; font-weight: 600; color: #e4e7ec; }
-  .b-meter { display: flex; gap: 8px; align-items: center; font: 600 12px/1 var(--mono); color: #a2a8b2; }
-  .b-meter .bar { height: 4px; border-radius: 0; }
-  .b-item[data-status="blocked"] .bar i { background: #e3a83c; }
-  .b-meter .bar i { background: var(--chrome); }
-
-  .orb { position: relative; aspect-ratio: 1.7 / 1; min-height: 320px; overflow-x: clip; }
-  .orb-flat { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  .orb-flat .ch { stroke: var(--ink); stroke-width: 1; opacity: .35; }
-  .orb-flat .traj { fill: none; stroke: var(--ink); stroke-width: 1.2; stroke-dasharray: 2 7; opacity: .45; }
-  .orb-flat .dim { stroke: var(--hot); stroke-width: 1.2; }
-  .orb-flat text { font: 600 14px/1 var(--mono); fill: #a2a8b2; }
-  .orb-flat .vm { fill: var(--hot); }
-  .orb-persp { position: absolute; inset: 0; perspective: 1500px; perspective-origin: 50% 15%; }
-  .orb-plane { position: absolute; left: 50%; top: 50%; width: min(68%, 92vh); aspect-ratio: 1; transform-style: preserve-3d;
-               transform: translate(-50%, -54%) rotateX(60deg); }
-  .orb-track { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .ring { position: absolute; transform-style: preserve-3d; border-radius: 50%; }
-  .ring > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .ring > svg:nth-child(2) { transform: translateZ(5px); }
-  .ring > svg:nth-child(3) { transform: translateZ(10px); }
-  .ring.r1 { inset: 2%; animation: spinZ 110s linear infinite; }
-  .ring.r2 { inset: 16%; animation: spinZr 70s linear infinite; }
-  .ring.r3 { inset: 31%; animation: spinZ 42s linear infinite; }
-  @keyframes spinZ { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-  @keyframes spinZr { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
-  .rb { fill: none; } .ring .l0 .rb { stroke: #2b2e33; } .ring .l1 .rb { stroke: #7d838c; } .ring .l2 .rb { stroke: #e3e7ec; }
-  .ring .tooth { stroke: var(--ink); stroke-width: .9; opacity: .55; }
-  .ring .sec { stroke: var(--hot); stroke-width: 1.6; }
-  .ring .clamp { fill: #f4f6f8; stroke: #050506; stroke-width: .8; }
-  .ring .edge { fill: none; stroke: var(--ink); stroke-width: .5; opacity: .55; }
-  .sweep { position: absolute; inset: 7%; border-radius: 50%; animation: spinZ 9s linear infinite;
-           background: conic-gradient(from 0deg, rgba(255,74,46,0) 0deg 300deg, rgba(255,74,46,.26) 356deg, rgba(255,74,46,0) 360deg); }
-  .orb:not(.is-verifying) .sweep { animation-play-state: paused !important; opacity: .35; }
-  .core { position: absolute; left: 50%; top: 50%; width: 26%; aspect-ratio: 1; transform: translate(-50%, -50%); transform-style: preserve-3d; }
-  .core > i { position: absolute; inset: var(--in); border-radius: 50%; transform: translateZ(var(--z));
-              background: radial-gradient(circle at 38% 30%, #ffffff, #cfd4db 30%, #4d525a 66%, #16181b 92%); border: 1px solid #000; }
-  .core > i.hot { background: radial-gradient(circle, #ffb199 0%, #ff4a2e 40%, #5c1206 100%); border-color: #2a0702; }
-  .core .vwrap { position: absolute; inset: 22%; transform: translateZ(44px); transform-style: preserve-3d; }
-  .core .vanes { width: 100%; height: 100%; animation: spinZ 14s linear infinite; }
-  .drone-orbit { position: absolute; inset: 0; transform-style: preserve-3d; animation: dArc 16s ease-in-out infinite alternate; }
-  .drone-orbit.d2 { animation-name: dArc2; animation-duration: 21s; }
-  @keyframes dArc { from { transform: rotate(200deg); } to { transform: rotate(320deg); } }
-  @keyframes dArcR { from { transform: rotate(-200deg); } to { transform: rotate(-320deg); } }
-  @keyframes dArc2 { from { transform: rotate(10deg); } to { transform: rotate(120deg); } }
-  @keyframes dArc2R { from { transform: rotate(-10deg); } to { transform: rotate(-120deg); } }
-  .drone-pos { position: absolute; left: 97%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
-  .drone-ctr { transform-style: preserve-3d; animation: dArcR 16s ease-in-out infinite alternate; }
-  .d2 .drone-ctr { animation-name: dArc2R; animation-duration: 21s; }
-  .drone { position: absolute; width: 34px; height: 14px; transform: translateZ(46px) translate(-50%, -50%) rotateX(-60deg);
-           background: #050506; border-radius: 3px; box-shadow: 0 0 0 1.5px #c3c8d0, 0 0 0 3px #050506; }
-  .drone::before, .drone::after { content: ""; position: absolute; top: -5px; width: 12px; height: 3px; background: var(--hot); border-radius: 2px; }
-  .drone::before { left: -4px; } .drone::after { right: -4px; }
-  /* Labels and capsules live in a flat layer above the 3D scene, so rings and core never cut through their text.
-     Zero-size anchors inside the tilted plane carry the 3D positions; placeB() projects them onto this layer. */
-  .orb-anchor { position: absolute; width: 0; height: 0; }
-  .orb-tags { position: absolute; inset: 0; pointer-events: none; }
-  .dock-l { position: absolute; transform: translate(calc(-50% + var(--dx) * 50%), calc(-50% + var(--dy) * 50%)); }
-  .dock-l span { display: block; white-space: nowrap; font: 700 12px/1 var(--mono); letter-spacing: .12em; color: #e4e7ec;
-                 background: rgba(5,5,6,.86); padding: 3px 5px; border: 1px solid rgba(195,200,208,.45); }
-  .dock-l.hold span { color: #e3a83c; border-color: #e3a83c; }
-  .cap { position: absolute; pointer-events: auto; transform: translate(-50%, -100%) translateY(calc(var(--stack, 0) * -38px));
-         transition: left 1s linear, top 1s linear; }
-  .cap.is-sel { z-index: 1; }
-  .orb.no-glide .cap { transition: none; }
-  .cap-body { display: grid; gap: 1px; padding: 5px 10px 6px; min-width: 92px; text-align: center; cursor: pointer;
-              background: var(--cap-chrome); border: 1.5px solid #050506;
-              border-radius: 16px; box-shadow: 0 0 0 1px #8d939c, 0 6px 10px rgba(0,0,0,.7); transition: transform .35s ease, box-shadow .35s; }
-  .cap-body:hover { transform: translateY(-4px); }
-  .cap-id { font: 800 12.5px/1.15 var(--mono); color: #050506; }
-  .cap-st { font: 700 11.5px/1.1 var(--mono); color: #1d2026; }
-  .cap-stem { width: 2px; height: 18px; margin: 0 auto; background: #c3c8d0; }
-  .cap[data-status="blocked"] .cap-body { border-color: #e3a83c; background: linear-gradient(180deg, #fff3da 0%, #f0cf8e 45%, #c4973f 52%, #f2d395 100%); }
-  .cap[data-status="blocked"] .cap-st { color: #2a1a00; }
-  .cap[data-status="done"] .cap-body { background: linear-gradient(180deg, #c3c8cf 0%, #a4aab3 45%, #9097a0 52%, #b7bcc4 100%); }
-  .cap[data-status="done"] .cap-st { color: #15171a; }
-  .cap.is-sel .cap-body { transform: translateY(-14px); border-color: var(--hot);
-                          box-shadow: 0 0 0 3px rgba(255,74,46,.45), 0 0 18px rgba(255,74,46,.35), 0 18px 18px rgba(0,0,0,.7);
-                          background: var(--cap-chrome); }
-  .cap.is-sel .cap-stem { height: 32px; background: var(--hot); }
-  .orb-arm .housing { fill: #050506; stroke: #c3c8d0; stroke-width: 1.2; } .orb-arm .seg { fill: url(#b-chrome); stroke: #050506; stroke-width: 1.2; }
-  .orb-arm .tip { fill: var(--hot); }
-  .tele1 { animation: tele1 8s ease-in-out infinite alternate; }
-  .tele2 { animation: tele2 8s ease-in-out infinite alternate; }
-  .tele3 { animation: tele3 8s ease-in-out infinite alternate; }
-  @keyframes tele1 { from { transform: translateX(0); } to { transform: translateX(-34px); } }
-  @keyframes tele2 { from { transform: translateX(0); } to { transform: translateX(-68px); } }
-  @keyframes tele3 { from { transform: translateX(0); } to { transform: translateX(-102px); } }
-  .orb:not(.is-delivering) .orb-arm g { animation-play-state: paused !important; }
-  .b-strip { display: flex; flex-wrap: wrap; gap: 0; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--ink); margin-top: 6px; }
-  .b-strip div { flex: 1 1 120px; padding: 6px 12px; border-right: 1px solid #2e3137; }
-  .b-strip dt { font: 700 11.5px/1.3 var(--mono); letter-spacing: .12em; color: #a2a8b2; text-transform: uppercase; }
-  .b-strip dd { margin: 0; font: 300 24px/1.1 var(--mono); color: #eef1f5; }
-  .b-strip .warn dd { color: #e3a83c; font-weight: 600; }
-  .b-lower { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 14px;
-             background: linear-gradient(180deg, #121316, #08090a); border: 1px solid #2e3137;
-             box-shadow: inset 0 1px 0 rgba(255,255,255,.07); padding: 16px 20px; }
-  .gauge { position: relative; width: 240px; aspect-ratio: 1; margin: 0 auto; }
-  .gauge svg { width: 100%; height: 100%; }
-  .gauge .seg { fill: #1d1f23; } .gauge .seg.on { fill: #dde3eb; } .gauge .seg.hold { fill: #e3a83c; }
-  .gauge .gring { fill: none; stroke: #6a7079; stroke-width: 1; }
-  .gauge-n { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
-  .gauge-n b { font: 300 52px/1 var(--mono); color: #eef1f5; }
-  .gauge-n span { font: 700 11.5px/1.3 var(--mono); letter-spacing: .12em; color: var(--hot); text-transform: uppercase; }
-  .gauge-n em { font: 600 12px/1.3 var(--mono); font-style: normal; color: #a2a8b2; }
-  .v-b .d-title { font-weight: 400; font-size: 1.5rem; }
-
-  /* ================= C / MEGASTRUCTURE ================= */
-  .v-c { padding: 14px 20px 12px; background: radial-gradient(ellipse at 40% 30%, #1d1712 0%, #0d0c0b 65%); }
-  .c-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 24px;
-            border-bottom: 1px solid #3a3128; padding-bottom: 8px; }
-  .c-kick { margin: 0; font: 700 13px/1.2 var(--mono); letter-spacing: .2em; color: #ff7a1a; }
-  .c-head h1 { font: 900 clamp(40px, 5.4vw, 76px)/.88 var(--cond); font-stretch: condensed; text-transform: uppercase;
-               letter-spacing: -.01em; color: #f1e7d3; }
-  .c-stats { display: flex; gap: 22px; margin: 0; flex-wrap: wrap; }
-  .c-stats dt { font: 700 11.5px/1.2 var(--mono); letter-spacing: .14em; color: #b9ab92; text-transform: uppercase; }
-  .c-stats dd { margin: 0; font: 900 44px/1 var(--cond); font-stretch: condensed; color: #f1e7d3; }
-  .c-stats .warn dd { color: #e0a63a; } .c-stats .hot dd { color: #ff7a1a; }
-  .c-grid { display: grid; grid-template-columns: 150px minmax(380px, 1.05fr) minmax(0, 1fr); gap: 16px; margin-top: 10px; align-items: start; }
-  .c-spine h2, .c-side h2 { font: 700 12px/1.2 var(--mono); letter-spacing: .14em; color: #b9ab92; text-transform: uppercase; margin-bottom: 8px; }
-  .c-spine ol { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 4px solid #3a3128; display: grid; gap: 4px; }
-  .c-spine li { position: relative; padding: 8px 6px; color: #8d8170; }
-  .c-spine li::before { content: ""; position: absolute; left: -23px; top: 13px; width: 14px; height: 14px; border-radius: 50%;
-                        background: #0d0c0b; border: 3px solid #3a3128; }
-  .c-spine b { display: block; font: 900 30px/1 var(--cond); font-stretch: condensed; }
-  .c-spine span { font: 700 12.5px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
-  .c-spine li.st-done { color: #d8c7a6; } .c-spine li.st-done::before { background: #b08a4a; border-color: #b08a4a; }
-  .c-spine li.st-current { color: #ff9a4d; } .c-spine li.st-current::before { background: #ff7a1a; border-color: #ffc38f; box-shadow: 0 0 12px #ff7a1a; }
-  .c-spine li.st-current.st-hold { color: #e0a63a; } .c-spine li.st-current.st-hold::before { background: #e0a63a; box-shadow: none; border-color: #e0a63a; }
-  .c-spine p { font-size: 13px; color: #b9ab92; margin: 8px 0 0; }
-  .c-tower { min-width: 0; }
-  .c-tower-inner { position: relative; container-type: inline-size; --u: calc(100cqw / 700); max-width: 620px; margin: 0 auto; }
-  .c-tower svg { display: block; width: 100%; height: auto; }
-  #c-svg .floor-top { fill: #2a231b; } #c-svg .floor-front { fill: url(#c-slab); } #c-svg .floor-edge { stroke: #b08a4a; stroke-width: 1.4; }
-  #c-svg .backwall { fill: #15120f; } #c-svg .side { fill: #1d1814; } #c-svg .side.r { fill: #120f0c; }
-  #c-svg .brace { stroke: #4a3e30; stroke-width: 2; } #c-svg .col { fill: #2b241c; stroke: #5a4a36; }
-  #c-svg .win { fill: #2a2017; } #c-svg .win.lit { fill: #ffb062; opacity: .55; }
-  #c-svg .bignum { font: 900 58px/1 var(--cond); font-stretch: condensed; fill: #b08a4a; opacity: .92; }
-  #c-svg .bayname { font: 700 12.5px/1 var(--mono); fill: #d8c7a6; letter-spacing: .1em; }
-  #c-svg .belt { fill: #0b0a09; stroke: #4a3e30; }
-  #c-svg .belt-t { stroke: #6d5a40; stroke-width: 3; stroke-dasharray: 7 7; animation: beltC .9s linear infinite; }
-  @keyframes beltC { to { stroke-dashoffset: -14; } }
-  #c-svg .roll { fill: #2b241c; stroke: #b08a4a; stroke-width: 1.2; }
-  #c-svg .steel { fill: #3a3128; stroke: #6d5a40; stroke-width: 1; }
-  #c-svg .steel-hi { fill: #5a4a36; }
-  #c-svg .brass { fill: #b08a4a; }
-  #c-svg .hot { fill: #ff7a1a; }
-  #c-svg .press { animation: press 2.6s cubic-bezier(.6,0,.3,1) infinite; }
-  @keyframes press { 0%, 100% { transform: translateY(0); } 40%, 55% { transform: translateY(16px); } }
-  #c-svg .cage { fill: none; stroke: #8a7457; stroke-width: 1.6; }
-  #c-svg .cage-bar { stroke: #6d5a40; stroke-width: 1.4; }
-  #c-svg .scanbar { fill: #ffb062; opacity: .85; animation: scanC 3.4s ease-in-out infinite alternate; }
-  #c-svg .scanglow { fill: rgba(255,176,98,.16); animation: scanC 3.4s ease-in-out infinite alternate; }
-  @keyframes scanC { from { transform: translateX(0); } to { transform: translateX(132px); } }
-  #c-svg .door-l { animation: doorL 8s ease-in-out infinite; } #c-svg .door-r { animation: doorR 8s ease-in-out infinite; }
-  @keyframes doorL { 0%, 30% { transform: translateX(0); } 45%, 80% { transform: translateX(-26px); } 95%, 100% { transform: translateX(0); } }
-  @keyframes doorR { 0%, 30% { transform: translateX(0); } 45%, 80% { transform: translateX(26px); } 95%, 100% { transform: translateX(0); } }
-  #c-svg .hatch-in { fill: #ff7a1a; opacity: .35; }
-  #c-svg .holdzone { fill: url(#c-haz); opacity: .45; }
-  #c-svg .holdsign { fill: #1b1408; stroke: #e0a63a; stroke-width: 1.6; }
-  #c-svg .holdtext { font: 800 13px/1 var(--mono); fill: #e0a63a; letter-spacing: .08em; }
-  #c-svg .trolley { animation: trolley 20s ease-in-out infinite alternate; }
-  @keyframes trolley { from { transform: translateX(0); } to { transform: translateX(330px); } }
-  #c-svg .gear { transform-box: fill-box; transform-origin: center; animation: spin 9s linear infinite; }
-  #c-svg .gear.rev { animation: spinR 5.4s linear infinite; }
-  @keyframes spinR { to { transform: rotate(-360deg); } }
-  #c-svg .fan { transform-box: fill-box; transform-origin: center; animation: spin 7s linear infinite; }
-  #c-svg .duct { fill: #2b241c; stroke: #5a4a36; }
-  #c-svg .conduit { fill: none; stroke: #3a3128; stroke-width: 5; stroke-linejoin: round; }
-  #c-svg .conduit-lit { fill: none; stroke: #ffa040; stroke-width: 3; stroke-linejoin: round; stroke-dasharray: 100 100;
-                        transition: stroke-dashoffset 1s linear; filter: drop-shadow(0 0 4px #ff7a1a); }
-  #c-svg .shaft { fill: #110f0d; stroke: #4a3e30; }
-  #c-svg .cable { stroke: #8a7457; stroke-width: 1.4; }
-  #c-svg .rail { stroke: #6d5a40; stroke-width: 2; }
-  #c-svg .slab { transition: transform 1s linear; }
-  #c-svg .slab .sf { fill: #3a2f22; stroke: #b08a4a; stroke-width: 1.4; }
-  #c-svg .slab .st { fill: #5a4a36; }
-  #c-svg .slab text { font: 800 14px/1 var(--mono); fill: #f1e7d3; }
-  #c-svg .slab .sp { font: 700 11.5px/1 var(--mono); fill: #ffb062; }
-  #c-svg .slab[data-status="blocked"] .sf { stroke: #e0a63a; fill: #2d2310; } #c-svg .slab[data-status="blocked"] .sp { fill: #e0a63a; }
-  #c-svg .slab[data-status="done"] .sf { fill: #2c2a22; stroke: #8d8170; } #c-svg .slab[data-status="done"] .sp { fill: #d8c7a6; }
-  #c-svg .slab.is-sel .sf { fill: #ff7a1a; stroke: #ffe1c2; } #c-svg .slab.is-sel text { fill: #1a0d00; }
-  #c-svg .bay.is-focus .bayname { fill: #ff9a4d; }
-  #c-svg .bay.is-focus .bignum { fill: #ff7a1a; }
-  #c-svg .bay-lamp { fill: #3a3128; } #c-svg .bay.on .bay-lamp { fill: #ffb062; filter: drop-shadow(0 0 5px #ff7a1a); }
-  #c-svg .bay.idle .press, #c-svg .bay.idle .scanbar, #c-svg .bay.idle .scanglow, #c-svg .bay.idle .door-l,
-  #c-svg .bay.idle .door-r, #c-svg .bay.idle .belt-t { animation-play-state: paused !important; }
-  .lift { position: absolute; left: calc(var(--u) * 19); width: calc(var(--u) * 58); height: calc(var(--u) * 54);
-          perspective: 600px; transition: top 1.6s cubic-bezier(.5,0,.3,1); pointer-events: none; }
-  .lift-box { position: absolute; inset: 0; transform-style: preserve-3d; transform: rotateX(-14deg) rotateY(26deg); }
-  .lift-box > div { position: absolute; display: grid; place-items: center; border: 1.5px solid #ffb062;
-                    background: linear-gradient(180deg, #4a3b28, #2a2017); font: 800 calc(var(--u) * 10.5)/1 var(--mono); color: #ffd7ac; }
-  .lift-box .f, .lift-box .b { width: calc(var(--u) * 58); height: calc(var(--u) * 54); }
-  .lift-box .f { transform: translateZ(calc(var(--u) * 18)); background: linear-gradient(180deg, #6b5235, #3a2c1c);
-                 box-shadow: inset 0 0 0 calc(var(--u) * 4) rgba(0,0,0,.25); }
-  .lift-box .b { transform: rotateY(180deg) translateZ(calc(var(--u) * 18)); }
-  .lift-box .l, .lift-box .r { width: calc(var(--u) * 36); height: calc(var(--u) * 54); left: calc(var(--u) * 11); }
-  .lift-box .r { transform: rotateY(90deg) translateZ(calc(var(--u) * 29)); background: #241b12; }
-  .lift-box .l { transform: rotateY(-90deg) translateZ(calc(var(--u) * 29)); }
-  .lift-box .t, .lift-box .d { width: calc(var(--u) * 58); height: calc(var(--u) * 36); top: calc(var(--u) * 9); }
-  .lift-box .t { transform: rotateX(90deg) translateZ(calc(var(--u) * 27)); background: #7a5f3e; }
-  .lift-box .d { transform: rotateX(-90deg) translateZ(calc(var(--u) * 27)); }
-  .c-side { min-width: 0; display: grid; gap: 14px; }
-  .c-rows { display: grid; gap: 6px; }
-  .c-item { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; text-align: left;
-            min-height: 48px; padding: 7px 12px; background: linear-gradient(90deg, #1b1611, #141210); border: 1px solid #3a3128;
-            border-left: 5px solid #5a4a36; border-radius: 3px; }
-  .c-item:hover { background: #231c15; }
-  .c-item[aria-pressed="true"] { border-color: #ff7a1a; box-shadow: 0 0 0 1px #ff7a1a inset; background: #2a1d10; }
-  .c-item[data-status="active"] { border-left-color: #ff7a1a; } .c-item[data-status="blocked"] { border-left-color: #e0a63a; }
-  .c-item[data-status="done"] { border-left-color: #8d8170; }
-  .c-fl { grid-row: span 2; font: 900 32px/1 var(--cond); font-stretch: condensed; color: #b08a4a; }
-  .c-item[data-status="active"] .c-fl { color: #ff9a4d; }
-  .c-t { font-size: 14.5px; font-weight: 700; color: #f1e7d3; min-width: 0; }
-  .c-id { font: 700 12.5px/1.2 var(--mono); color: #ffb062; margin-right: 6px; }
-  .c-st { font: 700 12.5px/1.2 var(--mono); color: #d8c7a6; text-transform: uppercase; letter-spacing: .04em; }
-  .c-item[data-status="blocked"] .c-st { color: #e0a63a; }
-  .c-pct { grid-row: span 2; font: 900 28px/1 var(--cond); font-stretch: condensed; color: #f1e7d3; }
-  .c-strow { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .c-item .bar { height: 4px; border-radius: 0; }
-  .c-item[data-status="blocked"] .bar i { background: #e0a63a; }
-  .c-console { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 16px; padding: 14px; border: 1px solid #3a3128;
-               background: linear-gradient(180deg, #171310, #0f0d0b); border-top: 3px solid #ff7a1a; }
-  .meter { display: grid; justify-items: center; gap: 6px; }
-  .meter-t { font: 900 30px/1 var(--cond); font-stretch: condensed; color: #ffb062; }
-  .meter-l { font: 700 11.5px/1.2 var(--mono); color: #b9ab92; text-align: center; letter-spacing: .06em; text-transform: uppercase; }
-  .meter-tube { position: relative; width: 34px; height: 210px; background: #0b0a09; border: 2px solid #5a4a36; border-radius: 4px; overflow: hidden; }
-  .meter-tube i { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(0deg, #ff7a1a, #ffb062); transition: height 1s linear; }
-  .meter-tube[data-status="blocked"] i { background: #e0a63a; }
-  .meter-tube b { position: absolute; left: 0; right: 0; height: 2px; background: #f1e7d3; opacity: .8; }
-
-  /* ---------- Responsive ---------- */
-  @media (max-width: 1180px) {
-    .v-a { grid-template-columns: 220px minmax(0, 1fr); }
-    .a-panel { grid-column: 1 / -1; border-left: 0; border-top: 1px solid #1d3b43; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; }
-    .a-panel > h2 { grid-column: 1 / -1; }
-    .b-main { grid-template-columns: 210px minmax(0, 1fr) 210px; }
-    .c-grid { grid-template-columns: 120px minmax(0, 1fr); }
-    .c-side { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  }
-  @media (max-width: 820px) {
-    body { padding-bottom: 150px; }
-    .v-a, .c-grid, .b-main, .b-lower, .c-side { grid-template-columns: minmax(0, 1fr); }
-    .a-rail { border-right: 0; border-bottom: 1px solid #1d3b43; }
-    .a-panel { grid-template-columns: minmax(0, 1fr); }
-    .a-scene, .c-tower { overflow-x: auto; }
-    .a-scene svg { min-width: 600px; max-height: none; }
-    .c-tower-inner { min-width: 480px; }
-    .a-ticker ol { flex-direction: column; gap: 4px; white-space: normal; }
-    .a-ticker { flex-direction: column; align-items: flex-start; }
-    .b-main .orb { order: -1; aspect-ratio: 1 / 1.05; }
-    .orb-plane { width: 94%; }
-    .b-head { grid-template-columns: minmax(0, 1fr); }
-    .b-scale { width: 100%; }
-    .c-spine ol { grid-template-columns: repeat(3, minmax(0, 1fr)); border-left: 0; padding: 0; }
-    .c-spine li::before { display: none; }
-    .c-spine li { border-top: 3px solid #3a3128; }
-    .c-spine li.st-done { border-top-color: #b08a4a; } .c-spine li.st-current { border-top-color: #ff7a1a; }
-    .sw-name { display: none; }
-    .switcher { width: calc(100vw - 16px); }
-  }
-  @media (max-width: 480px) {
-    .v-a .a-center, .v-b, .v-c { padding-left: 12px; padding-right: 12px; }
-    .lab { padding: 6px 10px; }
-    .c-console { grid-template-columns: 72px minmax(0, 1fr); padding: 10px; }
-    .a-head h1 { font-size: 26px; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .a-tilt { transform: none !important; transition: none; }
-    .pal, .tag, .cap, #c-svg .slab, .lift, .meter-tube i, #c-svg .conduit-lit { transition-duration: .01s !important; }
-  }
+:root { color-scheme:dark; --bg:#0a111c; --panel:#101c2c; --raised:#152236; --ink:#e5eefb; --muted:#a4b6cd; --edge:#3c506a; --track:#637b98; --accent:#5ae2da; --good:#64e89b; --bad:#ff7c86; --warn:#ffcf80; --shadow:0 24px 80px #0006; font:14px/1.5 system-ui,sans-serif; }
+:root[data-theme="light"] { color-scheme:light; --bg:#edf2f8; --panel:#fff; --raised:#e5edf6; --ink:#15263d; --muted:#495e77; --edge:#a8b8cb; --track:#6d8098; --accent:#006e6a; --good:#14783e; --bad:#ba2538; --warn:#825000; --shadow:0 24px 80px #182b4426; }
+*,::before,::after { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); }
+button,select,input { font:inherit; color:inherit; }
+button,select { border:1px solid var(--edge); background:var(--panel); border-radius:5px; padding:7px 11px; }
+button,summary,select { cursor:pointer; }
+button:hover,select:hover { border-color:var(--accent); }
+:focus-visible { outline:3px solid var(--accent); outline-offset:4px; }
+button:disabled { opacity:.6; cursor:default; }
+.mono { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-variant-numeric:tabular-nums; }
+.muted { color:var(--muted); }
+header { border-bottom:1px solid var(--edge); padding:22px max(24px,calc((100vw - 1240px)/2)); background:var(--panel); }
+.topline,.toolbar,.section-head,.ticket-top,.ticket-foot,.dialog-top { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.brand { display:flex; align-items:center; gap:12px; }
+.brand-mark { color:var(--accent); font:26px ui-monospace,monospace; }
+h1 { font:700 20px ui-monospace,monospace; letter-spacing:3px; margin:0; }
+.subtitle { color:var(--muted); font-size:12px; margin:3px 0 0; }
+.appearance { display:flex; align-items:center; gap:8px; font-size:12px; }
+main { max-width:1240px; margin:auto; padding:24px; }
+.overview { display:flex; align-items:center; flex-wrap:wrap; gap:12px 32px; margin-bottom:20px; }
+.overview div { display:flex; align-items:baseline; gap:8px; }
+.overview b { font:600 26px ui-monospace,monospace; }
+.overview span { color:var(--muted); font-size:12px; }
+.toolbar { border:1px solid var(--edge); border-radius:6px; background:var(--panel); padding:12px 14px; margin-bottom:24px; }
+.demo-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.demo-label { color:var(--accent); font:600 11px ui-monospace,monospace; letter-spacing:1px; }
+.clock { min-width:92px; font-size:12px; }
+.playback-status { font-size:12px; color:var(--muted); }
+.scrubber { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; }
+.scrubber input { width:150px; accent-color:var(--accent); }
+h2 { font-size:14px; margin:0; font-weight:650; }
+.section-head { margin:22px 0 10px; }
+.section-head span { color:var(--muted); font-size:12px; }
+.ticket-list { display:grid; gap:10px; }
+.ticket { width:100%; text-align:left; padding:16px 20px 12px; background:var(--panel); border:1px solid var(--edge); border-radius:6px; }
+.ticket[aria-pressed="true"] { border-color:var(--accent); }
+.ticket[data-status="blocked"] { border-left:3px solid var(--warn); padding-left:18px; }
+.ticket-id { color:var(--accent); font:600 12px ui-monospace,monospace; }
+.ticket-title { font-weight:600; font-size:15px; margin-left:12px; }
+.status { border:1px solid var(--edge); border-radius:4px; padding:2px 8px; font:11px ui-monospace,monospace; white-space:nowrap; }
+.ticket[data-status="blocked"] .status,.ticket[data-status="queued"] .status { color:var(--warn); }
+.track { --dot-size:10px; --dot-top:3px; --line-size:2px; display:flex; list-style:none; padding:0; margin:16px 0 10px; }
+.step { flex:1; min-width:0; position:relative; text-align:center; color:var(--muted); font:11px ui-monospace,monospace; }
+/* Shared border-box geometry keeps the connector on the dot's vertical center. */
+.step:before { content:''; position:relative; z-index:1; display:block; width:var(--dot-size); height:var(--dot-size); border:2px solid var(--track); background:var(--panel); border-radius:50%; margin:var(--dot-top) auto 8px; }
+.step:not(:last-child):after { content:''; position:absolute; top:calc(var(--dot-top) + (var(--dot-size) - var(--line-size)) / 2); left:calc(50% + var(--dot-size) / 2); width:calc(100% - var(--dot-size)); height:var(--line-size); background:var(--track); }
+.step.complete:before { background:var(--accent); border-color:var(--accent); }
+.step.connected:after { background:var(--accent); }
+.step.current:before { background:var(--stage-state,var(--good)); border-color:var(--stage-state,var(--good)); box-shadow:0 0 10px color-mix(in srgb,var(--stage-state,var(--good)) 45%,transparent),0 0 22px color-mix(in srgb,var(--stage-state,var(--good)) 20%,transparent); }
+.step.current { color:var(--ink); font-weight:700; }
+.sonar { position:absolute; z-index:2; pointer-events:none; left:50%; top:calc(var(--dot-top) + var(--dot-size) / 2); width:var(--dot-size); height:var(--dot-size); border:1px solid var(--stage-state,var(--good)); border-radius:50%; transform:translate(-50%,-50%) scale(var(--sonar-scale,0)); opacity:var(--sonar-opacity,0); }
+@media(prefers-reduced-motion:reduce) { .sonar { display:none; } }
+.ticket:is([data-status="blocked"],[data-status="jammed"],[data-status="failed"],[data-status="stopped"],[data-status="error"]) { --stage-state:var(--bad); }
+.ticket-foot { color:var(--muted); font-size:12px; }
+.reason-list { list-style:none; padding:0; margin:10px 0; color:var(--warn); font-size:12px; }
+.reason-list li:before { content:'↳ '; }
+.empty { color:var(--muted); border:1px dashed var(--edge); border-radius:6px; padding:20px; font-size:13px; }
+#shipped { margin-top:28px; padding-top:18px; border-top:1px solid var(--edge); }
+#shipped summary { font-size:14px; font-weight:650; padding:3px 0 12px; }
+#shipped summary span { font-weight:400; font-size:12px; color:var(--muted); margin-left:8px; }
+#shipped .ticket { padding:12px 18px; }
+#shipped .ticket-foot { margin-top:6px; }
+footer { color:var(--muted); font-size:12px; margin-top:26px; border-top:1px solid var(--edge); padding-top:14px; }
+dialog { color:var(--ink); background:var(--panel); border:1px solid var(--edge); border-radius:8px 0 0 8px; width:min(540px,100%); max-width:100%; max-height:100dvh; height:100dvh; margin:0 0 0 auto; padding:24px; box-shadow:var(--shadow); }
+dialog::backdrop { background:#02071290; }
+.dialog-top { position:sticky; top:-24px; padding:12px 0; background:var(--panel); z-index:2; }
+#detail-title { font:600 16px ui-monospace,monospace; }
+#detail-body h3 { font-size:14px; margin:22px 0 10px; }
+#detail-body h3:first-child { font-size:19px; margin-top:14px; }
+.metrics { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:18px 0; }
+.metric { border:1px solid var(--edge); border-radius:4px; padding:12px; }
+.metric span { color:var(--muted); font-size:12px; }
+.metric b { display:block; font:600 23px ui-monospace,monospace; margin-top:3px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { font-size:11px; text-align:left; color:var(--muted); font-weight:500; }
+th,td { border-bottom:1px solid var(--edge); padding:8px 0; }
+th:last-child,td:last-child { text-align:right; }
+.history { list-style:none; padding:0; margin:0; }
+.history li { padding:8px 0; border-bottom:1px solid var(--edge); font-size:13px; }
+.history small { display:block; color:var(--muted); margin-top:2px; }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media(min-width:950px) { .ticket-list:not(#shipped-list) .ticket { display:grid; grid-template-columns:minmax(280px,1fr) minmax(350px,1.4fr); gap:0 30px; align-items:center; } .ticket-list:not(#shipped-list) .ticket-top { display:block; } .ticket-list:not(#shipped-list) .status { display:table; margin-top:7px; } .ticket-list:not(#shipped-list) .track { grid-column:2; grid-row:1 / span 2; margin:8px 0; } .ticket-list:not(#shipped-list) .ticket-foot { grid-column:1 / -1; margin-top:8px; } .ticket-list:not(#shipped-list) .reason-list { grid-column:1; } }
+@media(max-width:600px) { header { padding:18px 16px; } main { padding:18px 12px; } .ticket { padding:14px 10px 12px; } .ticket[data-status="blocked"] { padding-left:8px; } .ticket-title { display:block; margin:4px 0 0; font-size:14px; } .ticket-top { align-items:flex-start; gap:6px; } .step { font-size:9px; } .toolbar { padding:10px; } .scrubber { width:100%; } .scrubber input { flex:1; } .overview { gap:10px 20px; } .overview b { font-size:22px; } dialog { border-radius:0; padding:18px; } .dialog-top { top:-18px; } }
 </style>
 </head>
-<body data-variant="A">
-<header class="lab" aria-label="Design lab controls">
-  <span class="lab-name">Factory / Design lab</span>
-  <span class="badge">DESIGN PROTOTYPE</span>
-  <span class="badge sim">SIMULATED DATA</span>
-  <div class="lab-ctl">
-    <button type="button" class="ctl primary" id="btn-pause">Pause demo</button>
-    <button type="button" class="ctl" id="btn-restart">Restart demo</button>
-    <fieldset class="speed"><legend>Speed</legend>
-      <button type="button" class="ctl" data-speed="1" aria-pressed="true">1x</button>
-      <button type="button" class="ctl" data-speed="2" aria-pressed="false">2x</button>
-    </fieldset>
-  </div>
-  <p class="motion-note" id="motion-note" role="status"></p>
-  <details class="inspect"><summary>Demo state</summary><pre id="state-pre" tabindex="0" aria-label="Current simulation record"></pre></details>
-</header>
-<noscript><p style="padding:16px">This design prototype needs JavaScript to run its simulated demo.</p></noscript>
-
-<main id="lab-main">
-  <!-- ===== A / Assembly ===== -->
-  <section id="v-A" class="v v-a" aria-labelledby="a-h1">
-    <aside class="a-rail">
-      <div class="a-mark" aria-hidden="true">FACTORY</div>
-      <p class="a-mark-sub">Line 1 &middot; demo shift</p>
-      <h2>Active tickets</h2>
-      <div class="a-list ticket-list" role="group" aria-label="Demo tickets" data-kind="a"></div>
-    </aside>
-    <div class="a-center">
-      <div class="a-head">
-        <div><h1 id="a-h1">The assembly floor</h1>
-          <p>Tickets ride one line through build, verify and deliver stations. Every figure on this floor is simulated.</p></div>
-        <dl class="a-counts">
-          <div><dt>Active</dt><dd data-count="active">0</dd></div>
-          <div><dt>Queued</dt><dd data-count="queued">0</dd></div>
-          <div class="warn"><dt>Attention</dt><dd data-count="attention">0</dd></div>
-          <div class="clock"><dt>Demo shift clock</dt><dd data-bind="clock">T+00:00</dd></div>
-        </dl>
-      </div>
-      <div class="a-scene" id="a-scene"><div class="a-tilt" id="a-tilt"></div></div>
-      <div class="a-ticker"><h2>Simulated activity</h2><ol id="a-feed"></ol></div>
-    </div>
-    <aside class="a-panel" aria-label="Selected ticket inspection">
-      <h2>Inspection bay</h2>
-      <div class="crate-stage" aria-hidden="true"><div class="crate" id="a-crate">
-        <div class="cf"></div><div class="cb"></div><div class="cr"></div><div class="cl"></div><div class="ct"></div><div class="cd"></div></div></div>
-      <div class="detail" id="a-detail"></div>
-    </aside>
-  </section>
-
-  <!-- ===== B / Orbital ===== -->
-  <section id="v-B" class="v v-b" aria-labelledby="b-h1" hidden>
-    <header class="b-head">
-      <div><p class="b-kick">FACTORY / ORBITAL SYSTEMS</p>
-        <h1 id="b-h1">Orbital <b>fabrication</b> station</h1>
-        <p>Ticket capsules dock, build, verify and depart around one rotating yard. Simulated data, illustrative scale.</p></div>
-      <div><div class="b-scale" aria-hidden="true"></div><p class="b-scale-l">SCALE 0&ndash;40 M &middot; NOT TO SCALE</p></div>
-    </header>
-    <div class="b-main">
-      <div class="b-man"><h2>Manifest &middot; port</h2><div class="ticket-list" role="group" aria-label="Ticket manifests, port side" data-kind="b" data-range="0,3"></div></div>
-      <div class="orb" id="orb"></div>
-      <div class="b-man"><h2>Manifest &middot; starboard</h2><div class="ticket-list" role="group" aria-label="Ticket manifests, starboard side" data-kind="b" data-range="3,6"></div></div>
-    </div>
-    <dl class="b-strip">
-      <div><dt>Active</dt><dd data-count="active">0</dd></div>
-      <div><dt>Queued</dt><dd data-count="queued">0</dd></div>
-      <div class="warn"><dt>On hold</dt><dd data-count="attention">0</dd></div>
-      <div><dt>Delivered</dt><dd data-count="done">0</dd></div>
-      <div><dt>Demo clock</dt><dd data-bind="clock">T+00:00</dd></div>
-      <div><dt>Demo loop</dt><dd data-bind="loop">1</dd></div>
-    </dl>
-    <section class="b-lower" aria-label="Selected capsule manifest">
-      <div class="gauge" id="b-gauge"></div>
-      <div class="detail" id="b-detail"></div>
-    </section>
-  </section>
-
-  <!-- ===== C / Megastructure ===== -->
-  <section id="v-C" class="v v-c" aria-labelledby="c-h1" hidden>
-    <header class="c-head">
-      <div><p class="c-kick">FACTORY &middot; VERTICAL WORKS &middot; SIMULATED</p><h1 id="c-h1">Work in motion</h1></div>
-      <dl class="c-stats">
-        <div class="hot"><dt>Active</dt><dd data-count="active">0</dd></div>
-        <div><dt>Queued</dt><dd data-count="queued">0</dd></div>
-        <div class="warn"><dt>On hold</dt><dd data-count="attention">0</dd></div>
-        <div><dt>Shipped</dt><dd data-count="done">0</dd></div>
-        <div><dt>Demo clock</dt><dd data-bind="clock">T+00:00</dd></div>
-      </dl>
-    </header>
-    <div class="c-grid">
-      <nav class="c-spine" aria-label="Stage spine for the selected ticket"><h2>Stage spine</h2><ol id="c-spine"></ol><p id="c-spine-note"></p></nav>
-      <div class="c-tower"><div class="c-tower-inner" id="c-tower"></div></div>
-      <div class="c-side">
-        <div><h2>Tickets by floor</h2><div class="c-rows ticket-list" role="group" aria-label="Demo tickets" data-kind="c"></div></div>
-        <section class="c-console" aria-label="Dispatch console">
-          <div class="meter"><span class="meter-l">Elapsed demo</span><span class="meter-t" id="c-elapsed">00:00</span>
-            <div class="meter-tube" id="c-meter" aria-hidden="true"><i></i></div><span class="meter-l">Stage completion</span></div>
-          <div class="detail" id="c-detail"></div>
-        </section>
-      </div>
-    </div>
-  </section>
+<body>
+<header><div class="topline"><div class="brand"><span class="brand-mark" aria-hidden="true">⠿</span><div><h1>BOARD</h1><p class="subtitle">Ticket trackers / design preview</p></div></div><label class="appearance">Appearance <select id="appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div></header>
+<main>
+<div class="overview" aria-label="Ticket counts"><div><b id="active-count">0</b><span>Active</span></div><div><b id="queued-count">0</b><span>Queued</span></div><div><b id="blocked-count">0</b><span>Blocked</span></div><div><b id="shipped-count">0</b><span>Shipped shown</span></div></div>
+<div class="toolbar"><div class="demo-controls"><span class="demo-label">SIMULATED</span><span id="clock" class="clock mono">T+00:00</span><button id="pause" type="button">Pause demo</button><button id="restart" type="button">Restart</button><label class="sr" for="speed">Demo speed</label><select id="speed"><option value="1">1×</option><option value="2">2×</option></select><span id="playback-status" class="playback-status"></span></div><label class="scrubber">Demo time <input id="scrub" type="range" min="0" max="119" step="1" value="0" aria-label="Demo time in seconds"></label></div>
+<section aria-labelledby="active-heading"><div class="section-head"><h2 id="active-heading">In progress</h2><span>One tracker per ticket</span></div><div id="active-list" class="ticket-list"></div></section>
+<section aria-labelledby="queue-heading"><div class="section-head"><h2 id="queue-heading">Queued</h2><span>All current queue blockers</span></div><div id="queue-list" class="ticket-list"></div></section>
+<details id="shipped"><summary>Shipped <span id="shipped-summary">0 tickets</span></summary><div id="shipped-list" class="ticket-list"></div></details>
+<footer>Demo data only. Times, workers, blockers and bounces are simulated. The 120-second loop resets the fixture. Select any ticket for stats.</footer>
 </main>
-
-<nav class="switcher" aria-label="Design switcher">
-  <span class="sw-label">DESIGN</span>
-  <button type="button" id="sw-prev" aria-label="Previous design">&lsaquo;</button>
-  <div class="sw-choices" role="group" aria-label="Choose a design">
-    <button type="button" data-variant="A" aria-pressed="true">A<span class="sw-name">&nbsp;/ Assembly</span></button>
-    <button type="button" data-variant="B" aria-pressed="false">B<span class="sw-name">&nbsp;/ Orbital</span></button>
-    <button type="button" data-variant="C" aria-pressed="false">C<span class="sw-name">&nbsp;/ Megastructure</span></button>
-  </div>
-  <button type="button" id="sw-next" aria-label="Next design">&rsaquo;</button>
-  <span class="sw-index" id="sw-index" aria-live="polite">1 / 3</span>
-</nav>
-
+<dialog id="details" aria-labelledby="detail-title"><div class="dialog-top"><h2 id="detail-title">Ticket stats</h2><button type="button" id="close-details" autofocus>Close</button></div><div id="detail-body"></div></dialog>
+<noscript>This demo needs JavaScript. No live Board data is loaded.</noscript>
 <script>
-'use strict';
-// Throwaway #70 design lab: one deterministic demo clock drives all three designs. Simulated data only.
 (() => {
-  // ---------- Fixture and simulation ----------
+  'use strict';
   const STAGES = ['queued', 'setup', 'implementing', 'verifying', 'delivering', 'done'];
-  const LABEL = { queued: 'Queued', setup: 'Setup', implementing: 'Implementing', verifying: 'Verifying', delivering: 'Delivering', done: 'Done' };
-  const SHORT = { queued: 'QUEUE', setup: 'SETUP', implementing: 'BUILD', verifying: 'VERIFY', delivering: 'DELIVER', done: 'DONE' };
-  const DUR = { setup: 6, implementing: 20, verifying: 14, delivering: 10 };      // demo seconds per stage
-  const BOUND = { setup: 0, implementing: 6, verifying: 26, delivering: 40, done: 50 };
-  const PIPE = 50;   // seconds of work from setup to done
-  const LOOP = 64;   // labelled demo loop length; done tickets rest briefly, then everything restarts
-  const VARIANTS = [{ id: 'A', name: 'Assembly' }, { id: 'B', name: 'Orbital' }, { id: 'C', name: 'Megastructure' }];
-  // start = seconds of work already done at T+0; delay = seconds queued before work starts.
-  const FIX = [
-    { id: 'DEMO-241', title: 'Stream agent activity', worker: 'Demo worker Atlas', start: 14, delay: 0 },
-    { id: 'DEMO-242', title: 'Preserve interrupted work', worker: 'Demo worker Birch', start: 29, delay: 0 },
-    { id: 'DEMO-243', title: 'Verify recovery safety', worker: 'Demo worker Cobalt', start: 0, delay: 6 },
-    { id: 'DEMO-244', title: 'Add project controls', worker: 'Demo worker Delta', start: 42, delay: 0 },
-    { id: 'DEMO-245', title: 'Record run evidence', worker: 'Demo worker Ember', start: 50, delay: 0 },
-    { id: 'DEMO-246', title: 'Resolve dependency hold', worker: 'Demo worker Fjord', start: 9, delay: 0,
-      hold: 'waiting for a simulated upstream dependency' },
-  ];
-  const ACT = {
-    queued: ['Waiting for a free simulated worker slot', 'Dependency check passed (simulated)'],
-    setup: ['Preparing a demo workspace', 'Checking out the fixture branch', 'Warming the container cache'],
-    implementing: ['Writing a failing test first', 'Editing source files', 'Running focused unit checks', 'Refining the change', 'Re-running the focused checks'],
-    verifying: ['Replaying the demo scenario', 'Capturing comparison evidence (simulated)', 'Checking edge cases', 'Reviewing the diff'],
-    delivering: ['Packaging the branch', 'Writing the evidence summary', 'Waiting on simulated CI'],
-    done: ['Delivered in this demo loop', 'Resting at the dock until the loop restarts'],
-  };
-  const HOLD_ACT = ['On hold: no work proceeds until the dependency clears', 'Hold re-checked: still waiting (simulated)'];
+  const LABEL = { queued:'Queue', setup:'Setup', implementing:'Build', verifying:'Verify', delivering:'Deliver', done:'Shipped' };
+  const LOOP = 120;
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = value => { const s = Math.max(0, Math.floor(value)); return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); };
+  const stamp = time => (time < 0 ? 'T−' : 'T+') + fmt(Math.abs(time));
+  const capacity = { code:'docket_full', text:'Docket is full' };
+  const approval = { code:'approval', text:'Needs maintainer approval' };
+  const dependency = { code:'dependency', text:'Waiting for DEMO-241 to ship' };
 
-  const mqReduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const S = { variant: 'A', selected: 'DEMO-241', clock: 0, loop: 1, running: true, pauseReason: null, speed: 1 };
-
-  const stageFor = (pos) => pos >= PIPE ? 'done' : pos >= BOUND.delivering ? 'delivering' : pos >= BOUND.verifying ? 'verifying'
-    : pos >= BOUND.implementing ? 'implementing' : 'setup';
-  const fmt = (s) => { s = Math.max(0, Math.floor(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
-  const evTime = (at) => at < 0 ? 'pre-loop' : 'T+' + fmt(at);
-
-  function eventsFor(f, t) {
-    const at = (s) => f.delay + (BOUND[s] - f.start);
-    const reach = f.hold ? f.start : f.start + Math.max(0, t - f.delay);
-    const out = [{ at: at('setup') - 5, text: 'Queued for a simulated worker' }];
-    for (const s of ['setup', 'implementing', 'verifying', 'delivering', 'done']) {
-      if (BOUND[s] <= reach) out.push({ at: at(s), text: s === 'done' ? 'Delivered (demo)' : 'Entered ' + LABEL[s].toLowerCase() });
-    }
-    if (f.hold) out.push({ at: -2, text: 'Hold raised: ' + f.hold });
-    return out.filter((e) => e.at <= t).sort((a, b) => a.at - b.at);
-  }
-
-  function ticketAt(f, t, i) {
-    const pos = f.hold ? f.start : t < f.delay ? null : Math.min(PIPE, f.start + (t - f.delay));
-    const stage = pos === null ? 'queued' : stageFor(pos);
-    const status = f.hold ? 'blocked' : stage === 'done' ? 'done' : stage === 'queued' ? 'queued' : 'active';
-    const inStage = pos === null ? t : pos - BOUND[stage];
-    const stageFrac = stage === 'done' ? 1 : pos === null ? 0 : inStage / DUR[stage];
-    const list = f.hold ? HOLD_ACT : ACT[stage];
-    const n = Math.floor(inStage / 4) + i;
-    return {
-      id: f.id, title: f.title, worker: f.worker, hold: f.hold || null, stage, status, pos,
-      pct: pos === null ? 0 : Math.round(pos / PIPE * 100), stageFrac, elapsed: pos === null ? 0 : pos,
-      activity: [list[n % list.length], list[(n + list.length - 1) % list.length]],
-      events: eventsFor(f, t),
+  // Intervals partition elapsed time. Repeated stage visits retain their history.
+  function fixture(id, title, worker, queuedAt, options = {}) {
+    const intervals = [], bounces = [];
+    let cursor = queuedAt;
+    const add = (stage, mode, seconds, reasons = []) => {
+      if (seconds <= 0) return;
+      intervals.push({ stage, mode, start:cursor, end:cursor + seconds, reasons });
+      cursor += seconds;
     };
-  }
-
-  function snapshot() {
-    const t = Math.floor(S.clock);
-    const tickets = FIX.map((f, i) => ticketAt(f, t, i));
-    const byId = Object.fromEntries(tickets.map((k) => [k.id, k]));
-    const counts = { active: 0, queued: 0, attention: 0, done: 0 };
-    for (const k of tickets) counts[k.status === 'blocked' ? 'attention' : k.status]++;
-    const feed = tickets.flatMap((k) => k.events.filter((e) => e.at >= 0).map((e) => ({ ...e, id: k.id })));
-    if (S.loop > 1) feed.push({ at: 0, id: '', text: 'Demo loop ' + S.loop + ' restarted' });
-    feed.sort((a, b) => b.at - a.at);
-    return { t, tickets, byId, counts, sel: byId[S.selected], feed };
-  }
-
-  // ---------- Small helpers ----------
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
-  const n1 = (v) => (Math.round(v * 10) / 10).toString();
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const stageText = (k) => k.status === 'blocked' ? 'On hold · ' + LABEL[k.stage] : LABEL[k.stage];
-
-  function statusLine(k) {
-    if (k.status === 'blocked') return 'On hold in ' + LABEL[k.stage] + ': ' + k.hold + '.';
-    if (k.status === 'queued') return 'Queued: waiting for a simulated worker.';
-    if (k.status === 'done') return 'Done: delivered in this demo loop.';
-    return LABEL[k.stage] + ' · ' + Math.round(k.stageFrac * 100) + '% through this stage (simulated).';
-  }
-
-  function detailHTML(k) {
-    const si = STAGES.indexOf(k.stage);
-    const strip = STAGES.map((s, i) => {
-      const st = k.stage === 'done' ? (i === si ? 'done st-current' : 'done') : i < si ? 'done' : i === si ? 'current' : 'todo';
-      const hold = k.status === 'blocked' && i === si ? ' st-hold' : '';
-      const sr = i < si || k.stage === 'done' ? 'completed' : i === si ? (hold ? 'current, on hold' : 'current') : 'not started';
-      return `<li class="st-${st}${hold}"${i === si ? ' aria-current="step"' : ''}>${LABEL[s]}<span class="vh"> (${sr})</span></li>`;
-    }).join('');
-    const events = k.events.slice(-5).reverse().map((e) => `<li><time>${evTime(e.at)}</time><span>${esc(e.text)}</span></li>`).join('');
-    return `<p class="d-kick">Selected ticket &middot; simulated</p>
-      <h3 class="d-title"><span class="d-id">${k.id}</span>${esc(k.title)}</h3>
-      <p class="d-status" data-status="${k.status}">${esc(statusLine(k))}</p>
-      <ol class="strip" aria-label="Stages">${strip}</ol>
-      <div class="d-prog"><div class="d-pct">${k.pct}%<small>simulated progress</small></div>
-        <div class="bar" role="progressbar" aria-label="Simulated progress for ${k.id}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${k.pct}" aria-valuetext="${k.pct} percent, simulated"><i style="width:${k.pct}%"></i></div></div>
-      <dl class="d-facts"><div><dt>Elapsed demo time</dt><dd>${fmt(k.elapsed)}</dd></div>
-        <div><dt>Worker (fictional)</dt><dd>${esc(k.worker.replace('Demo worker ', ''))}</dd></div>
-        <div><dt>Stage</dt><dd>${LABEL[k.stage]}</dd></div></dl>
-      <h4>Recent activity</h4><ul class="d-act"><li>${esc(k.activity[0])}</li><li>${esc(k.activity[1])}</li></ul>
-      <h4>Event history</h4><ol class="d-events">${events}</ol>`;
-  }
-
-  // ---------- Ticket buttons (built once, updated in place so focus survives) ----------
-  function buildLists() {
-    for (const host of $$('.ticket-list')) {
-      const kind = host.dataset.kind;
-      const [a, b] = (host.dataset.range || '0,6').split(',').map(Number);
-      host.innerHTML = FIX.slice(a, b).map((f) => {
-        const pctBar = `<span class="bar" aria-hidden="true"><i data-f="bar"></i></span>`;
-        if (kind === 'a') return `<button type="button" class="a-item" data-ticket="${f.id}" aria-pressed="false">
-            <span class="a-item-top"><span class="a-id">${f.id}</span><span class="a-st" data-f="stage"></span></span>
-            <span class="a-title">${esc(f.title)}</span>
-            <span class="a-meter">${pctBar}<span><span data-f="pct"></span><span class="vh"> simulated</span></span></span></button>`;
-        if (kind === 'b') return `<button type="button" class="b-item" data-ticket="${f.id}" aria-pressed="false">
-            <span class="b-row"><span class="b-id">${f.id}</span><span class="b-st" data-f="stage"></span></span>
-            <span class="b-title">${esc(f.title)}</span>
-            <span class="b-meter">${pctBar}<span><span data-f="pct"></span><span class="vh"> simulated</span></span></span></button>`;
-        return `<button type="button" class="c-item" data-ticket="${f.id}" aria-pressed="false">
-            <span class="c-fl" aria-hidden="true" data-f="floor"></span>
-            <span class="c-t"><span class="c-id">${f.id}</span>${esc(f.title)}</span>
-            <span class="c-pct"><span data-f="pct"></span><span class="vh"> simulated</span></span>
-            <span class="c-strow"><span class="c-st" data-f="stage"></span>${pctBar}</span></button>`;
-      }).join('');
+    const wait = options.wait ?? 4;
+    if (options.multiple) {
+      add('queued','queued',wait - 8,[capacity,dependency,approval]);
+      add('queued','queued',8,[capacity]);
+    } else add('queued','queued',wait,options.reasons || [capacity]);
+    add('setup','running',6);
+    add('implementing','running',8);
+    if (options.hold) add('implementing','blocked',options.hold,[approval]);
+    add('implementing','running',12);
+    add('verifying','running',14);
+    if (options.bounce) {
+      bounces.push({ from:'verifying', to:'implementing', at:cursor, reason:'Focused test failed' });
+      add('implementing','running',8);
+      add('verifying','running',6);
     }
+    add('delivering','running',10);
+    return { id, title, worker, queuedAt, completedAt:cursor, intervals, bounces };
   }
-  const FLOOR = { queued: '01', setup: '01', implementing: '02', verifying: '03', delivering: '04', done: '05' };
-
-  function updateLists(snap) {
-    for (const b of $$('button[data-ticket]')) {
-      const k = snap.byId[b.dataset.ticket];
-      b.setAttribute('aria-pressed', String(k.id === S.selected));
-      b.dataset.status = k.status;
-      const set = (f, v) => { const el = b.querySelector(`[data-f="${f}"]`); if (el) el.textContent = v; };
-      set('stage', stageText(k)); set('pct', k.pct + '%'); set('floor', FLOOR[k.stage]);
-      const bar = b.querySelector('[data-f="bar"]'); if (bar) bar.style.width = k.pct + '%';
-    }
-  }
-
-  // ================= A / Assembly scene =================
-  const IS = { ox: 300, oy: 118, s: 32 };
-  const P = (x, y, z = 0) => [IS.ox + (x - y) * 0.866 * IS.s, IS.oy + (x + y) * 0.5 * IS.s - z * IS.s];
-  const P0 = P(0, 0, 0);
-  const PR = (x, y, z = 0) => { const p = P(x, y, z); return [p[0] - P0[0], p[1] - P0[1]]; };
-  const pp = (a) => a.map((p) => n1(p[0]) + ',' + n1(p[1])).join(' ');
-  function ibox(x, y, z, w, d, h, m, attrs = '', proj = P) {
-    const T = [proj(x, y, z + h), proj(x + w, y, z + h), proj(x + w, y + d, z + h), proj(x, y + d, z + h)];
-    const L = [proj(x, y + d, z + h), proj(x + w, y + d, z + h), proj(x + w, y + d, z), proj(x, y + d, z)];
-    const R = [proj(x + w, y, z + h), proj(x + w, y + d, z + h), proj(x + w, y + d, z), proj(x + w, y, z)];
-    return `<g class="m-${m}" ${attrs}><polygon class="fl" points="${pp(L)}"/><polygon class="fr" points="${pp(R)}"/><polygon class="ft" points="${pp(T)}"/></g>`;
-  }
-  const ln = (a, b, cls, extra = '') => `<line class="${cls}" x1="${n1(a[0])}" y1="${n1(a[1])}" x2="${n1(b[0])}" y2="${n1(b[1])}" ${extra}/>`;
-  const label = (p, title, sub, w = 118) => `<g transform="translate(${n1(p[0])},${n1(p[1])})">
-      <rect class="a-lbl-bg" x="${-w / 2}" y="-34" width="${w}" height="${sub ? 36 : 22}" rx="4"/>
-      <text class="a-lbl" text-anchor="middle" y="-18">${title}</text>${sub ? `<text class="a-lbl-sub" text-anchor="middle" y="-4">${sub}</text>` : ''}</g>`;
-
-  function armSVG(base, delay) {
-    return `<g class="arm hov" transform="translate(${n1(base[0])},${n1(base[1])})" style="--d:${delay}s">
-      <ellipse rx="17" ry="8" class="arm-foot"/><rect x="-11" y="-24" width="22" height="24" class="arm-ped"/>
-      <ellipse cy="-24" rx="11" ry="5" class="arm-cap"/>
-      <g transform="translate(0,-28)"><g class="j sh">
-        <rect x="-6" y="-6" width="54" height="12" rx="6" class="arm-seg"/><line x1="8" y1="0" x2="40" y2="0" class="arm-hyd"/>
-        <circle r="9" class="arm-joint"/><circle r="3" class="arm-bolt"/>
-        <g transform="translate(48,0)"><g class="j el">
-          <rect x="-5" y="-5" width="52" height="10" rx="5" class="arm-seg"/><circle r="7" class="arm-joint"/><circle r="2.5" class="arm-bolt"/>
-          <g transform="translate(48,0)"><g class="j wr">
-            <rect x="-3" y="-6" width="9" height="12" class="arm-wrist"/>
-            <rect x="6" y="-7" width="10" height="3" class="arm-claw cl1"/><rect x="6" y="4" width="10" height="3" class="arm-claw cl2"/>
-            <circle cx="17" r="2.4" class="arm-tip"/></g></g>
-        </g></g>
-      </g></g></g>`;
-  }
-  function sparksSVG(p) {
-    const v = [[-14, -10], [10, -16], [-6, -20], [16, -4], [-18, 2], [4, -12]];
-    return `<g class="sparks" transform="translate(${n1(p[0])},${n1(p[1])})">${v.map((d, i) =>
-      `<circle class="spark" r="1.5" style="--dx:${d[0]}px;--dy:${d[1]}px;animation-delay:${(i * 0.3).toFixed(1)}s"/>`).join('')}</g>`;
-  }
-
-  function stationSVG(x0, w, num, name, stage, extra) {
-    const y0 = 1.0, d = 2.6, h = 2.0, yf = y0 + d;
-    const T = [P(x0, y0, h), P(x0 + w, y0, h), P(x0 + w, yf, h), P(x0, yf, h)];
-    let s = `<g class="station hov" data-station="${stage}">`;
-    s += ibox(x0, y0, 0, w, d, h, 'cab');
-    s += `<polygon class="focus-ring" points="${pp(T)}"/>`;
-    s += ibox(x0 + 0.3, y0 + 0.3, h, 1.3, 1.1, 0.55, 'steel');                 // motor housing
-    s += ibox(x0 + w - 1.3, y0 + 0.4, h, 0.9, 0.9, 0.3, 'frame');              // junction box
-    // front face (+y): mesh grille, screen, hazard band
-    const gx1 = x0 + w * 0.5;
-    s += `<polygon points="${pp([P(x0 + 0.35, yf, 0.45), P(gx1, yf, 0.45), P(gx1, yf, 1.65), P(x0 + 0.35, yf, 1.65)])}" fill="url(#a-mesh)"/>`;
-    s += `<polygon class="grille-frame" points="${pp([P(x0 + 0.35, yf, 0.45), P(gx1, yf, 0.45), P(gx1, yf, 1.65), P(x0 + 0.35, yf, 1.65)])}"/>`;
-    const sx0 = x0 + w * 0.6, sx1 = x0 + w - 0.3;
-    s += `<polygon class="screen" points="${pp([P(sx0, yf, 0.9), P(sx1, yf, 0.9), P(sx1, yf, 1.7), P(sx0, yf, 1.7)])}"/>`;
-    for (let i = 0; i < 4; i++) { const zz = 1.05 + i * 0.16, len = [0.8, 0.5, 0.95, 0.35][i] * (sx1 - sx0 - 0.3); s += ln(P(sx0 + 0.15, yf, zz), P(sx0 + 0.15 + len, yf, zz), 'screen-bar'); }
-    s += `<polygon class="haz" points="${pp([P(x0, yf, 0), P(x0 + w, yf, 0), P(x0 + w, yf, 0.24), P(x0, yf, 0.24)])}" fill="url(#a-stripe)"/>`;
-    for (let i = 0; i < 5; i++) { const yy = y0 + 0.4 + i * 0.42; s += ln(P(x0 + w, yy, 0.8), P(x0 + w, yy + 0.25, 1.6), 'vent'); }     // side vents
-    for (const c of [[x0 + 0.15, y0 + 0.15], [x0 + w - 0.15, y0 + 0.15], [x0 + w - 0.15, yf - 0.15], [x0 + 0.15, yf - 0.15]]) {
-      const b = P(c[0], c[1], h); s += `<circle class="bolt" cx="${n1(b[0])}" cy="${n1(b[1])}" r="1.8"/>`; }
-    const lp = P(x0 + w - 0.5, y0 + 2.1, h); s += `<circle class="lamp" cx="${n1(lp[0])}" cy="${n1(lp[1] - 4)}" r="5.5"/>`;
-    const c1 = P(x0 + 0.7, y0 + 0.4, h + 0.55), c2 = P(x0 + 0.7, 0.3, 2.3);
-    s += `<path class="cable" d="M${n1(c1[0])} ${n1(c1[1])} C ${n1(c1[0])} ${n1(c1[1] - 30)}, ${n1(c2[0] + 10)} ${n1(c2[1] - 10)}, ${n1(c2[0])} ${n1(c2[1])}"/>`;
-    s += `<path class="cable-hi" d="M${n1(c1[0])} ${n1(c1[1])} C ${n1(c1[0])} ${n1(c1[1] - 30)}, ${n1(c2[0] + 10)} ${n1(c2[1] - 10)}, ${n1(c2[0])} ${n1(c2[1])}"/>`;
-    s += ibox(x0 + 1, yf, 0, w - 2, 1.25, 0.5, 'frame');                        // feed chute to the line
-    s += extra || '';
-    s += label(P(x0 + w / 2, y0, h + 1.2), num + ' · ' + name, stage.toUpperCase(), 132);
-    return s + '</g>';
-  }
-
-  function buildA() {
-    let s = `<svg id="a-svg" viewBox="0 0 770 560" aria-hidden="true" focusable="false"><defs>
-      <pattern id="a-stripe" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="9" height="9" fill="#1b2a30"/><rect width="4.5" height="9" fill="#e7a93b"/></pattern>
-      <pattern id="a-mesh" width="5" height="5" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#0d2128"/><path d="M0 0L5 5M5 0L0 5" stroke="#5f8a92" stroke-width=".6"/></pattern>
-      <linearGradient id="a-armgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd27a"/><stop offset=".5" stop-color="#e7a93b"/><stop offset="1" stop-color="#9c6a1c"/></linearGradient>
-      <clipPath id="a-beltclip"><polygon points="${pp([P(0.9, 5.12, 0.9), P(15.3, 5.12, 0.9), P(15.3, 6.48, 0.9), P(0.9, 6.48, 0.9)])}"/></clipPath>
-    </defs><g class="a-floor" id="a-floor">`;
-    // floor platform, grid and markings
-    s += ibox(0, 0, -0.6, 16, 10, 0.6, 'floor');
-    for (let i = 1; i < 16; i++) s += ln(P(i, 0), P(i, 10), 'grid-l');
-    for (let j = 1; j < 10; j++) s += ln(P(0, j), P(16, j), 'grid-l');
-    s += `<polygon points="${pp([P(0, 10, 0), P(16, 10, 0), P(16, 10, -0.18), P(0, 10, -0.18)])}" fill="url(#a-stripe)" opacity=".8"/>`;
-    s += ln(P(0.4, 4.75), P(15.6, 4.75), 'lane') + ln(P(0.4, 7.0), P(15.6, 7.0), 'lane');
-    // back service pipes with supports and flanges
-    for (const x of [1, 5, 9, 13]) s += ln(P(x, 0.3, 0), P(x, 0.3, 2.7), 'support');
-    for (const z of [2.7, 2.25]) { s += ln(P(0.3, 0.3, z), P(15.8, 0.3, z), 'pipe'); s += ln(P(0.3, 0.2, z + 0.1), P(15.8, 0.2, z + 0.1), 'pipe-hi'); }
-    for (let x = 2; x < 16; x += 2.5) { const f = P(x, 0.3, 2.7); s += `<ellipse cx="${n1(f[0])}" cy="${n1(f[1])}" rx="3" ry="6" fill="#5b8a91"/>`; }
-    // front zones: intake rack, hold siding, shipping dock (drawn before the line so the line overlaps correctly)
-    s += `<g class="zone zone-intake" data-zone="queued">${ibox(0.6, 7.6, 0, 2.8, 1.8, 0.3, 'plat')}
-      <polygon class="focus-ring" points="${pp([P(0.6, 7.6, 0.3), P(3.4, 7.6, 0.3), P(3.4, 9.4, 0.3), P(0.6, 9.4, 0.3)])}"/></g>`;
-    s += `<g class="zone zone-hold" data-zone="blocked"><polygon points="${pp([P(4.0, 7.5), P(7.4, 7.5), P(7.4, 9.6), P(4.0, 9.6)])}" fill="url(#a-stripe)" opacity=".38"/>
-      <polygon class="focus-ring" points="${pp([P(4.0, 7.5), P(7.4, 7.5), P(7.4, 9.6), P(4.0, 9.6)])}"/>
-      ${ibox(7.0, 7.6, 0, 0.18, 0.18, 1.5, 'amber')}</g>`;
-    s += `<g class="zone zone-dock" data-zone="done">${ibox(11.6, 7.5, 0, 4.2, 2.3, 0.3, 'plat')}
-      <polygon class="focus-ring" points="${pp([P(11.6, 7.5, 0.3), P(15.8, 7.5, 0.3), P(15.8, 9.8, 0.3), P(11.6, 9.8, 0.3)])}"/>
-      ${ibox(11.6, 7.5, 0.3, 4.2, 0.12, 0.35, 'amber')}</g>`;
-    // stations
-    s += stationSVG(1.6, 4.2, '01', 'BUILD', 'implementing',
-      armSVG(P(2.7, 4.3, 0.5), 0) + armSVG(P(4.7, 4.3, 0.5), -2.4));
-    s += stationSVG(6.6, 3.8, '02', 'VERIFY', 'verifying', '');
-    s += stationSVG(11.4, 3.6, '03', 'DELIVER', 'delivering', '');
-    // back gantry rail and posts; gate back post
-    s += ibox(6.6, 4.75, 0, 0.2, 0.2, 3.0, 'steel') + ibox(10.0, 4.75, 0, 0.2, 0.2, 3.0, 'steel') + ibox(6.6, 4.75, 3.0, 3.6, 0.2, 0.2, 'steel');
-    s += ibox(13.3, 4.75, 0, 0.25, 0.25, 2.9, 'amber');
-    // conveyor: frame, belt, moving treads, rollers, guide rails, zone paint
-    s += ibox(0.8, 5.0, 0, 14.6, 1.6, 0.9, 'frame');
-    s += `<polygon class="belt" points="${pp([P(0.9, 5.12, 0.9), P(15.3, 5.12, 0.9), P(15.3, 6.48, 0.9), P(0.9, 6.48, 0.9)])}"/>`;
-    s += `<g clip-path="url(#a-beltclip)"><g class="treads">`;
-    for (let x = -0.6; x < 15.8; x += 0.5) s += ln(P(x, 5.12, 0.9), P(x, 6.48, 0.9), 'tread');
-    s += `</g></g>`;
-    for (let x = 1.3; x < 15.2; x += 0.9) { const c = P(x, 6.6, 0.45);
-      s += `<g transform="translate(${n1(c[0])},${n1(c[1])})"><circle class="roller" r="6"/><g class="spin"><line class="roller-x" x1="-4.5" y1="0" x2="4.5" y2="0"/><line class="roller-x" x1="0" y1="-4.5" x2="0" y2="4.5"/></g></g>`; }
-    s += ln(P(0.8, 5.0, 1.25), P(15.4, 5.0, 1.25), 'rail') + ln(P(0.8, 6.6, 1.25), P(15.4, 6.6, 1.25), 'rail');
-    for (let x = 0.9; x < 15.5; x += 1.45) s += ln(P(x, 6.6, 0.9), P(x, 6.6, 1.25), 'rail-post');
-    s += ln(P(1.8, 6.56, 0.92), P(5.8, 6.56, 0.92), 'zone-paint', 'stroke="#e7a93b" stroke-width="3"');
-    s += ln(P(6.8, 6.56, 0.92), P(10.2, 6.56, 0.92), 'zone-paint', 'stroke="#6ff0d6" stroke-width="3"');
-    s += ln(P(11.6, 6.56, 0.92), P(15.0, 6.56, 0.92), 'zone-paint', 'stroke="#9fd3ff" stroke-width="3"');
-    // ticket pallets (positions set by render)
-    s += `<g id="a-pallets">${FIX.map((f) => `<g class="pal hov" data-ticket="${f.id}">
-        ${ibox(-0.45, -0.45, 0, 0.9, 0.9, 0.12, 'palbase', '', PR)}${ibox(-0.36, -0.36, 0.12, 0.72, 0.72, 0.42, 'crate', '', PR)}
-        <polygon class="sel-ring" points="${pp([PR(-0.55, -0.55, 0.02), PR(0.55, -0.55, 0.02), PR(0.55, 0.55, 0.02), PR(-0.55, 0.55, 0.02)])}"/></g>`).join('')}</g>`;
-    // verify scanner carriage (moves along the bay), front rail and posts
-    const head = `<g class="scanner hov">${ibox(6.85, 4.8, 3.0, 0.45, 1.95, 0.32, 'steel')}${ibox(6.92, 5.55, 2.2, 0.34, 0.4, 0.8, 'cab')}
-        <polygon class="beam" points="${pp([P(6.92, 5.2, 0.95), P(7.26, 5.2, 0.95), P(7.26, 6.4, 0.95), P(6.92, 6.4, 0.95)])}"/>
-        <polygon class="beam" points="${pp([P(6.92, 5.75, 2.2), P(7.26, 5.75, 2.2), P(7.26, 6.4, 0.95), P(6.92, 6.4, 0.95)])}"/></g>`;
-    s += head;
-    s += ibox(6.6, 6.65, 0, 0.2, 0.2, 3.0, 'steel') + ibox(10.0, 6.65, 0, 0.2, 0.2, 3.0, 'steel') + ibox(6.6, 6.65, 3.0, 3.6, 0.2, 0.2, 'steel');
-    // delivery gate: sliding door between posts, beacon
-    s += `<g class="gate-door"><polygon points="${pp([P(13.45, 5.0, 2.55), P(13.45, 6.6, 2.55), P(13.45, 6.6, 1.0), P(13.45, 5.0, 1.0)])}" fill="url(#a-stripe)" stroke="#5a3b0c"/>
-      ${ln(P(13.45, 5.0, 1.8), P(13.45, 6.6, 1.8), 'vent')}</g>`;
-    s += ibox(13.3, 6.6, 0, 0.25, 0.25, 2.9, 'amber') + ibox(13.25, 4.75, 2.9, 0.35, 2.1, 0.3, 'amber');
-    const bc = P(13.42, 5.8, 3.2); s += `<circle class="beacon" cx="${n1(bc[0])}" cy="${n1(bc[1] - 4)}" r="5"/>`;
-    s += sparksSVG(P(2.2, 5.7, 1.5)) + sparksSVG(P(4.2, 5.7, 1.5));
-    // zone labels (upright, outside tilted planes)
-    s += label(P(2.0, 9.6, 0.3), 'INTAKE', 'queued', 96);
-    s += `<g class="zone-hold">${label(P(5.7, 9.6, 0), 'HOLD', 'simulated hold', 128)}</g>`;
-    s += label(P(13.7, 9.8, 0.3), 'SHIPPED', 'done', 96);
-    // ticket tags last, so IDs are never covered
-    s += `<g id="a-tags">${FIX.map((f) => `<g class="tag" data-ticket="${f.id}"><line x1="0" y1="-10" x2="0" y2="-26"/>
-        <rect x="-38" y="-62" width="76" height="36" rx="4"/><text class="tg-id" text-anchor="middle" y="-46">${f.id}</text>
-        <text class="tg-st" text-anchor="middle" y="-32"></text></g>`).join('')}</g>`;
-    s += `</g></svg>`;
-    $('#a-tilt').innerHTML = s;
-  }
-
-  const beltX = (p) => p < 6 ? 1.1 + p / 6 * 0.8 : p < 26 ? 2.0 + (p - 6) / 20 * 3.6 : p < 40 ? 6.9 + (p - 26) / 14 * 3.2 : 11.6 + (p - 40) / 10 * 3.4;
-
-  function renderA(snap) {
-    let q = 0, d = 0;
-    const active = (st) => snap.tickets.some((k) => k.status === 'active' && k.stage === st);
-    for (const k of snap.tickets) {
-      let x, y, z;
-      if (k.status === 'blocked') { x = 5.9; y = 8.6; z = 0; }
-      else if (k.stage === 'queued') { x = 1.6 + q * 1.1; y = 8.5; z = 0.3; q++; }
-      else if (k.stage === 'done') { x = 12.3 + (d % 4) * 1.2; y = d < 4 ? 8.2 : 9.3; z = 0.3; d++; }
-      else { x = beltX(k.pos); y = 5.8; z = 0.9; }
-      const [sx, sy] = P(x, y, z);
-      const pal = $(`.pal[data-ticket="${k.id}"]`), tag = $(`.tag[data-ticket="${k.id}"]`);
-      pal.style.transform = `translate(${n1(sx)}px,${n1(sy)}px)`;
-      tag.style.transform = `translate(${n1(sx)}px,${n1(sy - 14)}px)`;
-      const sel = k.id === S.selected;
-      pal.classList.toggle('is-sel', sel); tag.classList.toggle('is-sel', sel);
-      pal.dataset.status = tag.dataset.status = k.status;
-      tag.querySelector('.tg-st').textContent = (k.status === 'blocked' ? 'HOLD' : SHORT[k.stage]) + ' ' + k.pct + '%';
-    }
-    const selTag = $(`.tag[data-ticket="${S.selected}"]`); selTag.parentNode.appendChild(selTag);
-    const sel = snap.sel;
-    for (const st of $$('#a-svg .station')) {
-      st.classList.toggle('on', active(st.dataset.station));
-      st.classList.toggle('is-focus', sel.status === 'active' && sel.stage === st.dataset.station);
-    }
-    for (const z of $$('#a-svg .zone')) z.classList.toggle('is-focus', z.dataset.zone === (sel.status === 'blocked' ? 'blocked' : sel.stage));
-    const floor = $('#a-floor');
-    floor.classList.toggle('is-building', active('implementing'));
-    floor.classList.toggle('is-verifying', active('verifying'));
-    floor.classList.toggle('is-delivering', active('delivering'));
-    floor.classList.toggle('is-moving', snap.counts.active > 0);
-    const crate = $('#a-crate'); crate.dataset.status = sel.status;
-    for (const face of crate.children) face.textContent = face.classList.contains('cd') ? '' : sel.id + (face.classList.contains('cf') ? '\n' + sel.pct + '%' : '');
-    $('#a-detail').innerHTML = detailHTML(sel);
-    $('#a-feed').innerHTML = snap.feed.slice(0, 4).map((e) => `<li><time>${evTime(e.at)}</time>${e.id ? e.id + ' ' : ''}${esc(e.text)}</li>`).join('');
-  }
-
-  // ================= B / Orbital scene =================
-  const polar = (cx, cy, r, a) => [cx + r * Math.cos(a * Math.PI / 180), cy + r * Math.sin(a * Math.PI / 180)];
-  function arcD(cx, cy, r, a0, a1) {
-    const p0 = polar(cx, cy, r, a0), p1 = polar(cx, cy, r, a1);
-    return `M${n1(p0[0])} ${n1(p0[1])}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${n1(p1[0])} ${n1(p1[1])}`;
-  }
-  function ringSVG(layer, teeth, sectors, clamps) {
-    // Top face (layer 2) gets its own diagonal chrome gradient (#73) so the ring's rotation carries reflected bands;
-    // the inline stroke style beats the `.ring .l2 .rb` rule. Teeth counts differ per ring, so the ID stays unique.
-    const gid = `b-ring-chrome-${teeth}-${layer}`;
-    const chrome = layer === 2 ? `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">${
-      [[0, '#10151b'], [.12, '#68737e'], [.25, '#f4f8fc'], [.30, '#ffffff'], [.38, '#8b96a1'], [.49, '#161d25'], [.52, '#05080c'],
-        [.58, '#84909c'], [.68, '#f5f9fc'], [.72, '#ffffff'], [.80, '#737f8b'], [.92, '#171d25'], [1, '#b9c3ce']]
-        .map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('')}</linearGradient></defs>` : '';
-    let s = `<svg class="l${layer}" viewBox="0 0 200 200" aria-hidden="true">${chrome}<circle class="rb" cx="100" cy="100" r="93" stroke-width="10"${
-      layer === 2 ? ` style="stroke:url(#${gid})"` : ''}/>`;
-    if (layer === 2) {
-      s += `<circle class="edge" cx="100" cy="100" r="98"/><circle class="edge" cx="100" cy="100" r="88"/>`;
-      for (let i = 0; i < teeth; i++) { const a = i * 360 / teeth, p0 = polar(100, 100, 98, a), p1 = polar(100, 100, 100, a);
-        s += `<line class="tooth" x1="${n1(p0[0])}" y1="${n1(p0[1])}" x2="${n1(p1[0])}" y2="${n1(p1[1])}"/>`; }
-      for (let i = 0; i < sectors; i++) { const a = i * 360 / sectors, p0 = polar(100, 100, 88.5, a), p1 = polar(100, 100, 97.5, a);
-        s += `<line class="sec" x1="${n1(p0[0])}" y1="${n1(p0[1])}" x2="${n1(p1[0])}" y2="${n1(p1[1])}"/>`; }
-      for (let i = 0; i < clamps; i++) { const a = 45 + i * 360 / clamps;
-        s += `<rect class="clamp" x="186" y="96" width="9" height="8" transform="rotate(${a} 100 100)"/>`; }
-    }
-    return s + '</svg>';
-  }
-  const B_ANG = { queued: 122, blocked: 92, done: 62 };
-  const bAngle = (p) => 150 + p / PIPE * 250;
-
-  function buildB() {
-    const orb = $('#orb');
-    // flat drafting overlay: crosshairs, scale, trajectories, dimensions, telescoping docking arm
-    let flat = `<svg class="orb-flat" viewBox="0 0 1000 588" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      <line class="ch" x1="40" y1="300" x2="960" y2="300"/><line class="ch" x1="500" y1="20" x2="500" y2="570"/>
-      <ellipse class="traj" cx="500" cy="300" rx="430" ry="205"/><ellipse class="traj" cx="500" cy="300" rx="300" ry="140"/>
-      <path class="dim" d="M80 548 H920 M80 540 V556 M920 540 V556"/><text x="500" y="575" text-anchor="middle">&#216; YARD 40.0 M (ILLUSTRATIVE)</text>`;
-    for (let i = 0; i <= 40; i++) { const x = 80 + i * 21; flat += `<line class="ch" x1="${x}" y1="22" x2="${x}" y2="${i % 5 ? 30 : 40}"/>`; }
-    flat += `<text x="80" y="58">000</text><text x="500" y="58" text-anchor="middle">180</text><text x="920" y="58" text-anchor="end">360</text>
-      <path class="vm" d="M40 40 h20 v4 h-16 v16 h-4z M960 40 h-20 v4 h16 v16 h4z"/>
-      <defs><linearGradient id="b-chrome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbfcfd"/><stop offset=".45" stop-color="#bfc5cd"/><stop offset=".5" stop-color="#5d636c"/><stop offset="1" stop-color="#c9ced6"/></linearGradient></defs>
-      <g class="orb-arm"><rect class="housing" x="930" y="250" width="50" height="40" rx="3"/>
-        <g class="tele3"><rect class="seg" x="874" y="263" width="60" height="14"/><rect class="tip" x="868" y="258" width="8" height="24"/></g>
-        <g class="tele2"><rect class="seg" x="886" y="260" width="50" height="20"/></g>
-        <g class="tele1"><rect class="seg" x="900" y="256" width="40" height="28"/></g>
-        <text x="955" y="242" text-anchor="middle">ARM</text></g></svg>`;
-    // tilted 3D plane
-    let track = `<svg class="orb-track" viewBox="0 0 100 100" aria-hidden="true">
-      <defs><radialGradient id="b-disc"><stop offset="0" stop-color="#1c1e22"/><stop offset=".72" stop-color="#08090a"/><stop offset=".94" stop-color="#2c2f35"/><stop offset="1" stop-color="#8d939c"/></radialGradient>
-      <filter id="b-glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation=".8"/></filter></defs>
-      <circle cx="50" cy="50" r="49" fill="url(#b-disc)" stroke="#aab0b9" stroke-width=".25"/>
-      <circle cx="50" cy="50" r="38" fill="none" stroke="#aab0b9" stroke-width=".2" stroke-dasharray=".6 1.2"/>`;
-    for (const [a0, a1, col] of [[150, 180, '#5d636c'], [180, 280, '#dde3eb'], [280, 350, '#ff4a2e'], [350, 400, '#9aa0a9']]) {
-      track += `<path d="${arcD(50, 50, 38, a0, a1)}" fill="none" stroke="${col}" stroke-width="3" opacity=".35" filter="url(#b-glow)"/>
-        <path d="${arcD(50, 50, 38, a0 + 0.6, a1 - 0.6)}" fill="none" stroke="${col}" stroke-width="1.2"/>`;
-    }
-    for (const a of [122, 92, 62]) { const p = polar(50, 50, 38, a); track += `<circle cx="${n1(p[0])}" cy="${n1(p[1])}" r="2.2" fill="none" stroke="#aab0b9" stroke-width=".4"/>`; }
-    for (let i = 0; i < 72; i++) { const p0 = polar(50, 50, 48.2, i * 5), p1 = polar(50, 50, i % 6 ? 47.2 : 45.8, i * 5);
-      track += `<line x1="${n1(p0[0])}" y1="${n1(p0[1])}" x2="${n1(p1[0])}" y2="${n1(p1[1])}" stroke="#aab0b9" stroke-width=".22"/>`; }
-    track += '</svg>';
-    const ring = (cls, teeth, sec, cl) => `<div class="ring ${cls}">${ringSVG(0, teeth, sec, cl)}${ringSVG(1, teeth, sec, cl)}${ringSVG(2, teeth, sec, cl)}</div>`;
-    const core = [['0%', '0px', ''], ['8%', '10px', ''], ['14%', '20px', 'hot'], ['16%', '28px', ''], ['20%', '36px', '']]
-      .map(([inn, z, c]) => `<i class="${c}" style="--in:${inn};--z:${z}"></i>`).join('');
-    const vanes = `<svg class="vanes" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48" fill="#050506"/>${
-      Array.from({ length: 8 }, (_, i) => `<path d="M50 50 L${n1(polar(50, 50, 46, i * 45 - 12)[0])} ${n1(polar(50, 50, 46, i * 45 - 12)[1])} A46 46 0 0 1 ${n1(polar(50, 50, 46, i * 45 + 8)[0])} ${n1(polar(50, 50, 46, i * 45 + 8)[1])}Z" fill="#cfd4db"/>`).join('')
-    }<circle cx="50" cy="50" r="12" fill="#ff4a2e"/></svg>`;
-    // Each label has a zero-size anchor in the tilted plane and a flat twin in .orb-tags. Dock anchors sit just
-    // outside the disc rim, and each label is pushed off its anchor by [dx, dy] (fractions of its own size): away from
-    // the capsules standing on the track, and below the deliver dock so the docking arm never covers DELIVER.
-    const DOCKS = [[165, 'SETUP', -0.3, 1], [230, 'BUILD', -0.6, -1], [315, 'VERIFY', 0.6, -1], [375, 'DELIVER', 0.3, 1],
-      [122, 'QUEUE', 0, 1], [92, 'HOLD CLAMP', 0, 1, 'hold'], [62, 'SHIPPED', 0, 1]];
-    const anchor = (key, p) => `<i class="orb-anchor" data-anchor="${key}"${p ? ` style="left:${n1(p[0])}%;top:${n1(p[1])}%"` : ''}></i>`;
-    const dockAnchors = DOCKS.map(([a, txt]) => anchor('dock-' + txt, polar(50, 50, 52, a))).join('');
-    const dockLabels = DOCKS.map(([, txt, dx, dy, cls = '']) => `<div class="dock-l ${cls}" data-for="dock-${txt}" style="--dx:${dx};--dy:${dy}"><span>${txt}</span></div>`).join('');
-    const drone = (cls) => `<div class="drone-orbit ${cls}"><div class="drone-pos"><div class="drone-ctr"><div class="drone"></div></div></div></div>`;
-    const capAnchors = FIX.map((f) => anchor('cap-' + f.id)).join('');
-    const caps = FIX.map((f) => `<div class="cap" data-ticket="${f.id}" data-for="cap-${f.id}"><div class="cap-body hov">
-        <span class="cap-id">${f.id}</span><span class="cap-st"></span></div><div class="cap-stem"></div></div>`).join('');
-    orb.innerHTML = flat + `<div class="orb-persp" aria-hidden="true"><div class="orb-plane">${track}<div class="sweep"></div>
-      ${ring('r1', 120, 12, 4)}${ring('r2', 90, 8, 3)}${ring('r3', 60, 6, 3)}
-      <div class="core">${core}<div class="vwrap">${vanes}</div></div>
-      ${drone('d1')}${drone('d2')}
-      ${dockAnchors}${capAnchors}</div></div><div class="orb-tags" aria-hidden="true">${dockLabels}${caps}</div>`;
-    // Re-project without gliding when the scene changes size (window resize, or B becoming visible).
-    new ResizeObserver(() => { if (S.variant === 'B') placeB(true); }).observe(orb);
-    // segmented radial gauge
-    let g = `<svg viewBox="0 0 240 240" aria-hidden="true"><circle class="gring" cx="120" cy="120" r="116"/><circle class="gring" cx="120" cy="120" r="78"/><g transform="translate(120,120)">`;
-    for (let i = 0; i < 60; i++) g += `<rect class="seg" x="-3" y="-110" width="6" height="22" rx="1" transform="rotate(${i * 6})"/>`;
-    g += `</g></svg><div class="gauge-n"><b id="b-pct">0%</b><span>Simulated</span><em id="b-gid"></em></div>`;
-    $('#b-gauge').innerHTML = g;
-  }
-
-  // Move each flat label to the on-screen point of its 3D anchor; capsules glide there unless `instant`.
-  function placeB(instant) {
-    const orb = $('#orb'), box = orb.getBoundingClientRect();
-    if (!box.width) return;
-    if (instant) orb.classList.add('no-glide');
-    $$('.orb-tags [data-for]', orb).forEach((el) => {
-      const r = $(`[data-anchor="${el.dataset.for}"]`, orb).getBoundingClientRect();
-      el.style.left = n1(r.left - box.left) + 'px'; el.style.top = n1(r.top - box.top) + 'px';
-    });
-    if (instant) { void orb.offsetWidth; orb.classList.remove('no-glide'); }
-  }
-
-  function renderB(snap) {
-    const orb = $('#orb');
-    let q = 0, d = 0;
-    const active = (st) => snap.tickets.some((k) => k.status === 'active' && k.stage === st);
-    for (const k of snap.tickets) {
-      let a, stack = 0;
-      if (k.status === 'blocked') a = B_ANG.blocked;
-      else if (k.stage === 'queued') { a = B_ANG.queued; stack = q++; }
-      else if (k.stage === 'done') { a = B_ANG.done; stack = d++; }
-      else a = bAngle(k.pos);
-      const p = polar(50, 50, 38, a);
-      const at = $(`[data-anchor="cap-${k.id}"]`, orb);
-      at.style.left = n1(p[0]) + '%'; at.style.top = n1(p[1]) + '%';
-      const cap = $(`.cap[data-ticket="${k.id}"]`, orb);
-      cap.style.setProperty('--stack', stack);
-      cap.dataset.status = k.status;
-      cap.classList.toggle('is-sel', k.id === S.selected);
-      cap.querySelector('.cap-st').textContent = (k.status === 'blocked' ? 'HOLD' : SHORT[k.stage]) + ' ' + k.pct + '%';
-    }
-    orb.classList.toggle('is-verifying', active('verifying'));
-    orb.classList.toggle('is-delivering', active('delivering'));
-    placeB(false);
-    const sel = snap.sel, lit = Math.round(sel.pct * 0.6);
-    $$('#b-gauge .seg').forEach((el, i) => { el.classList.toggle('on', i < lit && sel.status !== 'blocked'); el.classList.toggle('hold', i < lit && sel.status === 'blocked'); });
-    $('#b-pct').textContent = sel.pct + '%';
-    $('#b-gid').textContent = sel.id + ' · ' + (sel.status === 'blocked' ? 'ON HOLD' : LABEL[sel.stage].toUpperCase());
-    $('#b-detail').innerHTML = detailHTML(sel);
-  }
-
-  // ================= C / Megastructure scene =================
-  const VP = [380, 40], KD = 0.1, X0 = 150, X1 = 610;
-  const BK = (x, y) => [x + (VP[0] - x) * KD, y + (VP[1] - y) * KD];
-  const FLOORS = [
-    { y: 760, n: '01', name: 'INTAKE', bay: 'intake' },
-    { y: 620, n: '02', name: 'BUILD PRESS', bay: 'implementing' },
-    { y: 480, n: '03', name: 'VERIFY CAGE', bay: 'verifying' },
-    { y: 340, n: '04', name: 'DELIVERY HATCH', bay: 'delivering' },
-    { y: 200, n: '05', name: 'DISPATCH DECK', bay: 'done' },
+  const FIX = [
+    fixture('DEMO-241','Stream agent activity','Atlas',-18,{bounce:true}),
+    fixture('DEMO-242','Preserve interrupted work','Birch',-33),
+    fixture('DEMO-243','Verify recovery safety','Cobalt',0,{wait:58,multiple:true}),
+    fixture('DEMO-244','Add project controls','Delta',-48),
+    fixture('DEMO-245','Record run evidence','Ember',0,{wait:12}),
+    fixture('DEMO-246','Resolve dependency hold','Fjord',-24,{hold:160}),
+    fixture('DEMO-247','Check scheduled admission','Grove',0,{wait:22,reasons:[{code:'scheduled',text:'Scheduled for T+00:22'}]}),
+    ...Array.from({length:12},(_,i) => fixture('DEMO-' + (230-i),[
+      'Capture delivery evidence','Repair the queue display','Keep logs after restart',
+      'Check worker capacity','Save stage history','Show dependency links',
+      'Label paused runs','Record verification results','Keep the selected ticket',
+      'Handle an empty queue','Check project settings','Report delivery status'
+    ][i],['Atlas','Birch','Cobalt'][i%3],-70-i*12,{bounce:i===0}))
   ];
-  const FLOOR_Y = { queued: 760, setup: 760, implementing: 620, verifying: 480, delivering: 340, done: 200 };
-  const gearPath = (cx, cy, r, teeth) => {
-    let d = '';
-    for (let i = 0; i < teeth * 2; i++) { const a = i * 180 / teeth, rr = i % 2 ? r - 4 : r;
-      const p0 = polar(cx, cy, rr, a - 90 / teeth * 0.7), p1 = polar(cx, cy, rr, a + 90 / teeth * 0.7);
-      d += (i ? 'L' : 'M') + n1(p0[0]) + ' ' + n1(p0[1]) + 'L' + n1(p1[0]) + ' ' + n1(p1[1]); }
-    return d + 'Z';
-  };
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const systemDark = matchMedia('(prefers-color-scheme: dark)');
+  const state = { clock:0, running:!reduce.matches, speed:1, loop:1, selected:null, theme:'system' };
 
-  function storey(f, ceilY) {
-    const top = ceilY + 16, by0 = BK(0, top)[1], by1 = BK(0, f.y)[1], bx0 = BK(X0, 0)[0], bx1 = BK(X1, 0)[0];
-    let s = `<polygon class="backwall" points="${bx0},${n1(by0)} ${bx1},${n1(by0)} ${bx1},${n1(by1)} ${bx0},${n1(by1)}"/>`;
-    s += `<polygon class="side" points="${X0},${top} ${n1(bx0)},${n1(by0)} ${n1(bx0)},${n1(by1)} ${X0},${f.y}"/>`;
-    s += `<polygon class="side r" points="${X1},${top} ${n1(bx1)},${n1(by0)} ${n1(bx1)},${n1(by1)} ${X1},${f.y}"/>`;
-    s += `<line class="brace" x1="${X0}" y1="${top}" x2="${n1(bx0)}" y2="${n1(by1)}"/><line class="brace" x1="${n1(bx0)}" y1="${n1(by0)}" x2="${X0}" y2="${f.y}"/>`;
-    s += `<line class="brace" x1="${X1}" y1="${top}" x2="${n1(bx1)}" y2="${n1(by1)}"/><line class="brace" x1="${n1(bx1)}" y1="${n1(by0)}" x2="${X1}" y2="${f.y}"/>`;
-    const wy = by0 + (by1 - by0) * 0.18, wh = Math.max(8, (by1 - by0) * 0.28);
-    for (let i = 0; i < 10; i++) { const wx = bx0 + 14 + i * ((bx1 - bx0 - 28) / 10);
-      s += `<rect class="win${(i * 7 + f.y) % 3 ? ' lit' : ''}" x="${n1(wx)}" y="${n1(wy)}" width="${n1((bx1 - bx0 - 28) / 10 - 8)}" height="${n1(wh)}"/>`; }
-    return s;
+  function visibleQueueReasons(reasons) {
+    const unique = reasons.filter((r,i) => reasons.findIndex(v => v.code === r.code && v.text === r.text) === i);
+    const other = unique.filter(r => r.code !== 'docket_full');
+    return other.length ? other : unique.length ? unique : [{code:'unknown',text:'Queue reason unavailable'}];
   }
-  function floorPlate(y) {
-    const b0 = BK(X0, y), b1 = BK(X1, y);
-    return `<polygon class="floor-top" points="${X0},${y} ${X1},${y} ${n1(b1[0])},${n1(b1[1])} ${n1(b0[0])},${n1(b0[1])}"/>
-      <rect class="floor-front" x="${X0}" y="${y}" width="${X1 - X0}" height="16"/><line class="floor-edge" x1="${X0}" y1="${y}" x2="${X1}" y2="${y}"/>`;
-  }
-  const belt = (y, x0, x1) => `<rect class="belt" x="${x0}" y="${y - 14}" width="${x1 - x0}" height="12" rx="6"/>
-      <line class="belt-t" x1="${x0 + 6}" y1="${y - 8}" x2="${x1 - 6}" y2="${y - 8}"/>
-      <circle class="roll" cx="${x0 + 6}" cy="${y - 8}" r="5"/><circle class="roll" cx="${x1 - 6}" cy="${y - 8}" r="5"/>`;
-
-  function buildC() {
-    let s = `<svg id="c-svg" viewBox="0 0 700 880" aria-hidden="true" focusable="false"><defs>
-      <linearGradient id="c-slab" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a4a36"/><stop offset="1" stop-color="#2b241c"/></linearGradient>
-      <pattern id="c-haz" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="12" height="12" fill="#1b1408"/><rect width="6" height="12" fill="#e0a63a"/></pattern>
-      <linearGradient id="c-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d1712"/><stop offset="1" stop-color="#0d0c0b"/></linearGradient></defs>`;
-    // elevator shaft with bracing, rails, landings, cables
-    s += `<rect class="shaft" x="18" y="70" width="64" height="730"/>`;
-    for (let y = 70; y < 790; y += 70) s += `<line class="brace" x1="18" y1="${y}" x2="82" y2="${y + 70}"/><line class="brace" x1="82" y1="${y}" x2="18" y2="${y + 70}"/>`;
-    s += `<line class="rail" x1="24" y1="70" x2="24" y2="800"/><line class="rail" x1="76" y1="70" x2="76" y2="800"/>
-      <line class="cable" x1="42" y1="84" x2="42" y2="800"/><line class="cable" x1="58" y1="84" x2="58" y2="800"/>`;
-    for (const f of FLOORS) s += `<rect class="steel" x="82" y="${f.y - 2}" width="68" height="8"/>`;
-    // gears / cable drum at the shaft head
-    s += `<g class="hov"><path class="steel gear" d="${gearPath(50, 56, 26, 14)}"/><circle class="brass" cx="50" cy="56" r="8"/>
-      <path class="steel gear rev" d="${gearPath(92, 36, 17, 9)}"/><circle class="brass" cx="92" cy="36" r="5"/></g>`;
-    // outer columns
-    s += `<rect class="col" x="${X0 - 10}" y="186" width="10" height="600"/><rect class="col" x="${X1}" y="186" width="10" height="600"/>`;
-    // storeys bottom-up content (each from its ceiling to its floor)
-    for (let i = 0; i < 4; i++) s += storey(FLOORS[i], FLOORS[i + 1].y);
-    for (const f of FLOORS) s += floorPlate(f.y);
-    // foundation
-    s += `<rect x="${X0 - 20}" y="776" width="${X1 - X0 + 40}" height="40" fill="url(#c-haz)" opacity=".5"/><rect x="${X0 - 20}" y="776" width="${X1 - X0 + 40}" height="40" fill="none" stroke="#5a4a36"/>`;
-    // bays
-    const bayHead = (f) => `<text class="bignum" x="${X0 + 14}" y="${f.y - 30}">${f.n}</text><text class="bayname" x="${X0 + 16}" y="${f.y - 10}">${f.name}</text>
-      <circle class="bay-lamp" cx="${X1 - 20}" cy="${f.y - 112}" r="5"/>`;
-    // 01 intake: rack, belt, hold bay
-    s += `<g class="bay" data-bay="intake">${bayHead(FLOORS[0])}
-      <rect class="steel" x="236" y="${760 - 96}" width="6" height="82"/><rect class="steel" x="300" y="${760 - 96}" width="6" height="82"/>
-      <rect class="steel-hi" x="236" y="${760 - 70}" width="70" height="4"/><rect class="steel-hi" x="236" y="${760 - 44}" width="70" height="4"/>
-      ${belt(760, 312, 494)}
-      <rect class="holdzone" x="500" y="${760 - 22}" width="104" height="20"/>
-      <rect class="holdsign" x="510" y="${760 - 112}" width="88" height="24" rx="3"/><text class="holdtext" x="554" y="${760 - 95}" text-anchor="middle">HOLD</text>
-      <rect class="steel" x="551" y="${760 - 88}" width="6" height="48"/></g>`;
-    // 02 build press
-    s += `<g class="bay hov" data-bay="implementing">${bayHead(FLOORS[1])}${belt(620, 236, 604)}
-      <rect class="steel" x="356" y="${620 - 124}" width="12" height="110"/><rect class="steel" x="452" y="${620 - 124}" width="12" height="110"/>
-      <rect class="steel-hi" x="348" y="${620 - 124}" width="124" height="16"/><rect class="steel" x="394" y="${620 - 108}" width="32" height="30"/>
-      <g class="press"><rect class="brass" x="405" y="${620 - 78}" width="10" height="22"/><rect class="steel-hi" x="380" y="${620 - 58}" width="60" height="12" rx="2"/>
-        <rect class="hot" x="384" y="${620 - 47}" width="52" height="2" opacity=".8"/></g>
-      ${[0, 1, 2, 3].map((i) => `<circle class="brass" cx="${362}" cy="${620 - 100 + i * 22}" r="2"/><circle class="brass" cx="${458}" cy="${620 - 100 + i * 22}" r="2"/>`).join('')}</g>`;
-    // 03 verify cage
-    let bars = ''; for (let x = 336; x <= 474; x += 10) bars += `<line class="cage-bar" x1="${x}" y1="${480 - 112}" x2="${x}" y2="${480 - 18}"/>`;
-    s += `<g class="bay hov" data-bay="verifying">${bayHead(FLOORS[2])}${belt(480, 236, 604)}
-      <rect class="scanglow" x="336" y="${480 - 112}" width="10" height="94"/>${bars}<rect class="scanbar" x="339" y="${480 - 114}" width="4" height="98"/>
-      <rect class="cage" x="330" y="${480 - 116}" width="150" height="100"/><rect class="steel-hi" x="326" y="${480 - 122}" width="158" height="8"/></g>`;
-    // 04 delivery hatch
-    s += `<g class="bay hov" data-bay="delivering">${bayHead(FLOORS[3])}${belt(340, 236, 470)}
-      <rect class="steel" x="474" y="${340 - 118}" width="126" height="104"/><rect class="hatch-in" x="484" y="${340 - 108}" width="106" height="84"/>
-      <g class="door-l"><rect class="steel-hi" x="484" y="${340 - 108}" width="53" height="84"/><line class="brace" x1="490" y1="${340 - 100}" x2="530" y2="${340 - 32}"/></g>
-      <g class="door-r"><rect class="steel-hi" x="537" y="${340 - 108}" width="53" height="84"/><line class="brace" x1="584" y1="${340 - 100}" x2="544" y2="${340 - 32}"/></g>
-      <path d="M520 ${340 - 128} l17 -10 l17 10" fill="none" stroke="#ff7a1a" stroke-width="3"/></g>`;
-    // 05 dispatch deck (roof): railing, gantry crane with trolley
-    s += `<g class="bay" data-bay="done">${bayHead(FLOORS[4])}</g>`;
-    for (let x = X0; x <= X1; x += 23) s += `<line class="cage-bar" x1="${x}" y1="${200 - 22}" x2="${x}" y2="200"/>`;
-    s += `<line class="rail" x1="${X0}" y1="${200 - 22}" x2="${X1}" y2="${200 - 22}"/>`;
-    s += `<rect class="steel" x="166" y="86" width="12" height="114"/><rect class="steel" x="582" y="86" width="12" height="114"/>
-      <rect class="steel-hi" x="150" y="74" width="460" height="14"/><line class="brace" x1="172" y1="100" x2="300" y2="88"/><line class="brace" x1="588" y1="100" x2="460" y2="88"/>
-      <g class="trolley hov"><rect class="steel" x="196" y="88" width="56" height="16" rx="2"/><circle class="brass" cx="206" cy="88" r="4"/><circle class="brass" cx="242" cy="88" r="4"/>
-        <line class="cable" x1="224" y1="104" x2="224" y2="146"/><path d="M216 146 h16 v6 a8 8 0 0 1 -16 0z" fill="#b08a4a"/>
-        <rect class="hot" x="210" y="156" width="28" height="12" rx="1" opacity=".75"/></g>`;
-    // exterior duct, fan and conduits
-    s += `<rect class="duct" x="626" y="190" width="16" height="610"/>`;
-    for (const f of FLOORS.slice(0, 4)) s += `<rect class="duct" x="610" y="${f.y - 104}" width="18" height="12"/>`;
-    s += `<g transform="translate(662,560)"><circle r="30" fill="#1d1814" stroke="#6d5a40" stroke-width="3"/>
-      <g class="fan hov"><circle r="26" fill="none"/>${[0, 1, 2, 3, 4].map((i) => `<path d="M0 0 C 8 -6, 22 -6, 24 0 C 18 4, 8 4, 0 0Z" fill="#8a7457" transform="rotate(${i * 72})"/>`).join('')}</g>
-      <circle r="5" fill="#ff7a1a"/></g>`;
-    const cond = `M676 810 V700 H648 V640 H676 V420 H648 V360 H676 V190`;
-    s += `<path class="conduit" d="${cond}"/><path class="conduit-lit" id="c-cond" d="${cond}" pathLength="100" stroke-dashoffset="100"/>`;
-    // ticket slabs
-    s += `<g id="c-slabs">${FIX.map((f) => `<g class="slab hov" data-ticket="${f.id}"><polygon class="st" points="0,0 84,0 80,-6 4,-6"/>
-      <rect class="sf" x="0" y="0" width="84" height="24" rx="2"/><text x="42" y="12" text-anchor="middle">${f.id.replace('DEMO-', 'D-')}</text>
-      <text class="sp" x="42" y="22" text-anchor="middle"></text></g>`).join('')}</g>`;
-    s += `</svg><div class="lift" id="c-lift" aria-hidden="true"><div class="lift-box">
-      <div class="b"></div><div class="l"></div><div class="d"></div><div class="r"></div><div class="t"></div><div class="f" id="c-lift-f"></div></div></div>`;
-    $('#c-tower').innerHTML = s;
-  }
-
-  function renderC(snap) {
-    let q = 0, d = 0;
-    const active = (st) => snap.tickets.some((k) => k.status === 'active' && k.stage === st);
-    for (const k of snap.tickets) {
-      let x, y = FLOOR_Y[k.stage] - 38;
-      if (k.status === 'blocked') { x = 512; y = 760 - 46; }
-      else if (k.stage === 'queued') { x = 228; y = 760 - 94 - 26 * q; q++; }
-      else if (k.stage === 'setup') x = 318 + k.stageFrac * 92;
-      else if (k.stage === 'done') { x = 236 + (d % 4) * 92; y = 200 - 30 - (d >= 4 ? 30 : 0); d++; }
-      else x = 240 + k.stageFrac * (k.stage === 'delivering' ? 220 : 270);
-      const g = $(`#c-slabs .slab[data-ticket="${k.id}"]`);
-      g.style.transform = `translate(${n1(x)}px,${n1(y)}px)`;
-      g.dataset.status = k.status;
-      g.classList.toggle('is-sel', k.id === S.selected);
-      g.querySelector('.sp').textContent = (k.status === 'blocked' ? 'HOLD' : SHORT[k.stage]) + ' ' + k.pct + '%';
+  function ticketAt(ticket, time) {
+    const interval = ticket.intervals.find(i => i.start <= time && time < i.end);
+    const done = time >= ticket.completedAt;
+    const stage = done ? 'done' : interval?.stage || 'queued';
+    const status = done ? 'done' : interval?.mode === 'blocked' ? 'blocked' : stage === 'queued' ? 'queued' : 'active';
+    const used = ticket.intervals.filter(i => i.start < time).map(i => ({...i, duration:Math.max(0,Math.min(i.end,time)-i.start)}));
+    const duration = mode => used.filter(i => i.mode === mode).reduce((n,i) => n+i.duration,0);
+    // Consecutive pieces of the same running visit are one visit, even with a hold.
+    const visits = Object.fromEntries(STAGES.map(s => [s,0]));
+    let previousStage = null;
+    for (const i of used) if (i.mode === 'running') { if (i.stage !== previousStage) visits[i.stage]++; previousStage=i.stage; }
+    let stageTime = 0;
+    for (const i of [...used].reverse()) {
+      if (i.stage !== stage) break;
+      if (i.mode === 'running') stageTime += i.duration;
     }
-    const selSlab = $(`#c-slabs .slab[data-ticket="${S.selected}"]`); selSlab.parentNode.appendChild(selSlab);
-    const sel = snap.sel;
-    const bayOn = { intake: active('setup'), implementing: active('implementing'), verifying: active('verifying'), delivering: active('delivering'), done: snap.counts.done > 0 };
-    for (const b of $$('#c-svg .bay')) {
-      const key = b.dataset.bay;
-      b.classList.toggle('idle', !bayOn[key]); b.classList.toggle('on', bayOn[key]);
-      b.classList.toggle('is-focus', key === (sel.stage === 'queued' || sel.stage === 'setup' ? 'intake' : sel.stage));
-    }
-    $('#c-cond').style.strokeDashoffset = String(100 - sel.pct);
-    const lift = $('#c-lift'); lift.style.top = ((FLOOR_Y[sel.stage] - 62) / 880 * 100) + '%';
-    $('#c-lift-f').textContent = sel.id;
-    // stage spine (top = done)
-    const si = STAGES.indexOf(sel.stage);
-    $('#c-spine').innerHTML = STAGES.map((s, i) => [s, i]).reverse().map(([s, i]) => {
-      const st = sel.stage === 'done' ? 'done' : i < si ? 'done' : i === si ? 'current' : 'todo';
-      const hold = sel.status === 'blocked' && i === si ? ' st-hold' : '';
-      return `<li class="st-${st}${hold}"${i === si ? ' aria-current="step"' : ''}><b>${String(i).padStart(2, '0')}</b><span>${LABEL[s]}</span><span class="vh"> (${st === 'todo' ? 'not started' : st === 'done' ? 'completed' : hold ? 'current, on hold' : 'current'})</span></li>`;
+    return { ...ticket, stage, status, interval, used, visits,
+      running:duration('running'), queued:duration('queued'), blocked:duration('blocked'),
+      elapsed:Math.max(0,Math.min(time,ticket.completedAt)-ticket.queuedAt),
+      stageTime,
+      reasons:status === 'queued' ? visibleQueueReasons(interval?.reasons || []) : interval?.reasons || [],
+      bounces:ticket.bounces.filter(b => b.at <= time) };
+  }
+  // A single outward wave per 1.8 demo seconds, from the center to beyond the dot.
+  function sonarFrame(time) {
+    const phase = (time % 1.8) / 1.8;
+    return { scale:phase * 3.2, opacity:(1 - phase) * .65 };
+  }
+  function trackerHTML(ticket) {
+    const index = STAGES.indexOf(ticket.stage);
+    return `<ol class="track" aria-label="Ticket stages">${STAGES.map((s,i) => {
+      const complete = ticket.status === 'done' || i < index;
+      const current = ticket.status !== 'done' && i === index;
+      // A connector reaches the current dot, not only the last complete dot.
+      const connected = i < index;
+      return `<li class="step${complete?' complete':''}${current?' current':''}${connected?' connected':''}"${current?' aria-current="step"':''}>${current?'<span class="sonar" aria-hidden="true"></span>':''}${LABEL[s]}<span class="sr">, ${complete?'complete':current?'current'+(ticket.status==='blocked'?', blocked':''):'not complete'}</span></li>`;
+    }).join('')}</ol>`;
+  }
+  function rowHTML(ticket) {
+    const shipped = ticket.status === 'done';
+    const status = shipped ? 'Shipped' : ticket.status === 'queued' ? 'Queued' : (ticket.status === 'blocked' ? 'Blocked' : 'Active') + ' · ' + LABEL[ticket.stage];
+    return `<div class="ticket-top"><div><span class="ticket-id">${esc(ticket.id)}</span><span class="ticket-title">${esc(ticket.title)}</span></div><span class="status">${status}</span></div>`
+      + (shipped ? '' : trackerHTML(ticket))
+      + (!shipped && ticket.reasons.length ? `<ul class="reason-list">${ticket.reasons.map(r=>`<li>${esc(r.text)}</li>`).join('')}</ul>` : '')
+      + `<div class="ticket-foot"><span class="mono">${shipped?'Completed '+stamp(ticket.completedAt):ticket.status==='queued'?'Queued '+fmt(ticket.queued):ticket.status==='blocked'?'Blocked '+fmt(ticket.blocked):LABEL[ticket.stage]+' '+fmt(ticket.stageTime)} · Running ${fmt(ticket.running)}</span><span>${esc(ticket.worker)} · View stats ↗</span></div>`;
+  }
+  const rows = new Map();
+  function renderList(id, tickets, emptyText) {
+    const list = $(id);
+    const desired = new Set(tickets.map(t=>t.id));
+    for (const child of [...list.children]) if (!desired.has(child.dataset.id)) child.remove();
+    tickets.forEach((ticket,index) => {
+      let row = rows.get(ticket.id);
+      if (!row) {
+        row = document.createElement('button'); row.type='button'; row.className='ticket'; row.dataset.id=ticket.id;
+        row.addEventListener('click',()=>openDetails(ticket.id));
+        rows.set(ticket.id,row);
+      }
+      row.dataset.status=ticket.status;
+      row.setAttribute('aria-label',ticket.id+' '+ticket.title+', '+ticket.status+', '+LABEL[ticket.stage]+'. '+ticket.reasons.map(r=>r.text).join('. ')+'. View stats');
+      row.setAttribute('aria-pressed',String(state.selected === ticket.id));
+      const html = rowHTML(ticket);
+      if (row.innerHTML !== html) row.innerHTML=html;
+      if (list.children[index] !== row) list.insertBefore(row,list.children[index] || null);
+    });
+    if (!tickets.length) { const empty=document.createElement('div'); empty.className='empty'; empty.textContent=emptyText; list.append(empty); }
+  }
+  function detailHTML(ticket) {
+    const metric = (label,value) => `<div class="metric"><span>${label}</span><b>${fmt(value)}</b></div>`;
+    const stages = STAGES.filter(s=>!['queued','done'].includes(s)).map(stage => {
+      const duration=ticket.used.filter(i=>i.stage===stage && i.mode==='running').reduce((n,i)=>n+i.duration,0);
+      return `<tr><td>${LABEL[stage]}${ticket.visits[stage]>1?' · '+ticket.visits[stage]+' visits':''}</td><td class="mono">${fmt(duration)}</td></tr>`;
     }).join('');
-    $('#c-spine-note').textContent = sel.id + (sel.status === 'blocked' ? ' is held; its machinery stays still.' : ' · ' + sel.pct + '% simulated');
-    $('#c-elapsed').textContent = fmt(sel.elapsed);
-    const meter = $('#c-meter'); meter.dataset.status = sel.status;
-    if (!meter.querySelector('b')) meter.insertAdjacentHTML('beforeend', [6, 26, 40].map((b) => `<b style="bottom:${b / PIPE * 100}%"></b>`).join(''));
-    meter.querySelector('i').style.height = sel.pct + '%';
-    $('#c-detail').innerHTML = detailHTML(sel);
+    // Filter only the capacity label; raw reasons remain in the fixture.
+    const blockers = ticket.used.filter(i=>i.mode!=='running').flatMap(i => (i.mode==='queued'?visibleQueueReasons(i.reasons):i.reasons).map(reason=>({...i,reason})));
+    return `<h3>${esc(ticket.title)}</h3><p class="muted">${esc(ticket.worker)} · ${ticket.status==='done'?'Shipped '+stamp(ticket.completedAt):esc(ticket.status)+' · '+LABEL[ticket.stage]}<br>Simulated measurements at ${stamp(state.clock)}</p>`
+      + `<div class="metrics">${metric('Running time',ticket.running)}${metric('Total elapsed',ticket.elapsed)}${metric('Queued time',ticket.queued)}${metric('Blocked time',ticket.blocked)}</div>`
+      + `<h3>Time per stage</h3><table><thead><tr><th>Stage · all visits</th><th>Running time</th></tr></thead><tbody>${stages}</tbody></table>`
+      + `<p class="muted">Running time excludes queue and hold time. Total elapsed includes both. Stage totals include every visit.</p>`
+      + `<h3>Current blockers</h3>${ticket.reasons.length?'<ul class="history">'+ticket.reasons.map(r=>'<li>'+esc(r.text)+'</li>').join('')+'</ul>':'<p class="muted">None</p>'}`
+      + `<h3>Blocker history · ${blockers.length} reason episodes</h3><ul class="history">${blockers.map(i=>`<li>${esc(i.reason.text)}<small class="mono">${stamp(i.start)} → ${stamp(i.start+i.duration)} · ${fmt(i.duration)} · ${i.mode==='queued'?'Queue':'Hold'}${i.end>state.clock?' · ongoing':''}</small></li>`).join('') || '<li>No blockers recorded.</li>'}</ul>`
+      + `<p class="muted">Concurrent reasons share the same interval. Do not add their durations together.</p>`
+      + `<h3>Bounces · ${ticket.bounces.length}</h3><ul class="history">${ticket.bounces.map(b=>`<li>${LABEL[b.from]} → ${LABEL[b.to]}<small>${esc(b.reason)} · ${stamp(b.at)}</small></li>`).join('') || '<li>No bounces recorded.</li>'}</ul>`;
   }
-
-  // ---------- Shared render ----------
-  const RENDER = { A: renderA, B: renderB, C: renderC };
-  function motionNote() {
-    if (!S.running && S.pauseReason === 'reduced-motion') return ['Reduced motion is on, so the demo starts paused. Choose Resume demo to play it.', true];
-    if (!S.running) return ['Demo paused: machinery and simulated progress are stopped.', true];
-    if (document.hidden) return ['Page hidden: motion is suspended until you return.', false];
-    return [`Demo running at ${S.speed}x. Loop ${S.loop} restarts at T+${fmt(LOOP)}.` + (mqReduce.matches ? ' (You opted in despite reduced motion.)' : ''), false];
+  function openDetails(id) {
+    state.selected=id; render();
+    if (!$('details').open) $('details').showModal();
   }
-  // animation-play-state (body.is-frozen) does not stop CSS transitions, so the 1 s glides of capsules, tags, slabs
-  // and the lift would keep moving after Pause. Freezing pauses in-flight transitions where they are and resuming
-  // plays them on; a transition started while frozen (Restart, selection) jumps to its end instead of waiting.
-  let wasFrozen = false;
-  function freezeTransitions(frozen) {
-    if (typeof CSSTransition === 'undefined' || !document.getAnimations) return;
-    for (const a of document.getAnimations()) {
-      if (!(a instanceof CSSTransition)) continue;
-      if (!frozen) { if (a.playState === 'paused') a.play(); }
-      else if (a.playState === 'running') { if (wasFrozen) a.finish(); else a.pause(); }
-    }
-    wasFrozen = frozen;
+  function renderSonar() {
+    if (reduce.matches) return;
+    const pulse = sonarFrame(state.clock);
+    // Inherited values survive row updates without restarting the wave.
+    document.documentElement.style.setProperty('--sonar-scale',pulse.scale.toFixed(4));
+    document.documentElement.style.setProperty('--sonar-opacity',pulse.opacity.toFixed(4));
   }
   function render() {
-    const snap = snapshot();
-    const frozen = !S.running || document.hidden;
-    document.body.dataset.variant = S.variant;
-    document.body.classList.toggle('is-frozen', frozen);
-    for (const v of VARIANTS) $('#v-' + v.id).hidden = v.id !== S.variant;
-    $$('[data-bind="clock"]').forEach((el) => { el.textContent = 'T+' + fmt(snap.t); });
-    $$('[data-bind="loop"]').forEach((el) => { el.textContent = String(S.loop); });
-    $$('[data-count]').forEach((el) => { el.textContent = String(snap.counts[el.dataset.count]); });
-    $('#btn-pause').textContent = S.running ? 'Pause demo' : 'Resume demo';
-    $$('[data-speed]').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === S.speed)));
-    const [note, warn] = motionNote(); const mn = $('#motion-note'); mn.textContent = note; mn.classList.toggle('warn', warn);
-    const idx = VARIANTS.findIndex((v) => v.id === S.variant);
-    $$('.sw-choices button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.variant === S.variant)));
-    $('#sw-index').textContent = (idx + 1) + ' / ' + VARIANTS.length + ' · ' + VARIANTS[idx].name;
-    document.title = 'Factory / Design lab · ' + S.variant + ' / ' + VARIANTS[idx].name;
-    updateLists(snap);
-    RENDER[S.variant](snap);
-    $('#state-pre').textContent = JSON.stringify({
-      note: 'Simulated fixture data for a design prototype; not live telemetry.',
-      variant: { id: S.variant, name: VARIANTS[idx].name },
-      selectedTicket: S.selected,
-      clock: { demoSeconds: snap.t, display: 'T+' + fmt(snap.t), loop: S.loop, loopLengthSeconds: LOOP, speed: S.speed },
-      motion: { state: S.running ? 'running' : 'paused', pauseReason: S.pauseReason, pageHidden: document.hidden, prefersReducedMotion: mqReduce.matches },
-      counts: snap.counts,
-      tickets: snap.tickets.map((k) => ({ id: k.id, title: k.title, stage: k.stage, status: k.status, simulatedPercent: k.pct,
-        worker: k.worker, elapsedDemoSeconds: k.elapsed, activity: k.activity[0] })),
-    }, null, 2);
-    freezeTransitions(frozen);   // last, so getAnimations() sees the transitions this render just started
-  }
-
-  // ---------- Single clock ----------
-  let lastTs = null, lastT = -1;
-  function frame(ts) {
-    let dt = lastTs === null ? 0 : (ts - lastTs) / 1000;
-    lastTs = ts;
-    if (dt > 0.25) dt = 0.25;               // never jump after a throttled or hidden tab
-    if (S.running && !document.hidden) {
-      S.clock += dt * S.speed;
-      if (S.clock >= LOOP) { S.clock = 0; S.loop++; lastT = -1; }
+    renderSonar();
+    const tickets=FIX.map(f=>ticketAt(f,state.clock));
+    const active=tickets.filter(t=>t.status==='active'||t.status==='blocked');
+    const queued=tickets.filter(t=>t.status==='queued');
+    const shipped=tickets.filter(t=>t.status==='done').sort((a,b)=>b.completedAt-a.completedAt || a.id.localeCompare(b.id)).slice(0,10);
+    renderList('active-list',active,'No tickets in progress.');
+    renderList('queue-list',queued,'No queued tickets.');
+    renderList('shipped-list',shipped,'No shipped tickets yet.');
+    $('active-count').textContent=active.filter(t=>t.status==='active').length;
+    $('blocked-count').textContent=active.filter(t=>t.status==='blocked').length;
+    $('queued-count').textContent=queued.length;
+    $('shipped-count').textContent=shipped.length;
+    $('shipped-summary').textContent=shipped.length+' tickets · latest 10 · newest first';
+    $('clock').textContent='T+'+fmt(state.clock);
+    $('scrub').value=String(Math.floor(state.clock));
+    $('pause').textContent=state.running?'Pause demo':'Resume demo';
+    $('playback-status').textContent=(state.running?'Playing':'Paused')+' · loop '+state.loop;
+    if (state.selected) {
+      const ticket=tickets.find(t=>t.id===state.selected);
+      $('detail-title').textContent=ticket.id+' / Stats';
+      const body=detailHTML(ticket);
+      if ($('detail-body').innerHTML!==body) $('detail-body').innerHTML=body;
     }
-    const t = Math.floor(S.clock);
-    if (t !== lastT) { lastT = t; render(); }
+  }
+  function theme() { document.documentElement.dataset.theme=state.theme==='system'?(systemDark.matches?'dark':'light'):state.theme; }
+  $('appearance').addEventListener('change',e=>{state.theme=e.target.value;theme();});
+  systemDark.addEventListener('change',theme);
+  $('close-details').addEventListener('click',()=>$('details').close());
+  $('details').addEventListener('close',()=>{
+    const selected=state.selected; state.selected=null; render();
+    const row=rows.get(selected);
+    if (row?.isConnected && !row.closest('details:not([open])')) row.focus();
+    else $('shipped').querySelector('summary').focus();
+  });
+  $('pause').addEventListener('click',()=>{state.running=!state.running;render();});
+  $('restart').addEventListener('click',()=>{state.clock=0;state.loop=1;render();});
+  $('speed').addEventListener('change',e=>{state.speed=Number(e.target.value);});
+  $('scrub').addEventListener('input',e=>{state.running=false;state.clock=Number(e.target.value);render();});
+  reduce.addEventListener('change',()=>{if(reduce.matches){state.running=false;render();}});
+  // Hidden pages suspend the clock without a jump on return.
+  let previous=performance.now(), accumulated=0;
+  document.addEventListener('visibilitychange',()=>{previous=performance.now();accumulated=0;});
+  function frame(now) {
+    const delta=Math.max(0,now-previous)/1000; previous=now;
+    if (state.running && !document.hidden) {
+      state.clock+=delta*state.speed;
+      if (state.clock>=LOOP) {state.loop+=Math.floor(state.clock/LOOP);state.clock%=LOOP;}
+      renderSonar();
+      accumulated+=delta;
+      if(accumulated>=.2){render();accumulated=0;}
+    }
     requestAnimationFrame(frame);
   }
-
-  // ---------- Controls ----------
-  function setRunning(run, reason) { S.running = run; S.pauseReason = run ? null : reason; render(); }
-  function readVariant() {
-    const v = (new URL(location.href).searchParams.get('variant') || '').toUpperCase();
-    return VARIANTS.some((x) => x.id === v) ? v : 'A';
-  }
-  function setVariant(v) {
-    if (v === S.variant) return;
-    S.variant = v;
-    const url = new URL(location.href); url.searchParams.set('variant', v);
-    history.pushState({ variant: v }, '', url);
-    resetTilt(); render();
-  }
-  const cycle = (dir) => { const i = VARIANTS.findIndex((v) => v.id === S.variant); setVariant(VARIANTS[(i + dir + VARIANTS.length) % VARIANTS.length].id); };
-
-  document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-ticket]');
-    if (t) { S.selected = t.dataset.ticket; render(); return; }
-    const v = e.target.closest('.sw-choices [data-variant]');
-    if (v) setVariant(v.dataset.variant);
-  });
-  $('#sw-prev').addEventListener('click', () => cycle(-1));
-  $('#sw-next').addEventListener('click', () => cycle(1));
-  $('#btn-pause').addEventListener('click', () => setRunning(!S.running, 'user'));
-  $('#btn-restart').addEventListener('click', () => { S.clock = 0; S.loop = 1; S.selected = FIX[0].id; lastT = -1; render(); });
-  $$('[data-speed]').forEach((b) => b.addEventListener('click', () => { S.speed = Number(b.dataset.speed); render(); }));
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
-    const el = e.target;
-    if (el && el.closest && (el.closest('input, select, textarea, [contenteditable]:not([contenteditable="false"])') || el.isContentEditable)) return;
-    e.preventDefault(); cycle(e.key === 'ArrowRight' ? 1 : -1);
-  });
-  window.addEventListener('popstate', () => { S.variant = readVariant(); resetTilt(); render(); });
-  document.addEventListener('visibilitychange', () => { lastTs = null; render(); });
-  const onReduce = () => {
-    if (mqReduce.matches && S.running) setRunning(false, 'reduced-motion');
-    else if (!mqReduce.matches && !S.running && S.pauseReason === 'reduced-motion') setRunning(true);
-    else render();
-    resetTilt();
-  };
-  if (mqReduce.addEventListener) mqReduce.addEventListener('change', onReduce); else mqReduce.addListener(onReduce);
-
-  // Pointer parallax on the assembly floor (off with reduced motion).
-  const tilt = $('#a-tilt');
-  function resetTilt() { tilt.style.setProperty('--px', 0); tilt.style.setProperty('--py', 0); }
-  $('#a-scene').addEventListener('pointermove', (e) => {
-    if (mqReduce.matches) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    tilt.style.setProperty('--px', (((e.clientX - r.left) / r.width) * 2 - 1).toFixed(3));
-    tilt.style.setProperty('--py', (((e.clientY - r.top) / r.height) * 2 - 1).toFixed(3));
-  });
-  $('#a-scene').addEventListener('pointerleave', resetTilt);
-
-  // ---------- Boot ----------
-  buildLists(); buildA(); buildB(); buildC();
-  S.variant = readVariant();
-  history.replaceState({ variant: S.variant }, '', location.href);
-  if (mqReduce.matches) { S.running = false; S.pauseReason = 'reduced-motion'; }
-  render();
-  requestAnimationFrame(frame);
+  theme(); render(); requestAnimationFrame(frame);
 })();
 </script>
 </body>
