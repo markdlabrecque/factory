@@ -16,12 +16,13 @@ import { uninstall } from '../src/commands/uninstall.mts';
 import { init } from '../src/commands/init.mts';
 import { readRegistry } from '../src/projects.mts';
 import { buildAssets } from '../src/scaffold.mts';
+import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
 const EXPECTED = ['.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
   'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
-  'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'];
+  'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'];
 
 function fixture(t: TestContext, homeName = 'home') {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'factory-init-')));
@@ -107,7 +108,7 @@ test('rerun keeps existing bytes and modes, fills gaps, reports skips, never dup
   assert.deepEqual(readFileSync(s('prompt.md')), keep);
   assert.equal(mode(s('prompt.md')), 0o640);
   assert.ok(existsSync(s('ci.mts')), 'missing file recreated');
-  assert.match(out, /Created 1 file\(s\), skipped 26/);
+  assert.match(out, /Created 1 file\(s\), skipped 27/);
   assert.match(out, /skipped .*config\.mts/);
   assert.match(out, /nothing was reconfigured/);
   assert.match(out, /Add: \.env evidence\/ state\/ logs\/ board\.html/);
@@ -226,4 +227,26 @@ test('every workflow module a scaffolded file imports is scaffolded too', () => 
       assert.ok(names.has(dep), `${f.path} imports ./${dep}, which init does not write`);
     }
   }
+});
+
+test('a new scaffold ships the recovery workflow as reviewed; an existing copy stays inactive until it is reviewed', async t => {
+  const { p, repo } = fixture(t);
+  const fresh = repo('fresh');
+  const r1 = await quiet(() => init(p, fresh, personal));
+  assert.equal(r1.error, undefined);
+  assert.equal(readFileSync(join(fresh, '.sandcastle/prompt.recover.md'), 'utf8'), readFileSync(new URL('../../orchestrator/prompt.recover.md', import.meta.url), 'utf8'));
+  assert.equal(recoveryCopyProblem(p, fresh), null, 'active');
+  assert.match(r1.out, /Self-recovery: active/);
+  writeFileSync(join(fresh, '.sandcastle/main.mts'), readFileSync(join(fresh, '.sandcastle/main.mts'), 'utf8') + '// customized\n');
+  assert.match(recoveryCopyProblem(p, fresh) ?? '', /main\.mts changed since the recovery workflow was reviewed/);
+
+  // An existing project whose own main.mts predates recovery: init fills the gaps but records no review.
+  const old = repo('old');
+  mkdirSync(join(old, '.sandcastle'));
+  writeFileSync(join(old, '.sandcastle/main.mts'), '// pre-recovery main\n');
+  const r2 = await quiet(() => init(p, old, personal));
+  assert.equal(r2.error, undefined);
+  assert.equal(readReview(p, old), null);
+  assert.match(recoveryCopyProblem(p, old) ?? '', /missing main\.mts --recover --attempt-record/);
+  assert.match(r2.out, /Self-recovery: inactive/);
 });

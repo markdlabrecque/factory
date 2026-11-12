@@ -11,7 +11,8 @@
 //    completed passes, with no normal admission between them, is confirmed; a pass with no jam ends the episode.
 // 4. for a confirmed jam, picks the lowest still-stopped jammed ticket with attempts left (dependency-held tickets have no
 //    work of their own to repair; their stopped prerequisite is the target) and, only when the project's copy has the
-//    recovery workflow (recoveryCopyProblem; until then recovery stays inactive and the jam is only recorded) and the
+//    recovery workflow, reviewed as it is (recovery-review.mts recoveryCopyProblem, #63; otherwise recovery stays inactive
+//    and the jam is only recorded), and the
 //    caller still allows new work (`mayLaunch`: not cancelled, scheduler still on), launches one attempt
 //    (launchRecovery), which rechecks everything under the admission lock.
 // A missing report (a dispatcher copy older than #61; nothing is logged), one for another pass or project, or a malformed
@@ -21,7 +22,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { generationOf, readAdmission } from '../../board/admission.mts';
 import { readRuns } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
-import { launchRecovery, recoveryCopyProblem, settleRecovery } from './recovery-run.mts';
+import { recoveryCopyProblem } from './recovery-review.mts';
+import { launchRecovery, settleRecovery } from './recovery-run.mts';
 import { attemptProblem, deliveryMarker, observePass, observeTicket, readRecovery } from './recovery-state.mts';
 
 export type JamReport = { version: 1; pass: string; project: string; at: string; tickets: number[]; reasons?: Record<string, string>;
@@ -75,7 +77,7 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
     if (target === undefined) {
       return say(`jam on ${jam} confirmed; ${stopped.length ? attemptProblem(state, stopped[0], generation) : 'no stopped ticket with recorded work to repair'}`);
     }
-    const copy = recoveryCopyProblem(o.root);
+    const copy = recoveryCopyProblem(p, o.root);
     if (copy) return say(`jam on ${jam} confirmed; not repairing: ${copy}`);
     if (!(await o.mayLaunch())) return say(`jam on ${jam} confirmed; not repairing: scheduled work was stopped`);
     const launched = (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now() });

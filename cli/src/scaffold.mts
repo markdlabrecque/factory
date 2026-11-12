@@ -7,8 +7,8 @@
 // container and private-Git adapter (#74), plus admission.mts (the run-claim admission record board.mts imports) and
 // ownership.mts (the ownership receipts main.mts writes before creating a branch), #75. All are import-safe, so ordinary
 // dispatch of a new scaffold is unaffected.
-// prompt.recover.md is not copied yet, so a new scaffold cannot run a repair until the reviewed recovery workflow is
-// delivered (#63).
+// prompt.recover.md, the repair agent's prompt, is copied too (#63), so a new scaffold has the complete recovery workflow;
+// `factory init` records it as reviewed only when it created every workflow file itself (cli/src/recovery-review.mts).
 import { closeSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -21,7 +21,7 @@ export type Settings = { profile: Profile; repo: string; image: string; host?: s
 export type PlannedFile = { path: string; content: string | Buffer; mode: number };
 
 const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
-  'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'handoff.mts',
+  'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts'];
 const FROM_BOARD = ['board.mts', 'admission.mts', 'board.template.html'];
 

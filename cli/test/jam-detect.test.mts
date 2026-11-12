@@ -13,6 +13,7 @@ import { keyFor, withAdmission } from '../../board/admission.mts';
 import { afterPass } from '../src/jam-detect.mts';
 import type { AfterPassOptions } from '../src/jam-detect.mts';
 import { paths } from '../src/paths.mts';
+import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import { beginAttempt, finishAttempt, readRecovery } from '../src/recovery-state.mts';
 
 const TRACKER = 'acme/site';
@@ -26,8 +27,9 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   const sc = join(root, '.sandcastle');
   mkdirSync(sc, { recursive: true });
   if (o.copy !== false) {
-    for (const f of ['recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'prompt.recover.md']) writeFileSync(join(sc, f), '');
+    for (const f of WORKFLOW) writeFileSync(join(sc, f), '');
     writeFileSync(join(sc, 'main.mts'), '"attempt-record": { type: "string" }\n');
+    recordReview(p, root);
   }
   const dir = p.state;
   mkdirSync(dir, { recursive: true });

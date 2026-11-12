@@ -1,4 +1,4 @@
-// `factory recovery status|reset` tests (#62), plus the recovery summary in `factory status` and repair logs in
+// `factory recovery status|reset|review` tests (#62, review #63), plus the recovery summary in `factory status` and repair logs in
 // `factory logs --recovery`. Disposable HOME, Git repo and run-state folder; recovery state is set up through
 // recovery-state.mts and the admission record; no tracker, Docker or service manager.
 import { test } from 'node:test';
@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { admissionFile, emptyAdmission } from '../../board/admission.mts';
 import { paths } from '../src/paths.mts';
+import { readReview, recoveryCopyProblem, WORKFLOW } from '../src/recovery-review.mts';
 import { addProject } from '../src/projects.mts';
 import { beginAttempt, finishAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
 import { recovery } from '../src/commands/recovery.mts';
@@ -115,4 +116,39 @@ test('logs --recovery shows the ticket\'s repair log, or the newest one', async 
   await logs(p, undefined, { cwd: root, recovery: true, write });
   assert.equal(out, 'repair\nrepair\n');
   await assert.rejects(logs(p, '9', { cwd: root, recovery: true, write }), /No recovery log for #9 in site yet/);
+});
+
+test('review lists the workflow, refuses an incomplete copy, and --confirm activates recovery until a file changes', async t => {
+  const { p, root, out, err, clear } = fixture(t);
+  const sc = (f: string) => join(root, '.sandcastle', f);
+  // A hand upgrade in progress: everything but the repair prompt.
+  writeFileSync(sc('main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
+  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'prompt.recover.md')) writeFileSync(sc(f), `// ${f}\n`);
+  assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 1);
+  assert.match(err(), /missing prompt\.recover\.md[^]*Nothing was recorded/);
+  assert.equal(readReview(p, root), null);
+
+  writeFileSync(sc('prompt.recover.md'), readFileSync(new URL('../../orchestrator/prompt.recover.md', import.meta.url)));
+  clear();
+  assert.equal(await recovery(p, 'review', { cwd: root }), 0, 'without --confirm it only lists');
+  assert.match(out(), /prompt\.recover\.md +same as Factory's/);
+  assert.match(out(), /recovery\.mts +differs from Factory's copy/);
+  assert.match(out(), /main\.mts +project-specific/);
+  assert.match(out(), /Recovery is inactive/);
+  assert.equal(readReview(p, root), null);
+
+  clear();
+  assert.equal(await recovery(p, 'review', { cwd: root, confirm: true, at: '2026-11-12T10:00:00Z' }), 0);
+  assert.equal(recoveryCopyProblem(p, root), null);
+  await recovery(p, 'status', { cwd: root, now });
+  assert.match(out(), /State: active/);
+
+  writeFileSync(sc('handoff.mts'), '// edited after review\n');
+  clear();
+  await status(p, { status: async () => 'active' }, { cwd: root, now });
+  assert.match(out(), /Recovery: inactive \(workflow not reviewed as it is\)/);
+  clear();
+  await recovery(p, 'review', { cwd: root });
+  assert.match(out(), /handoff\.mts +differs from Factory's copy, changed since review/);
+  assert.match(out(), /main\.mts +project-specific, reviewed/);
 });

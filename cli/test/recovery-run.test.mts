@@ -21,6 +21,7 @@ import { projectId, readReceipt, receiptFile, recordIntent } from '../../orchest
 import { containerFor, readAttemptRecord, writeAttemptRecord } from '../../orchestrator/recovery.mts';
 import type { AttemptRecord, Docker } from '../../orchestrator/recovery.mts';
 import { paths } from '../src/paths.mts';
+import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import { launchRecovery, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
 import { beginAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
@@ -57,9 +58,10 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   writeFileSync(join(evidence, 'before-1.png'), 'old evidence');
   if (o.copy !== false) {
     writeFileSync(join(root, '.sandcastle/main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
-    for (const f of ['recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'prompt.recover.md']) writeFileSync(join(root, '.sandcastle', f), '');
+    for (const f of WORKFLOW.filter(f => f !== 'main.mts')) writeFileSync(join(root, '.sandcastle', f), '');
   }
   const p = paths(home);
+  if (o.copy !== false) recordReview(p, root);
   const dir = join(home, 'runs');
   // A stopped run of #7 and a confirmed jam that includes it.
   claimRun({ dir, project: 'proj', iid: '7', pid: 2 ** 22 + 4321, cap: 99,
@@ -102,7 +104,7 @@ test('an attempt is refused without the recovery workflow copy, claiming nothing
   const f = fixture(t, { copy: false });
   const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, false);
-  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, prompt\.recover\.md\)/);
+  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md\)/);
   assert.equal(f.launched.length, 0);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'no attempt recorded, no budget spent');
   assert.equal(f.run().stage, 'stopped');
