@@ -1,7 +1,8 @@
 // Scaffold writer: builds the allowlisted `.sandcastle/` assets from the installed app (never from cwd) and
 // creates only the files that are missing. Existing files are never touched; symlinked or mistyped
 // destinations are rejected before any write; creation is exclusive ('wx'), so a race fails instead of
-// overwriting. A failed write removes its own partial file, leaving a scaffold a rerun can repair.
+// overwriting. A failed write removes its own partial file, leaving a scaffold a rerun can repair. The allowlist
+// includes handoff.mts, the verify/deliver steps main.mts imports (shared with recovery runs, #58).
 import { closeSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,7 @@ export type Settings = { profile: Profile; repo: string; image: string; host?: s
 export type PlannedFile = { path: string; content: string | Buffer; mode: number };
 
 const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
-  'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md'];
+  'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'handoff.mts'];
 const FROM_BOARD = ['board.mts', 'board.template.html'];
 
 type Edit = { tag: string; line?: RegExp; value?: (m: RegExpMatchArray) => string };

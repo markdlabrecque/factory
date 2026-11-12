@@ -1,5 +1,6 @@
 // Init tests: scaffold contents, no-clobber, rerun repair, failure-doesn't-register, wrapper quoting, shared
-// state and uninstall's treatment of projects. Disposable HOME and Git repos; no network, service manager or credentials.
+// state, uninstall's treatment of projects, and that every module a scaffolded file imports is scaffolded.
+// Disposable HOME and Git repos; no network, service manager or credentials.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +20,7 @@ import { buildAssets } from '../src/scaffold.mts';
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
 const EXPECTED = ['.env', '.env.example', '.gitignore', 'analyze.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
-  'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'main.mts', 'manifests.mts', 'models.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
+  'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'main.mts', 'manifests.mts', 'models.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
   'prompt.verify.md', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'];
 
 function fixture(t: TestContext, homeName = 'home') {
@@ -106,7 +107,7 @@ test('rerun keeps existing bytes and modes, fills gaps, reports skips, never dup
   assert.deepEqual(readFileSync(s('prompt.md')), keep);
   assert.equal(mode(s('prompt.md')), 0o640);
   assert.ok(existsSync(s('ci.mts')), 'missing file recreated');
-  assert.match(out, /Created 1 file\(s\), skipped 21/);
+  assert.match(out, /Created 1 file\(s\), skipped 22/);
   assert.match(out, /skipped .*config\.mts/);
   assert.match(out, /nothing was reconfigured/);
   assert.match(out, /Add: \.env evidence\/ state\/ logs\/ board\.html/);
@@ -215,4 +216,14 @@ test('scaffold assets resolve from the installed app, not the working directory'
     process.chdir(tmp);
     assert.equal(buildAssets({ profile: 'personal', repo: 'a/b', image: 'x' }, '/s').length, EXPECTED.length);
   } finally { process.chdir(cwd); rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('every workflow module a scaffolded file imports is scaffolded too', () => {
+  const files = buildAssets({ profile: 'personal', repo: 'a/b', image: 'x' }, '/s');
+  const names = new Set(files.map(f => f.path.split('/').pop()));
+  for (const f of files.filter(f => f.path.endsWith('.mts'))) {
+    for (const [, dep] of String(f.content).matchAll(/from "\.\/([\w.-]+\.mts)"/g)) {
+      assert.ok(names.has(dep), `${f.path} imports ./${dep}, which init does not write`);
+    }
+  }
 });
