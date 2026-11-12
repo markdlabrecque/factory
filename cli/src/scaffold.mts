@@ -4,7 +4,9 @@
 // overwriting. A failed write removes its own partial file, leaving a scaffold a rerun can repair. The allowlist
 // includes handoff.mts, the verify/deliver steps main.mts imports (shared with recovery runs, #58), recovery.mts, the
 // repair attempt lifecycle main.mts's --recover mode imports (#60/#74), and recovery-sandbox.mts, that mode's owned
-// container and private-Git adapter (#74). Both are import-safe, so ordinary dispatch of a new scaffold is unaffected.
+// container and private-Git adapter (#74), plus admission.mts (the run-claim admission record board.mts imports) and
+// ownership.mts (the ownership receipts main.mts writes before creating a branch), #75. All are import-safe, so ordinary
+// dispatch of a new scaffold is unaffected.
 // prompt.recover.md is not copied yet, so a new scaffold cannot run a repair until the reviewed recovery workflow is
 // delivered (#63).
 import { closeSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
@@ -20,8 +22,8 @@ export type PlannedFile = { path: string; content: string | Buffer; mode: number
 
 const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'handoff.mts',
-  'recovery.mts', 'recovery-sandbox.mts'];
-const FROM_BOARD = ['board.mts', 'board.template.html'];
+  'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts'];
+const FROM_BOARD = ['board.mts', 'admission.mts', 'board.template.html'];
 
 type Edit = { tag: string; line?: RegExp; value?: (m: RegExpMatchArray) => string };
 const marker = (tag: string) => new RegExp(`// factory:${tag}(?![\\w:-])`, 'g');

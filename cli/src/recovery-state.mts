@@ -11,7 +11,11 @@
 // - `attempts` and `renewals`: bounded history (LOG_LIMIT each, oldest dropped) for reports. The budget counters, not
 //   this history, decide whether another attempt is allowed. At most one attempt per project is `running` at a time.
 //   Since #74 an attempt also carries its UUID, exact container name and host-owned attempt record path, fixed before
-//   the repair process starts, and ends with one of orchestrator/recovery.mts's outcomes.
+//   the repair process starts, and ends with one of orchestrator/recovery.mts's outcomes. Since #75 the claim and its
+//   charge are first committed together in the admission record (board/admission.mts); beginAttempt then applies the
+//   charge here, idempotently by attempt UUID, so a crash between the two writes is replayed without charging twice.
+// - `episode.generation` (#75): the project's admission activity generation the jam was seen at. A normal admission
+//   advances it, which restarts confirmation (observePass) and refuses an attempt on a jam confirmed before it.
 // - `watch` (#56): per ticket, the last observed requirement fingerprint (`content`, the dispatcher's unitHash of title,
 //   description, parent and human comments, which leaves out Sandcastle's own and system notes; `labels`, the ticket's
 //   labels minus those Factory writes itself) and verified delivery marker (`delivery`, see deliveryMarker). observeTicket
@@ -33,7 +37,7 @@ export const LOG_LIMIT = 100;
 
 export type PassSeen = { pass: string; at: string };
 export type Episode = { id: string; startedAt: string; tickets: number[]; passes: PassSeen[]; confirmedAt?: string;
-  endedAt?: string; end?: 'cleared' | 'changed' | 'reset' };
+  endedAt?: string; end?: 'cleared' | 'changed' | 'reset'; generation?: number };
 // 'repaired' and 'blocked' are results of attempts recorded before #74; new attempts end with recovery.mts's outcomes.
 export type AttemptResult = 'running' | 'delivered' | 'unresolved' | 'failed' | 'timed-out' | 'interrupted' | 'host-followup'
   | 'ownership-refused' | 'repaired' | 'blocked';
@@ -64,7 +68,7 @@ export const emptyRecovery = (root: string): RecoveryState => ({ version: 1, roo
 const validEpisode = (e: any) => e && typeof e.id === 'string' && isTime(e.startedAt) && Array.isArray(e.tickets) && e.tickets.every(isIid)
   && Array.isArray(e.passes) && e.passes.every((x: any) => typeof x?.pass === 'string' && isTime(x.at))
   && (e.confirmedAt === undefined || isTime(e.confirmedAt)) && (e.endedAt === undefined || isTime(e.endedAt))
-  && (e.end === undefined || ENDS.includes(e.end));
+  && (e.end === undefined || ENDS.includes(e.end)) && (e.generation === undefined || (Number.isInteger(e.generation) && e.generation >= 0));
 
 /** The project's recovery record. Missing is empty; malformed or another project's file throws. */
 export function readRecovery(p: Paths, root: string): RecoveryState {
@@ -126,16 +130,18 @@ export const runningAttempt = (s: RecoveryState) => s.attempts.find(a => a.resul
 export const remainingAttempts = (s: RecoveryState, ticket: number) => Math.max(0, ATTEMPT_LIMIT - (s.budgets[ticket]?.used ?? 0));
 
 /** Record one completed dispatcher pass and the jam it saw (the affected tickets, or null/empty for none). Returns the
- *  current episode, if any. A pass id already counted changes nothing. */
-export function observePass(p: Paths, root: string, o: { pass: string; at: string; jam: number[] | null }): Episode | undefined {
+ *  current episode, if any. A pass id already counted changes nothing. `generation` is the project's admission activity
+ *  generation (board/admission.mts) when the pass ran: a different one than the episode's means normal work was admitted
+ *  since, which breaks the confirmation, so the jam starts over from this pass. */
+export function observePass(p: Paths, root: string, o: { pass: string; at: string; jam: number[] | null; generation?: number }): Episode | undefined {
   if (!isTime(o.at)) throw new Error(`Invalid pass time: ${o.at}`);
   const tickets = [...new Set(o.jam ?? [])].sort((a, b) => a - b);
   if (!tickets.every(isIid)) throw new Error(`Invalid jammed tickets: ${JSON.stringify(o.jam)}`);
   return mutateRecovery(p, root, s => {
     if (s.episode?.passes.some(x => x.pass === o.pass)) return { write: false, value: s.episode };
     if (!tickets.length) { const write = !!s.episode; endEpisode(s, o.at, 'cleared'); return { write, value: undefined }; }
-    if (s.episode && !sameJam(s.episode.tickets, tickets)) endEpisode(s, o.at, 'changed');
-    if (!s.episode) s.episode = { id: `${o.at}#${o.pass}`, startedAt: o.at, tickets, passes: [] };
+    if (s.episode && (!sameJam(s.episode.tickets, tickets) || s.episode.generation !== o.generation)) endEpisode(s, o.at, 'changed');
+    if (!s.episode) s.episode = { id: `${o.at}#${o.pass}`, startedAt: o.at, tickets, passes: [], ...(o.generation !== undefined ? { generation: o.generation } : {}) };
     const e = s.episode;
     e.passes = [...e.passes, { pass: o.pass, at: o.at }].slice(-CONFIRM_PASSES);
     if (!e.confirmedAt && e.passes.length >= CONFIRM_PASSES) e.confirmedAt = o.at;
@@ -143,23 +149,37 @@ export function observePass(p: Paths, root: string, o: { pass: string; at: strin
   });
 }
 
-/** Why a repair attempt on `ticket` may not start now, or null. */
-export function attemptProblem(s: RecoveryState, ticket: number): string | null {
+/** Why a repair attempt on `ticket` may not start now, or null. `generation`: the project's current admission activity
+ *  generation; a jam confirmed at another one is stale (normal work was admitted since). */
+export function attemptProblem(s: RecoveryState, ticket: number, generation?: number): string | null {
   const running = runningAttempt(s);
   if (running) return `Recovery attempt ${running.seq} on #${running.ticket} is still running.`;
   if (!s.episode?.confirmedAt) return `No confirmed jam: it must be seen on ${CONFIRM_PASSES} consecutive completed passes.`;
+  if (s.episode.generation !== undefined && generation !== undefined && s.episode.generation !== generation) {
+    return 'Normal work was admitted in this project since the jam was confirmed; confirmation starts over.';
+  }
   if (!s.episode.tickets.includes(ticket)) return `#${ticket} is not part of the confirmed jam.`;
   if (!remainingAttempts(s, ticket)) return `#${ticket} has used its ${ATTEMPT_LIMIT} recovery attempts; it needs verified progress, a requirement change or a project reset.`;
   return null;
 }
-/** Record a new running attempt and spend one unit of the ticket's budget. Throws with the reason when not allowed. */
+/** Record a new running attempt and spend one unit of the ticket's budget. Throws with the reason when not allowed.
+ *  Idempotent by attempt UUID (`id`): an attempt already recorded is returned as it is, charging nothing. `replay` applies
+ *  an attempt the admission record already admitted (cli/src/recovery-claim.mts) without rechecking whether it may start;
+ *  it was checked when admitted, and its charge is applied here exactly once. */
 export function beginAttempt(p: Paths, root: string, o: { ticket: number; at: string; branch?: string; pid?: number; log?: string;
-  id?: string; container?: string; record?: string }): Attempt {
+  id?: string; container?: string; record?: string; replay?: boolean; generation?: number }): Attempt {
   if (!isTime(o.at)) throw new Error(`Invalid attempt time: ${o.at}`);
   return mutateRecovery(p, root, s => {
-    const problem = attemptProblem(s, o.ticket);
-    if (problem) throw new Error(problem);
-    const a: Attempt = { seq: s.nextSeq++, ticket: o.ticket, episode: s.episode!.id, startedAt: o.at, result: 'running',
+    const known = o.id ? s.attempts.find(x => x.id === o.id) : undefined;
+    if (known) return { write: false, value: known };
+    if (!o.replay) {
+      const problem = attemptProblem(s, o.ticket, o.generation);
+      if (problem) throw new Error(problem);
+    } else {
+      const running = runningAttempt(s);
+      if (running) throw new Error(`Recovery attempt ${running.seq} on #${running.ticket} is still running; admitted attempt ${o.id} cannot be recorded.`);
+    }
+    const a: Attempt = { seq: s.nextSeq++, ticket: o.ticket, episode: s.episode?.id ?? 'replayed', startedAt: o.at, result: 'running',
       ...(o.branch ? { branch: o.branch } : {}), ...(o.pid ? { pid: o.pid } : {}), ...(o.log ? { log: o.log } : {}),
       ...(o.id ? { id: o.id } : {}), ...(o.container ? { container: o.container } : {}), ...(o.record ? { record: o.record } : {}) };
     s.attempts = keep([...s.attempts, a]);
