@@ -7,6 +7,8 @@
 // recovery reservation, or nothing changes and the reason is returned. The reservation keeps the record's branch and
 // evidence, notes its previous stage under `recovery.from`, and has no `starting` flag, so a claimant that dies leaves
 // the record stopped (not deleted) for crash reconciliation. Nothing here launches, signals or reads the tracker.
+// The launcher (#74) passes the attempt's UUID, exact container name and attempt-record path, recorded with the attempt
+// and (the UUID) on the run record, so the repair process can check it was started for exactly this attempt.
 import { claimRun } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
 import { beginAttempt, finishAttempt } from './recovery-state.mts';
@@ -21,16 +23,17 @@ export type RecoveryClaim = { ok: true; attempt: Attempt } | { ok: false; reason
 /** Claim capacity, ticket and project ownership for one repair attempt by process `pid`, or nothing. `tracker` is the
  *  project's TRACKER.project, the name its run records carry. */
 export function claimRecovery(p: Paths, o: { root: string; tracker: string; ticket: number; pid: number; at: string;
-  cap?: number; branch?: string; log?: string; dir?: string }): RecoveryClaim {
+  cap?: number; branch?: string; log?: string; dir?: string; id?: string; container?: string; record?: string }): RecoveryClaim {
   let attempt: Attempt | undefined;
   try {
     const claim = claimRun({
       iid: String(o.ticket), pid: o.pid, cap: o.cap ?? DEFAULT_CAP, project: o.tracker, dir: o.dir ?? runStateDir(p),
       also: current => {
-        attempt = beginAttempt(p, o.root, { ticket: o.ticket, at: o.at, pid: o.pid, branch: o.branch ?? current?.branch, log: o.log });
+        attempt = beginAttempt(p, o.root, { ticket: o.ticket, at: o.at, pid: o.pid, branch: o.branch ?? current?.branch, log: o.log,
+          id: o.id, container: o.container, record: o.record });
         return {
           note: `recovery attempt ${attempt.seq} starting`, starting: undefined,
-          recovery: { attempt: attempt.seq, ...(current ? { from: { stage: current.stage, note: current.note, stageSince: current.stageSince } } : {}) },
+          recovery: { attempt: attempt.seq, ...(o.id ? { id: o.id } : {}), ...(current ? { from: { stage: current.stage, note: current.note, stageSince: current.stageSince } } : {}) },
         };
       },
     });

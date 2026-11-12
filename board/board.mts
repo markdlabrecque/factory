@@ -44,8 +44,8 @@ export interface RunState {
   parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
   mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on
   starting?: boolean; // reserved by the dispatcher at launch; main.mts clears it with its first write
-  // Set while a recovery attempt owns the ticket: its attempt number and the record's stage/note before the claim.
-  recovery?: { attempt: number; from?: { stage: Stage; note?: string; stageSince?: string } };
+  // Set while a recovery attempt owns the ticket: its attempt number, its UUID (#74) and the record's stage/note before the claim.
+  recovery?: { attempt: number; id?: string; from?: { stage: Stage; note?: string; stageSince?: string } };
 }
 
 export interface BoardRun extends RunState {

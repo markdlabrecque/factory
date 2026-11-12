@@ -1,8 +1,10 @@
-// Recovery launcher tests (#60): an attempt resumes the recorded branch in a detached repair process that holds the
-// claim; a finished attempt is recorded from its result file; a crashed one is settled as interrupted only after its own
-// container is confirmed gone, with commits, dirty work and evidence untouched; a ticket stops after two attempts.
-// Disposable Git repo, run-state folder and recovery record; a sleeping process stands in for the repair process and a
-// fake docker for containers. No tracker, agent or real Docker.
+// Recovery launcher tests (#60, #74): an attempt's UUID and exact container name are fixed and recorded (recovery state,
+// run record, host-owned attempt record) before the detached repair process starts; it resumes the recorded branch and
+// holds the claim; a finished attempt is recorded from its attempt record; a crashed one is settled as interrupted only
+// after its exact container is confirmed gone, never touching another container (even one mounting the same worktree);
+// a cleanup-pending attempt keeps its intended outcome; a death during delivery is never replayed; a ticket stops after
+// two attempts. Disposable Git repo, run-state folder and recovery record; a sleeping process stands in for the repair
+// process and a fake docker (exact-name inspect and rm -f only; anything else throws). No tracker, agent or real Docker.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,16 +15,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claimRun, readRuns } from '../../board/board.mts';
-import { writeResult } from '../../orchestrator/recovery.mts';
-import type { Docker } from '../../orchestrator/recovery.mts';
+import { containerFor, readAttemptRecord, writeAttemptRecord } from '../../orchestrator/recovery.mts';
+import type { AttemptRecord, Docker } from '../../orchestrator/recovery.mts';
 import { paths } from '../src/paths.mts';
 import { launchRecovery, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
-import { observePass, readRecovery } from '../src/recovery-state.mts';
+import { beginAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
 
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 
-function fixture(t: TestContext, o: { copy?: boolean } = {}) {
+const IDS = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333'];
+
+function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'factory-recover-')));
   const children: ChildProcess[] = [];
   t.after(() => { for (const c of children) c.kill('SIGKILL'); rmSync(home, { recursive: true, force: true }); });
@@ -35,15 +39,20 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   git(root, 'branch', '7-fix-login');
   // The ticket's Factory worktree, with a commit and uncommitted work the repair must keep.
   const worktree = join(root, '.sandcastle/worktrees/7-fix-login');
-  git(root, 'worktree', 'add', '-q', worktree, '7-fix-login');
-  git(worktree, 'commit', '-q', '--allow-empty', '-m', 'half done');
-  writeFileSync(join(worktree, 'wip.txt'), 'uncommitted\n');
+  if (o.worktree === false) {
+    git(root, 'commit', '-q', '--allow-empty', '-m', 'on main');
+    mkdirSync(join(root, '.sandcastle/worktrees'), { recursive: true });
+  } else {
+    git(root, 'worktree', 'add', '-q', worktree, '7-fix-login');
+    git(worktree, 'commit', '-q', '--allow-empty', '-m', 'half done');
+    writeFileSync(join(worktree, 'wip.txt'), 'uncommitted\n');
+  }
   const evidence = join(root, '.sandcastle/evidence/7');
   mkdirSync(evidence, { recursive: true });
   writeFileSync(join(evidence, 'before-1.png'), 'old evidence');
   if (o.copy !== false) {
-    writeFileSync(join(root, '.sandcastle/main.mts'), 'parseArgs({ options: { recover: { type: "string" } } });\n');
-    for (const f of ['recovery.mts', 'handoff.mts', 'prompt.recover.md']) writeFileSync(join(root, '.sandcastle', f), '');
+    writeFileSync(join(root, '.sandcastle/main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
+    for (const f of ['recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'prompt.recover.md']) writeFileSync(join(root, '.sandcastle', f), '');
   }
   const p = paths(home);
   const dir = join(home, 'runs');
@@ -60,81 +69,103 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
     launched.push({ cmd, args, cwd: so.cwd, env: so.env, child });
     return child.pid!;
   };
-  // Containers by name with their mount sources; rm -f removes one unless it is stuck.
-  const containers: Record<string, string[]> = {};
+  // Containers by exact name; rm -f removes one unless it is stuck. Listing or filtering is not supported.
+  const containers = new Set<string>();
   const stuck = new Set<string>();
   const removed: string[] = [];
   const docker: Docker = args => {
-    if (args[0] === 'ps') return { status: 0, stdout: Object.keys(containers).join('\n'), stderr: '' };
-    if (args[0] === 'rm') { removed.push(args[2]); if (!stuck.has(args[2])) delete containers[args[2]]; return { status: 0, stdout: '', stderr: '' }; }
-    const c = containers[args.at(-1)!];
-    return c ? { status: 0, stdout: c.join('\n'), stderr: '' } : { status: 1, stdout: '', stderr: 'Error: No such container' };
+    const name = args.at(-1)!;
+    if (args[0] === 'rm' && args[1] === '-f') { removed.push(name); if (!stuck.has(name)) containers.delete(name); return { status: 0, stdout: '', stderr: '' }; }
+    if (args[0] === 'container' && args[1] === 'inspect') {
+      return containers.has(name) ? { status: 0, stdout: `/${name}`, stderr: '' } : { status: 1, stdout: '', stderr: `Error: No such container: ${name}` };
+    }
+    throw new Error(`unexpected docker call: ${args.join(' ')}`);
   };
-  const common = { root, tracker: 'proj', dir, docker, spawn: spawner, npx: 'npx' };
+  let n = 0;
+  const uuid = () => IDS[n++];
+  const common = { root, tracker: 'proj', dir, docker, spawn: spawner, npx: 'npx', uuid };
   const run = () => readRuns(dir).find(r => r.project === 'proj' && r.iid === '7')!;
   const kill = async (c: ChildProcess) => { c.kill('SIGKILL'); await once(c, 'exit'); };
-  return { home, root, p, dir, git, worktree, evidence, launched, containers, stuck, removed, common, run, kill };
+  const record = (i: number) => join(p.recovery, 'attempts', `${IDS[i]}.json`);
+  const readRecord = (i: number) => (readAttemptRecord(record(i)) as { record: AttemptRecord }).record;
+  /** What main.mts writes as the attempt moves on. */
+  const advance = (i: number, patch: Partial<AttemptRecord>) => writeAttemptRecord(record(i), { ...readRecord(i), ...patch });
+  return { home, root, p, dir, git, worktree, evidence, launched, containers, stuck, removed, common, run, kill, record, readRecord, advance };
 }
 
 test('an attempt is refused without the recovery workflow copy, claiming nothing', t => {
   const f = fixture(t, { copy: false });
   const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, false);
-  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing main\.mts, recovery\.mts, handoff\.mts, prompt\.recover\.md\)/);
+  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, prompt\.recover\.md\)/);
   assert.equal(f.launched.length, 0);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'no attempt recorded, no budget spent');
   assert.equal(f.run().stage, 'stopped');
 });
 
-test('a repair runs detached on the recorded branch, holds the ticket while it lives, and is recorded from its result', async t => {
+test('a repair runs detached on the recorded branch with its identity fixed first, holds the ticket, and is recorded from its attempt record', async t => {
   const f = fixture(t);
+  const tip = f.git(f.root, 'rev-parse', '7-fix-login');
   const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, true, (r as { reason?: string }).reason);
   const [l] = f.launched;
-  assert.deepEqual([l.cmd, ...l.args], ['npx', 'tsx', '.sandcastle/main.mts', '--issue', '7', '--base', 'main', '--recover', '1']);
+  assert.deepEqual([l.cmd, ...l.args], ['npx', 'tsx', '.sandcastle/main.mts', '--issue', '7', '--base', 'main', '--recover', '1', '--attempt-record', f.record(0)]);
   assert.equal(l.cwd, f.root);
   assert.equal(l.env.SANDCASTLE_STATE_DIR, f.dir);
+  // Identity recorded before the process started: recovery state, run record and host-owned attempt record agree.
+  const attempt = readRecovery(f.p, f.root).attempts[0];
+  assert.deepEqual([attempt.id, attempt.container, attempt.record], [IDS[0], containerFor(IDS[0]), f.record(0)]);
+  const ar = f.readRecord(0);
+  assert.deepEqual([ar.phase, ar.seq, ar.iid, ar.branch, ar.base, ar.startSha, ar.worktree, ar.container],
+    ['claimed', 1, '7', '7-fix-login', 'main', tip, f.worktree, containerFor(IDS[0])]);
+  assert.equal(ar.evidence, join(f.evidence, 'recovery', IDS[0]));
+  assert.ok(!ar.gitDir.startsWith(ar.evidence) && !f.record(0).startsWith(f.root), 'record and private Git are outside the writable evidence');
   // The claim now belongs to the repair process, so it outlives the launcher.
   const rec = f.run();
   assert.equal(rec.pid, l.child.pid);
-  assert.equal(rec.recovery?.attempt, 1);
+  assert.deepEqual(rec.recovery && [rec.recovery.attempt, rec.recovery.id], [1, IDS[0]]);
   assert.equal(rec.branch, '7-fix-login');
-  assert.equal(rec.stage, 'setup');
   assert.match(readFileSync(join(f.root, '.sandcastle/logs/recover-7.log'), 'utf8'), /recovery attempt 1 on #7 \(7-fix-login\)/);
 
   assert.equal(settleRecovery(f.p, { ...f.common, at: at(11) }).state, 'running');
   assert.match((launchRecovery(f.p, { ...f.common, ticket: 7, at: at(11) }) as { reason: string }).reason, /attempt 1 on #7 is still running/);
   assert.equal(f.launched.length, 1);
 
-  // main.mts delivered the repaired branch and wrote its result, then exited.
-  writeFileSync(join(f.evidence, 'recovery-report.md'), 'cause: stale fixture\n');
-  writeResult(f.evidence, 1, 'repaired', 'verified and delivered: https://example.test/pr/9');
+  // main.mts (runRecoveryAttempt) delivered the repaired branch, recorded it and exited.
+  mkdirSync(ar.evidence, { recursive: true });
+  writeFileSync(join(ar.evidence, 'recovery-report.md'), 'cause: stale fixture\n');
+  f.advance(0, { phase: 'finished', outcome: 'delivered', reason: 'verified and delivered: https://example.test/pr/9' });
   const file = join(f.dir, 'proj--7.json');
   writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stage: 'done', verdict: 'PASS', mr: 'https://example.test/pr/9' }));
   await f.kill(l.child);
   const s = settleRecovery(f.p, { ...f.common, at: at(30) });
   assert.equal(s.state, 'settled');
   const a = (s as { attempt: { result: string; report?: string; reason?: string; finishedAt?: string } }).attempt;
-  assert.equal(a.result, 'repaired');
-  assert.equal(a.report, join(f.evidence, 'recovery-report.md'));
+  assert.equal(a.result, 'delivered');
+  assert.equal(a.report, join(ar.evidence, 'recovery-report.md'));
   assert.equal(a.finishedAt, at(30));
   assert.equal(f.run().stage, 'done');
+  assert.deepEqual(f.removed, [containerFor(IDS[0])].slice(0, f.removed.length), 'only its own container was ever named');
   assert.equal(settleRecovery(f.p, { ...f.common }).state, 'none');
 });
 
-test('a crashed attempt waits for its container to be confirmed gone, keeps the work, and the ticket stops after two attempts', async t => {
+test('a crashed attempt waits for its exact container to be confirmed gone, keeps the work, and the ticket stops after two attempts', async t => {
   const f = fixture(t);
   const tip = f.git(f.root, 'rev-parse', '7-fix-login');
   launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
-  // The repair process dies outright, leaving its container (and an unrelated one) behind.
-  f.containers['sandcastle-mine'] = [f.worktree, join(f.root, '.sandcastle/evidence')];
-  f.containers['sandcastle-other'] = [join(f.root, '.sandcastle/worktrees/8-other')];
-  f.stuck.add('sandcastle-mine');
+  // The repair process dies right after creating its container, before recording anything more; other containers,
+  // including a Sandcastle container mounting the same worktree, are not this attempt's.
+  const mine = containerFor(IDS[0]);
+  f.containers.add(mine);
+  f.containers.add('sandcastle-same-worktree');
+  f.containers.add(containerFor(IDS[2]));
+  f.stuck.add(mine);
+  f.advance(0, { phase: 'setup' });
   await f.kill(f.launched[0].child);
 
   const held = settleRecovery(f.p, { ...f.common, at: at(12) });
   assert.equal(held.state, 'unconfirmed');
-  assert.match((held as { reason: string }).reason, /sandcastle-mine still present/);
+  assert.match((held as { reason: string }).reason, /still present after docker rm -f/);
   assert.equal(readRecovery(f.p, f.root).attempts[0].result, 'running', 'unconfirmed: the attempt stays running');
   assert.match((launchRecovery(f.p, { ...f.common, ticket: 7, at: at(12) }) as { reason: string }).reason, /not confirmed gone/);
   assert.equal(f.launched.length, 1, 'no new attempt over an unconfirmed container');
@@ -144,9 +175,10 @@ test('a crashed attempt waits for its container to be confirmed gone, keeps the 
   assert.equal(s.state, 'settled');
   const a = (s as { attempt: { result: string; reason?: string } }).attempt;
   assert.equal(a.result, 'interrupted');
-  assert.match(a.reason!, /exited without finishing.*work preserved on 7-fix-login/);
-  assert.ok(!f.removed.includes('sandcastle-other'), "another ticket's container is never removed");
-  assert.ok('sandcastle-other' in f.containers);
+  assert.match(a.reason!, /exited during setup.*work preserved on 7-fix-login/);
+  assert.deepEqual([...new Set(f.removed)], [mine], 'no other container is ever removed');
+  assert.ok(f.containers.has('sandcastle-same-worktree') && f.containers.has(containerFor(IDS[2])));
+  assert.equal(f.readRecord(0).outcome, 'interrupted');
   assert.equal(f.run().stage, 'stopped');
   assert.match(f.run().note!, /recovery attempt 1 interrupted/);
   // Commits, dirty work and earlier evidence are untouched.
@@ -154,15 +186,44 @@ test('a crashed attempt waits for its container to be confirmed gone, keeps the 
   assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
   assert.ok(existsSync(join(f.evidence, 'before-1.png')));
 
-  // The second attempt ends with a timeout; the budget is then spent until progress, a requirement change or a reset.
+  // The second attempt timed out but could not confirm its cleanup; once its container is gone it settles as timed-out.
   const second = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(14) });
   assert.equal(second.ok, true, (second as { reason?: string }).reason);
   assert.equal((second as { attempt: { seq: number } }).attempt.seq, 2);
-  writeResult(f.evidence, 2, 'timed-out', 'repair agent stopped after 15 minutes; work preserved on 7-fix-login');
+  f.advance(1, { phase: 'cleanup-pending', intended: 'timed-out', reason: 'repair agent stopped after 15 minutes; container not confirmed gone' });
   await f.kill(f.launched[1].child);
   const third = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(40) });
   assert.equal(third.ok, false);
   assert.match((third as { reason: string }).reason, /used its 2 recovery attempts/);
   assert.deepEqual(readRecovery(f.p, f.root).attempts.map(x => x.result), ['interrupted', 'timed-out']);
   assert.equal(f.launched.length, 2);
+});
+
+test('a death during delivery is settled without replaying it; an attempt without a container identity is never guessed at', async t => {
+  const f = fixture(t);
+  launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
+  f.advance(0, { phase: 'delivering', tip: 'b'.repeat(40) });
+  await f.kill(f.launched[0].child);
+  const s = settleRecovery(f.p, { ...f.common, at: at(11) });
+  assert.equal((s as { attempt: { result: string } }).attempt.result, 'interrupted');
+  assert.match((s as { attempt: { reason: string } }).attempt.reason, /delivery outcome is unknown and is not replayed/);
+
+  // A pre-#74 attempt (no recorded container) stays running rather than removing anything.
+  const g = fixture(t);
+  beginAttempt(g.p, g.root, { ticket: 7, at: at(20), branch: '7-fix-login' });
+  g.containers.add('sandcastle-legacy');
+  const held = settleRecovery(g.p, { ...g.common, at: at(21) });
+  assert.equal(held.state, 'unconfirmed');
+  assert.match((held as { reason: string }).reason, /no recorded container identity/);
+  assert.deepEqual(g.removed, []);
+});
+
+test('a missing Factory worktree for the recorded branch is added without any reset', t => {
+  const f = fixture(t, { worktree: false });
+  const tip = f.git(f.root, 'rev-parse', '7-fix-login');
+  const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
+  assert.equal(r.ok, true, (r as { reason?: string }).reason);
+  assert.equal(f.git(f.worktree, 'rev-parse', 'HEAD'), tip);
+  assert.equal(f.git(f.root, 'rev-parse', 'main') !== tip, true, 'main untouched');
+  assert.equal(f.readRecord(0).worktree, f.worktree);
 });

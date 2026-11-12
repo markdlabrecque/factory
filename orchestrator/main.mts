@@ -1,9 +1,9 @@
 import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { PARKED, readRuns, setProject, setStage, TERMINAL } from "./board.mts";
 import { parentText } from "./analyze.mts";
@@ -14,8 +14,8 @@ import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest } from "./manifests.mts";
 import { postAndDeliver, runVerifier } from "./handoff.mts";
 import type { Host } from "./handoff.mts";
-import { containersGone, realDocker, REPAIR_MINUTES, REPAIR_PROMPT, repairWithin, worktreeFor, writeResult } from "./recovery.mts";
-import type { RepairResult } from "./recovery.mts";
+import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
+import { createOwnedSandbox, gitWorkspace, readDotEnv, realProc } from "./recovery-sandbox.mts";
 import * as tracker from "./tracker.mts";
 
 // End-to-end loop for one ticket (run from the repo root):
@@ -30,15 +30,17 @@ import * as tracker from "./tracker.mts";
 // The agent (Claude Code or Pi) comes from AGENT in config.mts. The implementer's model is AGENT.model, or
 // with AGENT.modelLabels the one the ticket's model label names (models.mts); the verifier always uses AGENT.model.
 //
-// Recovery mode (slice four, #60): `main.mts --issue <n> --base <b> --recover <attempt>` is started only by Factory's
-// recovery launcher (cli/src/recovery-run.mts), after it claimed the ticket for that attempt. Instead of a new branch it
-// resumes the ticket's recorded branch (and Sandcastle's existing worktree for it, dirty files included), runs the
-// repair agent (prompt.recover.md, AGENT.model) for at most REPAIR_MINUTES after the container is ready and set up, then
-// the same verifier and delivery as step 3-5 (handoff.mts, origin "repaired"). A timeout or SIGTERM aborts the agent,
-// closes the sandbox and confirms this attempt's container is gone; commits, dirty work and evidence are kept. Earlier
-// evidence stays (an old blocked.json is renamed, previous-run.json keeps the record as claimed). The attempt's result
-// goes to <evidence>/recovery-attempt-<n>.json (recovery.mts) for the launcher to record; the record ends `done`
-// (delivered) or `stopped`. It never creates or deletes a branch, labels the ticket or closes it.
+// Recovery mode (slice four, #60/#74): `main.mts --issue <n> --base <b> --recover <seq> --attempt-record <file>` is
+// started only by Factory's recovery launcher (cli/src/recovery-run.mts) after it claimed the ticket and wrote the
+// host-owned attempt record. Before any Git or container side effect it checks the record, the claimed run record and
+// the arguments name the same project, ticket, branch, base and attempt (seq and UUID), and that the worktree is inside
+// .sandcastle/worktrees/. It then runs recovery.mts runRecoveryAttempt with the real boundaries: recovery-sandbox.mts's
+// owned container (exact pre-recorded name, private Git metadata, this attempt's evidence only writable; not
+// Sandcastle's createSandbox), the repair agent on AGENT.model whatever the ticket's model label, a 900000 ms deadline
+// from container readiness, the shared verifier and delivery (handoff.mts), and a recheck of the ticket's requirements,
+// state, needs-human label and claim before verifying and before delivering. SIGTERM/SIGINT cancel the attempt (exit
+// 143). The record ends `done` (delivered) or `stopped` with the reason. It never creates or deletes a branch, labels
+// the ticket or closes it. The normal path below keeps its branch-exists protection and is otherwise unchanged.
 
 // ---- Project config: the block to edit when adapting this to another project ----------
 // Tracker, agent, merge policy, milestone and labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
@@ -77,33 +79,29 @@ const agent = (model: string) =>
 let currentIid: string | undefined;
 let finished = false;
 let lastMessage = "";
-// Recovery mode: the attempt number, its evidence folder once known, and whether its result has been written.
-let recoverAttempt: number | undefined;
-let recoverEvidence: string | undefined;
-let resultWritten = false;
 function fail(msg: string): never {
   lastMessage = msg;
   console.error(msg);
   process.exit(1);
 }
-/** Recovery mode: write the attempt's result, leave the record stopped with the reason, and exit. */
-function endAttempt(result: RepairResult, msg: string, code = 1): never {
-  if (recoverEvidence && recoverAttempt !== undefined) writeResult(recoverEvidence, recoverAttempt, result, msg);
-  resultWritten = true;
-  lastMessage = msg;
-  console.error(msg);
-  process.exit(code);
-}
 // Anything that ends the process before a terminal stage lands on the board as "washed away".
 process.on("exit", (code) => {
-  if (recoverEvidence && recoverAttempt !== undefined && !finished && !resultWritten) {
-    writeResult(recoverEvidence, recoverAttempt, "failed", lastMessage || `exited with code ${code}`);
-  }
   if (currentIid && !finished) setStage(currentIid, { stage: "stopped", note: lastMessage || `exited with code ${code}` });
 });
 function sh(cmd: string, args: string[]): string {
   return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 }
+// The host side of the hand-off (handoff.mts): board, git and tracker.
+const host: Host = {
+  setStage, readRuns,
+  live: (r, openMrs) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)),
+  git: (args) => sh("git", args),
+  gitStatus: (args) => {
+    const res = spawnSync("git", args, { encoding: "utf8" });
+    return { status: res.status, stdout: res.stdout ?? "" };
+  },
+  tracker,
+};
 
 const { values: opts } = parseArgs({
   options: {
@@ -112,13 +110,14 @@ const { values: opts } = parseArgs({
     "no-push": { type: "boolean", default: false },
     "whole-issues": { type: "boolean", default: false }, // without --issue: pick a ready issue, not one of its Tasks
     recover: { type: "string" }, // recovery attempt number; started by Factory's recovery launcher only
+    "attempt-record": { type: "string" }, // the launcher's host-owned record of that attempt
   },
 });
 if (!opts.base) fail("--base <integration branch> is required (e.g. sal-develop, or sal-redesign for #565 children)");
-if (opts.recover !== undefined) {
-  if (!/^[1-9]\d*$/.test(opts.recover) || !opts.issue) fail("--recover <attempt> needs a positive attempt number and --issue.");
+const recovering = opts.recover !== undefined;
+if (recovering) {
+  if (!/^[1-9]\d*$/.test(opts.recover!) || !opts.issue || !opts["attempt-record"]) fail("--recover <attempt> needs a positive attempt number, --issue and --attempt-record.");
   if (opts["no-push"]) fail("--recover always delivers normally; --no-push is not allowed with it.");
-  recoverAttempt = Number(opts.recover);
 }
 const base = opts.base;
 if (MERGE.auto && (TRACKER as { kind?: string }).kind !== "github" && !opts["no-push"]) fail('MERGE.auto needs TRACKER.kind "github" (config.mts).');
@@ -145,42 +144,91 @@ const withParent = (t: tracker.Ticket): tracker.Ticket => {
 const startTicket = withParent(tracker.ticket(Number(iid)));
 const issue = startTicket;
 const picked = ticketModel(startTicket.labels ?? [], AGENT.modelLabels, AGENT.model);
-if ("error" in picked) fail(`#${iid} ${picked.error}. Not started.`);
-const implementerModel = picked.model;
+if ("error" in picked && !recovering) fail(`#${iid} ${picked.error}. Not started.`);
+const implementerModel = "error" in picked ? AGENT.model : picked.model; // recovery never uses it
 const ticket = [tracker.viewText(Number(iid)), parentText(startTicket)].filter(Boolean).join("\n\n");
 // The version of the ticket this run builds from; compared again before the MR opens.
 const ticketHash = (t = withParent(tracker.ticket(Number(iid)))) => ({ hash: unitHash(t, tracker.notes(Number(iid))), description: t.description });
 const startVersion = ticketHash(startTicket);
 const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);
 const slug = String(issue.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "");
-setProject(PROJECT);
-// Recovery resumes the record's branch, which the launcher already checked (recovery-workspace.mts) and claimed.
-const claimed = recoverAttempt === undefined ? undefined : readRuns().find((r) => r.project === PROJECT && r.iid === iid);
-if (recoverAttempt !== undefined && (claimed?.recovery?.attempt !== recoverAttempt || !claimed.branch)) {
-  fail(`#${iid} is not claimed for recovery attempt ${recoverAttempt}; only Factory's recovery launcher starts --recover.`);
+// ---- recovery mode: one admitted repair attempt (recovery.mts) ------------------------------------------------
+if (recovering) {
+  const seq = Number(opts.recover);
+  const file = resolve(opts["attempt-record"]!);
+  const read = readAttemptRecord(file);
+  if (!read.ok) fail(`#${iid}: recovery refused: ${read.reason}`);
+  const rec = read.record;
+  setProject(PROJECT);
+  const claimed = readRuns().find((r) => r.project === PROJECT && r.iid === iid);
+  const owned = (() => { try { const r = relative(realpathSync(".sandcastle/worktrees"), realpathSync(rec.worktree)); return !!r && !r.startsWith("..") && !r.includes("/"); } catch { return false; } })();
+  if (rec.iid !== iid || rec.seq !== seq || rec.project !== PROJECT || rec.base !== base || rec.phase !== "claimed"
+    || claimed?.recovery?.attempt !== seq || claimed.recovery.id !== rec.id || claimed.branch !== rec.branch || !owned) {
+    fail(`#${iid} is not claimed for recovery attempt ${seq} (${rec.id}); only Factory's recovery launcher starts --recover, once per attempt.`);
+  }
+  sh("git", ["fetch", "origin", base]);
+  const baseSha = sh("git", ["rev-parse", `origin/${base}`]);
+  currentIid = iid;
+  setStage(iid, { stage: "setup", note: `recovery attempt ${seq}: setting up`, base, starting: undefined });
+  setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
+  console.log(`#${iid} ${issue.title}\n  recovery attempt ${seq} (${rec.id}) on ${rec.branch} at ${rec.startSha.slice(0, 8)}, repair model ${AGENT.model}`);
+  const cancel = new AbortController();
+  for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => cancel.abort(new Error(`${sig}: recovery attempt cancelled`)));
+  mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true });
+  const evidenceBox = `/home/agent/evidence/${iid}`;
+  const recheck = () => {
+    const now = withParent(tracker.ticket(Number(iid)));
+    if (now.state === "closed") return `#${iid} is closed`;
+    if ((now.labels ?? []).includes(LABELS.needsHuman)) return `#${iid} is labelled ${LABELS.needsHuman}`;
+    if (ticketHash(now).hash !== startVersion.hash) return `#${iid}'s requirements changed since the attempt started`;
+    const r = readRuns().find((x) => x.project === PROJECT && x.iid === iid);
+    if (r?.recovery?.id !== rec.id || r.pid !== process.pid) return `#${iid}'s run record is no longer held by this attempt`;
+    return undefined;
+  };
+  const result = await runRecoveryAttempt({
+    root: process.cwd(), record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
+    promptArgs: {
+      ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
+      EVIDENCE_DIR: evidenceBox, CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
+      ATTEMPT: String(seq), ATTEMPT_ID: rec.id, REPAIR_MINUTES: String(REPAIR_MINUTES),
+    },
+    previousRun: claimed, logs: [resolve(".sandcastle/logs", `recover-${iid}.log`)],
+    delivery: { ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto },
+    cancel: cancel.signal, deadlineMs: REPAIR_DEADLINE_MS,
+  }, {
+    clock: realClock,
+    createSandbox: (spec) => createOwnedSandbox(spec, {
+      image: IMAGE, setup: CONFIG.sandboxSetup, helpers: resolve(".sandcastle/sandbox"), env: readDotEnv(resolve(".sandcastle/.env")),
+      uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, proc: realProc, root: process.cwd(),
+    }),
+    containerGone: (name) => ownedContainerGone(name, realDocker),
+    workspace: gitWorkspace,
+    recheck, host,
+    setStage: (patch) => setStage(iid!, patch),
+    agent,
+    log: (line) => console.log(line),
+  });
+  finished = true;
+  if (result.outcome !== "delivered") setStage(iid, { stage: "stopped", note: `recovery attempt ${seq} ${result.outcome}: ${result.reason}` });
+  console.log(`recovery attempt ${seq}: ${result.outcome}${result.cleanupPending ? " (cleanup pending)" : ""}: ${result.reason}`);
+  process.exit(result.outcome === "delivered" && !result.cleanupPending ? 0 : result.outcome === "interrupted" ? 143 : 1);
 }
-const branch = claimed?.branch ?? `${iid}-${slug}`;
+
+const branch = `${iid}-${slug}`;
 
 sh("git", ["fetch", "origin", base]);
 const baseSha = sh("git", ["rev-parse", `origin/${base}`]);
-if (claimed) {
-  if (!sh("git", ["branch", "--list", branch])) fail(`Recorded branch ${branch} no longer exists locally; recovery does not restart from scratch.`);
-} else if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads", "origin", branch])) {
+if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads", "origin", branch])) {
   fail(`Branch ${branch} already exists locally or on origin; delete it or pick another ticket.`);
 }
 currentIid = iid;
-if (claimed) {
-  recoverEvidence = resolve(".sandcastle/evidence", iid);
-  // Take over the claimed record: keep its branch, evidence and history; this process now holds it.
-  setStage(iid, { stage: "setup", note: `recovery attempt ${recoverAttempt}: setting up`, base, starting: undefined });
-} else {
-  setStage(iid, {
-    title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
-    evidenceDir: resolve(".sandcastle/evidence", iid), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
-    parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
-    starting: undefined, // this run now owns the record the dispatcher reserved at launch
-  });
-}
+setProject(PROJECT);
+setStage(iid, {
+  title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
+  evidenceDir: resolve(".sandcastle/evidence", iid), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
+  parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
+  starting: undefined, // this run now owns the record the dispatcher reserved at launch
+});
 // Heartbeat so the board can tell a long agent run from a dead process.
 setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
 console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${baseSha.slice(0, 8)}), implementer ${implementerModel}`);
@@ -190,17 +238,8 @@ const evidenceHost = resolve(".sandcastle/evidence", iid);
 const evidenceBox = `/home/agent/evidence/${iid}`;
 mkdirSync(evidenceHost, { recursive: true });
 mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true }); // mounted read-only at /opt/sandcastle; empty unless the project adds helpers
-if (claimed) {
-  // Keep earlier evidence: the record as claimed, and an old blocked.json under another name so only the repair
-  // agent's own blocked.json counts. verdict.md is cleared by beginVerification just before the verifier.
-  writeFileSync(resolve(evidenceHost, "previous-run.json"), JSON.stringify(claimed, null, 2) + "\n");
-  const oldBlocked = resolve(evidenceHost, "blocked.json");
-  if (existsSync(oldBlocked)) renameSync(oldBlocked, resolve(evidenceHost, `blocked.before-recovery-${recoverAttempt}.json`));
-  rmSync(resolve(evidenceHost, `recovery-attempt-${recoverAttempt}.json`), { force: true });
-} else {
-  // A relaunched ticket (it was waiting on a blocker) must not pick up the last run's reports.
-  for (const f of ["blocked.json", "verdict.md"]) rmSync(resolve(evidenceHost, f), { force: true });
-}
+// A relaunched ticket (it was waiting on a blocker) must not pick up the last run's reports.
+for (const f of ["blocked.json", "verdict.md"]) rmSync(resolve(evidenceHost, f), { force: true });
 
 /** blocked.json from the implementer: tickets (or things) it needs that aren't merged yet. */
 function readBlocked(): ImplementerBlocker[] | undefined {
@@ -217,36 +256,6 @@ function readBlocked(): ImplementerBlocker[] | undefined {
   } catch {
     return []; // unreadable report: blockedOutcome sends it to a person
   }
-}
-
-// Recovery mode: SIGTERM (Factory cancelling the attempt) aborts the repair agent, or, outside it, closes the sandbox
-// and confirms this attempt's container is gone before exiting 143. Work on the branch and in the worktree is kept.
-const cancel = new AbortController();
-let owned: { close(): Promise<unknown>; worktreePath: string } | undefined;
-let inRepair = false;
-/** Close this attempt's sandbox and confirm no container mounting the ticket's worktree is left; returns any problem. */
-async function closeOwned(): Promise<string | undefined> {
-  const worktree = owned?.worktreePath ?? worktreeFor(process.cwd(), branch);
-  let problem: string | undefined;
-  try {
-    await owned?.close();
-  } catch (e) {
-    problem = `sandbox close failed: ${(e as Error).message}`;
-  }
-  owned = undefined;
-  const gone = containersGone(worktree, realDocker);
-  return gone.ok ? problem : [problem, gone.reason].filter(Boolean).join("; ");
-}
-async function stopAttempt(result: RepairResult, msg: string, code = 1): Promise<never> {
-  const problem = await closeOwned();
-  endAttempt(result, problem ? `${msg} (${problem})` : msg, code);
-}
-const preserved = `work preserved on ${branch}`;
-if (claimed) {
-  process.on("SIGTERM", () => {
-    cancel.abort(new Error("cancelled"));
-    if (!inRepair) void stopAttempt("interrupted", `recovery attempt ${recoverAttempt} cancelled; ${preserved}`, 143);
-  });
 }
 
 const sandbox = await createSandbox({
@@ -275,72 +284,35 @@ const promptArgs = {
   BRANCH: branch,
   EVIDENCE_DIR: evidenceBox,
   CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
-  ...(claimed ? { ATTEMPT: String(recoverAttempt), REPAIR_MINUTES: String(REPAIR_MINUTES) } : {}),
 };
 
 let tip = "";
 let blockers: ImplementerBlocker[] | undefined;
-if (claimed) {
-  // ---- 1R. repair agent: at most REPAIR_MINUTES, counted from here (the container is ready and set up) --------
-  owned = sandbox;
-  if (cancel.signal.aborted) await stopAttempt("interrupted", `recovery attempt ${recoverAttempt} cancelled during setup; ${preserved}`, 143);
-  setStage(iid, { stage: "implementing", note: `recovery attempt ${recoverAttempt}: repairing (at most ${REPAIR_MINUTES} min)` });
-  inRepair = true;
-  const repair = await repairWithin(REPAIR_MINUTES * 60_000, cancel.signal, (signal) => sandbox.run({
-    agent: agent(AGENT.model),
-    promptFile: REPAIR_PROMPT,
+try {
+  // ---- 1. implementer ----------------------------------------------------------
+  setStage(iid, { stage: "implementing" });
+  const impl = await sandbox.run({
+    agent: agent(implementerModel),
+    promptFile: "./.sandcastle/prompt.md",
     promptArgs,
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
-    name: "repair",
-    signal,
-  })).catch(async (e) => stopAttempt("failed", `recovery attempt ${recoverAttempt}: repair agent failed: ${(e as Error).message}; ${preserved}`));
-  inRepair = false;
-  if (!repair.ok) {
-    if (repair.why === "cancelled") await stopAttempt("interrupted", `recovery attempt ${recoverAttempt} cancelled; ${preserved}`, 143);
-    await stopAttempt("timed-out", `recovery attempt ${recoverAttempt}: repair agent stopped after ${REPAIR_MINUTES} minutes; ${preserved}`);
-  }
-  if (readBlocked()) await stopAttempt("blocked", `recovery attempt ${recoverAttempt}: the repair agent reported a blocker (blocked.json, recovery-report.md); ${preserved}`);
-  if ((await sandbox.exec("git status --porcelain")).stdout.trim()) {
-    await stopAttempt("failed", `recovery attempt ${recoverAttempt}: uncommitted changes are left in the worktree, so there is no tip to verify; ${preserved}`);
-  }
-  tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
-  if (sh("git", ["rev-list", "--count", `${baseSha}..${tip}`]) === "0") {
-    await stopAttempt("failed", `recovery attempt ${recoverAttempt}: ${branch} has no commits beyond origin/${base}; nothing to verify`);
-  }
-  patchManifest(PROJECT, Number(iid), { actualFootprint: sh("git", ["diff", "--name-only", `${baseSha}...${tip}`]).split("\n").filter(Boolean) });
-  // ---- 2R. the same independent verifier (handoff.mts) ---------------------------------------
-  const refused = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs, tip });
-  if (refused) await stopAttempt("failed", `recovery attempt ${recoverAttempt}: ${refused}`);
-  const problem = await closeOwned();
-  if (problem) endAttempt("failed", `recovery attempt ${recoverAttempt}: ${problem}; not delivering`);
-} else {
-  try {
-    // ---- 1. implementer ----------------------------------------------------------
-    setStage(iid, { stage: "implementing" });
-    const impl = await sandbox.run({
-      agent: agent(implementerModel),
-      promptFile: "./.sandcastle/prompt.md",
-      promptArgs,
-      maxIterations: 1,
-      completionSignal: "<promise>COMPLETE</promise>",
-      name: "implementer",
-    });
-    if (!impl.commits.length) {
-      blockers = readBlocked();
-      if (!blockers) fail(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
-    } else {
-      tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
-      // The real diff replaces the predicted footprint for conflict checks from now on.
-      patchManifest(PROJECT, Number(iid), { actualFootprint: sh("git", ["diff", "--name-only", `${baseSha}...${tip}`]).split("\n").filter(Boolean) });
+    name: "implementer",
+  });
+  if (!impl.commits.length) {
+    blockers = readBlocked();
+    if (!blockers) fail(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
+  } else {
+    tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+    // The real diff replaces the predicted footprint for conflict checks from now on.
+    patchManifest(PROJECT, Number(iid), { actualFootprint: sh("git", ["diff", "--name-only", `${baseSha}...${tip}`]).split("\n").filter(Boolean) });
 
-      // ---- 2. verifier (handoff.mts) -----------------------------------------------
-      const refused = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs, tip });
-      if (refused) fail(refused);
-    }
-  } finally {
-    await sandbox.close();
+    // ---- 2. verifier (handoff.mts) -----------------------------------------------
+    const refused = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs, tip });
+    if (refused) fail(refused);
   }
+} finally {
+  await sandbox.close();
 }
 
 // ---- implementer reported a missing prerequisite ----------------------------------
@@ -400,29 +372,11 @@ if (endVersion.hash !== startVersion.hash) {
   setStage(iid, { note: "built from an older ticket version" });
 }
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
-const host: Host = {
-  setStage, readRuns,
-  live: (r, openMrs) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)),
-  git: (args) => sh("git", args),
-  gitStatus: (args) => {
-    const res = spawnSync("git", args, { encoding: "utf8" });
-    return { status: res.status, stdout: res.stdout ?? "" };
-  },
-  tracker,
-};
 const outcome = await postAndDeliver({
-  iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid,
-  origin: claimed ? { kind: "repaired", attempt: recoverAttempt! } : { kind: "implemented" },
+  iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid, origin: { kind: "implemented" },
   staleNote, noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
 }, host);
-if (!outcome.ok) {
-  if (claimed) endAttempt("failed", `recovery attempt ${recoverAttempt}: ${outcome.reason}`);
-  fail(outcome.reason);
-}
-if (claimed) {
-  writeResult(recoverEvidence!, recoverAttempt!, "repaired", outcome.pushed ? `verified and delivered: ${outcome.url}` : undefined);
-  resultWritten = true;
-}
+if (!outcome.ok) fail(outcome.reason);
 finished = true;
 if (!outcome.pushed) {
   console.log(`--no-push: stopping. Branch ${branch} is ready locally.`);
