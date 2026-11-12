@@ -1,9 +1,9 @@
 import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { PARKED, readRuns, setProject, setStage, TERMINAL } from "./board.mts";
 import { parentText } from "./analyze.mts";
@@ -14,6 +14,8 @@ import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest } from "./manifests.mts";
 import { postAndDeliver, runVerifier } from "./handoff.mts";
 import type { Host } from "./handoff.mts";
+import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
+import { createOwnedSandbox, gitWorkspace, readDotEnv, realProc } from "./recovery-sandbox.mts";
 import * as tracker from "./tracker.mts";
 
 // End-to-end loop for one ticket (run from the repo root):
@@ -27,6 +29,18 @@ import * as tracker from "./tracker.mts";
 // merges). Every tracker call runs on the host with your glab/gh login; the container has no tracker token.
 // The agent (Claude Code or Pi) comes from AGENT in config.mts. The implementer's model is AGENT.model, or
 // with AGENT.modelLabels the one the ticket's model label names (models.mts); the verifier always uses AGENT.model.
+//
+// Recovery mode (slice four, #60/#74): `main.mts --issue <n> --base <b> --recover <seq> --attempt-record <file>` is
+// started only by Factory's recovery launcher (cli/src/recovery-run.mts) after it claimed the ticket and wrote the
+// host-owned attempt record. Before any Git or container side effect it checks the record, the claimed run record and
+// the arguments name the same project, ticket, branch, base and attempt (seq and UUID), and that the worktree is inside
+// .sandcastle/worktrees/. It then runs recovery.mts runRecoveryAttempt with the real boundaries: recovery-sandbox.mts's
+// owned container (exact pre-recorded name, private Git metadata, this attempt's evidence only writable; not
+// Sandcastle's createSandbox), the repair agent on AGENT.model whatever the ticket's model label, a 900000 ms deadline
+// from container readiness, the shared verifier and delivery (handoff.mts), and a recheck of the ticket's requirements,
+// state, needs-human label and claim before verifying and before delivering. SIGTERM/SIGINT cancel the attempt (exit
+// 143). The record ends `done` (delivered) or `stopped` with the reason. It never creates or deletes a branch, labels
+// the ticket or closes it. The normal path below keeps its branch-exists protection and is otherwise unchanged.
 
 // ---- Project config: the block to edit when adapting this to another project ----------
 // Tracker, agent, merge policy, milestone and labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
@@ -77,6 +91,17 @@ process.on("exit", (code) => {
 function sh(cmd: string, args: string[]): string {
   return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 }
+// The host side of the hand-off (handoff.mts): board, git and tracker.
+const host: Host = {
+  setStage, readRuns,
+  live: (r, openMrs) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)),
+  git: (args) => sh("git", args),
+  gitStatus: (args) => {
+    const res = spawnSync("git", args, { encoding: "utf8" });
+    return { status: res.status, stdout: res.stdout ?? "" };
+  },
+  tracker,
+};
 
 const { values: opts } = parseArgs({
   options: {
@@ -84,9 +109,16 @@ const { values: opts } = parseArgs({
     issue: { type: "string" },
     "no-push": { type: "boolean", default: false },
     "whole-issues": { type: "boolean", default: false }, // without --issue: pick a ready issue, not one of its Tasks
+    recover: { type: "string" }, // recovery attempt number; started by Factory's recovery launcher only
+    "attempt-record": { type: "string" }, // the launcher's host-owned record of that attempt
   },
 });
 if (!opts.base) fail("--base <integration branch> is required (e.g. sal-develop, or sal-redesign for #565 children)");
+const recovering = opts.recover !== undefined;
+if (recovering) {
+  if (!/^[1-9]\d*$/.test(opts.recover!) || !opts.issue || !opts["attempt-record"]) fail("--recover <attempt> needs a positive attempt number, --issue and --attempt-record.");
+  if (opts["no-push"]) fail("--recover always delivers normally; --no-push is not allowed with it.");
+}
 const base = opts.base;
 if (MERGE.auto && (TRACKER as { kind?: string }).kind !== "github" && !opts["no-push"]) fail('MERGE.auto needs TRACKER.kind "github" (config.mts).');
 const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
@@ -112,14 +144,80 @@ const withParent = (t: tracker.Ticket): tracker.Ticket => {
 const startTicket = withParent(tracker.ticket(Number(iid)));
 const issue = startTicket;
 const picked = ticketModel(startTicket.labels ?? [], AGENT.modelLabels, AGENT.model);
-if ("error" in picked) fail(`#${iid} ${picked.error}. Not started.`);
-const implementerModel = picked.model;
+if ("error" in picked && !recovering) fail(`#${iid} ${picked.error}. Not started.`);
+const implementerModel = "error" in picked ? AGENT.model : picked.model; // recovery never uses it
 const ticket = [tracker.viewText(Number(iid)), parentText(startTicket)].filter(Boolean).join("\n\n");
 // The version of the ticket this run builds from; compared again before the MR opens.
 const ticketHash = (t = withParent(tracker.ticket(Number(iid)))) => ({ hash: unitHash(t, tracker.notes(Number(iid))), description: t.description });
 const startVersion = ticketHash(startTicket);
 const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);
 const slug = String(issue.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "");
+// ---- recovery mode: one admitted repair attempt (recovery.mts) ------------------------------------------------
+if (recovering) {
+  const seq = Number(opts.recover);
+  const file = resolve(opts["attempt-record"]!);
+  const read = readAttemptRecord(file);
+  if (!read.ok) fail(`#${iid}: recovery refused: ${read.reason}`);
+  const rec = read.record;
+  setProject(PROJECT);
+  const claimed = readRuns().find((r) => r.project === PROJECT && r.iid === iid);
+  const owned = (() => { try { const r = relative(realpathSync(".sandcastle/worktrees"), realpathSync(rec.worktree)); return !!r && !r.startsWith("..") && !r.includes("/"); } catch { return false; } })();
+  if (rec.iid !== iid || rec.seq !== seq || rec.project !== PROJECT || rec.base !== base || rec.phase !== "claimed"
+    || claimed?.recovery?.attempt !== seq || claimed.recovery.id !== rec.id || claimed.branch !== rec.branch || !owned) {
+    fail(`#${iid} is not claimed for recovery attempt ${seq} (${rec.id}); only Factory's recovery launcher starts --recover, once per attempt.`);
+  }
+  sh("git", ["fetch", "origin", base]);
+  const baseSha = sh("git", ["rev-parse", `origin/${base}`]);
+  currentIid = iid;
+  setStage(iid, { stage: "setup", note: `recovery attempt ${seq}: setting up`, base, starting: undefined });
+  setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
+  console.log(`#${iid} ${issue.title}\n  recovery attempt ${seq} (${rec.id}) on ${rec.branch} at ${rec.startSha.slice(0, 8)}, repair model ${AGENT.model}`);
+  const cancel = new AbortController();
+  for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => cancel.abort(new Error(`${sig}: recovery attempt cancelled`)));
+  mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true });
+  const evidenceBox = `/home/agent/evidence/${iid}`;
+  const recheck = () => {
+    const now = withParent(tracker.ticket(Number(iid)));
+    if (now.state === "closed") return `#${iid} is closed`;
+    if ((now.labels ?? []).includes(LABELS.needsHuman)) return `#${iid} is labelled ${LABELS.needsHuman}`;
+    if (ticketHash(now).hash !== startVersion.hash) return `#${iid}'s requirements changed since the attempt started`;
+    const r = readRuns().find((x) => x.project === PROJECT && x.iid === iid);
+    if (r?.recovery?.id !== rec.id || r.pid !== process.pid) return `#${iid}'s run record is no longer held by this attempt`;
+    return undefined;
+  };
+  const result = await runRecoveryAttempt({
+    root: process.cwd(), record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
+    promptArgs: {
+      ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
+      EVIDENCE_DIR: evidenceBox, CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
+      ATTEMPT: String(seq), ATTEMPT_ID: rec.id, REPAIR_MINUTES: String(REPAIR_MINUTES),
+    },
+    previousRun: claimed, logs: [resolve(".sandcastle/logs", `recover-${iid}.log`)],
+    delivery: { ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto },
+    cancel: cancel.signal, deadlineMs: REPAIR_DEADLINE_MS,
+  }, {
+    clock: realClock,
+    createSandbox: (spec) => createOwnedSandbox(spec, {
+      image: IMAGE, setup: CONFIG.sandboxSetup, helpers: resolve(".sandcastle/sandbox"), env: readDotEnv(resolve(".sandcastle/.env")),
+      uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, proc: realProc, root: process.cwd(),
+    }),
+    containerGone: (name) => ownedContainerGone(name, realDocker),
+    workspace: gitWorkspace,
+    recheck, host,
+    setStage: (patch) => setStage(iid!, patch),
+    agent,
+    log: (line) => console.log(line),
+  });
+  finished = true;
+  // Cleanup unconfirmed: the claim stays (hold) so capacity, the ticket and the project are not released; settleRecovery lifts it.
+  if (result.outcome !== "delivered" || result.cleanupPending) {
+    setStage(iid, { stage: "stopped", note: `recovery attempt ${seq} ${result.outcome}: ${result.reason}`,
+      hold: result.cleanupPending ? { attempt: rec.id, reason: result.reason } : undefined });
+  }
+  console.log(`recovery attempt ${seq}: ${result.outcome}${result.cleanupPending ? " (cleanup pending)" : ""}: ${result.reason}`);
+  process.exit(result.outcome === "delivered" && !result.cleanupPending ? 0 : result.outcome === "interrupted" ? 143 : 1);
+}
+
 const branch = `${iid}-${slug}`;
 
 sh("git", ["fetch", "origin", base]);
@@ -278,16 +376,6 @@ if (endVersion.hash !== startVersion.hash) {
   setStage(iid, { note: "built from an older ticket version" });
 }
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
-const host: Host = {
-  setStage, readRuns,
-  live: (r, openMrs) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)),
-  git: (args) => sh("git", args),
-  gitStatus: (args) => {
-    const res = spawnSync("git", args, { encoding: "utf8" });
-    return { status: res.status, stdout: res.stdout ?? "" };
-  },
-  tracker,
-};
 const outcome = await postAndDeliver({
   iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid, origin: { kind: "implemented" },
   staleNote, noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,

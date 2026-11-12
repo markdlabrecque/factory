@@ -15,6 +15,9 @@ import { fileURLToPath } from "node:url";
 // refuses when the cap is reached or the ticket already has a run in flight, and only then writes the record. The
 // dispatcher claims each ticket before spawning it; recovery (cli/src/recovery-claim.mts) claims the same way and also
 // records its project's attempt under the lock, so capacity, ticket and project ownership are taken together or not at all.
+// While a recovery attempt owns a ticket, or its record carries a cleanup `hold` (owned container removal unconfirmed,
+// #74), claimRun refuses every other run of that project; a held record counts as in flight and survives its dead
+// worker until settleRecovery lifts it. A recovery claim (`exclusive`) is likewise refused while its project has any other run in flight.
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
 
@@ -44,8 +47,11 @@ export interface RunState {
   parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
   mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on
   starting?: boolean; // reserved by the dispatcher at launch; main.mts clears it with its first write
-  // Set while a recovery attempt owns the ticket: its attempt number and the record's stage/note before the claim.
-  recovery?: { attempt: number; from?: { stage: Stage; note?: string; stageSince?: string } };
+  // Set while a recovery attempt owns the ticket: its attempt number, its UUID (#74) and the record's stage/note before the claim.
+  recovery?: { attempt: number; id?: string; from?: { stage: Stage; note?: string; stageSince?: string } };
+  // Set by a recovery attempt that ended with its owned container's removal unconfirmed (#74). The claim then outlives the
+  // process: the record counts as in flight whatever its stage or pid, until settleRecovery confirms the container gone.
+  hold?: { attempt: string; reason: string };
 }
 
 export interface BoardRun extends RunState {
@@ -116,7 +122,7 @@ export function reserveRun(iid: string, pid: number, patch: Partial<RunState> = 
 }
 
 export type Claim = { ok: true; run: RunState } | { ok: false; reason: string };
-const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
+const inFlight = (r: RunState) => !!r.hold || (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage));
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Hold <dir>/claim.lock while `fn` runs. The lock names its holder's pid; a lock whose holder is gone is taken over. */
@@ -173,6 +179,8 @@ export function claimRun(o: {
   dir?: string;
   patch?: Partial<RunState>;
   also?: (current: RunState | undefined) => Partial<RunState> | void;
+  /** A recovery claim: refused while any other run of the project is in flight. */
+  exclusive?: boolean;
 }): Claim {
   const dir = o.dir ?? stateDir();
   const proj = o.project ?? project;
@@ -181,6 +189,11 @@ export function claimRun(o: {
     const runs = readRuns(dir);
     const current = runs.find((r) => r.key === key);
     if (current && inFlight(current)) return { ok: false, reason: `#${o.iid} already has a run in flight (${current.stage}, process ${current.pid})` };
+    // Recovery holds its project: while an attempt (or an unconfirmed cleanup) owns a ticket, no other run of that project starts.
+    const holder = runs.find((r) => r.key !== key && r.project === proj && inFlight(r) && (r.recovery || r.hold));
+    if (holder) return { ok: false, reason: `project ${proj ?? "(unnamed)"} is held by recovery on #${holder.iid}` };
+    const other = o.exclusive ? runs.find((r) => r.key !== key && r.project === proj && inFlight(r)) : undefined;
+    if (other) return { ok: false, reason: `project ${proj ?? "(unnamed)"} has #${other.iid} in flight; recovery needs the project to itself` };
     const active = runs.filter(inFlight).length;
     if (active >= o.cap) return { ok: false, reason: `no capacity: ${active} run(s) in flight, cap ${o.cap}` };
     let extra: Partial<RunState> | void;
@@ -213,7 +226,7 @@ export function readRuns(dir = stateDir()): BoardRun[] {
     try {
       const file = resolve(dir, f);
       const s: RunState = JSON.parse(readFileSync(file, "utf8"));
-      if (!TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
+      if (!s.hold && !TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
         if (s.starting) {
           rmSync(file, { force: true });
           continue;

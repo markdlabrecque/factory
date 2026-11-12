@@ -10,6 +10,8 @@
 //   unrelated queue changes never buy more attempts.
 // - `attempts` and `renewals`: bounded history (LOG_LIMIT each, oldest dropped) for reports. The budget counters, not
 //   this history, decide whether another attempt is allowed. At most one attempt per project is `running` at a time.
+//   Since #74 an attempt also carries its UUID, exact container name and host-owned attempt record path, fixed before
+//   the repair process starts, and ends with one of orchestrator/recovery.mts's outcomes.
 // - `watch` (#56): per ticket, the last observed requirement fingerprint (`content`, the dispatcher's unitHash of title,
 //   description, parent and human comments, which leaves out Sandcastle's own and system notes; `labels`, the ticket's
 //   labels minus those Factory writes itself) and verified delivery marker (`delivery`, see deliveryMarker). observeTicket
@@ -32,9 +34,13 @@ export const LOG_LIMIT = 100;
 export type PassSeen = { pass: string; at: string };
 export type Episode = { id: string; startedAt: string; tickets: number[]; passes: PassSeen[]; confirmedAt?: string;
   endedAt?: string; end?: 'cleared' | 'changed' | 'reset' };
-export type AttemptResult = 'running' | 'repaired' | 'failed' | 'timed-out' | 'blocked' | 'interrupted';
+// 'repaired' and 'blocked' are results of attempts recorded before #74; new attempts end with recovery.mts's outcomes.
+export type AttemptResult = 'running' | 'delivered' | 'unresolved' | 'failed' | 'timed-out' | 'interrupted' | 'host-followup'
+  | 'ownership-refused' | 'repaired' | 'blocked';
+/** `id`, `container` and `record` (#74): the attempt's UUID, its exact container name and its host-owned attempt record
+ *  (orchestrator/recovery.mts), all fixed before the repair process starts. */
 export type Attempt = { seq: number; ticket: number; episode: string; startedAt: string; finishedAt?: string; result: AttemptResult;
-  branch?: string; pid?: number; reason?: string; log?: string; report?: string };
+  branch?: string; pid?: number; reason?: string; log?: string; report?: string; id?: string; container?: string; record?: string };
 export type RenewalKind = 'progress' | 'requirement-change' | 'reset';
 export type Renewal = { at: string; kind: RenewalKind; ticket?: number; detail?: string };
 export type Budget = { used: number; renewedAt?: string; renewal?: RenewalKind };
@@ -42,7 +48,8 @@ export type Watch = { seenAt: string; content: string; labels: string[]; deliver
 export type RecoveryState = { version: 1; root: string; nextSeq: number; episode?: Episode; episodes: Episode[];
   budgets: Record<string, Budget>; attempts: Attempt[]; renewals: Renewal[]; watch?: Record<string, Watch> };
 
-const RESULTS: AttemptResult[] = ['running', 'repaired', 'failed', 'timed-out', 'blocked', 'interrupted'];
+const RESULTS: AttemptResult[] = ['running', 'delivered', 'unresolved', 'failed', 'timed-out', 'interrupted', 'host-followup',
+  'ownership-refused', 'repaired', 'blocked'];
 const KINDS: RenewalKind[] = ['progress', 'requirement-change', 'reset'];
 const ENDS = ['cleared', 'changed', 'reset'];
 const isTime = (x: unknown) => typeof x === 'string' && !Number.isNaN(Date.parse(x));
@@ -73,7 +80,8 @@ export function readRecovery(p: Paths, root: string): RecoveryState {
       && (b.renewedAt === undefined || isTime(b.renewedAt)) && (b.renewal === undefined || KINDS.includes(b.renewal)))
     && Array.isArray(d.attempts) && d.attempts.every((a: any) => isIid(a?.seq) && isIid(a.ticket) && typeof a.episode === 'string'
       && isTime(a.startedAt) && (a.finishedAt === undefined || isTime(a.finishedAt)) && RESULTS.includes(a.result)
-      && optStr(a.branch) && (a.pid === undefined || isIid(a.pid)) && optStr(a.reason) && optStr(a.log) && optStr(a.report))
+      && optStr(a.branch) && (a.pid === undefined || isIid(a.pid)) && optStr(a.reason) && optStr(a.log) && optStr(a.report)
+      && optStr(a.id) && optStr(a.container) && optStr(a.record))
     && d.attempts.filter((a: any) => a.result === 'running').length <= 1
     && Array.isArray(d.renewals) && d.renewals.every((r: any) => isTime(r?.at) && KINDS.includes(r.kind)
       && (r.ticket === undefined || isIid(r.ticket)) && optStr(r.detail))
@@ -145,13 +153,15 @@ export function attemptProblem(s: RecoveryState, ticket: number): string | null 
   return null;
 }
 /** Record a new running attempt and spend one unit of the ticket's budget. Throws with the reason when not allowed. */
-export function beginAttempt(p: Paths, root: string, o: { ticket: number; at: string; branch?: string; pid?: number; log?: string }): Attempt {
+export function beginAttempt(p: Paths, root: string, o: { ticket: number; at: string; branch?: string; pid?: number; log?: string;
+  id?: string; container?: string; record?: string }): Attempt {
   if (!isTime(o.at)) throw new Error(`Invalid attempt time: ${o.at}`);
   return mutateRecovery(p, root, s => {
     const problem = attemptProblem(s, o.ticket);
     if (problem) throw new Error(problem);
     const a: Attempt = { seq: s.nextSeq++, ticket: o.ticket, episode: s.episode!.id, startedAt: o.at, result: 'running',
-      ...(o.branch ? { branch: o.branch } : {}), ...(o.pid ? { pid: o.pid } : {}), ...(o.log ? { log: o.log } : {}) };
+      ...(o.branch ? { branch: o.branch } : {}), ...(o.pid ? { pid: o.pid } : {}), ...(o.log ? { log: o.log } : {}),
+      ...(o.id ? { id: o.id } : {}), ...(o.container ? { container: o.container } : {}), ...(o.record ? { record: o.record } : {}) };
     s.attempts = keep([...s.attempts, a]);
     const b = s.budgets[o.ticket] ?? { used: 0 };
     s.budgets[o.ticket] = { ...b, used: b.used + 1 };
