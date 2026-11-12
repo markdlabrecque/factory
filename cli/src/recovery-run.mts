@@ -1,15 +1,16 @@
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
 // settles attempts that ended. The tick's jam confirmation (#61, jam-detect.mts) calls settleRecovery after each completed
 // scheduled pass and launchRecovery for a confirmed jam's ticket, only when the project's copy has the recovery workflow
-// (recoveryCopyProblem), so recovery stays inactive until that copy is upgraded (#63).
+// and a person has reviewed it as it is (recovery-review.mts recoveryCopyProblem, #63), so recovery stays inactive until
+// that copy is complete and reviewed.
 // launchRecovery, in order: settle the project's running attempt, if any (refusing while it still runs or its container
 // is unconfirmed); read the ticket's ownership receipt (orchestrator/ownership.mts, keyed by the project's id from its
 // checkout and tracker, read from .sandcastle/config.mts) and check its recorded branch and worktree may be resumed
 // (recovery-workspace.mts resumeTarget). A branch only on origin is fetched exactly and created locally without force
 // (fetchRecordedBranch), under a receipt that says so, unless a claim protects the ticket. A pre-upgrade run's exact
 // branch is adopted into a new receipt; identities a receipt is missing are filled in from Git. Then: check the
-// project's copy has the recovery workflow (main.mts --recover, recovery.mts, recovery-sandbox.mts, handoff.mts,
-// prompt.recover.md; factory init does not deliver the prompt yet, #63); choose the attempt's UUID and its exact container
+// project's copy has the complete recovery workflow and that it is unchanged since it was reviewed (recovery-review.mts;
+// factory init delivers and records it for a new scaffold, #63); choose the attempt's UUID and its exact container
 // name (factory-recovery-<uuid>); take capacity, ticket and project together with the attempt's charge in one admission
 // record replacement (recovery-claim.mts); record the intent and add the branch's Factory worktree if it is missing
 // (`git worktree add`, never a reset); write the host-owned attempt record (orchestrator/recovery.mts, phase `claimed`,
@@ -44,6 +45,7 @@ import type { AttemptRecord, RecoveryOutcome } from '../../orchestrator/recovery
 import type { Docker } from '../../orchestrator/recovery.mts';
 import type { Paths } from './paths.mts';
 import { claimRecovery, replayAdmitted } from './recovery-claim.mts';
+import { recoveryCopyProblem } from './recovery-review.mts';
 import { finishAttempt, readRecovery, runningAttempt } from './recovery-state.mts';
 import type { Attempt } from './recovery-state.mts';
 import { fetchRecordedBranch, resumeTarget } from './recovery-workspace.mts';
@@ -68,17 +70,6 @@ type Common = { root: string; tracker: string; dir?: string; docker?: Docker; at
 export type Settled = { state: 'none' } | { state: 'running'; attempt: Attempt } | { state: 'settled'; attempt: Attempt }
   | { state: 'unconfirmed'; attempt: Attempt; reason: string };
 export type Launch = { ok: true; attempt: Attempt; pid: number; branch: string; log: string } | { ok: false; reason: string };
-
-const REQUIRED = ['main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'prompt.recover.md'];
-/** Why the project's .sandcastle copy cannot run a repair, or null. */
-export function recoveryCopyProblem(root: string): string | null {
-  const dir = join(root, '.sandcastle');
-  const missing = REQUIRED.filter(f => !existsSync(join(dir, f)));
-  if (!missing.length && !readFileSync(join(dir, 'main.mts'), 'utf8').includes('"attempt-record": { type: "string" }')) missing.push('main.mts --recover --attempt-record');
-  return missing.length
-    ? `the project's .sandcastle copy has no recovery workflow (missing ${missing.join(', ')}); recovery stays inactive until the copy is upgraded`
-    : null;
-}
 
 const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
 
@@ -193,7 +184,7 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
   }
   if (!target.ok) return target;
   if (!target.base) return { ok: false, reason: `#${o.ticket}: its run record names no base branch` };
-  const copy = recoveryCopyProblem(o.root);
+  const copy = recoveryCopyProblem(p, o.root);
   if (copy) return { ok: false, reason: copy };
   // A pre-upgrade run's exact branch is adopted; identities a crash left unrecorded are filled from what Git shows.
   if (target.adopt) {

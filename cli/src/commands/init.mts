@@ -1,11 +1,15 @@
 // `factory init`: add the missing minimal Sandcastle workflow files to a Git project, then register it.
 // Never overwrites, never contacts a tracker, builds images or installs packages. A failed write leaves a
 // repairable scaffold and does not register the project; rerun to fill the gaps.
+// Self-recovery (#63): when this run created every recovery workflow file (recovery-review.mts WORKFLOW), the new copy is
+// Factory's own workflow and init records it as reviewed, so recovery is active. If any of them already existed, it records
+// nothing: recovery stays inactive until the developer upgrades the copy by hand and runs `factory recovery review --confirm`.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Paths } from '../paths.mts';
 import { scaffoldName } from '../paths.mts';
 import { addProject, canonicalRoot, readRegistry } from '../projects.mts';
+import { recordReview, WORKFLOW } from '../recovery-review.mts';
 import { buildAssets, writeScaffold } from '../scaffold.mts';
 import type { PlannedFile, Profile, Settings } from '../scaffold.mts';
 
@@ -41,6 +45,8 @@ export async function init(p: Paths, path: string | undefined, options: InitOpti
   const files = hooks.assets ?? buildAssets(settings, p.state);
   const { created, skipped } = writeScaffold(root, files, { beforeWrite: hooks.beforeWrite });
   const added = addProject(p, root);
+  const fresh = WORKFLOW.every(f => created.includes(`${scaffoldName}/${f}`));
+  if (fresh) recordReview(p, root, { by: 'init' });
 
   console.log(`Initialized ${join(root, scaffoldName)} (profile ${settings.profile})`);
   console.log(`Created ${created.length} file(s), skipped ${skipped.length} existing file(s).`);
@@ -67,5 +73,8 @@ export async function init(p: Paths, path: string | undefined, options: InitOpti
     `  4. Provision image "${settings.image}" and the environment commands (sandboxSetup, prompts) with the sandcastle-setup skill.`,
     `  5. Check with: ${scaffoldName}/factory-dispatch.sh --dry-run`,
   ].join('\n'));
+  console.log(fresh
+    ? `Self-recovery: active for this new workflow. Editing ${WORKFLOW.join(', ')} later turns it off until you check the copy and run \`factory recovery review --confirm\`.`
+    : 'Self-recovery: inactive. This project already had workflow files; upgrade them by hand (orchestrator/ADAPTING.md, "Upgrading an existing project for self-recovery"), then run `factory recovery review`.');
   if (!existsSync(join(root, scaffoldName, 'dispatch.sh'))) console.log('Warning: dispatch.sh is missing; rerun factory init.');
 }

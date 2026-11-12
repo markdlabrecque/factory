@@ -1,6 +1,6 @@
 // Guarded entrypoint smoke test (#74): a claimed, stopped ticket goes from Factory's real launcher (cli/src/recovery-run.mts)
-// through the real scaffolded `.sandcastle/main.mts --recover` (built by cli/src/scaffold.mts, plus prompt.recover.md as
-// the reviewed upgrade will add it, #63) into runRecoveryAttempt, the owned container, the shared verifier and normal
+// through the real scaffolded `.sandcastle/main.mts --recover` (built by cli/src/scaffold.mts, which ships prompt.recover.md,
+// and recorded as reviewed the way factory init records a new scaffold, #63) into runRecoveryAttempt, the owned container, the shared verifier and normal
 // delivery, and back through settleRecovery. Only external programs are stubbed, as executables first on the child's
 // PATH or a module in the project's node_modules (orchestrator/fixtures/entrypoint): `gh` (tracker), `docker`, and
 // @ai-hero/sandcastle (agent providers; its createSandbox and docker() throw if recovery ever touches them). Git is real,
@@ -19,6 +19,7 @@ import { readAdmission } from "../board/admission.mts";
 import { claimRun, readRuns } from "../board/board.mts";
 import { projectId, readReceipt, receiptFile } from "./ownership.mts";
 import { paths } from "../cli/src/paths.mts";
+import { recordReview } from "../cli/src/recovery-review.mts";
 import { buildAssets } from "../cli/src/scaffold.mts";
 import { launchRecovery, settleRecovery } from "../cli/src/recovery-run.mts";
 import type { Spawner } from "../cli/src/recovery-run.mts";
@@ -57,13 +58,12 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   writeFileSync(join(worktree, "untracked.txt"), "keep me\n");
   const otherRef = git(root, "rev-parse", "8-other");
 
-  // The scaffold as factory init writes it, plus the recovery prompt the reviewed upgrade adds (#63).
+  // The scaffold as factory init writes it, recorded as reviewed the way init records a new scaffold (#63).
   const state = join(home, "runs");
   for (const f of buildAssets({ profile: "personal", repo: "owner/repo", image: "img" }, state)) {
     mkdirSync(dirname(join(root, f.path)), { recursive: true });
     writeFileSync(join(root, f.path), f.content, { mode: f.mode });
   }
-  cpSync(join(import.meta.dirname, "prompt.recover.md"), join(root, ".sandcastle/prompt.recover.md"));
   cpSync(join(FIXTURES, "sandcastle"), join(root, "node_modules/@ai-hero/sandcastle"), { recursive: true });
   const evidence = join(root, ".sandcastle/evidence/7");
   mkdirSync(evidence, { recursive: true });
@@ -88,6 +88,7 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
 
   // A stopped run of #7 and a jam confirmed on two passes.
   const p = paths(home);
+  recordReview(p, root, { by: "init" });
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
     patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main", evidenceDir: evidence } });
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
