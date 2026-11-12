@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -8,7 +8,7 @@ import { claimRun, PARKED, readRuns, removeRun, reserveRun, setProject, setStage
 import type { BoardRun } from "./board.mts";
 import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
-import { contentHash, decide, edgesOf, expandUnits, staleReason, unitHash } from "./graph.mts";
+import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
 import * as tracker from "./tracker.mts";
@@ -33,6 +33,12 @@ import type { Ticket } from "./tracker.mts";
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
 // With AGENT.modelLabels (config.mts), a ticket without exactly one model label stays queued.
+// Jam report (slice four self-recovery, #61): when the scheduler's tick sets FACTORY_JAM_REPORT (and FACTORY_PASS_ID),
+// a pass that is not a dry run writes there, after the board update and before launching, whether the project is jammed
+// (graph.mts findJam: still-ready stopped tickets and the holds behind them, with no run in flight, nothing launched,
+// nothing awaiting analysis and a free slot) and, for each jammed or still-ready ticket with a run record, its requirement
+// fingerprint (unitHash and labels minus the ones Sandcastle writes). The tick counts it only once the pass exits 0. Manual
+// passes are not asked for one. The report changes nothing here; the tick decides what to do with it.
 
 // ---- Selection config: which tickets get a run ----------------------------------------
 // Tracker, milestone and labels live in config.mts. Every option below is optional; leave one unset
@@ -261,6 +267,32 @@ if (!dry) {
   for (const m of manifests.values()) {
     if (!catalogueById.has(m.iid) && !liveIids.has(m.iid) && Date.parse(m.analyzedAt || "1970-01-01") < cutoff) removeManifest(PROJECT, m.iid);
   }
+}
+
+// ---- jam report (scheduled passes only; see the header) --------------------------
+const jamReport = process.env.FACTORY_JAM_REPORT;
+if (jamReport && !dry) {
+  const jam = findJam({
+    units: issues.map((i) => {
+      const r = runOf.get(i.iid);
+      return { iid: i.iid, stage: r?.stage, openPr: !!r?.branch && openMrs.has(r.branch) };
+    }),
+    decisions,
+    active: runs.filter(running).map((r) => Number(r.iid)),
+    room,
+  });
+  const ours = new Set([...LABELS.ready, LABELS.needsHuman, LABELS.done]);
+  const jammed = new Set<number>(jam.tickets);
+  const watched = issues.filter((i) => jammed.has(i.iid) || ["stopped", "done"].includes(runOf.get(i.iid)?.stage ?? ""));
+  const tickets = watched.map((t) => ({
+    iid: t.iid,
+    content: hashOf.get(t.iid) ?? unitHash(t, tracker.notes(t.iid)),
+    labels: (t.labels ?? []).filter((l) => !ours.has(l)),
+  }));
+  log(jam.tickets.length ? `jam: ${jam.tickets.map((t) => `#${t}`).join(", ")}` : `no jam: ${"none" in jam ? jam.none : ""}`);
+  const temp = `${jamReport}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify({ version: 1, pass: process.env.FACTORY_PASS_ID ?? "", project: PROJECT, at: new Date().toISOString(), ...jam, observed: tickets }, null, 2) + "\n", { mode: 0o600 });
+  renameSync(temp, jamReport);
 }
 
 // ---- launch ------------------------------------------------------------------

@@ -441,3 +441,33 @@ test('each tick starts at the next opted-in project in rotation, also after a ca
   assert.deepEqual((await run()).visited, ['b']);
   assert.equal(readTickState(p).nextRoot, b, 'a single project keeps the turn');
 });
+
+test('each completed pass hands its own jam report to jam confirmation; a failed or cancelled one is not counted (#61)', async t => {
+  const { p, sched, roots: [a] } = await armed(t, ['a']);
+  setProjectSchedule(p, a, true);
+  const { readRecovery } = await import('../src/recovery-state.mts');
+  mkdirSync(p.state, { recursive: true });
+  writeFileSync(`${p.state}/a_a--7.json`, JSON.stringify({ iid: '7', project: 'a/a', stage: 'stopped', startedAt: new Date().toISOString(), branch: '7-x' }));
+  const reports: string[] = [];
+  const pass = (code: number, after?: () => Promise<void>) => async (_ctx: unknown, _args: string[], o: { env: NodeJS.ProcessEnv }) => {
+    const file = o.env.FACTORY_JAM_REPORT!;
+    reports.push(file);
+    writeFileSync(file, JSON.stringify({ version: 1, pass: o.env.FACTORY_PASS_ID, project: 'a/a', at: new Date().toISOString(), tickets: [7], observed: [] }));
+    await after?.();
+    return code;
+  };
+  const lines: string[] = [];
+  await tick(p, { backend: sched, log: l => lines.push(l), pass: pass(0) as any });
+  await tick(p, { backend: sched, log: () => {}, pass: pass(1) as any });
+  assert.equal(readRecovery(p, a).episode?.passes.length, 1, 'the failed pass is not counted');
+  assert.ok(lines.some(l => /recovery a: jam on #7 seen \(1 of 2 passes\)/.test(l)));
+  await tick(p, { backend: sched, log: l => lines.push(l), pass: pass(0) as any });
+  assert.ok(readRecovery(p, a).episode?.confirmedAt, 'two completed passes confirm the jam');
+  assert.ok(lines.some(l => /recovery a: jam on #7 confirmed; not repairing: .*no recovery workflow/.test(l)), 'inactive until the copy is upgraded');
+  assert.equal(new Set(reports).size, 3, 'every pass has its own report file');
+  assert.ok(reports.every(r => !existsSync(r)), 'report files are removed after the pass');
+  let called = false;
+  const abort = new AbortController();
+  await tick(p, { backend: sched, signal: abort.signal, log: () => {}, recovery: async () => { called = true; }, pass: pass(0, async () => abort.abort()) as any });
+  assert.equal(called, false, 'a cancelled pass is not handed on');
+});

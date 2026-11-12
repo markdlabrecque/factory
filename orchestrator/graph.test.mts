@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blockedOutcome, breakCycles, contentHash, decide, expandUnits, overlap, pathsOverlap, SANDCASTLE_MARK, staleReason, unitHash } from "./graph.mts";
+import { blockedOutcome, breakCycles, contentHash, decide, expandUnits, findJam, overlap, pathsOverlap, SANDCASTLE_MARK, staleReason, unitHash } from "./graph.mts";
 import type { Edge, Manifest } from "./graph.mts";
 
 // Run: node --test 'orchestrator/*.test.mts'
@@ -145,4 +145,25 @@ test("a task's hash changes when its parent is edited", () => {
   const task = { title: "t", description: "d", parent: { iid: 1, title: "p", description: "v1" } };
   assert.notEqual(unitHash(task), unitHash({ ...task, parent: { ...task.parent, description: "v2" } }));
   assert.equal(unitHash({ title: "t", description: "d" }), contentHash({ title: "t", description: "d" }), "plain tickets keep their old hash");
+});
+
+test("project jam: stopped ready tickets and the holds behind them, only when normal work cannot move", () => {
+  const held = (iid: number, ...on: number[]) => ({ iid, launch: false as const, reason: `waiting on ${on.map((x) => `#${x}`).join(", ")}`, waitingOn: on });
+  const units = [{ iid: 3, stage: "stopped" }, { iid: 5 }, { iid: 6 }, { iid: 8 }];
+  const quiet = { units, decisions: [held(5, 3), held(6, 5), held(8, 3, 99)], active: [], room: 3 };
+  assert.deepEqual(findJam(quiet).tickets, [3, 5, 6], "#6 waits on #5 waits on stopped #3; #8 also waits on #99, outside the jam");
+  // A dependency hold alone, or one on a prerequisite whose PR is open, is not a jam.
+  assert.deepEqual(findJam({ ...quiet, units: [{ iid: 3, stage: "stopped", openPr: true }, { iid: 5 }] }).tickets, []);
+  assert.deepEqual(findJam({ ...quiet, units: [{ iid: 5 }], decisions: [held(5, 99)] }).tickets, []);
+  // Normal work and shared capacity come first.
+  assert.match((findJam({ ...quiet, active: [4] }) as { none: string }).none, /in flight: #4/);
+  assert.match((findJam({ ...quiet, decisions: [...quiet.decisions, { iid: 9, launch: true }] }) as { none: string }).none, /launched/);
+  assert.match((findJam({ ...quiet, decisions: [{ iid: 9, launch: false, reason: "not analysed yet" }] }) as { none: string }).none, /analysis/);
+  assert.match((findJam({ ...quiet, room: 0 }) as { none: string }).none, /free slot/);
+});
+
+test("decide names the prerequisites a held ticket waits on", () => {
+  const manifests = new Map([[2, manifest(2, { requires: [needs(1)] })]]);
+  const { decisions } = decide({ candidates: [{ iid: 2, hash: "h2" }], manifests, satisfied: () => false, queue: new Set([1, 2]), live: [], room: 3 });
+  assert.deepEqual(decisions, [{ iid: 2, launch: false, reason: "waiting on #1: thing from #1", waitingOn: [1] }]);
 });

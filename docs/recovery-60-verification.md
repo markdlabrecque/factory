@@ -1,7 +1,7 @@
-<!-- Acceptance map for #60 (bounded container repairs), written by its continuation #74 and updated by #75, which closed gaps 1 to 4 (admission record, claims after the worker exits, ownership receipts and remote-only branches, prerequisite holds). New evidence against the continued tip; the earlier INCONCLUSIVE verdict on 2244777 stays as recorded on the ticket. Recovery is still inactive: nothing triggers it (#61) and factory init does not copy prompt.recover.md (#63). -->
+<!-- Acceptance map for #60 (bounded container repairs), written by its continuation #74 and updated by #75, which closed gaps 1 to 4 (admission record, claims after the worker exits, ownership receipts and remote-only branches, prerequisite holds). New evidence against the continued tip; the earlier INCONCLUSIVE verdict on 2244777 stays as recorded on the ticket. Recovery is still inactive: since #61 the tick's jam confirmation calls the launcher, but only in a project whose copy has prompt.recover.md, which factory init does not copy (#63). -->
 # #60 acceptance map (continued by #74, gaps closed by #75)
 
-The earlier verification of `2244777` was INCONCLUSIVE because `main.mts --recover` never ran from sandbox readiness through repair, cleanup, verification and delivery. That verdict stands as history. This page maps the original #60 requirements to the continued code and the tests that now exercise it. Recovery is still **inactive**: nothing calls the launcher (#61) and `factory init` does not copy `prompt.recover.md` (#63).
+The earlier verification of `2244777` was INCONCLUSIVE because `main.mts --recover` never ran from sandbox readiness through repair, cleanup, verification and delivery. That verdict stands as history. This page maps the original #60 requirements to the continued code and the tests that now exercise it. Recovery is still **inactive**: since #61 the tick's jam confirmation calls the launcher for a confirmed jam, but only in a project whose copy has `prompt.recover.md`, and `factory init` does not copy it (#63).
 
 ## Starting-code findings, and what changed
 
@@ -35,7 +35,7 @@ The earlier verification of `2244777` was INCONCLUSIVE because `main.mts --recov
 | Recheck requirements, exclusions and ownership before verification and delivery | `main.mts` `recheck`: ticket closed, `needs-human`, `unitHash` changed, admission claim and run record still this attempt's, and `handoff.mts` `prerequisiteHold` over the dispatcher's analysis (#75) | runner: changed before verify and before deliver; a dependency hold before verification, an open-PR prerequisite or unknown prerequisites before delivery, a missing analysis; `handoff.test.mts` | Met (#75) |
 | Ambiguous delivery is not replayed | `postAndDeliver` error → `failed`; a crash while `delivering` → `interrupted`, "not replayed" | runner: delivery throws once; recovery-run: delivering crash | Met (no lookup-before-replay is needed, because nothing replays) |
 | Detached worker survives `schedule off` | launcher spawns into its own process group (unchanged from #60) | earlier launcher checks; recovery-run | Met |
-| No automatic dispatch or activation | nothing calls `launchRecovery`; `prompt.recover.md` not scaffolded | init tests (scaffold list) | Met |
+| No automatic dispatch or activation | only the tick's jam confirmation (#61) calls `launchRecovery`, and only when the copy has `prompt.recover.md`; `prompt.recover.md` not scaffolded | init tests (scaffold list) | Met |
 | Scaffold allowlist and import smoke | `cli/src/scaffold.mts` adds `recovery-sandbox.mts` | `cli/test/init.test.mts` (every imported module is scaffolded) | Met |
 | Normal path unchanged; branch-exists protection | `main.mts` normal path (identical to before #60 apart from the hoisted `host` and the recovery-only model-label exemption) | entrypoint test: a normal start of #7 refuses the existing branch, no Docker | Met |
 
@@ -50,4 +50,4 @@ The earlier verification of `2244777` was INCONCLUSIVE because `main.mts --recov
 
 5. **Not exercised:** real Docker, a real agent CLI and a real tracker. Per TESTING.md, these are trusted external boundaries. The tests verify Factory's exact `docker`/`gh`/`git` arguments, mounts, ordering and failure handling against stubs.
 
-Recovery stays inactive: nothing triggers it (#61) and `factory init` does not copy `prompt.recover.md` (#63). With gaps 1 to 4 closed, #61 and #64 can build on the admission record, receipts and settle step.
+Recovery stays inactive: jam confirmation (#61) launches only in a project whose copy has `prompt.recover.md`, and `factory init` does not copy it (#63). With gaps 1 to 4 closed, #61 and #64 can build on the admission record, receipts and settle step.
