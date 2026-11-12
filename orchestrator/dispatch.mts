@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
-import { PARKED, readRuns, removeRun, reserveRun, setProject, setStage, TERMINAL } from "./board.mts";
+import { claimRun, PARKED, readRuns, removeRun, reserveRun, setProject, setStage, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
 import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
@@ -24,6 +24,9 @@ import type { Ticket } from "./tracker.mts";
 // is not retried every pass: delete its file in the state dir to retry it.
 // Each launch is recorded on the board (stage "setup", note "starting", the child's pid) the moment it is spawned,
 // so the cap counts it in every later pass, this project's or another's, before main.mts writes its own record.
+// Before spawning, each launch is claimed atomically (claimRun in board.mts): the cap is recounted from the board and
+// the ticket checked under a shared lock, so a pass running alongside (another project's, a manual one, or a recovery
+// attempt) cannot overfill the cap or start the same ticket twice. A refused claim launches nothing.
 // With SUBTASKS.enabled (config.mts), a ready issue that has Tasks gets one run per open Task instead.
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
@@ -266,6 +269,14 @@ const logDir = resolve(here, "logs");
 mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);
+  const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base };
+  // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
+  const claim = claimRun({ iid, pid: process.pid, cap, patch: meta });
+  if (!claim.ok) {
+    log(`#${iid} not launched: ${claim.reason}`);
+    if (claim.reason.startsWith("no capacity")) break;
+    continue;
+  }
   const out = openSync(resolve(logDir, `run-${iid}.log`), "a");
   const child = spawn(existsSync(npx) ? npx : "npx", ["tsx", resolve(here, "main.mts"), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {
     cwd: process.cwd(),
@@ -274,6 +285,7 @@ for (const [n, d] of launch.entries()) {
     env: process.env,
   });
   child.unref();
-  if (child.pid) reserveRun(iid, child.pid, { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base });
+  if (child.pid) reserveRun(iid, child.pid, meta);
+  else removeRun(iid);
   if (n < launch.length - 1) await new Promise((r) => setTimeout(r, SELECT.staggerSeconds * 1000));
 }
