@@ -3,10 +3,12 @@
      B / Orbital (orbital fabrication station) and C / Megastructure (vertical industrial cutaway) - on the
      prototype/board-three-concepts branch only. Everything shown is SIMULATED fixture data (DEMO-241..DEMO-246) driven
      by one deterministic demo clock; nothing is fetched, stored or read from the live Board. Pick a design with
-     ?variant=A|B|C or the bottom switcher (History API, back/forward, arrow keys). Pause/Resume stops all CSS motion and
-     progress; Restart restores the initial state; reduced motion starts paused. The production Board
+     ?variant=A|B|C or the bottom switcher (History API, back/forward, arrow keys). Pause/Resume stops all CSS motion
+     (animations via animation-play-state, in-flight transitions via the Web Animations API, #71) and progress; Restart restores the initial state; reduced motion starts paused. The production Board
      (board.template.html, board.mts, board-server.mts) is unchanged and never loads this file. Not copied into projects,
-     not installed by Factory, not a supported Board design. Preview: npm run prototype:board. -->
+     not installed by Factory, not a supported Board design. B's capsules and dock labels sit in a flat layer above the 3D
+     scene, projected from anchors in the tilted plane, so rings never cut through their text (#71).
+     Preview: npm run prototype:board. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -297,7 +299,7 @@
   .b-meter .bar { height: 4px; border-radius: 0; }
   .b-item[data-status="blocked"] .bar i { background: #c98512; }
 
-  .orb { position: relative; aspect-ratio: 1.7 / 1; min-height: 320px; }
+  .orb { position: relative; aspect-ratio: 1.7 / 1; min-height: 320px; overflow-x: clip; }
   .orb-flat { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .orb-flat .ch { stroke: #14213d; stroke-width: 1; opacity: .35; }
   .orb-flat .traj { fill: none; stroke: #14213d; stroke-width: 1.2; stroke-dasharray: 2 7; opacity: .45; }
@@ -344,13 +346,18 @@
            background: #14213d; border-radius: 3px; box-shadow: 0 0 0 2px #e8e7e1; }
   .drone::before, .drone::after { content: ""; position: absolute; top: -5px; width: 12px; height: 3px; background: #c93a1a; border-radius: 2px; }
   .drone::before { left: -4px; } .drone::after { right: -4px; }
-  .bill { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%) rotateX(-60deg) translateY(calc(var(--stack, 0) * -38px));
-          transform-origin: 50% 100%; transform-style: preserve-3d; }
-  .dock-l { position: absolute; width: 0; height: 0; transform-style: preserve-3d; }
+  /* Labels and capsules live in a flat layer above the 3D scene, so rings and core never cut through their text.
+     Zero-size anchors inside the tilted plane carry the 3D positions; placeB() projects them onto this layer. */
+  .orb-anchor { position: absolute; width: 0; height: 0; }
+  .orb-tags { position: absolute; inset: 0; pointer-events: none; }
+  .dock-l { position: absolute; transform: translate(calc(-50% + var(--dx) * 50%), calc(-50% + var(--dy) * 50%)); }
   .dock-l span { display: block; white-space: nowrap; font: 700 12px/1 var(--mono); letter-spacing: .12em; color: #14213d;
                  background: rgba(232,231,225,.86); padding: 3px 5px; border: 1px solid rgba(20,33,61,.4); }
   .dock-l.hold span { color: #8a5a00; border-color: #c98512; }
-  .cap { position: absolute; width: 0; height: 0; transform-style: preserve-3d; transition: left 1s linear, top 1s linear; }
+  .cap { position: absolute; pointer-events: auto; transform: translate(-50%, -100%) translateY(calc(var(--stack, 0) * -38px));
+         transition: left 1s linear, top 1s linear; }
+  .cap.is-sel { z-index: 1; }
+  .orb.no-glide .cap { transition: none; }
   .cap-body { display: grid; gap: 1px; padding: 5px 10px 6px; min-width: 92px; text-align: center; cursor: pointer;
               background: linear-gradient(180deg, #ffffff 0%, #e2e4ea 55%, #b9bfcc 100%); border: 1.5px solid #14213d;
               border-radius: 16px; box-shadow: 0 6px 10px rgba(20,33,61,.25); transition: transform .35s ease, box-shadow .35s; }
@@ -1063,23 +1070,42 @@
     const vanes = `<svg class="vanes" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48" fill="#14213d"/>${
       Array.from({ length: 8 }, (_, i) => `<path d="M50 50 L${n1(polar(50, 50, 46, i * 45 - 12)[0])} ${n1(polar(50, 50, 46, i * 45 - 12)[1])} A46 46 0 0 1 ${n1(polar(50, 50, 46, i * 45 + 8)[0])} ${n1(polar(50, 50, 46, i * 45 + 8)[1])}Z" fill="#c4c8d1"/>`).join('')
     }<circle cx="50" cy="50" r="12" fill="#c93a1a"/></svg>`;
-    const dockLabel = (a, r, txt, cls = '') => { const p = polar(50, 50, r, a);
-      return `<div class="dock-l ${cls}" style="left:${n1(p[0])}%;top:${n1(p[1])}%"><div class="bill"><span>${txt}</span></div></div>`; };
+    // Each label has a zero-size anchor in the tilted plane and a flat twin in .orb-tags. Dock anchors sit just
+    // outside the disc rim, and each label is pushed off its anchor by [dx, dy] (fractions of its own size): away from
+    // the capsules standing on the track, and below the deliver dock so the docking arm never covers DELIVER.
+    const DOCKS = [[165, 'SETUP', -0.3, 1], [230, 'BUILD', -0.6, -1], [315, 'VERIFY', 0.6, -1], [375, 'DELIVER', 0.3, 1],
+      [122, 'QUEUE', 0, 1], [92, 'HOLD CLAMP', 0, 1, 'hold'], [62, 'SHIPPED', 0, 1]];
+    const anchor = (key, p) => `<i class="orb-anchor" data-anchor="${key}"${p ? ` style="left:${n1(p[0])}%;top:${n1(p[1])}%"` : ''}></i>`;
+    const dockAnchors = DOCKS.map(([a, txt]) => anchor('dock-' + txt, polar(50, 50, 52, a))).join('');
+    const dockLabels = DOCKS.map(([, txt, dx, dy, cls = '']) => `<div class="dock-l ${cls}" data-for="dock-${txt}" style="--dx:${dx};--dy:${dy}"><span>${txt}</span></div>`).join('');
     const drone = (cls) => `<div class="drone-orbit ${cls}"><div class="drone-pos"><div class="drone-ctr"><div class="drone"></div></div></div></div>`;
-    const caps = FIX.map((f) => `<div class="cap" data-ticket="${f.id}"><div class="bill"><div class="cap-body hov">
-        <span class="cap-id">${f.id}</span><span class="cap-st"></span></div><div class="cap-stem"></div></div></div>`).join('');
+    const capAnchors = FIX.map((f) => anchor('cap-' + f.id)).join('');
+    const caps = FIX.map((f) => `<div class="cap" data-ticket="${f.id}" data-for="cap-${f.id}"><div class="cap-body hov">
+        <span class="cap-id">${f.id}</span><span class="cap-st"></span></div><div class="cap-stem"></div></div>`).join('');
     orb.innerHTML = flat + `<div class="orb-persp" aria-hidden="true"><div class="orb-plane">${track}<div class="sweep"></div>
       ${ring('r1', 120, 12, 4)}${ring('r2', 90, 8, 3)}${ring('r3', 60, 6, 3)}
       <div class="core">${core}<div class="vwrap">${vanes}</div></div>
       ${drone('d1')}${drone('d2')}
-      ${dockLabel(165, 46, 'SETUP')}${dockLabel(230, 46, 'BUILD')}${dockLabel(315, 46, 'VERIFY')}${dockLabel(375, 46, 'DELIVER')}
-      ${dockLabel(122, 46.5, 'QUEUE')}${dockLabel(92, 47, 'HOLD CLAMP', 'hold')}${dockLabel(62, 46.5, 'SHIPPED')}
-      ${caps}</div></div>`;
+      ${dockAnchors}${capAnchors}</div></div><div class="orb-tags" aria-hidden="true">${dockLabels}${caps}</div>`;
+    // Re-project without gliding when the scene changes size (window resize, or B becoming visible).
+    new ResizeObserver(() => { if (S.variant === 'B') placeB(true); }).observe(orb);
     // segmented radial gauge
     let g = `<svg viewBox="0 0 240 240" aria-hidden="true"><circle class="gring" cx="120" cy="120" r="116"/><circle class="gring" cx="120" cy="120" r="78"/><g transform="translate(120,120)">`;
     for (let i = 0; i < 60; i++) g += `<rect class="seg" x="-3" y="-110" width="6" height="22" rx="1" transform="rotate(${i * 6})"/>`;
     g += `</g></svg><div class="gauge-n"><b id="b-pct">0%</b><span>Simulated</span><em id="b-gid"></em></div>`;
     $('#b-gauge').innerHTML = g;
+  }
+
+  // Move each flat label to the on-screen point of its 3D anchor; capsules glide there unless `instant`.
+  function placeB(instant) {
+    const orb = $('#orb'), box = orb.getBoundingClientRect();
+    if (!box.width) return;
+    if (instant) orb.classList.add('no-glide');
+    $$('.orb-tags [data-for]', orb).forEach((el) => {
+      const r = $(`[data-anchor="${el.dataset.for}"]`, orb).getBoundingClientRect();
+      el.style.left = n1(r.left - box.left) + 'px'; el.style.top = n1(r.top - box.top) + 'px';
+    });
+    if (instant) { void orb.offsetWidth; orb.classList.remove('no-glide'); }
   }
 
   function renderB(snap) {
@@ -1093,8 +1119,9 @@
       else if (k.stage === 'done') { a = B_ANG.done; stack = d++; }
       else a = bAngle(k.pos);
       const p = polar(50, 50, 38, a);
+      const at = $(`[data-anchor="cap-${k.id}"]`, orb);
+      at.style.left = n1(p[0]) + '%'; at.style.top = n1(p[1]) + '%';
       const cap = $(`.cap[data-ticket="${k.id}"]`, orb);
-      cap.style.left = n1(p[0]) + '%'; cap.style.top = n1(p[1]) + '%';
       cap.style.setProperty('--stack', stack);
       cap.dataset.status = k.status;
       cap.classList.toggle('is-sel', k.id === S.selected);
@@ -1102,6 +1129,7 @@
     }
     orb.classList.toggle('is-verifying', active('verifying'));
     orb.classList.toggle('is-delivering', active('delivering'));
+    placeB(false);
     const sel = snap.sel, lit = Math.round(sel.pct * 0.6);
     $$('#b-gauge .seg').forEach((el, i) => { el.classList.toggle('on', i < lit && sel.status !== 'blocked'); el.classList.toggle('hold', i < lit && sel.status === 'blocked'); });
     $('#b-pct').textContent = sel.pct + '%';
@@ -1275,10 +1303,24 @@
     if (document.hidden) return ['Page hidden: motion is suspended until you return.', false];
     return [`Demo running at ${S.speed}x. Loop ${S.loop} restarts at T+${fmt(LOOP)}.` + (mqReduce.matches ? ' (You opted in despite reduced motion.)' : ''), false];
   }
+  // animation-play-state (body.is-frozen) does not stop CSS transitions, so the 1 s glides of capsules, tags, slabs
+  // and the lift would keep moving after Pause. Freezing pauses in-flight transitions where they are and resuming
+  // plays them on; a transition started while frozen (Restart, selection) jumps to its end instead of waiting.
+  let wasFrozen = false;
+  function freezeTransitions(frozen) {
+    if (typeof CSSTransition === 'undefined' || !document.getAnimations) return;
+    for (const a of document.getAnimations()) {
+      if (!(a instanceof CSSTransition)) continue;
+      if (!frozen) { if (a.playState === 'paused') a.play(); }
+      else if (a.playState === 'running') { if (wasFrozen) a.finish(); else a.pause(); }
+    }
+    wasFrozen = frozen;
+  }
   function render() {
     const snap = snapshot();
+    const frozen = !S.running || document.hidden;
     document.body.dataset.variant = S.variant;
-    document.body.classList.toggle('is-frozen', !S.running || document.hidden);
+    document.body.classList.toggle('is-frozen', frozen);
     for (const v of VARIANTS) $('#v-' + v.id).hidden = v.id !== S.variant;
     $$('[data-bind="clock"]').forEach((el) => { el.textContent = 'T+' + fmt(snap.t); });
     $$('[data-bind="loop"]').forEach((el) => { el.textContent = String(S.loop); });
@@ -1302,6 +1344,7 @@
       tickets: snap.tickets.map((k) => ({ id: k.id, title: k.title, stage: k.stage, status: k.status, simulatedPercent: k.pct,
         worker: k.worker, elapsedDemoSeconds: k.elapsed, activity: k.activity[0] })),
     }, null, 2);
+    freezeTransitions(frozen);   // last, so getAnimations() sees the transitions this render just started
   }
 
   // ---------- Single clock ----------
