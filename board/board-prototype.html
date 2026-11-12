@@ -1,0 +1,331 @@
+<!doctype html>
+<!-- Branch-only, throwaway Board prototype. One dot tracker per unfinished ticket;
+     centered connectors reach the current stage. Solid current dots have a soft halo, green for healthy states and red for bad states.
+     Each current dot emits a clock-driven sonar pulse; pause freezes it and reduced motion hides it.
+     Queue reasons suppress secondary docket capacity.
+     Shipped holds the ten latest completions; selectable tickets expose interval-based stats.
+     System/light/dark themes, one deterministic demo clock, no fetches or storage.
+     Direct implementation approved by the user, without Factory. The installed Board is unchanged. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Board / Ticket trackers</title>
+<style>
+:root { color-scheme:dark; --bg:#0a111c; --panel:#101c2c; --raised:#152236; --ink:#e5eefb; --muted:#a4b6cd; --edge:#3c506a; --track:#637b98; --accent:#5ae2da; --good:#64e89b; --bad:#ff7c86; --warn:#ffcf80; --shadow:0 24px 80px #0006; font:14px/1.5 system-ui,sans-serif; }
+:root[data-theme="light"] { color-scheme:light; --bg:#edf2f8; --panel:#fff; --raised:#e5edf6; --ink:#15263d; --muted:#495e77; --edge:#a8b8cb; --track:#6d8098; --accent:#006e6a; --good:#14783e; --bad:#ba2538; --warn:#825000; --shadow:0 24px 80px #182b4426; }
+*,::before,::after { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); }
+button,select,input { font:inherit; color:inherit; }
+button,select { border:1px solid var(--edge); background:var(--panel); border-radius:5px; padding:7px 11px; }
+button,summary,select { cursor:pointer; }
+button:hover,select:hover { border-color:var(--accent); }
+:focus-visible { outline:3px solid var(--accent); outline-offset:4px; }
+button:disabled { opacity:.6; cursor:default; }
+.mono { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-variant-numeric:tabular-nums; }
+.muted { color:var(--muted); }
+header { border-bottom:1px solid var(--edge); padding:22px max(24px,calc((100vw - 1240px)/2)); background:var(--panel); }
+.topline,.toolbar,.section-head,.ticket-top,.ticket-foot,.dialog-top { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.brand { display:flex; align-items:center; gap:12px; }
+.brand-mark { color:var(--accent); font:26px ui-monospace,monospace; }
+h1 { font:700 20px ui-monospace,monospace; letter-spacing:3px; margin:0; }
+.subtitle { color:var(--muted); font-size:12px; margin:3px 0 0; }
+.appearance { display:flex; align-items:center; gap:8px; font-size:12px; }
+main { max-width:1240px; margin:auto; padding:24px; }
+.overview { display:flex; align-items:center; flex-wrap:wrap; gap:12px 32px; margin-bottom:20px; }
+.overview div { display:flex; align-items:baseline; gap:8px; }
+.overview b { font:600 26px ui-monospace,monospace; }
+.overview span { color:var(--muted); font-size:12px; }
+.toolbar { border:1px solid var(--edge); border-radius:6px; background:var(--panel); padding:12px 14px; margin-bottom:24px; }
+.demo-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.demo-label { color:var(--accent); font:600 11px ui-monospace,monospace; letter-spacing:1px; }
+.clock { min-width:92px; font-size:12px; }
+.playback-status { font-size:12px; color:var(--muted); }
+.scrubber { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; }
+.scrubber input { width:150px; accent-color:var(--accent); }
+h2 { font-size:14px; margin:0; font-weight:650; }
+.section-head { margin:22px 0 10px; }
+.section-head span { color:var(--muted); font-size:12px; }
+.ticket-list { display:grid; gap:10px; }
+.ticket { width:100%; text-align:left; padding:16px 20px 12px; background:var(--panel); border:1px solid var(--edge); border-radius:6px; }
+.ticket[aria-pressed="true"] { border-color:var(--accent); }
+.ticket[data-status="blocked"] { border-left:3px solid var(--warn); padding-left:18px; }
+.ticket-id { color:var(--accent); font:600 12px ui-monospace,monospace; }
+.ticket-title { font-weight:600; font-size:15px; margin-left:12px; }
+.status { border:1px solid var(--edge); border-radius:4px; padding:2px 8px; font:11px ui-monospace,monospace; white-space:nowrap; }
+.ticket[data-status="blocked"] .status,.ticket[data-status="queued"] .status { color:var(--warn); }
+.track { --dot-size:10px; --dot-top:3px; --line-size:2px; display:flex; list-style:none; padding:0; margin:16px 0 10px; }
+.step { flex:1; min-width:0; position:relative; text-align:center; color:var(--muted); font:11px ui-monospace,monospace; }
+/* Shared border-box geometry keeps the connector on the dot's vertical center. */
+.step:before { content:''; position:relative; z-index:1; display:block; width:var(--dot-size); height:var(--dot-size); border:2px solid var(--track); background:var(--panel); border-radius:50%; margin:var(--dot-top) auto 8px; }
+.step:not(:last-child):after { content:''; position:absolute; top:calc(var(--dot-top) + (var(--dot-size) - var(--line-size)) / 2); left:calc(50% + var(--dot-size) / 2); width:calc(100% - var(--dot-size)); height:var(--line-size); background:var(--track); }
+.step.complete:before { background:var(--accent); border-color:var(--accent); }
+.step.connected:after { background:var(--accent); }
+.step.current:before { background:var(--stage-state,var(--good)); border-color:var(--stage-state,var(--good)); box-shadow:0 0 10px color-mix(in srgb,var(--stage-state,var(--good)) 45%,transparent),0 0 22px color-mix(in srgb,var(--stage-state,var(--good)) 20%,transparent); }
+.step.current { color:var(--ink); font-weight:700; }
+.sonar { position:absolute; z-index:2; pointer-events:none; left:50%; top:calc(var(--dot-top) + var(--dot-size) / 2); width:var(--dot-size); height:var(--dot-size); border:1px solid var(--stage-state,var(--good)); border-radius:50%; transform:translate(-50%,-50%) scale(var(--sonar-scale,0)); opacity:var(--sonar-opacity,0); }
+@media(prefers-reduced-motion:reduce) { .sonar { display:none; } }
+.ticket:is([data-status="blocked"],[data-status="jammed"],[data-status="failed"],[data-status="stopped"],[data-status="error"]) { --stage-state:var(--bad); }
+.ticket-foot { color:var(--muted); font-size:12px; }
+.reason-list { list-style:none; padding:0; margin:10px 0; color:var(--warn); font-size:12px; }
+.reason-list li:before { content:'↳ '; }
+.empty { color:var(--muted); border:1px dashed var(--edge); border-radius:6px; padding:20px; font-size:13px; }
+#shipped { margin-top:28px; padding-top:18px; border-top:1px solid var(--edge); }
+#shipped summary { font-size:14px; font-weight:650; padding:3px 0 12px; }
+#shipped summary span { font-weight:400; font-size:12px; color:var(--muted); margin-left:8px; }
+#shipped .ticket { padding:12px 18px; }
+#shipped .ticket-foot { margin-top:6px; }
+footer { color:var(--muted); font-size:12px; margin-top:26px; border-top:1px solid var(--edge); padding-top:14px; }
+dialog { color:var(--ink); background:var(--panel); border:1px solid var(--edge); border-radius:8px 0 0 8px; width:min(540px,100%); max-width:100%; max-height:100dvh; height:100dvh; margin:0 0 0 auto; padding:24px; box-shadow:var(--shadow); }
+dialog::backdrop { background:#02071290; }
+.dialog-top { position:sticky; top:-24px; padding:12px 0; background:var(--panel); z-index:2; }
+#detail-title { font:600 16px ui-monospace,monospace; }
+#detail-body h3 { font-size:14px; margin:22px 0 10px; }
+#detail-body h3:first-child { font-size:19px; margin-top:14px; }
+.metrics { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:18px 0; }
+.metric { border:1px solid var(--edge); border-radius:4px; padding:12px; }
+.metric span { color:var(--muted); font-size:12px; }
+.metric b { display:block; font:600 23px ui-monospace,monospace; margin-top:3px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { font-size:11px; text-align:left; color:var(--muted); font-weight:500; }
+th,td { border-bottom:1px solid var(--edge); padding:8px 0; }
+th:last-child,td:last-child { text-align:right; }
+.history { list-style:none; padding:0; margin:0; }
+.history li { padding:8px 0; border-bottom:1px solid var(--edge); font-size:13px; }
+.history small { display:block; color:var(--muted); margin-top:2px; }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media(min-width:950px) { .ticket-list:not(#shipped-list) .ticket { display:grid; grid-template-columns:minmax(280px,1fr) minmax(350px,1.4fr); gap:0 30px; align-items:center; } .ticket-list:not(#shipped-list) .ticket-top { display:block; } .ticket-list:not(#shipped-list) .status { display:table; margin-top:7px; } .ticket-list:not(#shipped-list) .track { grid-column:2; grid-row:1 / span 2; margin:8px 0; } .ticket-list:not(#shipped-list) .ticket-foot { grid-column:1 / -1; margin-top:8px; } .ticket-list:not(#shipped-list) .reason-list { grid-column:1; } }
+@media(max-width:600px) { header { padding:18px 16px; } main { padding:18px 12px; } .ticket { padding:14px 10px 12px; } .ticket[data-status="blocked"] { padding-left:8px; } .ticket-title { display:block; margin:4px 0 0; font-size:14px; } .ticket-top { align-items:flex-start; gap:6px; } .step { font-size:9px; } .toolbar { padding:10px; } .scrubber { width:100%; } .scrubber input { flex:1; } .overview { gap:10px 20px; } .overview b { font-size:22px; } dialog { border-radius:0; padding:18px; } .dialog-top { top:-18px; } }
+</style>
+</head>
+<body>
+<header><div class="topline"><div class="brand"><span class="brand-mark" aria-hidden="true">⠿</span><div><h1>BOARD</h1><p class="subtitle">Ticket trackers / design preview</p></div></div><label class="appearance">Appearance <select id="appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div></header>
+<main>
+<div class="overview" aria-label="Ticket counts"><div><b id="active-count">0</b><span>Active</span></div><div><b id="queued-count">0</b><span>Queued</span></div><div><b id="blocked-count">0</b><span>Blocked</span></div><div><b id="shipped-count">0</b><span>Shipped shown</span></div></div>
+<div class="toolbar"><div class="demo-controls"><span class="demo-label">SIMULATED</span><span id="clock" class="clock mono">T+00:00</span><button id="pause" type="button">Pause demo</button><button id="restart" type="button">Restart</button><label class="sr" for="speed">Demo speed</label><select id="speed"><option value="1">1×</option><option value="2">2×</option></select><span id="playback-status" class="playback-status"></span></div><label class="scrubber">Demo time <input id="scrub" type="range" min="0" max="119" step="1" value="0" aria-label="Demo time in seconds"></label></div>
+<section aria-labelledby="active-heading"><div class="section-head"><h2 id="active-heading">In progress</h2><span>One tracker per ticket</span></div><div id="active-list" class="ticket-list"></div></section>
+<section aria-labelledby="queue-heading"><div class="section-head"><h2 id="queue-heading">Queued</h2><span>All current queue blockers</span></div><div id="queue-list" class="ticket-list"></div></section>
+<details id="shipped"><summary>Shipped <span id="shipped-summary">0 tickets</span></summary><div id="shipped-list" class="ticket-list"></div></details>
+<footer>Demo data only. Times, workers, blockers and bounces are simulated. The 120-second loop resets the fixture. Select any ticket for stats.</footer>
+</main>
+<dialog id="details" aria-labelledby="detail-title"><div class="dialog-top"><h2 id="detail-title">Ticket stats</h2><button type="button" id="close-details" autofocus>Close</button></div><div id="detail-body"></div></dialog>
+<noscript>This demo needs JavaScript. No live Board data is loaded.</noscript>
+<script>
+(() => {
+  'use strict';
+  const STAGES = ['queued', 'setup', 'implementing', 'verifying', 'delivering', 'done'];
+  const LABEL = { queued:'Queue', setup:'Setup', implementing:'Build', verifying:'Verify', delivering:'Deliver', done:'Shipped' };
+  const LOOP = 120;
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = value => { const s = Math.max(0, Math.floor(value)); return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); };
+  const stamp = time => (time < 0 ? 'T−' : 'T+') + fmt(Math.abs(time));
+  const capacity = { code:'docket_full', text:'Docket is full' };
+  const approval = { code:'approval', text:'Needs maintainer approval' };
+  const dependency = { code:'dependency', text:'Waiting for DEMO-241 to ship' };
+
+  // Intervals partition elapsed time. Repeated stage visits retain their history.
+  function fixture(id, title, worker, queuedAt, options = {}) {
+    const intervals = [], bounces = [];
+    let cursor = queuedAt;
+    const add = (stage, mode, seconds, reasons = []) => {
+      if (seconds <= 0) return;
+      intervals.push({ stage, mode, start:cursor, end:cursor + seconds, reasons });
+      cursor += seconds;
+    };
+    const wait = options.wait ?? 4;
+    if (options.multiple) {
+      add('queued','queued',wait - 8,[capacity,dependency,approval]);
+      add('queued','queued',8,[capacity]);
+    } else add('queued','queued',wait,options.reasons || [capacity]);
+    add('setup','running',6);
+    add('implementing','running',8);
+    if (options.hold) add('implementing','blocked',options.hold,[approval]);
+    add('implementing','running',12);
+    add('verifying','running',14);
+    if (options.bounce) {
+      bounces.push({ from:'verifying', to:'implementing', at:cursor, reason:'Focused test failed' });
+      add('implementing','running',8);
+      add('verifying','running',6);
+    }
+    add('delivering','running',10);
+    return { id, title, worker, queuedAt, completedAt:cursor, intervals, bounces };
+  }
+  const FIX = [
+    fixture('DEMO-241','Stream agent activity','Atlas',-18,{bounce:true}),
+    fixture('DEMO-242','Preserve interrupted work','Birch',-33),
+    fixture('DEMO-243','Verify recovery safety','Cobalt',0,{wait:58,multiple:true}),
+    fixture('DEMO-244','Add project controls','Delta',-48),
+    fixture('DEMO-245','Record run evidence','Ember',0,{wait:12}),
+    fixture('DEMO-246','Resolve dependency hold','Fjord',-24,{hold:160}),
+    fixture('DEMO-247','Check scheduled admission','Grove',0,{wait:22,reasons:[{code:'scheduled',text:'Scheduled for T+00:22'}]}),
+    ...Array.from({length:12},(_,i) => fixture('DEMO-' + (230-i),[
+      'Capture delivery evidence','Repair the queue display','Keep logs after restart',
+      'Check worker capacity','Save stage history','Show dependency links',
+      'Label paused runs','Record verification results','Keep the selected ticket',
+      'Handle an empty queue','Check project settings','Report delivery status'
+    ][i],['Atlas','Birch','Cobalt'][i%3],-70-i*12,{bounce:i===0}))
+  ];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const systemDark = matchMedia('(prefers-color-scheme: dark)');
+  const state = { clock:0, running:!reduce.matches, speed:1, loop:1, selected:null, theme:'system' };
+
+  function visibleQueueReasons(reasons) {
+    const unique = reasons.filter((r,i) => reasons.findIndex(v => v.code === r.code && v.text === r.text) === i);
+    const other = unique.filter(r => r.code !== 'docket_full');
+    return other.length ? other : unique.length ? unique : [{code:'unknown',text:'Queue reason unavailable'}];
+  }
+  function ticketAt(ticket, time) {
+    const interval = ticket.intervals.find(i => i.start <= time && time < i.end);
+    const done = time >= ticket.completedAt;
+    const stage = done ? 'done' : interval?.stage || 'queued';
+    const status = done ? 'done' : interval?.mode === 'blocked' ? 'blocked' : stage === 'queued' ? 'queued' : 'active';
+    const used = ticket.intervals.filter(i => i.start < time).map(i => ({...i, duration:Math.max(0,Math.min(i.end,time)-i.start)}));
+    const duration = mode => used.filter(i => i.mode === mode).reduce((n,i) => n+i.duration,0);
+    // Consecutive pieces of the same running visit are one visit, even with a hold.
+    const visits = Object.fromEntries(STAGES.map(s => [s,0]));
+    let previousStage = null;
+    for (const i of used) if (i.mode === 'running') { if (i.stage !== previousStage) visits[i.stage]++; previousStage=i.stage; }
+    let stageTime = 0;
+    for (const i of [...used].reverse()) {
+      if (i.stage !== stage) break;
+      if (i.mode === 'running') stageTime += i.duration;
+    }
+    return { ...ticket, stage, status, interval, used, visits,
+      running:duration('running'), queued:duration('queued'), blocked:duration('blocked'),
+      elapsed:Math.max(0,Math.min(time,ticket.completedAt)-ticket.queuedAt),
+      stageTime,
+      reasons:status === 'queued' ? visibleQueueReasons(interval?.reasons || []) : interval?.reasons || [],
+      bounces:ticket.bounces.filter(b => b.at <= time) };
+  }
+  // A single outward wave per 1.8 demo seconds, from the center to beyond the dot.
+  function sonarFrame(time) {
+    const phase = (time % 1.8) / 1.8;
+    return { scale:phase * 3.2, opacity:(1 - phase) * .65 };
+  }
+  function trackerHTML(ticket) {
+    const index = STAGES.indexOf(ticket.stage);
+    return `<ol class="track" aria-label="Ticket stages">${STAGES.map((s,i) => {
+      const complete = ticket.status === 'done' || i < index;
+      const current = ticket.status !== 'done' && i === index;
+      // A connector reaches the current dot, not only the last complete dot.
+      const connected = i < index;
+      return `<li class="step${complete?' complete':''}${current?' current':''}${connected?' connected':''}"${current?' aria-current="step"':''}>${current?'<span class="sonar" aria-hidden="true"></span>':''}${LABEL[s]}<span class="sr">, ${complete?'complete':current?'current'+(ticket.status==='blocked'?', blocked':''):'not complete'}</span></li>`;
+    }).join('')}</ol>`;
+  }
+  function rowHTML(ticket) {
+    const shipped = ticket.status === 'done';
+    const status = shipped ? 'Shipped' : ticket.status === 'queued' ? 'Queued' : (ticket.status === 'blocked' ? 'Blocked' : 'Active') + ' · ' + LABEL[ticket.stage];
+    return `<div class="ticket-top"><div><span class="ticket-id">${esc(ticket.id)}</span><span class="ticket-title">${esc(ticket.title)}</span></div><span class="status">${status}</span></div>`
+      + (shipped ? '' : trackerHTML(ticket))
+      + (!shipped && ticket.reasons.length ? `<ul class="reason-list">${ticket.reasons.map(r=>`<li>${esc(r.text)}</li>`).join('')}</ul>` : '')
+      + `<div class="ticket-foot"><span class="mono">${shipped?'Completed '+stamp(ticket.completedAt):ticket.status==='queued'?'Queued '+fmt(ticket.queued):ticket.status==='blocked'?'Blocked '+fmt(ticket.blocked):LABEL[ticket.stage]+' '+fmt(ticket.stageTime)} · Running ${fmt(ticket.running)}</span><span>${esc(ticket.worker)} · View stats ↗</span></div>`;
+  }
+  const rows = new Map();
+  function renderList(id, tickets, emptyText) {
+    const list = $(id);
+    const desired = new Set(tickets.map(t=>t.id));
+    for (const child of [...list.children]) if (!desired.has(child.dataset.id)) child.remove();
+    tickets.forEach((ticket,index) => {
+      let row = rows.get(ticket.id);
+      if (!row) {
+        row = document.createElement('button'); row.type='button'; row.className='ticket'; row.dataset.id=ticket.id;
+        row.addEventListener('click',()=>openDetails(ticket.id));
+        rows.set(ticket.id,row);
+      }
+      row.dataset.status=ticket.status;
+      row.setAttribute('aria-label',ticket.id+' '+ticket.title+', '+ticket.status+', '+LABEL[ticket.stage]+'. '+ticket.reasons.map(r=>r.text).join('. ')+'. View stats');
+      row.setAttribute('aria-pressed',String(state.selected === ticket.id));
+      const html = rowHTML(ticket);
+      if (row.innerHTML !== html) row.innerHTML=html;
+      if (list.children[index] !== row) list.insertBefore(row,list.children[index] || null);
+    });
+    if (!tickets.length) { const empty=document.createElement('div'); empty.className='empty'; empty.textContent=emptyText; list.append(empty); }
+  }
+  function detailHTML(ticket) {
+    const metric = (label,value) => `<div class="metric"><span>${label}</span><b>${fmt(value)}</b></div>`;
+    const stages = STAGES.filter(s=>!['queued','done'].includes(s)).map(stage => {
+      const duration=ticket.used.filter(i=>i.stage===stage && i.mode==='running').reduce((n,i)=>n+i.duration,0);
+      return `<tr><td>${LABEL[stage]}${ticket.visits[stage]>1?' · '+ticket.visits[stage]+' visits':''}</td><td class="mono">${fmt(duration)}</td></tr>`;
+    }).join('');
+    // Filter only the capacity label; raw reasons remain in the fixture.
+    const blockers = ticket.used.filter(i=>i.mode!=='running').flatMap(i => (i.mode==='queued'?visibleQueueReasons(i.reasons):i.reasons).map(reason=>({...i,reason})));
+    return `<h3>${esc(ticket.title)}</h3><p class="muted">${esc(ticket.worker)} · ${ticket.status==='done'?'Shipped '+stamp(ticket.completedAt):esc(ticket.status)+' · '+LABEL[ticket.stage]}<br>Simulated measurements at ${stamp(state.clock)}</p>`
+      + `<div class="metrics">${metric('Running time',ticket.running)}${metric('Total elapsed',ticket.elapsed)}${metric('Queued time',ticket.queued)}${metric('Blocked time',ticket.blocked)}</div>`
+      + `<h3>Time per stage</h3><table><thead><tr><th>Stage · all visits</th><th>Running time</th></tr></thead><tbody>${stages}</tbody></table>`
+      + `<p class="muted">Running time excludes queue and hold time. Total elapsed includes both. Stage totals include every visit.</p>`
+      + `<h3>Current blockers</h3>${ticket.reasons.length?'<ul class="history">'+ticket.reasons.map(r=>'<li>'+esc(r.text)+'</li>').join('')+'</ul>':'<p class="muted">None</p>'}`
+      + `<h3>Blocker history · ${blockers.length} reason episodes</h3><ul class="history">${blockers.map(i=>`<li>${esc(i.reason.text)}<small class="mono">${stamp(i.start)} → ${stamp(i.start+i.duration)} · ${fmt(i.duration)} · ${i.mode==='queued'?'Queue':'Hold'}${i.end>state.clock?' · ongoing':''}</small></li>`).join('') || '<li>No blockers recorded.</li>'}</ul>`
+      + `<p class="muted">Concurrent reasons share the same interval. Do not add their durations together.</p>`
+      + `<h3>Bounces · ${ticket.bounces.length}</h3><ul class="history">${ticket.bounces.map(b=>`<li>${LABEL[b.from]} → ${LABEL[b.to]}<small>${esc(b.reason)} · ${stamp(b.at)}</small></li>`).join('') || '<li>No bounces recorded.</li>'}</ul>`;
+  }
+  function openDetails(id) {
+    state.selected=id; render();
+    if (!$('details').open) $('details').showModal();
+  }
+  function renderSonar() {
+    if (reduce.matches) return;
+    const pulse = sonarFrame(state.clock);
+    // Inherited values survive row updates without restarting the wave.
+    document.documentElement.style.setProperty('--sonar-scale',pulse.scale.toFixed(4));
+    document.documentElement.style.setProperty('--sonar-opacity',pulse.opacity.toFixed(4));
+  }
+  function render() {
+    renderSonar();
+    const tickets=FIX.map(f=>ticketAt(f,state.clock));
+    const active=tickets.filter(t=>t.status==='active'||t.status==='blocked');
+    const queued=tickets.filter(t=>t.status==='queued');
+    const shipped=tickets.filter(t=>t.status==='done').sort((a,b)=>b.completedAt-a.completedAt || a.id.localeCompare(b.id)).slice(0,10);
+    renderList('active-list',active,'No tickets in progress.');
+    renderList('queue-list',queued,'No queued tickets.');
+    renderList('shipped-list',shipped,'No shipped tickets yet.');
+    $('active-count').textContent=active.filter(t=>t.status==='active').length;
+    $('blocked-count').textContent=active.filter(t=>t.status==='blocked').length;
+    $('queued-count').textContent=queued.length;
+    $('shipped-count').textContent=shipped.length;
+    $('shipped-summary').textContent=shipped.length+' tickets · latest 10 · newest first';
+    $('clock').textContent='T+'+fmt(state.clock);
+    $('scrub').value=String(Math.floor(state.clock));
+    $('pause').textContent=state.running?'Pause demo':'Resume demo';
+    $('playback-status').textContent=(state.running?'Playing':'Paused')+' · loop '+state.loop;
+    if (state.selected) {
+      const ticket=tickets.find(t=>t.id===state.selected);
+      $('detail-title').textContent=ticket.id+' / Stats';
+      const body=detailHTML(ticket);
+      if ($('detail-body').innerHTML!==body) $('detail-body').innerHTML=body;
+    }
+  }
+  function theme() { document.documentElement.dataset.theme=state.theme==='system'?(systemDark.matches?'dark':'light'):state.theme; }
+  $('appearance').addEventListener('change',e=>{state.theme=e.target.value;theme();});
+  systemDark.addEventListener('change',theme);
+  $('close-details').addEventListener('click',()=>$('details').close());
+  $('details').addEventListener('close',()=>{
+    const selected=state.selected; state.selected=null; render();
+    const row=rows.get(selected);
+    if (row?.isConnected && !row.closest('details:not([open])')) row.focus();
+    else $('shipped').querySelector('summary').focus();
+  });
+  $('pause').addEventListener('click',()=>{state.running=!state.running;render();});
+  $('restart').addEventListener('click',()=>{state.clock=0;state.loop=1;render();});
+  $('speed').addEventListener('change',e=>{state.speed=Number(e.target.value);});
+  $('scrub').addEventListener('input',e=>{state.running=false;state.clock=Number(e.target.value);render();});
+  reduce.addEventListener('change',()=>{if(reduce.matches){state.running=false;render();}});
+  // Hidden pages suspend the clock without a jump on return.
+  let previous=performance.now(), accumulated=0;
+  document.addEventListener('visibilitychange',()=>{previous=performance.now();accumulated=0;});
+  function frame(now) {
+    const delta=Math.max(0,now-previous)/1000; previous=now;
+    if (state.running && !document.hidden) {
+      state.clock+=delta*state.speed;
+      if (state.clock>=LOOP) {state.loop+=Math.floor(state.clock/LOOP);state.clock%=LOOP;}
+      renderSonar();
+      accumulated+=delta;
+      if(accumulated>=.2){render();accumulated=0;}
+    }
+    requestAnimationFrame(frame);
+  }
+  theme(); render(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

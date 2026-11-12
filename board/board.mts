@@ -6,7 +6,9 @@ import { claimLive, keyFor, newToken, ownerOf, releaseClaim, transferClaim, with
 import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
 
-// Run-state store + the Factory board/evidence page (one design; light/dark/system appearance).
+// Run-state store + the Factory tracker board/evidence page (light/dark/system appearance).
+// Stage visits persist for real timing, blockers and bounce stats; legacy history stays explicitly incomplete.
+// Completed tickets appear in the template's latest-ten Shipped section; stopped runs remain unfinished.
 // Writers (main.mts) call setStage(); each call writes <stateDir>/<key>.json and regenerates
 // .sandcastle/board.html, a self-contained snapshot that opens from disk and does not poll. The always-on
 // service (board-server.mts) serves the same page over HTTP, plus buildBoardData() as JSON at /api/runs,
@@ -35,6 +37,9 @@ export const TERMINAL: Stage[] = ["done", "stopped"];
 // (the note says why), "waiting" = the implementer reported a blocker. Neither counts against capacity.
 export const PARKED: Stage[] = ["queued", "waiting"];
 
+export interface QueueReason { code: string; text: string }
+export interface StageVisit { stage: Stage; at: string; note?: string; reasons?: QueueReason[] }
+
 export interface RunState {
   iid: string;
   project?: string;
@@ -50,6 +55,9 @@ export interface RunState {
   verdict?: string;
   mr?: string;
   note?: string;
+  queueReasons?: QueueReason[]; // optional structured blockers; older writers supply note instead
+  stageHistory?: StageVisit[]; // each visit ends at the next visit's timestamp
+  historyComplete?: boolean; // false for pre-upgrade records or truncated history
   evidenceDir?: string;
   ticketHash?: string; // content hash of the ticket the run was built from
   parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
@@ -119,6 +127,35 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Record stage changes, not heartbeats. Parked reason changes start a new blocker episode.
+ *  A reopened completed ticket starts a new lifecycle; retries from stopped retain their visits. */
+export function trackStage(previous: Partial<RunState>, next: RunState, at: string): RunState {
+  const reopened = previous.stage === "done" && next.stage !== "done";
+  const stored = Array.isArray(previous.stageHistory) ? previous.stageHistory : [];
+  const visits = reopened ? [] : stored.filter(v => v && typeof v.stage === "string" && Number.isFinite(Date.parse(v.at)));
+  let complete = reopened || (!previous.stage ? true : previous.historyComplete === true && visits.length === stored.length);
+  if (!visits.length && previous.stage && !reopened) {
+    visits.push({ stage: previous.stage, at: previous.stageSince || at, note: previous.note, reasons: previous.queueReasons });
+    complete = false;
+  }
+  // An older project writer can update stage without adding visits. Never call that history complete.
+  if (previous.stage && visits.length && visits.at(-1)!.stage !== previous.stage) {
+    visits.push({ stage: previous.stage, at: previous.stageSince || at, note: previous.note, reasons: previous.queueReasons });
+    complete = false;
+  }
+  const last = visits.at(-1);
+  if (last && previous.stage && !PARKED.includes(previous.stage) && previous.stageSince && last.at !== previous.stageSince) complete = false;
+  const reasons = PARKED.includes(next.stage) ? next.queueReasons : undefined;
+  const note = PARKED.includes(next.stage) || next.stage === "stopped" ? next.note : undefined;
+  if (!last || last.stage !== next.stage || (PARKED.includes(next.stage) &&
+      (last.note !== note || JSON.stringify(last.reasons) !== JSON.stringify(reasons)))) {
+    visits.push({ stage: next.stage, at, note, reasons });
+  }
+  // Bound a pathological retry loop without claiming its retained totals are complete.
+  if (visits.length > 1000) { visits.splice(0, visits.length - 1000); complete = false; }
+  return { ...next, stageHistory: visits, historyComplete: complete };
+}
+
 export function setStage(iid: string, patch: Partial<RunState>): void {
   mkdirSync(stateDir(), { recursive: true });
   const file = resolve(stateDir(), `${keyFor(iid, project)}.json`);
@@ -132,16 +169,18 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
   }
   if (held && cur.claim !== held) return; // fenced: the record belongs to a newer claim
   const stageChanged = patch.stage && patch.stage !== cur.stage;
-  const next = {
-    startedAt: now(),
+  const at = now();
+  const next = trackStage(cur, {
+    startedAt: at,
     ...cur,
     ...patch,
     iid,
     project,
     pid: patch.pid ?? process.pid,
-    updatedAt: now(),
-    stageSince: stageChanged || !cur.stageSince ? now() : cur.stageSince,
-  } as RunState;
+    updatedAt: at,
+    stageSince: stageChanged || !cur.stageSince ? at : cur.stageSince,
+    queueReasons: patch.queueReasons ?? (stageChanged || Object.prototype.hasOwnProperty.call(patch, "note") ? undefined : cur.queueReasons),
+  } as RunState, at);
   write(file, JSON.stringify(next, null, 2));
   // A normal run that finished or parked lets go of its claim (a recovery claim is released only by settling).
   if (held && patch.stage && (TERMINAL.includes(patch.stage) || PARKED.includes(patch.stage))) {
@@ -214,8 +253,8 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   tx.state.claims[key] = claim;
   if (kind === "normal") tx.state.generations[claim.project] = (tx.state.generations[claim.project] ?? 0) + 1;
   const { key: _key, evidenceUrl: _url, activity: _a, activityAt: _at, ...cur } = (current ?? {}) as Partial<BoardRun>;
-  const run = { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
-    iid: o.iid, project: proj, pid: o.pid, claim: token, updatedAt: at, stageSince: at } as RunState;
+  const run = trackStage(cur, { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
+    queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token, updatedAt: at, stageSince: at } as RunState, at);
   return { ok: true, key, token, claim, current, run };
 }
 
@@ -257,15 +296,15 @@ export function readRuns(dir = stateDir()): BoardRun[] {
   for (const f of readdirSync(dir).filter((n) => n.endsWith(".json"))) {
     try {
       const file = resolve(dir, f);
-      const s: RunState = JSON.parse(readFileSync(file, "utf8"));
+      let s: RunState = JSON.parse(readFileSync(file, "utf8"));
       if (!TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
         if (s.starting) {
           rmSync(file, { force: true });
           continue;
         }
-        s.note = `process ${s.pid} exited without finishing (last stage: ${s.stage})`;
-        s.stage = "stopped";
-        s.stageSince = now();
+        const at = now();
+        s = trackStage(s, { ...s, note: `process ${s.pid} exited without finishing (last stage: ${s.stage})`,
+          stage: "stopped", stageSince: at }, at);
         write(file, JSON.stringify(s, null, 2));
       }
       runs.push({ ...s, key: f.replace(/\.json$/, "") });

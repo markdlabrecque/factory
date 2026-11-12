@@ -3,5 +3,8 @@
     "@ai-hero/sandcastle": "^0.14.0",
     "tsx": "^4.23.15"
   },
-  "private": true
+  "private": true,
+  "scripts": {
+    "prototype:board": "python3 -m http.server 4455 --bind 127.0.0.1 --directory board"
+  }
 }
