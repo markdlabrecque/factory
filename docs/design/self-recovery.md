@@ -1,10 +1,10 @@
-<!-- Self-recovery design entry point; the agreed decisions are maintained in docs/slice-4/plan.md. Only the recovery state store (#55, cli/src/recovery-state.mts) and the atomic capacity/ticket/project claim (#57, cli/src/recovery-claim.mts) are implemented; no recovery behavior is available. -->
+<!-- Self-recovery design entry point; the agreed decisions are maintained in docs/slice-4/plan.md. Only the recovery state store (#55, cli/src/recovery-state.mts, with requirement-change and delivery-progress tracking from #56) and the atomic capacity/ticket/project claim (#57, cli/src/recovery-claim.mts) are implemented; no recovery behavior is available. -->
 # Self-recovery slice
 
 The agreed scope and all ten follow-up decisions are recorded in the [slice 4 plan](../slice-4/plan.md). Use that plan as the source of truth when preparing Factory implementation tickets. High-level requirements are summarized in the [CLI requirements and roadmap](../factory-cli.md#slice-four-self-recovery-requirements).
 
 The retained [repair-agent prompt draft](self-recovery-prompt.md) is design input only. It is not an installed workflow asset or an available recovery feature.
 
-The durable recovery state (episodes, confirmation, attempt budgets and history) is implemented as a store only; see [Slice four: recovery state](../factory-cli.md#slice-four-recovery-state). The atomic claim a repair attempt will take (shared capacity, the ticket and the project's recovery slot together) is described under [Slice four: launch admission](../factory-cli.md#slice-four-launch-admission).
+The durable recovery state (episodes, confirmation, attempt budgets, history, and the per-ticket baselines that decide when a human requirement change or verified delivery progress renews a budget) is implemented as a store only; see [Slice four: recovery state](../factory-cli.md#slice-four-recovery-state). The atomic claim a repair attempt will take (shared capacity, the ticket and the project's recovery slot together) is described under [Slice four: launch admission](../factory-cli.md#slice-four-launch-admission).
 
 The premature direct implementation and tests were discarded. Implementation must run through prepared Factory tickets under [AGENTS.md](../../AGENTS.md); this documentation does not queue or dispatch them.
