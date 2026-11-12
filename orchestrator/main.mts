@@ -1,7 +1,7 @@
 import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -12,12 +12,15 @@ import { disallowedModels, piEnvFor, ticketModel } from "./models.mts";
 import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest } from "./manifests.mts";
+import { postAndDeliver, runVerifier } from "./handoff.mts";
+import type { Host } from "./handoff.mts";
 import * as tracker from "./tracker.mts";
 
 // End-to-end loop for one ticket (run from the repo root):
 //   npx tsx .sandcastle/main.mts --base sal-develop [--issue 695] [--no-push]
 // 1. branch <iid>-<slug> off origin/<base>   2. implementer run   3. verifier run (screenshots/video + verdict)
-// 4. host posts the evidence to the ticket   5. on PASS: push and deliver (tracker adapter):
+// 4. host posts the evidence to the ticket   5. on PASS: push and deliver (tracker adapter).
+//    Steps 3-5 live in handoff.mts, shared with recovery runs so a repaired branch is verified and delivered the same way:
 //    GitLab: wait for the branch pipeline, open an MR into <base>; never merges.
 //    GitHub: open a PR into <base>; with MERGE.auto, merge it once every CI check passes (ci.mts).
 // Never closes the ticket (the dispatcher closes a Task/sub-issue, or moves a ticket on, once its work
@@ -210,21 +213,9 @@ try {
     // The real diff replaces the predicted footprint for conflict checks from now on.
     patchManifest(PROJECT, Number(iid), { actualFootprint: sh("git", ["diff", "--name-only", `${baseSha}...${tip}`]).split("\n").filter(Boolean) });
 
-    // ---- 2. verifier -------------------------------------------------------------
-    setStage(iid, { stage: "verifying" });
-    const ver = await sandbox.run({
-      agent: agent(AGENT.model),
-      promptFile: "./.sandcastle/prompt.verify.md",
-      promptArgs: { ...promptArgs, TIP_SHA: tip },
-      maxIterations: 1,
-      completionSignal: "<promise>COMPLETE</promise>",
-      name: "verifier",
-    });
-    const after = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
-    const dirty = (await sandbox.exec("git status --porcelain")).stdout.trim();
-    if (ver.commits.length || after !== tip || dirty) {
-      fail(`Verifier changed the branch (commits=${ver.commits.length}, head=${after.slice(0, 8)}, dirty=${!!dirty}). Not posting or pushing; inspect ${sandbox.worktreePath}.`);
-    }
+    // ---- 2. verifier (handoff.mts) -----------------------------------------------
+    const refused = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs, tip });
+    if (refused) fail(refused);
   }
 } finally {
   await sandbox.close();
@@ -286,74 +277,26 @@ if (endVersion.hash !== startVersion.hash) {
   ].join("\n\n");
   setStage(iid, { note: "built from an older ticket version" });
 }
-const verdictFile = resolve(evidenceHost, "verdict.md");
-if (!existsSync(verdictFile)) fail(`Verifier wrote no verdict.md in ${evidenceHost}. Nothing posted or pushed.`);
-const verdictText = readFileSync(verdictFile, "utf8").trim();
-const verdict = /^VERDICT:\s*(PASS|FAIL|INCONCLUSIVE)/.exec(verdictText)?.[1] ?? "INCONCLUSIVE";
-
-const files = readdirSync(evidenceHost).sort();
-const media = (label: string) => files.filter((f) => (f.startsWith(`${label}-`) && f.endsWith(".png")) || f === `${label}.webm`);
-const shown = [...media("before"), ...media("after")];
-const uploaded = new Map(tracker.uploadEvidence(iid, tip, shown.map((f) => resolve(evidenceHost, f))).map((md, i) => [shown[i], md]));
-const section = (label: string, title: string) => {
-  const items = media(label).map((f) => `**${f}**\n\n${uploaded.get(f)}`);
-  return items.length ? `### ${title}\n\n${items.join("\n\n")}` : "";
+// ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
+const host: Host = {
+  setStage, readRuns,
+  live: (r, openMrs) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)),
+  git: (args) => sh("git", args),
+  gitStatus: (args) => {
+    const res = spawnSync("git", args, { encoding: "utf8" });
+    return { status: res.status, stdout: res.stdout ?? "" };
+  },
+  tracker,
 };
-const body = [
-  `## Sandcastle verification: ${verdict}`,
-  `Branch \`${branch}\` @ \`${tip.slice(0, 8)}\` (from \`${base}\` @ \`${baseSha.slice(0, 8)}\`). Synthetic data.`,
-  verdictText.replace(/^VERDICT:.*\n?/, ""),
-  section("before", "Before"),
-  section("after", "After"),
-  SANDCASTLE_MARK,
-].filter(Boolean).join("\n\n");
-tracker.comment(iid, body);
-console.log(`Evidence posted to #${iid} (verdict ${verdict}).`);
-setStage(iid, { verdict });
-
-if (verdict !== "PASS") fail(`Verdict ${verdict}: branch ${branch} kept locally, not pushed. Review the ticket comment.`);
-if (opts["no-push"]) {
-  finished = true;
-  setStage(iid, { stage: "done", note: "--no-push: branch ready locally" });
+const outcome = await postAndDeliver({
+  iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid, origin: { kind: "implemented" },
+  staleNote, noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
+}, host);
+if (!outcome.ok) fail(outcome.reason);
+finished = true;
+if (!outcome.pushed) {
   console.log(`--no-push: stopping. Branch ${branch} is ready locally.`);
   process.exit(0);
 }
-
-// ---- 4. push, then deliver: MR (GitLab), or PR merged once CI passes (GitHub + MERGE.auto) ----
-setStage(iid, { stage: "pushing" });
-sh("git", ["push", "-u", "origin", branch]);
-const sha = sh("git", ["rev-parse", branch]);
-
-// Exact conflicts with the other live Sandcastle branches, so you know which MR to merge first.
-const openMrs = tracker.openMrBranches();
-const conflicts = readRuns()
-  .filter((r) => r.project === PROJECT && r.iid !== iid && r.branch)
-  .filter((r) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)))
-  .filter((r) => spawnSync("git", ["rev-parse", "--verify", "--quiet", r.branch!]).status === 0)
-  .flatMap((r) => {
-    const res = spawnSync("git", ["merge-tree", "--write-tree", "--name-only", "--no-messages", branch, r.branch!], { encoding: "utf8" });
-    if (res.status !== 1) return [];
-    const files = [...new Set(res.stdout.trim().split("\n").slice(1).filter(Boolean))];
-    return [`- #${r.iid} (\`${r.branch}\`${r.mr ? `, ${r.mr}` : ""}): ${files.map((f) => `\`${f}\``).join(", ")}`];
-  });
-
-const description = (ciNote: string) => [
-  parentIid === undefined ? `Refs #${iid}` : `Refs #${iid} (Task of #${parentIid})`,
-  `Implemented and verified by Sandcastle. Verdict: **${verdict}** (evidence in the ticket comment).`,
-  ciNote,
-  staleNote,
-  conflicts.length ? `**Conflicts with other open Sandcastle work.** Merge one, then rebase the other:\n\n${conflicts.join("\n")}` : "",
-].filter(Boolean).join("\n\n");
-let delivered: tracker.Delivered;
-try {
-  delivered = await tracker.deliver({
-    branch, base, sha, title: `#${iid}: ${issue.title}`, body: description, onStage: (stage) => setStage(iid!, { stage }),
-    waitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
-  });
-} catch (e) {
-  fail((e as Error).message);
-}
-finished = true;
-setStage(iid, { stage: "done", mr: delivered.url, note: delivered.merged ? "merged after CI passed" : "" });
 const next = parentIid === undefined ? `moves #${iid} to ${LABELS.done}` : `closes Task #${iid}`;
-console.log(delivered.merged ? `Merged after CI passed. The next dispatcher pass ${next}.` : `Not merged. Once you merge it, the dispatcher ${next}.`);
+console.log(outcome.merged ? `Merged after CI passed. The next dispatcher pass ${next}.` : `Not merged. Once you merge it, the dispatcher ${next}.`);
