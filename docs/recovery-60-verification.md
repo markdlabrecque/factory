@@ -47,4 +47,8 @@ The earlier verification of `2244777` was INCONCLUSIVE because `main.mts --recov
 4. **Prerequisite holds before delivery.** The recheck covers the ticket's own text, state, `needs-human` label and claim. Dependency or open-PR prerequisite holds (the dispatcher's analysis) are not rechecked.
 5. **Not exercised:** real Docker, a real agent CLI and a real tracker. Per TESTING.md, these are trusted external boundaries. The tests verify Factory's exact `docker`/`gh` arguments, mounts, ordering and failure handling against stubs.
 
-Fixing gaps 1–3 belongs to the admission/ownership contracts (#57/#59 follow-ups), not this repair runner. Until then, #60 should not be marked complete as originally specified.
+## Result and where the gaps go
+
+Two safety failures found by the independent verifier on `7de07af` are fixed here: a cleanup-pending attempt now keeps its ticket, capacity slot and project claimed until its exact container is confirmed gone, and a recovery attempt holds its project exclusively. Tests cover both (`cli/test/recovery-claim.test.mts`, `cli/test/recovery-run.test.mts`).
+
+Gaps 1, 3 and 4 above, plus the `hold` mechanism replacing gap 2's pid-based claim, are tracked in #75 ("Make recovery claims and ownership survive crashes"), which blocks #61 and #64. Gap 5 is by design. This continuation does not complete #60 as originally specified: #60 stays open until #75 delivers, and recovery stays inactive.
