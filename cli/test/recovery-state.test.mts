@@ -1,5 +1,5 @@
-// Recovery state tests (#55): confirming a jam on two completed passes, the per-ticket attempt budget and what renews it,
-// reset, and fail-closed handling of a malformed or concurrently locked record. Disposable HOME only; nothing launches.
+// Recovery state tests (#55, #56): confirming a jam on two completed passes, the per-ticket attempt budget and what renews it,
+// reset, renewal from tracked human requirement changes and verified delivery progress (#56), and fail-closed handling of a malformed or concurrently locked record. Disposable HOME only; nothing launches.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { paths } from '../src/paths.mts';
-import { ATTEMPT_LIMIT, LOG_LIMIT, attemptProblem, beginAttempt, finishAttempt, observePass, readRecovery, recoveryFile,
+import { ATTEMPT_LIMIT, LOG_LIMIT, attemptProblem, beginAttempt, deliveryMarker, finishAttempt, observePass, observeTicket, readRecovery, recoveryFile,
   remainingAttempts, renewBudget, resetRecovery } from '../src/recovery-state.mts';
 
 const root = '/work/project';
@@ -76,4 +76,47 @@ test('history is bounded; malformed or locked records fail closed and are never 
     assert.throws(() => beginAttempt(p, root, { ticket: 1, at: at(201) }), /recovery state/i);
     assert.equal(readFileSync(file, 'utf8'), bad);
   }
+});
+
+test('only a human requirement change or verified delivery progress since the baseline renews a spent budget', t => {
+  const p = fixture(t);
+  const spend = (m: number) => {
+    observePass(p, root, { pass: `a${m}`, at: at(m), jam: [7] });
+    observePass(p, root, { pass: `b${m}`, at: at(m + 1), jam: [7] });
+    for (const k of [2, 3]) finishAttempt(p, root, beginAttempt(p, root, { ticket: 7, at: at(m + k) }).seq, { at: at(m + k), result: 'failed' });
+    assert.equal(remainingAttempts(readRecovery(p, root), 7), 0);
+  };
+  const seen = { ticket: 7, content: 'h1', labels: ['model:sonnet', 'bug'] };
+  assert.equal(observeTicket(p, root, { ...seen, at: at(0) }), null, 'the first observation is only the baseline');
+  spend(1);
+  // Repeated passes, label order, and a stopped or unverified run (the helper's own work) renew nothing.
+  for (const run of [{ stage: 'stopped' as const, verdict: 'PASS', mr: 'u/1' }, { stage: 'done' as const, verdict: 'FAIL', mr: 'u/1' },
+    { stage: 'done' as const, verdict: 'PASS' }, undefined])
+    assert.equal(observeTicket(p, root, { ...seen, labels: ['bug', 'model:sonnet'], at: at(10), delivery: deliveryMarker(run) }), null);
+  assert.equal(remainingAttempts(readRecovery(p, root), 7), 0);
+
+  const label = observeTicket(p, root, { ...seen, labels: ['bug', 'model:opus'], at: at(11) })!;
+  assert.deepEqual([label.kind, label.detail], ['requirement-change', 'labels +model:opus -model:sonnet']);
+  assert.equal(remainingAttempts(readRecovery(p, root), 7), ATTEMPT_LIMIT);
+  assert.equal(observeTicket(p, root, { ...seen, labels: ['bug', 'model:opus'], at: at(12) }), null, 'a change counts once');
+
+  spend(20);
+  const delivered = deliveryMarker({ stage: 'done', verdict: 'PASS', mr: 'https://x/pull/3' });
+  const progress = observeTicket(p, root, { ...seen, labels: ['bug', 'model:opus'], at: at(30), delivery: delivered })!;
+  assert.deepEqual([progress.kind, progress.detail], ['progress', 'delivered https://x/pull/3']);
+  spend(40);
+  assert.equal(observeTicket(p, root, { ...seen, labels: ['bug', 'model:opus'], at: at(50) }), null, 'a missing marker keeps the last one');
+  assert.equal(observeTicket(p, root, { ...seen, labels: ['bug', 'model:opus'], at: at(51), delivery: delivered }), null, 'the same delivery is not progress');
+  const merged = deliveryMarker({ stage: 'done', verdict: 'PASS', mr: 'https://x/pull/3', mergedAt: at(52) });
+  assert.equal(observeTicket(p, root, { ...seen, labels: ['bug', 'model:opus'], at: at(52), delivery: merged })!.kind, 'progress');
+  const content = observeTicket(p, root, { ...seen, content: 'h2', labels: ['bug', 'model:opus'], at: at(53) });
+  assert.equal(content, null, 'an unspent budget is not renewed, but the baseline moves');
+  assert.equal(readRecovery(p, root).watch![7].content, 'h2');
+  assert.deepEqual(readRecovery(p, root).renewals.map(r => r.kind), ['requirement-change', 'progress', 'progress']);
+
+  const file = recoveryFile(p, root);
+  const bad = JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), watch: { 7: { seenAt: at(0), labels: 'bug' } } });
+  writeFileSync(file, bad);
+  assert.throws(() => observeTicket(p, root, { ...seen, at: at(60) }), /Unsupported recovery state/);
+  assert.equal(readFileSync(file, 'utf8'), bad);
 });

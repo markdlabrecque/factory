@@ -10,12 +10,19 @@
 //   unrelated queue changes never buy more attempts.
 // - `attempts` and `renewals`: bounded history (LOG_LIMIT each, oldest dropped) for reports. The budget counters, not
 //   this history, decide whether another attempt is allowed. At most one attempt per project is `running` at a time.
+// - `watch` (#56): per ticket, the last observed requirement fingerprint (`content`, the dispatcher's unitHash of title,
+//   description, parent and human comments, which leaves out Sandcastle's own and system notes; `labels`, the ticket's
+//   labels minus those Factory writes itself) and verified delivery marker (`delivery`, see deliveryMarker). observeTicket
+//   compares each new observation with it: a changed fingerprint is an attributable human requirement change, a new
+//   delivery marker is verified delivery progress by the ticket; either renews the ticket's spent budget. The first
+//   observation only sets the baseline, and an unchanged one changes nothing, so repeated passes never renew.
 // This module stores and checks only; it never detects jams, launches repairs or reads the tracker. Transitions run under
 // an exclusive per-project lock and write temp-file + rename (mode 0600). A missing file is an empty record; a malformed
 // one throws and is never overwritten (fail closed: no attempt is allowed).
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { RunState } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
 
 export const CONFIRM_PASSES = 2;
@@ -31,8 +38,9 @@ export type Attempt = { seq: number; ticket: number; episode: string; startedAt:
 export type RenewalKind = 'progress' | 'requirement-change' | 'reset';
 export type Renewal = { at: string; kind: RenewalKind; ticket?: number; detail?: string };
 export type Budget = { used: number; renewedAt?: string; renewal?: RenewalKind };
+export type Watch = { seenAt: string; content: string; labels: string[]; delivery?: string };
 export type RecoveryState = { version: 1; root: string; nextSeq: number; episode?: Episode; episodes: Episode[];
-  budgets: Record<string, Budget>; attempts: Attempt[]; renewals: Renewal[] };
+  budgets: Record<string, Budget>; attempts: Attempt[]; renewals: Renewal[]; watch?: Record<string, Watch> };
 
 const RESULTS: AttemptResult[] = ['running', 'repaired', 'failed', 'timed-out', 'blocked', 'interrupted'];
 const KINDS: RenewalKind[] = ['progress', 'requirement-change', 'reset'];
@@ -68,7 +76,10 @@ export function readRecovery(p: Paths, root: string): RecoveryState {
       && optStr(a.branch) && (a.pid === undefined || isIid(a.pid)) && optStr(a.reason) && optStr(a.log) && optStr(a.report))
     && d.attempts.filter((a: any) => a.result === 'running').length <= 1
     && Array.isArray(d.renewals) && d.renewals.every((r: any) => isTime(r?.at) && KINDS.includes(r.kind)
-      && (r.ticket === undefined || isIid(r.ticket)) && optStr(r.detail));
+      && (r.ticket === undefined || isIid(r.ticket)) && optStr(r.detail))
+    && (d.watch === undefined || (d.watch && typeof d.watch === 'object' && !Array.isArray(d.watch)
+      && Object.entries<any>(d.watch).every(([k, w]) => isIid(Number(k)) && isTime(w?.seenAt) && typeof w.content === 'string'
+        && Array.isArray(w.labels) && w.labels.every((l: unknown) => typeof l === 'string') && optStr(w.delivery))));
   if (!ok) throw new Error(`Unsupported recovery state: ${file}. Fix or remove it; Factory will not overwrite it.`);
   return d;
 }
@@ -178,5 +189,46 @@ export function resetRecovery(p: Paths, root: string, o: { at: string; detail?: 
     for (const k of Object.keys(s.budgets)) s.budgets[k] = { used: 0, renewedAt: o.at, renewal: 'reset' };
     s.renewals = keep([...s.renewals, { at: o.at, kind: 'reset', ...(o.detail ? { detail: o.detail } : {}) }]);
     return { write: true, value: undefined };
+  });
+}
+
+/** The verified delivery a run record shows, or undefined: a finished run whose independent verifier passed and whose
+ *  branch was delivered (a PR/MR), marked merged once the dispatcher saw it merge. A stopped, failing, unpushed or
+ *  reserved record has none, so the helper's repair work counts only once it has been verified and delivered. */
+export function deliveryMarker(r: Pick<RunState, 'stage' | 'verdict' | 'mr' | 'mergedAt'> | undefined): string | undefined {
+  if (r?.stage !== 'done' || r.verdict !== 'PASS' || !r.mr) return undefined;
+  return `${r.mergedAt ? 'merged' : 'delivered'} ${r.mr}`;
+}
+
+/** Compare one ticket's current requirement fingerprint and verified delivery with its baseline, then make them the
+ *  baseline. `content` is the ticket's unitHash; `labels` excludes the labels Factory writes itself (ready, needs-human,
+ *  done), so only a person's changes count. A changed fingerprint renews a spent budget as `requirement-change`, a new
+ *  delivery marker (deliveryMarker) as `progress`; the first observation and an unchanged one renew nothing, and a
+ *  missing marker never erases the last one. Returns the renewal recorded, or null. */
+export function observeTicket(p: Paths, root: string,
+  o: { ticket: number; at: string; content: string; labels: string[]; delivery?: string }): Renewal | null {
+  if (!isIid(o.ticket) || !isTime(o.at) || typeof o.content !== 'string' || !Array.isArray(o.labels)
+    || !o.labels.every(l => typeof l === 'string') || !optStr(o.delivery)) throw new Error(`Invalid ticket observation: ${JSON.stringify(o)}`);
+  const labels = [...new Set(o.labels)].sort();
+  return mutateRecovery(p, root, s => {
+    const before = s.watch?.[o.ticket];
+    const delivery = o.delivery ?? before?.delivery;
+    const next: Watch = { seenAt: o.at, content: o.content, labels, ...(delivery ? { delivery } : {}) };
+    s.watch = { ...s.watch, [o.ticket]: next };
+    if (!before) return { write: true, value: null };
+    const changes: string[] = [];
+    if (before.content !== o.content) changes.push('title, description or comments changed');
+    const added = labels.filter(l => !before.labels.includes(l)), removed = before.labels.filter(l => !labels.includes(l));
+    if (added.length || removed.length) changes.push(`labels ${[...added.map(l => `+${l}`), ...removed.map(l => `-${l}`)].join(' ')}`);
+    const progressed = !!o.delivery && o.delivery !== before.delivery;
+    const unchanged = !changes.length && !progressed;
+    if (unchanged) return { write: before.seenAt !== o.at, value: null };
+    if (!s.budgets[o.ticket]?.used) return { write: true, value: null };
+    const kind: RenewalKind = changes.length ? 'requirement-change' : 'progress';
+    const detail = [...changes, ...(progressed ? [o.delivery!] : [])].join('; ');
+    const r: Renewal = { at: o.at, kind, ticket: o.ticket, detail };
+    s.budgets[o.ticket] = { used: 0, renewedAt: o.at, renewal: kind };
+    s.renewals = keep([...s.renewals, r]);
+    return { write: true, value: r };
   });
 }
