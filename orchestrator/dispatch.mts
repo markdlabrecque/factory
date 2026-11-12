@@ -26,7 +26,9 @@ import type { Ticket } from "./tracker.mts";
 // so the cap counts it in every later pass, this project's or another's, before main.mts writes its own record.
 // Before spawning, each launch is claimed atomically (claimRun in board.mts): the cap is recounted from the board and
 // the ticket checked under a shared lock, so a pass running alongside (another project's, a manual one, or a recovery
-// attempt) cannot overfill the cap or start the same ticket twice. A refused claim launches nothing.
+// attempt) cannot overfill the cap or start the same ticket twice. A refused claim launches nothing. Claims live in the
+// admission record (admission.mts, #75): each launch's claim is handed to its child, every normal admission advances the
+// project's activity generation, and a project held by a recovery attempt admits nothing.
 // With SUBTASKS.enabled (config.mts), a ready issue that has Tasks gets one run per open Task instead.
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
@@ -285,7 +287,8 @@ for (const [n, d] of launch.entries()) {
     env: process.env,
   });
   child.unref();
-  if (child.pid) reserveRun(iid, child.pid, meta);
-  else removeRun(iid);
+  // The claim goes to the child (main.mts adopts it); a launch that failed to spawn releases it.
+  if (child.pid) reserveRun(iid, child.pid, { ...meta, claim: claim.run.claim });
+  else removeRun(iid, claim.run.claim);
   if (n < launch.length - 1) await new Promise((r) => setTimeout(r, SELECT.staggerSeconds * 1000));
 }

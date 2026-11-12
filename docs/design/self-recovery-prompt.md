@@ -1,7 +1,7 @@
-<!-- Retained design draft for a future container-only repair agent; not installed or used by Factory. -->
+<!-- Retained design draft; the prompt Factory uses is orchestrator/prompt.recover.md (#60). -->
 # Recover ticket #{{ISSUE_IID}}: {{ISSUE_TITLE}}
 
-> Design draft only. The placeholders and diagnostic paths below are proposed contracts for future implementation tickets. Factory does not currently load this prompt. See [the agreed scope](self-recovery.md).
+> Design draft only, kept as history. The prompt `main.mts --recover` uses is `orchestrator/prompt.recover.md`. See [the agreed scope](self-recovery.md).
 
 Factory has queued work but no active ticket runs in this project. Investigate why this ticket cannot move forward and make the smallest change to its worktree that will unblock it.
 

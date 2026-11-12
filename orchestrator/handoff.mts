@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import type { RunState } from "./board.mts";
-import { SANDCASTLE_MARK } from "./graph.mts";
+import { edgesOf, SANDCASTLE_MARK } from "./graph.mts";
+import type { Manifest } from "./graph.mts";
 import type { Delivered, Delivery } from "./tracker.mts";
 
 // The hand-off every branch goes through before it leaves the host: the independent verifier, then evidence posted to
@@ -12,8 +13,12 @@ import type { Delivered, Delivery } from "./tracker.mts";
 // that reuses a ticket's record and evidence folder (a recovery attempt on a preserved branch): beginVerification
 // removes an earlier verdict.md and clears the record's verdict/PR before the verifier starts, so only this run's
 // verdict can count and a stale PASS never reads as delivery (cli/src/recovery-state.mts deliveryMarker); and the PR
-// description says the branch was repaired by which recovery attempt. Host calls are passed in (Host), so this file
-// imports no tracker, config or board module (only graph.mts's marker) and is tested with fakes (handoff.test.mts).
+// description says the branch was repaired by which recovery attempt. prerequisiteHold (#75) is the recovery run's
+// recheck, before verification and again before delivery, of the dependency holds the dispatcher's ticket analysis
+// records (manifests: analysed requirements and implementer-reported blockers): any prerequisite not yet closed or
+// merged, whether in flight or waiting in an open PR, holds the ticket; a missing or out-of-date analysis, or a lookup
+// that fails, is unknown and holds it too. Host calls are passed in (Host), so this file imports no tracker, config or
+// board module (only graph.mts's marker and edges) and is tested with fakes (handoff.test.mts).
 
 /** What the hand-off needs from the host: board, tracker and git. main.mts passes the real ones. */
 export interface Host {
@@ -173,4 +178,32 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   }
   host.setStage(iid, { stage: "done", mr: delivered.url, note: delivered.merged ? "merged after CI passed" : "" });
   return { ok: true, verdict, pushed: true, url: delivered.url, merged: delivered.merged };
+}
+
+/** What prerequisiteHold reads, from the host: the ticket's analysis and live lookups. */
+export interface PrerequisiteView {
+  /** The dispatcher's analysis of the ticket (its manifest), if any. */
+  manifest: Manifest | undefined;
+  /** The ticket's current content hash (graph.mts unitHash), to tell an out-of-date analysis. */
+  hash: string;
+  /** Is prerequisite `iid` done (closed, or its branch merged into its base)? May throw: unknown. */
+  satisfied(iid: number): boolean;
+  /** Why prerequisite `iid` is still active (a run in flight, an open PR), or undefined. May throw: unknown. */
+  active(iid: number): string | undefined;
+}
+
+/** Why ticket `iid` is held by a prerequisite (or by not knowing its prerequisites), or undefined when it is free. */
+export function prerequisiteHold(iid: number, v: PrerequisiteView): string | undefined {
+  try {
+    if (!v.manifest) return `#${iid} has no ticket analysis, so its prerequisites are unknown`;
+    if (v.manifest.hash !== v.hash) return `#${iid}'s ticket analysis is out of date, so its prerequisites are unknown`;
+    for (const e of edgesOf(v.manifest)) {
+      if (e.to !== iid || v.satisfied(e.from)) continue;
+      const why = v.active(e.from);
+      return `#${iid} waits on #${e.from}${why ? ` (${why})` : ""}: ${e.what}`;
+    }
+    return undefined;
+  } catch (e) {
+    return `#${iid}'s prerequisites are unknown: ${(e as Error).message}`;
+  }
 }

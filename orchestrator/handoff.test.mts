@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { postAndDeliver, runVerifier } from "./handoff.mts";
+import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
+import type { Manifest } from "./graph.mts";
 import type { Handoff, Host, VerifierSandbox } from "./handoff.mts";
 
 // Run: node --test 'orchestrator/*.test.mts'
-// The verify/post/deliver hand-off shared by main.mts and recovery runs, against a fake host (no tracker, git or Docker).
+// The verify/post/deliver hand-off shared by main.mts and recovery runs, and the prerequisite recheck recovery runs make
+// (#75), against a fake host (no tracker, git or Docker).
 
 type Rec = Record<string, unknown>;
 function fakeHost(record: Rec = {}) {
@@ -76,4 +78,21 @@ test("a verifier that changes the branch, or a non-PASS verdict, stops before pu
   assert.deepEqual(calls, ["comment"], "the evidence is posted, nothing pushed");
   assert.equal(record.verdict, "FAIL");
   assert.notEqual(record.stage, "done");
+});
+
+test("prerequisite holds: an unmet dependency holds, and so does not knowing", () => {
+  const m: Manifest = { iid: 7, project: "o/r", hash: "h", analyzedAt: "", base: "main", baseSha: "", provides: [], footprint: [], catalogueIids: [],
+    blockerHashes: {}, requires: [{ what: "API", providedBy: 12, evidence: "", confidence: 1 }, { what: "nothing", providedBy: null, evidence: "", confidence: 1 }],
+    implementerBlockers: [{ iid: 13, what: "schema", evidence: "" }] };
+  const view = (o: { done?: number[]; active?: Record<number, string>; hash?: string; manifest?: Manifest | null; throws?: boolean }) => ({
+    manifest: o.manifest === null ? undefined : (o.manifest ?? m), hash: o.hash ?? "h",
+    satisfied: (i: number) => { if (o.throws) throw new Error("gh failed"); return (o.done ?? []).includes(i); },
+    active: (i: number) => o.active?.[i],
+  });
+  assert.equal(prerequisiteHold(7, view({ done: [12, 13] })), undefined);
+  assert.equal(prerequisiteHold(7, view({ done: [13], active: { 12: "an open PR" } })), "#7 waits on #12 (an open PR): API");
+  assert.equal(prerequisiteHold(7, view({ done: [12] })), "#7 waits on #13: schema", "implementer-reported blockers count");
+  assert.match(prerequisiteHold(7, view({ manifest: null }))!, /no ticket analysis/);
+  assert.match(prerequisiteHold(7, view({ hash: "other" }))!, /out of date/);
+  assert.match(prerequisiteHold(7, view({ throws: true }))!, /unknown: gh failed/);
 });
