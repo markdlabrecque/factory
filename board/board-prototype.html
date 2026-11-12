@@ -9,6 +9,7 @@
      not installed by Factory, not a supported Board design. B's capsules and dock labels sit in a flat layer above the 3D
      scene, projected from anchors in the tilted plane, so rings never cut through their text (#71). B has a black and
      chrome finish (#72): --chrome/--cap-chrome gradients on a polished black ground, with one hot red accent (--hot).
+     Each ring's top face strokes a local diagonal b-ring-chrome-<teeth>-2 gradient of reflected light bands (#73).
      Preview: npm run prototype:board. -->
 <html lang="en">
 <head>
@@ -1028,7 +1029,15 @@
     return `M${n1(p0[0])} ${n1(p0[1])}A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${n1(p1[0])} ${n1(p1[1])}`;
   }
   function ringSVG(layer, teeth, sectors, clamps) {
-    let s = `<svg class="l${layer}" viewBox="0 0 200 200" aria-hidden="true"><circle class="rb" cx="100" cy="100" r="93" stroke-width="10"/>`;
+    // Top face (layer 2) gets its own diagonal chrome gradient (#73) so the ring's rotation carries reflected bands;
+    // the inline stroke style beats the `.ring .l2 .rb` rule. Teeth counts differ per ring, so the ID stays unique.
+    const gid = `b-ring-chrome-${teeth}-${layer}`;
+    const chrome = layer === 2 ? `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">${
+      [[0, '#10151b'], [.12, '#68737e'], [.25, '#f4f8fc'], [.30, '#ffffff'], [.38, '#8b96a1'], [.49, '#161d25'], [.52, '#05080c'],
+        [.58, '#84909c'], [.68, '#f5f9fc'], [.72, '#ffffff'], [.80, '#737f8b'], [.92, '#171d25'], [1, '#b9c3ce']]
+        .map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('')}</linearGradient></defs>` : '';
+    let s = `<svg class="l${layer}" viewBox="0 0 200 200" aria-hidden="true">${chrome}<circle class="rb" cx="100" cy="100" r="93" stroke-width="10"${
+      layer === 2 ? ` style="stroke:url(#${gid})"` : ''}/>`;
     if (layer === 2) {
       s += `<circle class="edge" cx="100" cy="100" r="98"/><circle class="edge" cx="100" cy="100" r="88"/>`;
       for (let i = 0; i < teeth; i++) { const a = i * 360 / teeth, p0 = polar(100, 100, 98, a), p1 = polar(100, 100, 100, a);
