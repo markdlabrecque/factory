@@ -11,6 +11,10 @@ import { fileURLToPath } from "node:url";
 // The dispatcher calls reserveRun() as it spawns each run, so the run counts against the shared cap (in this and
 // every other project's pass) before main.mts writes its own record; a launch whose process dies before that is
 // forgotten rather than stopped, so the next pass retries it.
+// claimRun() makes that reservation atomic: under <stateDir>/claim.lock it counts in-flight runs across every project,
+// refuses when the cap is reached or the ticket already has a run in flight, and only then writes the record. The
+// dispatcher claims each ticket before spawning it; recovery (cli/src/recovery-claim.mts) claims the same way and also
+// records its project's attempt under the lock, so capacity, ticket and project ownership are taken together or not at all.
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
 
@@ -40,6 +44,8 @@ export interface RunState {
   parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
   mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on
   starting?: boolean; // reserved by the dispatcher at launch; main.mts clears it with its first write
+  // Set while a recovery attempt owns the ticket: its attempt number and the record's stage/note before the claim.
+  recovery?: { attempt: number; from?: { stage: Stage; note?: string; stageSince?: string } };
 }
 
 export interface BoardRun extends RunState {
@@ -109,6 +115,89 @@ export function reserveRun(iid: string, pid: number, patch: Partial<RunState> = 
   setStage(iid, { ...patch, stage: "setup", note: "starting", starting: true, pid });
 }
 
+export type Claim = { ok: true; run: RunState } | { ok: false; reason: string };
+const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
+const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** Hold <dir>/claim.lock while `fn` runs. The lock names its holder's pid; a lock whose holder is gone is taken over. */
+function withClaimLock<T>(dir: string, fn: () => T, waitMs = 10_000): T {
+  mkdirSync(dir, { recursive: true });
+  const lock = resolve(dir, "claim.lock");
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      const fd = openSync(lock, "wx", 0o600);
+      try {
+        writeFileSync(fd, String(process.pid));
+      } finally {
+        closeSync(fd);
+      }
+      break;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      let holder = NaN;
+      let age = 0;
+      try {
+        holder = Number(readFileSync(lock, "utf8"));
+        age = Date.now() - statSync(lock).mtimeMs;
+      } catch {
+        continue; // released meanwhile
+      }
+      // A holder that died, or a lock left empty by a crash between create and write, is stale.
+      if ((Number.isInteger(holder) && holder > 0 && !alive(holder)) || (!holder && age > 5_000)) {
+        rmSync(lock, { force: true });
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`Run claims are locked by process ${holder || "unknown"} (${lock}). Retry shortly.`);
+      sleep(50);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/** Atomically claim a slot under the shared cap and ownership of ticket `iid` for process `pid`. Refused, writing
+ *  nothing, when `cap` runs are already in flight across every project in the state folder, or when the ticket has a
+ *  run in flight. `also` runs under the lock after those checks, with the ticket's current record; it may throw to
+ *  refuse (its message is the reason, nothing is written) or return more fields for the record. The record is written
+ *  as a reservation (stage `setup`, note `starting`, `starting: true`) over the ticket's existing record, keeping its
+ *  other fields (branch, evidence). It does not render the board; reserveRun() or the run's own writes do. */
+export function claimRun(o: {
+  iid: string;
+  pid: number;
+  cap: number;
+  project?: string;
+  dir?: string;
+  patch?: Partial<RunState>;
+  also?: (current: RunState | undefined) => Partial<RunState> | void;
+}): Claim {
+  const dir = o.dir ?? stateDir();
+  const proj = o.project ?? project;
+  const key = keyFor(o.iid, proj);
+  return withClaimLock(dir, () => {
+    const runs = readRuns(dir);
+    const current = runs.find((r) => r.key === key);
+    if (current && inFlight(current)) return { ok: false, reason: `#${o.iid} already has a run in flight (${current.stage}, process ${current.pid})` };
+    const active = runs.filter(inFlight).length;
+    if (active >= o.cap) return { ok: false, reason: `no capacity: ${active} run(s) in flight, cap ${o.cap}` };
+    let extra: Partial<RunState> | void;
+    try {
+      extra = o.also?.(current);
+    } catch (e) {
+      return { ok: false, reason: (e as Error).message };
+    }
+    const { key: _key, evidenceUrl: _url, activity: _a, activityAt: _at, ...cur } = (current ?? {}) as Partial<BoardRun>;
+    const at = now();
+    const run = { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
+      iid: o.iid, project: proj, pid: o.pid, updatedAt: at, stageSince: at } as RunState;
+    write(resolve(dir, `${key}.json`), JSON.stringify(run, null, 2));
+    return { ok: true, run };
+  });
+}
+
 /** Delete a run record (the dispatcher clears parked records for tickets that left the queue). */
 export function removeRun(iid: string): void {
   rmSync(resolve(stateDir(), `${keyFor(iid, project)}.json`), { force: true });
@@ -117,12 +206,12 @@ export function removeRun(iid: string): void {
 
 /** Read every run. A run whose process is gone without a terminal stage crashed: mark it washed away. A reserved
  *  launch whose process died before the run started is removed instead, as if never launched. */
-export function readRuns(): BoardRun[] {
-  if (!existsSync(stateDir())) return [];
+export function readRuns(dir = stateDir()): BoardRun[] {
+  if (!existsSync(dir)) return [];
   const runs: BoardRun[] = [];
-  for (const f of readdirSync(stateDir()).filter((n) => n.endsWith(".json"))) {
+  for (const f of readdirSync(dir).filter((n) => n.endsWith(".json"))) {
     try {
-      const file = resolve(stateDir(), f);
+      const file = resolve(dir, f);
       const s: RunState = JSON.parse(readFileSync(file, "utf8"));
       if (!TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
         if (s.starting) {

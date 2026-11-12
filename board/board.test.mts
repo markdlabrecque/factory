@@ -1,5 +1,5 @@
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
-// /api/runs snapshot, the evidence routes (bounded previews, original files, path safety) and launch reservations.
+// /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims.
 // The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
 import { test } from "node:test";
@@ -248,6 +248,40 @@ test("a launched run counts as active before its child writes, and vanishes if t
     process.chdir(cwd);
     if (prevState === undefined) delete process.env.SANDCASTLE_STATE_DIR;
     else process.env.SANDCASTLE_STATE_DIR = prevState;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("claims are atomic: concurrent claimants never exceed the cap or take one ticket twice", async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "board-claim-"));
+  const state = resolve(dir, "state");
+  const sleeper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  try {
+    const board = await import("./board.mts");
+    // Another project's run already holds one of two slots.
+    board.claimRun({ dir: state, project: "other", iid: "1", pid: sleeper.pid!, cap: 2 });
+    assert.equal(board.claimRun({ dir: state, project: "other", iid: "1", pid: sleeper.pid!, cap: 9 }).ok, false, "a ticket in flight is owned");
+    // Eight processes race for the last slot, two of them for the same ticket; each lingers between check and write.
+    const url = new URL("./board.mts", import.meta.url).href;
+    const racers = Array.from({ length: 8 }, (_, n) => {
+      const code = `const b = await import(${JSON.stringify(url)}); const c = b.claimRun({ dir: ${JSON.stringify(state)}, project: "p", iid: "${n % 4 === 0 ? 5 : 10 + n}", pid: ${sleeper.pid}, cap: 2, also: () => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150); } }); process.stdout.write(c.ok ? "won" : c.reason);`;
+      const c = spawn(process.execPath, ["--input-type=module", "-e", code], { stdio: ["ignore", "pipe", "inherit"] });
+      let out = "";
+      c.stdout.on("data", (d) => (out += d));
+      return once(c, "exit").then(() => out);
+    });
+    const results = await Promise.all(racers);
+    assert.equal(results.filter((r) => r === "won").length, 1, results.join("\n"));
+    assert.ok(results.filter((r) => r !== "won").every((r) => /no capacity|already has a run in flight/.test(r)), results.join("\n"));
+    assert.equal(board.readRuns(state).filter((r) => r.stage === "setup").length, 2);
+
+    // A refused `also` writes nothing; an accepted one adds its fields over the existing record.
+    board.setProject("q");
+    const queued = { dir: state, project: "q", iid: "3", pid: sleeper.pid!, cap: 9 };
+    assert.deepEqual(board.claimRun({ ...queued, also: () => { throw new Error("project busy"); } }), { ok: false, reason: "project busy" });
+    assert.equal(board.readRuns(state).some((r) => r.project === "q"), false);
+  } finally {
+    sleeper.kill();
     rmSync(dir, { recursive: true, force: true });
   }
 });
