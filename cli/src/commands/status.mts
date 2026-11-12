@@ -8,6 +8,9 @@
 // problems and enabled legacy timers; then this project's switch and branch, why it would not get a pass (or `ready`), its
 // last pass from state.json, and its pass timings and most recent passes from the history. Read-only; a malformed
 // scheduler file is shown as a problem, not an error.
+// Recovery (#62, commands/recovery.mts recoverySummary): whether recovery is active in this copy, the current jam and its
+// confirmation, a running attempt, the last finished attempt and its outcome, and spent budgets; `--json` adds `recovery`.
+// Details (budgets, reports, renewals) are in `factory recovery status`. A malformed recovery record is a problem line.
 import { existsSync } from 'node:fs';
 import { boardURL } from '../paths.mts';
 import type { Paths } from '../paths.mts';
@@ -19,6 +22,7 @@ import { currentBranch, scheduleBlocker } from '../schedule.mts';
 import type { ProjectState } from '../schedule-state.mts';
 import { age, describeTick, describeTimings, formatMs, passEntries, schedulerHealth, summarize, tickEntries } from '../scheduler-health.mts';
 import { legacyAdvice, legacyTimers } from './schedule.mts';
+import { recoveryStatusLines, recoverySummary } from './recovery.mts';
 export type StatusOptions = { project?: string; cwd?: string; json?: boolean; now?: number; schedule?: Pick<ScheduleBackend, 'status' | 'logHint'> };
 const RECENT = 5;
 
@@ -34,15 +38,17 @@ export async function status(p: Paths, service: Pick<ServiceBackend, 'status'>, 
   const runs = projectRuns(p, ctx);
   const now = o.now ?? Date.now();
   const sched = o.schedule ? await scheduling(p, o.schedule, ctx, now) : null;
+  const recovery = recoverySummary(p, ctx);
   if (o.json) {
     console.log(JSON.stringify({ version: 1, project: { name: ctx.name, root: ctx.root, tracker: ctx.tracker }, board: { service: state, url: boardURL },
-      ...(sched ? { scheduler: sched.scheduler, schedule: sched.schedule } : {}), runs }, null, 2));
+      ...(sched ? { scheduler: sched.scheduler, schedule: sched.schedule } : {}), recovery, runs }, null, 2));
     return;
   }
   console.log(`Board: ${state}  ${boardURL}`);
   if (sched) for (const l of sched.text.scheduler) console.log(l);
   console.log(`Project: ${ctx.name} (${ctx.tracker})  ${ctx.root}`);
   if (sched) for (const l of sched.text.schedule) console.log(l);
+  for (const l of recoveryStatusLines(recovery, ctx.name, now)) console.log(l);
   if (!runs.length) console.log('No runs yet.');
   else for (const r of runs) console.log(line(r, now));
 }

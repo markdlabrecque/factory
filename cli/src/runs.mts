@@ -1,7 +1,7 @@
 // Shared project and run lookup for the slice 3 commands (dispatch, run, retry, status, logs). Picks the
 // registered project a command is for (`--project <name|path>`, else the registered checkout the caller is
 // standing in), reads its tracker name from `.sandcastle/config.mts` (the name its run records carry), and
-// finds its run records in the shared run-state folder and its run log files. Read-only: it never writes a
+// finds its run records in the shared run-state folder and its run and repair (recover-<n>.log, #62) log files. Read-only: it never writes a
 // record, the registry or a project file. A run whose process is gone without finishing is reported as
 // stopped (as the board does) but its record is left for the board and dispatcher to update. A launch the
 // dispatcher reserved whose process died before the run started is skipped, as the board drops it.
@@ -95,3 +95,5 @@ export function findRun(p: Paths, ctx: ProjectContext, ticket: string): { file: 
 
 /** A ticket's run log, as dispatch.mts writes it (`.sandcastle/logs/run-<n>.log`). It may not exist yet. */
 export const runLog = (ctx: ProjectContext, ticket: string) => join(ctx.scaffold, 'logs', `run-${ticketId(ticket)}.log`);
+/** A ticket's repair log, as the recovery launcher writes it (`.sandcastle/logs/recover-<n>.log`, recovery-run.mts). */
+export const recoveryLog = (ctx: ProjectContext, ticket: string) => join(ctx.scaffold, 'logs', `recover-${ticketId(ticket)}.log`);

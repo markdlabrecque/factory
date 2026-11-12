@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Factory CLI: install, diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
-// failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's log, and
+// failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show or reset a project's self-recovery (`recovery status|reset`), and
 // switch the scheduler (and each project's opt-in) on or off. `tick` and `supervise` are internal: `tick` is what the Linux
 // scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
@@ -19,6 +19,7 @@ import { logs } from '../src/commands/logs.mts';
 import { run } from '../src/commands/run.mts';
 import { retry } from '../src/commands/retry.mts';
 import { status } from '../src/commands/status.mts';
+import { recovery } from '../src/commands/recovery.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { tick, tickExitCode } from '../src/commands/tick.mts';
 import { superviseProcess } from '../src/commands/supervise.mts';
@@ -33,7 +34,8 @@ factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]
 factory run <ticket> [--project <name>]
 factory retry <ticket> [--project <name>]
 factory status [--json] [--project <name>]
-factory logs [ticket] [-f] [--project <name>]
+factory logs [ticket] [-f] [--recovery] [--project <name>]
+factory recovery status|reset [--project <name|path>] [--json (status)]
 factory schedule on|off|status [--project <name|path>] [--json (status)]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
@@ -44,7 +46,8 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   run: { project: { type: 'string' } },
   retry: { project: { type: 'string' } },
   status: { json: { type: 'boolean' }, project: { type: 'string' } },
-  logs: { follow: { type: 'boolean', short: 'f' }, project: { type: 'string' } },
+  logs: { follow: { type: 'boolean', short: 'f' }, recovery: { type: 'boolean' }, project: { type: 'string' } },
+  recovery: { json: { type: 'boolean' }, project: { type: 'string' } },
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
   tick: {}, supervise: {},
 };
@@ -62,7 +65,7 @@ try {
       await init(p, first, v);
     } else if (command === 'logs') {
       if (second || extra.length) throw new Error('Unexpected arguments');
-      await logs(p, first, { project: v.project, follow: v.follow });
+      await logs(p, first, { project: v.project, follow: v.follow, recovery: v.recovery });
     } else if (command === 'run') {
       if (second || extra.length) throw new Error('Unexpected arguments');
       process.exitCode = await run(p, first, { project: v.project });
@@ -72,6 +75,10 @@ try {
     } else if (command === 'status') {
       if (first) throw new Error('Unexpected arguments');
       await status(p, { status: () => backend(p).status() }, { project: v.project, json: v.json, schedule: scheduleBackend(p) });
+    } else if (command === 'recovery') {
+      if (second || extra.length) throw new Error('Unexpected arguments (name a project with --project)');
+      if (v.json && first !== 'status') throw new Error('--json applies to recovery status');
+      process.exitCode = await recovery(p, first, { project: v.project, json: v.json });
     } else if (command === 'project') {
       if (extra.length) throw new Error('Unexpected arguments');
       if (v.json && first !== 'ls') throw new Error('--json applies to project ls');
