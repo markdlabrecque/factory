@@ -1,4 +1,4 @@
-<!-- Throwaway decision record for #70's Board design lab, #71's browser fixes and #72's black and chrome Orbital finish and #73's reflective ring bands. Records host Chromium observations separately from Factory verdicts. Prototype branch only; simulated data; no winner chosen yet. -->
+<!-- Throwaway decision record for #70's Board design lab, #71's browser fixes and #72's black and chrome Orbital finish and #73's reflective ring bands. Records host Chromium observations through #73 separately from Factory verdicts. Prototype branch only; simulated data; no winner chosen yet. -->
 # Board design prototype
 
 Status: **Decision pending user comparison.** No design has been chosen.
@@ -47,7 +47,9 @@ The separate host review opened the updated page in Chromium at 1440x1000 and 39
 
 The black and chrome Orbital finish (#72) is a palette change made after that review. A host Chromium review of #72 (commit `dd3ea2c`) observed the black background and chrome UI, readable capsule labels, working animation and Pause, and byte-identical Assembly and Megastructure baseline screenshots. It also found the three ring top faces, the largest chrome surfaces, still flat white.
 
-At the user's request, [#73](https://github.com/markdlabrecque/factory/issues/73) gives each ring's top face a local diagonal gradient of bright highlights and dark reflected bands, which the existing ring rotations carry around. Factory checked this statically only (the container has no browser); the reflected bands have not yet been viewed in a host browser.
+At the user's request, [#73](https://github.com/markdlabrecque/factory/issues/73) gives each ring's top face a local diagonal gradient of bright highlights and dark reflected bands, which the existing ring rotations carry around. Factory's static checks passed, but its visual verdict remains INCONCLUSIVE because the container has no browser.
+
+The separate host Chromium review of `c2e70c0` confirmed the reflected ring bands render and move, all six capsule labels remain readable, ticket progress advances, and Pause freezes both animation timelines and pixels. Resume and ticket selection work. Assembly and Megastructure match their pre-change screenshots byte for byte. The mobile viewport remains 390 pixels wide, with no JavaScript exceptions. Evidence is in `.sandcastle/evidence/73/host-browser/` in the original checkout.
 
 Exact paused screenshot equality was not used as a gate. Megastructure differed in ten antialiased glow pixels within a 2x10-pixel area despite stable animation timelines. Assembly and Orbital paused screenshots were byte-identical. This is exploratory review, not a permanent test suite. On narrow phones, some decorative dock labels are clipped or overlap; the readable ticket manifests remain available. These concepts are best compared on a desktop.
 
