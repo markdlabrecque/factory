@@ -1,4 +1,4 @@
-<!-- Throwaway decision record for #70's Board design lab (board/board-prototype.html). Lives only on the prototype/board-three-concepts branch; simulated data; no winner chosen yet. -->
+<!-- Throwaway decision record for #70's Board design lab and #71's browser fixes. Records host Chromium observations separately from Factory verdicts. Prototype branch only; simulated data; no winner chosen yet. -->
 # Board design prototype
 
 Status: **Decision pending user comparison.** No design has been chosen.
@@ -39,7 +39,13 @@ Open <http://127.0.0.1:4455/board-prototype.html?variant=A> (or `B`, `C`). The s
 
 ## Verification split
 
-The Factory container verified the artifact and runtime contract only (self-contained file, inline script syntax, simulation timeline, loopback preview, unchanged production files, board tests). Visual and animation review in a real browser, at desktop and mobile sizes, remains pending on the host.
+Factory passed the initial artifact and runtime-contract checks at `3b720e7`, including seven Board tests. Host Chromium 155 review then confirmed animation, ticket selection, URL persistence, back/forward, reduced-motion opt-in and no JavaScript exceptions. It found blank orbital capsule faces, a widened mobile viewport and transitions that continued after Pause.
+
+Factory implemented the fixes in [#71](https://github.com/markdlabrecque/factory/issues/71), commit `717a59a`. Its verifier kept an INCONCLUSIVE verdict because the container has no rendering engine. That verdict is retained, not rewritten as a browser pass.
+
+The separate host review opened the updated page in Chromium at 1440x1000 and 390x844. All six orbital capsule labels now render. All three variants advance ticket progress, stop their animation timelines on Pause and resume afterward. Orbital stayed 390 pixels wide across 22 samples over 66 seconds. No JavaScript exceptions occurred. Screenshots and video are retained under the original checkout's `.sandcastle/evidence/71/host-browser/`.
+
+Exact paused screenshot equality was not used as a gate. Megastructure differed in ten antialiased glow pixels within a 2x10-pixel area despite stable animation timelines. Assembly and Orbital paused screenshots were byte-identical. This is exploratory review, not a permanent test suite. On narrow phones, some decorative dock labels are clipped or overlap; the readable ticket manifests remain available. These concepts are best compared on a desktop.
 
 ## Verdict
 
