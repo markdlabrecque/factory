@@ -2,6 +2,7 @@
 // (projects.mts). `scheduleConfig` is the scheduler's launch configuration (PATH and Node, schedule.mts); it never says
 // whether scheduling is on, because the service manager owns that. `schedulerState` holds the tick's own files:
 // state.json and history.json (schedule-state.mts), tick.lock (tick-lock.mts) and, on macOS, tick.log (the supervisor's output).
+// `recovery` holds each project's self-recovery record: jam episodes, confirmation and repair attempts (recovery-state.mts).
 // `tickService`/`tickTimer` are the Linux scheduler units; `tickPlist` is the macOS scheduler's launch agent.
 // The project scaffold folder stays `.sandcastle` this slice (`.factory` is a later migration).
 import { homedir } from 'node:os';
@@ -15,6 +16,7 @@ export function paths(home = process.env.FACTORY_HOME || homedir()) {
     scheduleConfig: join(home, '.config/factory/schedule.json'),
     state,
     schedulerState: join(state, 'scheduler'),
+    recovery: join(state, 'recovery'),
     tickLock: join(state, 'scheduler/tick.lock'),
     tickLog: join(state, 'scheduler/tick.log'),
     systemd: join(home, '.config/systemd/user/factory-board.service'),
