@@ -2,6 +2,8 @@
 <!-- Factory tracker board/evidence shell: per-ticket dots and centered connectors, solid green/red current dots
      with halos and sonar pulses, explicit queue reasons, latest-ten collapsible Shipped and real-history stats.
      Stats return focus to the invoking control, with a fallback for removed/hidden tickets.
+     Current assessments show selection, pending dependency analysis and fail-closed dependency checks separately
+     from historical results. Refresh runs a short-lived read-only command, even when scheduling is off.
      Legacy history is marked incomplete; stopped tickets remain unfinished. Light, dark and system appearance
      (saved in the browser as sandcastle-theme). The HTTP board polls /api/runs every 10s and patches run cards by
      BoardRun.key with FLIP motion, so focus, scroll and filters survive updates. A local board.html is a static snapshot
@@ -168,7 +170,7 @@
     .card:not(.ev-hero) > .card-top, .card:not(.ev-hero) > h3, .card:not(.ev-hero) > .queue-reasons { grid-column: 1; }
     .card:not(.ev-hero) > .pipe { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
     .card:not(.ev-hero) > .stage-unknown { grid-column: 2; }
-    .card:not(.ev-hero) > .facts, .card:not(.ev-hero) > .note, .card:not(.ev-hero) > .activity { grid-column: 1 / -1; }
+    .card:not(.ev-hero) > .facts, .card:not(.ev-hero) > .note, .card:not(.ev-hero) > .activity, .card:not(.ev-hero) > .assessment { grid-column: 1 / -1; }
     .card:not(.ev-hero) > .card-foot { grid-column: 1; }
     .card:not(.ev-hero) > .stats-button { grid-column: 2; justify-self: end; }
   }
@@ -180,6 +182,11 @@
   .note[hidden] { display: none; }
   .activity { margin: 0; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .activity[hidden] { display: none; }
+  .assessment { margin: 0; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: 12px; color: var(--soft); display: grid; gap: 3px; }
+  .assessment[hidden] { display: none; }
+  .assessment .a-title { font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  .assessment .a-bad { color: var(--bad); }
+  .assessment .a-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .card-foot { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
   .card-foot:empty { display: none; }
   .verdict { font: 700 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; border-radius: 4px; border: 1px solid currentColor; }
@@ -762,13 +769,54 @@
     var note = el('p', 'note');
     var activity = el('p', 'activity');
     var foot = el('div', 'card-foot');
+    var assess = el('div', 'assessment');
+    var refresh = el('button', 'stats-button', 'Refresh ticket');
+    refresh.type = 'button';
+    refresh.addEventListener('click', function () {
+      if (refresh.disabled) return;
+      refresh.disabled = true;
+      refresh.textContent = 'Requesting…';
+      fetch('/api/refresh/' + encodeURIComponent(run.key), { method: 'POST', headers: { 'x-factory-refresh': '1' } })
+        .then(function (r) { refresh.textContent = r.ok ? 'Refresh requested' : 'Refresh failed'; })
+        .catch(function () { refresh.textContent = 'Refresh failed'; })
+        .then(function () { setTimeout(function () { refresh.disabled = false; refresh.textContent = 'Refresh ticket'; }, 4000); });
+    });
     var stats = el('button', 'stats-button', 'View stats ↗');
     stats.type = 'button';
     stats.addEventListener('click', function () { openStats(run.key, stats); });
     card.addEventListener('click', function (event) { if (!event.target.closest('a, button')) openStats(run.key, selectTicket); });
-    add(card, top, title, pipe, unknownStage, reasons, facts, note, activity, foot, stats);
+    add(card, top, title, pipe, unknownStage, reasons, facts, note, activity, assess, foot, refresh, stats);
     return { el: card, tid: tid, proj: proj, statusText: statusText, title: selectTicket, pipe: pipe, segs: segs,
-      unknownStage: unknownStage, reasons: reasons, branch: branch, timing: timing, note: note, activity: activity, foot: foot, sig: '', stage: run.stage };
+      unknownStage: unknownStage, reasons: reasons, branch: branch, timing: timing, note: note, activity: activity, assess: assess, refresh: refresh, foot: foot, sig: '', stage: run.stage };
+  }
+
+  // The ticket as the tracker shows it now (run.assessment), apart from the run's own record above.
+  function renderAssessment(c, run, now) {
+    var a = run.assessment, f = a && a.facts;
+    c.refresh.hidden = fileMode;
+    c.assess.hidden = !a;
+    if (!a) return;
+    var rows = [el('span', 'a-title', 'Current ticket')];
+    if (f) {
+      var line = el('div', 'a-row');
+      add(line, el('span', null, f.state === 'closed' ? 'Closed in tracker' : 'Open in tracker'));
+      if (f.selected === false) line.appendChild(el('span', 'a-bad', 'Not selected: ' + (f.selectionReason || 'outside current filters')));
+      if (f.model) line.appendChild(el('span', null, 'Model ' + f.model));
+      if (f.modelError) line.appendChild(el('span', 'a-bad', f.modelError));
+      line.appendChild(el('span', null, 'Checked ' + ago(f.checkedAt, now) + ' ago'));
+      rows.push(line);
+      if (f.title && run.title && f.title !== run.title) rows.push(el('div', null, 'Title now: ' + f.title));
+    } else rows.push(el('div', null, 'Not checked yet'));
+    if (a.pending) rows.push(el('div', null, 'Refresh requested: checking current tracker facts.'));
+    if (a.analysisState === 'pending') rows.push(el('div', null, 'Pending analysis: dependency conclusions are stale until read-only analysis completes.'));
+    if (a.analysisState === 'error') rows.push(el('div', 'a-bad', 'Dependency analysis failed: ' + a.analysisError + '. Previous conclusions are stale.'));
+    if (a.analysisState === 'current' && a.dependencies) a.dependencies.forEach(function (d) {
+      rows.push(el('div', d.state === 'satisfied' ? null : 'a-bad', 'Dependency ' + (d.iid == null ? 'unresolved / human-only' : '#' + d.iid) + ': ' + d.state + (d.what ? ' (' + d.what + ')' : '')));
+    });
+    if (a.changed) rows.push(el('div', null, 'Requirements changed since the last run was built. The run result above is unchanged.'));
+    if (a.retryRequired) rows.push(el('div', 'a-bad', a.retryRequired));
+    if (a.error) rows.push(el('div', 'a-bad', 'Last check failed ' + ago(a.attemptedAt, now) + ' ago: ' + a.error + (f ? ' Showing the last good check.' : '')));
+    c.assess.replaceChildren.apply(c.assess, rows);
   }
 
   function updateCard(c, run, now) {
@@ -808,6 +856,7 @@
     c.activity.textContent = run.activity || '';
     c.activity.title = run.activity ? 'Latest agent output, ' + ago(run.activityAt, now) + ' ago' : '';
     c.activity.hidden = !run.activity;
+    renderAssessment(c, run, now);
     // Links are rebuilt only when they change, so a focused link survives a refresh.
     var sig = JSON.stringify([run.iid, run.ticketUrl, run.mr, run.evidenceUrl, run.verdict]);
     if (sig !== c.sig) {

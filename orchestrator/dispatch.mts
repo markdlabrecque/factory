@@ -11,6 +11,7 @@ import { disallowedModels, ticketModel } from "./models.mts";
 import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
+import { refreshProject } from "./refresh.mts";
 import * as tracker from "./tracker.mts";
 import type { Ticket } from "./tracker.mts";
 
@@ -33,6 +34,8 @@ import type { Ticket } from "./tracker.mts";
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
 // With AGENT.modelLabels (config.mts), a ticket without exactly one model label stays queued.
+// Existing cards, including deselected parked cards, are retained and reassessed separately (#78, refresh.mts).
+// --refresh-only --ticket <iid> is the board's bounded read-only command. It exits before tracker writes or admission.
 // Jam report (slice four self-recovery, #61): when the scheduler's tick sets FACTORY_JAM_REPORT (and FACTORY_PASS_ID),
 // a pass that is not a dry run writes there, after the board update and before launching, whether the project is jammed
 // (graph.mts findJam: still-ready stopped tickets and the holds behind them, with no run in flight, nothing launched,
@@ -84,13 +87,15 @@ const { values: opts } = parseArgs({
     max: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     "whole-issues": { type: "boolean", default: false }, // one run per ready issue, ignoring Tasks
+    "refresh-only": { type: "boolean", default: false },
+    ticket: { type: "string" },
   },
 });
-if (!opts.base) {
+if (!opts.base && !opts["refresh-only"]) {
   console.error("--base <integration branch> is required");
   process.exit(1);
 }
-const base = opts.base;
+const base = opts.base ?? "main";
 const dry = opts["dry-run"];
 const subtasks = SUBTASKS.enabled && !opts["whole-issues"];
 const PROJECT = TRACKER.project;
@@ -98,6 +103,12 @@ const cap = Number(opts.max ?? SELECT.maxConcurrent);
 const here = dirname(fileURLToPath(import.meta.url));
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+
+if (opts["refresh-only"]) {
+  if (!opts.ticket || !/^\d+$/.test(opts.ticket)) throw new Error("--refresh-only requires --ticket <iid>");
+  refreshProject({ base, ticket: opts.ticket, subtasks, select: SELECT, log });
+  process.exit(0);
+}
 
 const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
 if (badModels) {
@@ -249,6 +260,14 @@ const { decisions, dropped } = decide({
 });
 for (const e of dropped) log(`cycle: ignoring "#${e.to} depends on #${e.from}" (${e.what}, confidence ${e.confidence})`);
 
+// ---- refresh existing cards (#78) ----------------------------------------------------
+// This separate analysis store never feeds decide() or writes an execution manifest. Share the per-pass budget,
+// including failed analysis attempts. No assessment-store failure may abort the admission path below.
+if (!dry) {
+  try { refreshProject({ base, subtasks, select: SELECT, budget: Math.max(0, GRAPH.maxAnalysesPerPass - batch.length), log }); }
+  catch (e) { log(`assessment refresh: ${(e as Error).message}`); }
+}
+
 // ---- board -------------------------------------------------------------------
 const byIid = new Map(candidates.map((c) => [c.iid, c]));
 for (const d of decisions) {
@@ -259,8 +278,8 @@ for (const d of decisions) {
   setStage(String(d.iid), { stage, title: c.title, ticketUrl: tracker.ticketUrl(d.iid), base, note: d.reason });
 }
 if (!dry) {
-  // Parked cards for tickets that left the queue (label removed, closed, out of the milestone).
-  for (const r of runs) if (PARKED.includes(r.stage) && !byIid.has(Number(r.iid)) && !noModel.has(Number(r.iid))) removeRun(r.iid);
+  // Parked cards that leave selection keep their complete history. They are absent from candidates, so cannot launch.
+  // Their current tracker state/selection is recorded by refreshProject, not by rewriting the historical run.
   // Manifests of tickets that are gone, once they're old enough not to explain anything.
   const cutoff = Date.now() - GRAPH.pruneAfterDays * 86_400_000;
   const liveIids = new Set(live.map((r) => Number(r.iid)));
