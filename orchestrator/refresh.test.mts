@@ -1,6 +1,7 @@
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
 // scheduling, per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
+// The fixture owns the Pi extension path as well as the pi command, so a developer's installed provider cannot mask CI failures.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -36,8 +37,11 @@ function fixture(t: any, kind = "github") {
     writeFileSync(join(bin, tool), `#!/bin/sh\nexec "${node}" "${join(FIXTURES, script)}" "$@"\n`, { mode: 0o755 });
   }
   writeFileSync(join(bin, "npx"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_STATE/launches"\nsleep 1\n`, { mode: 0o755 });
-  const env = { ...process.env, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: dir, FAKE_STATE: fake, FAKE_TRACKER: kind,
-    PATH: `${bin}:/usr/bin:/bin` };
+  const extension = join(fake, "subscription-extension.ts");
+  // Only its existence is checked by production argument construction; the stub must never load a real provider.
+  writeFileSync(extension, 'throw new Error("Fixture extension must not execute");\n');
+  const env = { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: dir, FAKE_STATE: fake, FAKE_TRACKER: kind,
+    FACTORY_PI_SUBSCRIPTION_EXTENSION: extension, PATH: `${bin}:/usr/bin:/bin` };
   const data: any = { tickets: [ticket(7), ticket(20, { description: "Provider", labels: [] }), ticket(21, { description: "New provider", labels: [] })], ready: [7], notes: {}, parents: {} };
   const save = () => writeFileSync(join(fake, "tracker.json"), JSON.stringify(data));
   const key = (iid: number) => `owner_repo--${iid}`;
@@ -63,6 +67,22 @@ function fixture(t: any, kind = "github") {
   const bytes = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "absent";
   return { home, root, dir, fake, env, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
 }
+
+test("refresh fixtures override a missing inherited Pi extension with their own stub boundary", (t) => {
+  const old = process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION;
+  process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION = "/fixture-missing-provider/index.ts";
+  t.after(() => {
+    if (old === undefined) delete process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION;
+    else process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION = old;
+  });
+  const f = fixture(t); f.record(7, "stopped");
+  assert.equal(f.env.FACTORY_PI_SUBSCRIPTION_EXTENSION, join(f.fake, "subscription-extension.ts"));
+  f.pass(["--refresh-only", "--ticket", "7"]);
+  assert.equal(f.assessment().analysisState, "current", f.assessment().analysisError);
+  const calls = f.bytes(join(f.fake, "analysis.jsonl")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args[calls[0].args.indexOf("-e") + 1], f.env.FACTORY_PI_SUBSCRIPTION_EXTENSION);
+});
 
 for (const kind of ["github", "gitlab"]) {
   test(`${kind}: closed, deselected, excluded and out-of-milestone parked cards retain history and never launch`, (t) => {
