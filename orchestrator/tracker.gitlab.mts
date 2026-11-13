@@ -9,6 +9,7 @@ import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from 
 // "Child items" on an issue). Manual delivery waits for branch CI. Auto delivery opens an MR first,
 // gates its head pipeline and required jobs on the pushed SHA, then merges with a SHA guard.
 // mergedPr: the newest merged MR into the base from the run's branch, else one titled `#N: ...`.
+// readyList reads every page of ready tickets (#135).
 // postVerification preserves GitLab's upload-then-comment flow, shared by normal and recovery runs.
 
 // Cast: the shipped config.personal.mts (GitHub) has no GitLab fields, and this module still loads there.
@@ -116,7 +117,8 @@ export function viewText(iid: number): string {
   return glab(["issue", "view", String(iid), "-R", TRACKER.project, "--comments"]);
 }
 
-/** Open tickets carrying every ready label and no exclude label, filtered by `select`. */
+/** Open tickets carrying every ready label and no exclude label, filtered by `select`. Reads every page, so a
+ * ticket past the first 100 is not mistaken for deselected and hidden from the board (#135). */
 export function readyList(select: Select = {}): ReadyTicket[] {
   const args = ["issue", "list", "-R", TRACKER.project, "--per-page", "100", "--output", "json"];
   if (select.order) args.push("--order", select.order);
@@ -129,7 +131,12 @@ export function readyList(select: Select = {}): ReadyTicket[] {
   if (select.issueType) args.push("--issue-type", select.issueType);
   if (select.confidential) args.push("--confidential");
   if (select.search) args.push("--search", select.search);
-  return JSON.parse(glab(args));
+  const all: ReadyTicket[] = [];
+  for (let page = 1; ; page++) {
+    const batch = JSON.parse(glab([...args, "--page", String(page)]) || "[]") as ReadyTicket[];
+    all.push(...batch);
+    if (batch.length < 100) return all;
+  }
 }
 
 export function comment(iid: number | string, body: string): void {

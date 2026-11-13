@@ -13,6 +13,7 @@ import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from 
 // Delivery: open a PR, and with MERGE.auto merge it only when ciGate (ci.mts) says "pass" for the
 // pushed commit. Failed or missing CI leaves the PR open as a draft and the run stopped.
 // mergedPr: the newest merged PR into the base from the run's branch, else one titled `#N: ...`.
+// readyList rejects GitHub Search's 1000-result boundary rather than infer deselection from a partial list (#135).
 
 const REPO = TRACKER.project;
 const HOST = (TRACKER as { host?: string }).host ?? "github.com";
@@ -124,19 +125,25 @@ export function notes(iid: number): Note[] {
 
 const ORDER: Record<string, string> = { created_at: "created", updated_at: "updated", popularity: "comments" };
 
-/** Open issues carrying every ready label and no exclude label, filtered by `select`. */
+/** Open issues carrying every ready label and no exclude label, filtered by `select`.
+ * Search returns at most 1000 results regardless of --limit. At that boundary completeness is unknown:
+ * fail the read so refresh preserves last-good facts instead of marking omitted tickets deselected. */
 export function readyList(select: Select = {}): ReadyTicket[] {
   const search = [
     ...LABELS.exclude.map((l) => `-label:${JSON.stringify(l)}`),
     `sort:${ORDER[select.order ?? ""] ?? "created"}-${select.sort === "desc" ? "desc" : "asc"}`,
     select.search ?? "",
   ].filter(Boolean).join(" ");
-  const args = ["issue", "list", "-R", REPO, "--state", "open", "--limit", "1000", "--json", `${FIELDS},assignees`, "--search", search];
+  const args = ["issue", "list", "-R", REPO, "--state", "open", "--json", `${FIELDS},assignees`, "--search", search];
   for (const l of LABELS.ready) args.push("--label", l);
   if (TRACKER.milestone) args.push("--milestone", TRACKER.milestone);
   if (select.assignee) args.push("--assignee", select.assignee);
   if (select.author) args.push("--author", select.author);
-  return json<GhIssue[]>(args).map((i) => ({ ...slim(i), assignees: (i.assignees ?? []).map((a) => ({ username: a.login })) }));
+  const issues = json<GhIssue[]>([...args, "--limit", "1000"]);
+  if (issues.length >= 1000) {
+    throw new Error("GitHub selection may be incomplete at the 1000-result search limit; narrow dispatch filters before retrying. Selection is unknown.");
+  }
+  return issues.map((i) => ({ ...slim(i), assignees: (i.assignees ?? []).map((a) => ({ username: a.login })) }));
 }
 
 export function comment(iid: number | string, body: string): void {
