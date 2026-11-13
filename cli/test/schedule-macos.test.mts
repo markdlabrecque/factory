@@ -1,3 +1,4 @@
+// Scheduled passes preserve their environment and pass no --max override, leaving the cap to the project's dispatcher config (#117).
 // The macOS scheduler (#35) across a stubbed launchd boundary. Factory's production launchd adapter
 // (platform/scheduler-launchd.mts), its generated launch agent, the real supervisor (commands/supervise.mts, run as its own
 // process through fixtures/supervisor.mts) and the real tick run against stubs/launchctl, a stateful, failure-injecting
@@ -260,7 +261,7 @@ test('off disables, then boots out: the supervisor cancels its held pass and nes
   assert.deepEqual([readLock(w.p)!.tick.pid, readLock(w.p)!.pass!.pid], [sup.child.pid, pids.dispatcher], 'the supervisor holds the lock and owns the pass group');
   await w.stub.using(async () => assert.equal((await w.backend.status()).tick, 'active'));
   const ran = JSON.parse(readFileSync(join(a, '.sandcastle/ran.log'), 'utf8').split('\n')[0]);
-  assert.deepEqual([ran.argv, ran.stdin, ran.env.FACTORY_SCHEDULED, ran.env.SANDCASTLE_STATE_DIR], [['--max', '3'], '/dev/null', '1', w.p.state]);
+  assert.deepEqual([ran.argv, ran.stdin, ran.env.FACTORY_SCHEDULED, ran.env.SANDCASTLE_STATE_DIR], [[], '/dev/null', '1', w.p.state]);
 
   const n = changes(w.stub).length;
   assert.equal(await w.stub.using(() => schedule(w.p, w.backend, 'off')), 0);

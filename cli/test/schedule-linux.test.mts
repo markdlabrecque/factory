@@ -1,3 +1,4 @@
+// Scheduled passes pass no --max override, so the project's dispatcher config sets the cap (#117).
 // The Linux scheduler slice (#33) across the stubbed systemd boundary. Factory's real CLI (cli/bin/factory.mts run as a
 // subprocess), its production adapter (platform/scheduler-systemd.mts) and its generated units run against
 // stubs/systemctl, a stateful, failure-injecting stand-in that records exact argv, models unit file / enabled / active
@@ -259,7 +260,7 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   const t1 = startTick(w, { PATH: config.path.replace(/^/, `${w.stub.bin}:`), SANDCASTLE_STATE_DIR: '/not/here' });
   assert.equal(await t1.exited, 0, t1.output());
   const ran = readFileSync(join(root, '.sandcastle/quick.args'), 'utf8').trim();
-  assert.equal(ran, '--max 3');
+  assert.equal(ran, '');
   assert.equal(readFileSync(join(root, '.sandcastle/quick.cwd'), 'utf8').trim(), root);
   assert.equal(existsSync(join(other, '.sandcastle/ran')), false, 'a project that was not opted in is not run');
   assert.match(t1.output(), /refresh beta \(main\): start/);
