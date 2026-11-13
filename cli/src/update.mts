@@ -11,10 +11,13 @@
 // catalog `factory install` writes into a copied app (HISTORY_FILE, built from the source checkout's history). With
 // neither, nothing counts as outdated and every differing file is `modified`, so an edited file is never mistaken for an
 // old one. factory-dispatch.sh is templated with the state folder: it is compared after putting the placeholder back.
-// Read-only: this module never writes a project file. `--apply` (#92) is a later ticket.
+// classifyCopy is read-only. applyCopy (#92, `factory update --apply`) writes only `missing` and `outdated` files: each is
+// re-classified just before its write, written to a temporary file beside it and then linked into place (a missing file,
+// so a file that appeared meanwhile is never overwritten) or renamed over it (an outdated file). `modified` and `project`
+// files are never written. A missing .env.example takes the profile's template: client when config.mts has gitlabHost.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fchmodSync, linkSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Paths } from './paths.mts';
 import { scaffoldName, shq } from './paths.mts';
@@ -106,7 +109,7 @@ export function classifyCopy(p: Paths, root: string, o: { app?: string; history?
     const st = (() => { try { return lstatSync(target); } catch { return undefined; } })();
     if (!st) return owned
       ? { file, class: 'project', source: sources[0], detail: 'missing; Factory never writes this file for you, add it by hand' }
-      : { file, class: 'missing', source: sources[0], detail: 'would create' };
+      : { file, class: 'missing', source: file === '.env.example' ? envExampleSource(root, sources) : sources[0], detail: 'would create' };
     if (!st.isFile()) return { file, class: owned ? 'project' : 'modified', source: sources[0], detail: 'not a regular file; resolve by hand' };
     const content = readFileSync(target);
     if (file === 'config.mts' || file === 'main.mts') {
@@ -130,4 +133,49 @@ export function classifyCopy(p: Paths, root: string, o: { app?: string; history?
       ? { file, class: 'outdated', source: old, detail: 'unmodified earlier Factory copy; would replace' }
       : { file, class: 'modified', source: sources[0], detail: 'edited locally; merge by hand' };
   });
+}
+
+/** The .env.example template for the project's profile: the client one when its config.mts names a GitLab host. */
+function envExampleSource(root: string, sources: string[]) {
+  let config = '';
+  try { config = readFileSync(join(root, scaffoldName, 'config.mts'), 'utf8'); } catch { /* personal */ }
+  return /^\s*gitlabHost:/m.test(config) ? sources.find(s => s.includes('client')) ?? sources[0] : sources[0];
+}
+
+export type Applied = { files: FileStatus[]; created: string[]; replaced: string[] };
+
+/** Create `missing` and replace `outdated` files in `root`'s copy with Factory's current version. Never touches other classes. */
+export function applyCopy(p: Paths, root: string, o: { app?: string; history?: History } = {}): Applied {
+  const app = o.app ?? appRoot;
+  const history = o.history ?? factoryHistory(app);
+  const dir = join(root, scaffoldName);
+  const dst = lstatSync(dir);
+  if (dst.isSymbolicLink() || !dst.isDirectory()) throw new Error(`Refusing to update ${dir}: not a directory`);
+  const files = classifyCopy(p, root, { app, history });
+  const created: string[] = [], replaced: string[] = [];
+  for (const f of files) {
+    if (f.class !== 'missing' && f.class !== 'outdated') continue;
+    // Re-check just before writing: a file edited or created since the first pass is left alone.
+    const now = classifyCopy(p, root, { app, history }).find(x => x.file === f.file);
+    if (now?.class !== f.class) { Object.assign(f, now); continue; }
+    const src = join(app, f.source);
+    let content = readFileSync(src);
+    if (f.file === 'factory-dispatch.sh') content = Buffer.from(content.toString('utf8').replace(PLACEHOLDER, () => shq(p.state)));
+    const mode = f.file === 'factory-dispatch.sh' ? 0o755 : statSync(src).mode & 0o777;
+    const target = join(dir, f.file);
+    const tmp = join(dir, `.${f.file}.factory-update-${process.pid}`);
+    rmSync(tmp, { force: true }); // a leftover from an interrupted update
+    const fd = openSync(tmp, 'wx', mode);
+    try {
+      try { fchmodSync(fd, mode); writeSync(fd, content); } finally { closeSync(fd); }
+      if (f.class === 'missing') linkSync(tmp, target); // fails if the file appeared meanwhile
+      else renameSync(tmp, target);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST') { Object.assign(f, { class: 'modified', detail: 'appeared while updating; kept' }); continue; }
+      throw e;
+    } finally { rmSync(tmp, { force: true }); }
+    (f.class === 'missing' ? created : replaced).push(f.file);
+    f.detail = f.class === 'missing' ? 'created' : 'replaced';
+  }
+  return { files, created, replaced };
 }
