@@ -128,6 +128,8 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   const recovery = () => readRecovery(p, root);
   const repairs = (): { pid: number; args: string[] }[] =>
     existsSync(join(sc, 'repairs.jsonl')) ? readFileSync(join(sc, 'repairs.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
+  // A launched repair is a freshly forked process: wait for it to record itself before reading.
+  const repairsAt = (n: number) => waitFor(`repair ${n} to record itself`, () => repairs().length >= n && repairs());
   const claim = () => readAdmission(p.state).claims[keyFor('7', 'site/site')];
   const recoveryLines = (out: string) => out.split('\n').filter(l => l.startsWith('recovery site:')).join('\n');
 
@@ -154,6 +156,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /recovered state from an interrupted tick/);
   assert.match(recoveryLines(r.out), /jam on #7 confirmed; attempt 1 on #7 started/);
+  await repairsAt(1);
   assert.equal(repairs().length, 1);
   const first = repairs()[0];
   assert.deepEqual(first.args.slice(0, 8), ['tsx', '.sandcastle/main.mts', '--issue', '7', '--base', 'main', '--recover', '1']);
@@ -204,6 +207,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   r = await w.tick();
   assert.match(recoveryLines(r.out), /attempt 1 on #7 ended: interrupted/);
   assert.match(recoveryLines(r.out), /attempt 2 on #7 started/);
+  await repairsAt(2);
   assert.equal(repairs().length, 2);
   const second = repairs()[1];
 
@@ -232,6 +236,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   assert.match(recoveryLines(r.out), /jam on #7 seen \(1 of 2 passes\)/);
   r = await w.tick();
   assert.match(recoveryLines(r.out), /attempt 3 on #7 started/);
+  await repairsAt(3);
   assert.equal(repairs().length, 3);
 
   // Throughout: the ticket's work is untouched, docker only ever named the attempts' own containers, and no call to the
