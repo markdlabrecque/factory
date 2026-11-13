@@ -1,16 +1,17 @@
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
-import { PARKED, readRuns, removeRun, setProject, setStage, TERMINAL } from "./board.mts";
+import { claimRun, markMergedOutside, PARKED, readRuns, removeRun, reserveRun, setProject, setStage, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
 import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
-import { contentHash, decide, edgesOf, expandUnits, staleReason, unitHash } from "./graph.mts";
+import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
+import { refreshProject } from "./refresh.mts";
 import * as tracker from "./tracker.mts";
 import type { Ticket } from "./tracker.mts";
 
@@ -18,14 +19,36 @@ import type { Ticket } from "./tracker.mts";
 // main.mts run per ticket that is free to go (up to a cap on concurrent runs). Usually started through
 // dispatch.sh (by hand, or by a sandcastle-dispatch@<project>.timer), which checks the tools and image first.
 //   node .sandcastle/dispatch.mts --base sal-develop [--max 3] [--dry-run] [--whole-issues]
+//   node .sandcastle/dispatch.mts --refresh-only [--ticket <iid>] [--base sal-develop]
 // A ticket is free to go when its manifest is current, every ticket it depends on is merged into the
 // base or closed, and its files don't overlap a live run (in flight, or MR still open).
 // Tickets that aren't free get a "queued" card on the board saying why. A ticket whose run failed
 // is not retried every pass: delete its file in the state dir to retry it.
+// Each launch is recorded on the board (stage "setup", note "starting", the child's pid) the moment it is spawned,
+// so the cap counts it in every later pass, this project's or another's, before main.mts writes its own record.
+// Before spawning, each launch is claimed atomically (claimRun in board.mts): the cap is recounted from the board and
+// the ticket checked under a shared lock, so a pass running alongside (another project's, a manual one, or a recovery
+// attempt) cannot overfill the cap or start the same ticket twice. A refused claim launches nothing. Claims live in the
+// admission record (admission.mts, #75): each launch's claim is handed to its child, every normal admission advances the
+// project's activity generation, and a project held by a recovery attempt admits nothing.
 // With SUBTASKS.enabled (config.mts), a ready issue that has Tasks gets one run per open Task instead.
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
+// Work merged outside Factory (#87): a stopped or parked card (stopped, queued, waiting) whose ticket has a PR/MR merged
+// into its base (tracker.mergedPr: from the run's recorded branch, or titled "#N: ...") moves to done with the PR, its
+// merge time and "merged outside Factory", keeping its verdict; it is not launched, and its still-open Task is closed or
+// ticket moved to LABELS.done as for Factory's own merges. A closed issue alone is never taken as a merge.
 // With AGENT.modelLabels (config.mts), a ticket without exactly one model label stays queued.
+// Existing cards, including deselected parked cards, are retained and reassessed separately (#78, refresh.mts).
+// --refresh-only [--ticket <iid>] is the bounded read-only command: with --ticket the board's one-card check, without it
+// (#93) every card of this project (up to REFRESH_PER_PASS, oldest assessment first, within GRAPH.maxAnalysesPerPass), for
+// projects that are not scheduled. It exits before tracker writes, run-record updates or admission.
+// Jam report (slice four self-recovery, #61): when the scheduler's tick sets FACTORY_JAM_REPORT (and FACTORY_PASS_ID),
+// a pass that is not a dry run writes there, after the board update and before launching, whether the project is jammed
+// (graph.mts findJam: still-ready stopped tickets and the holds behind them, with no run in flight, nothing launched,
+// nothing awaiting analysis and a free slot) and, for each jammed or still-ready ticket with a run record, its requirement
+// fingerprint (unitHash and labels minus the ones Sandcastle writes). The tick counts it only once the pass exits 0. Manual
+// passes are not asked for one. The report changes nothing here; the tick decides what to do with it.
 
 // ---- Selection config: which tickets get a run ----------------------------------------
 // Tracker, milestone and labels live in config.mts. Every option below is optional; leave one unset
@@ -60,7 +83,7 @@ const SELECT = {
   // -- Throughput --
   // Cap on runs in flight at once, counted from the board across ALL projects sharing the state
   // dir. A pass starts at most (cap - in flight). Overridden by --max.
-  maxConcurrent: 3,
+  maxConcurrent: 99, // effectively uncapped for the factory project while we pressure test (was 3)
   // Pause between launches within one pass, so runs don't race on git fetch / docker start.
   staggerSeconds: 20,
 };
@@ -71,13 +94,15 @@ const { values: opts } = parseArgs({
     max: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     "whole-issues": { type: "boolean", default: false }, // one run per ready issue, ignoring Tasks
+    "refresh-only": { type: "boolean", default: false },
+    ticket: { type: "string" },
   },
 });
-if (!opts.base) {
+if (!opts.base && !opts["refresh-only"]) {
   console.error("--base <integration branch> is required");
   process.exit(1);
 }
-const base = opts.base;
+const base = opts.base ?? "main";
 const dry = opts["dry-run"];
 const subtasks = SUBTASKS.enabled && !opts["whole-issues"];
 const PROJECT = TRACKER.project;
@@ -85,6 +110,12 @@ const cap = Number(opts.max ?? SELECT.maxConcurrent);
 const here = dirname(fileURLToPath(import.meta.url));
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+
+if (opts["refresh-only"]) {
+  if (opts.ticket !== undefined && !/^\d+$/.test(opts.ticket)) throw new Error("--refresh-only takes --ticket <iid> (a number), or no --ticket for the whole project");
+  refreshProject({ base, ticket: opts.ticket, subtasks, select: SELECT, log });
+  process.exit(0);
+}
 
 const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
 if (badModels) {
@@ -126,6 +157,37 @@ for (const p of advance) {
   log(`#${p}: every Task is closed; ${dry ? `would move to ${LABELS.done} (dry run)` : `moving to ${LABELS.done}`}`);
   if (!dry) tracker.advance(p);
 }
+
+// ---- merged outside Factory (#87) ----------------------------------------------
+const taskIids = new Set([...work.childrenOf.values()].flat().map((k) => k.iid));
+for (const r of allRuns) {
+  if (r.project !== PROJECT || r.mergedAt || !(r.stage === "stopped" || PARKED.includes(r.stage))) continue;
+  const into = r.base ?? base;
+  let pr: tracker.MergedPr | undefined;
+  try {
+    pr = tracker.mergedPr(Number(r.iid), r.branch, into);
+  } catch (e) {
+    log(`#${r.iid}: could not check for a merge outside Factory: ${(e as Error).message}`);
+    continue;
+  }
+  if (!pr) continue;
+  log(`#${r.iid} (${r.stage}) merged into ${into} outside Factory by ${pr.url}: ${dry ? "would move to done (dry run)" : "moving to done"}`);
+  if (dry) continue;
+  if (!markMergedOutside(r.iid, r.stage, pr)) {
+    log(`#${r.iid}: left as is; its card changed or a run claimed it meanwhile`);
+    continue;
+  }
+  r.stage = "done"; // this pass must not launch it
+  r.mergedAt = pr.mergedAt;
+  try {
+    if (tracker.ticket(Number(r.iid)).state === "closed") continue;
+    if (r.parentIid || taskIids.has(Number(r.iid))) tracker.close(Number(r.iid));
+    else tracker.advance(Number(r.iid));
+  } catch (e) {
+    log(`#${r.iid}: card is done, but the tracker update failed: ${(e as Error).message}`);
+  }
+}
+
 const workById = new Map(work.tickets.map((t) => [t.iid, t]));
 const parentById = new Map(parents.map((p) => [p.iid, p]));
 const issues = units
@@ -236,6 +298,14 @@ const { decisions, dropped } = decide({
 });
 for (const e of dropped) log(`cycle: ignoring "#${e.to} depends on #${e.from}" (${e.what}, confidence ${e.confidence})`);
 
+// ---- refresh existing cards (#78) ----------------------------------------------------
+// This separate analysis store never feeds decide() or writes an execution manifest. Share the per-pass budget,
+// including failed analysis attempts. No assessment-store failure may abort the admission path below.
+if (!dry) {
+  try { refreshProject({ base, subtasks, select: SELECT, budget: Math.max(0, GRAPH.maxAnalysesPerPass - batch.length), log }); }
+  catch (e) { log(`assessment refresh: ${(e as Error).message}`); }
+}
+
 // ---- board -------------------------------------------------------------------
 const byIid = new Map(candidates.map((c) => [c.iid, c]));
 for (const d of decisions) {
@@ -246,14 +316,40 @@ for (const d of decisions) {
   setStage(String(d.iid), { stage, title: c.title, ticketUrl: tracker.ticketUrl(d.iid), base, note: d.reason });
 }
 if (!dry) {
-  // Parked cards for tickets that left the queue (label removed, closed, out of the milestone).
-  for (const r of runs) if (PARKED.includes(r.stage) && !byIid.has(Number(r.iid)) && !noModel.has(Number(r.iid))) removeRun(r.iid);
+  // Parked cards that leave selection keep their complete history. They are absent from candidates, so cannot launch.
+  // Their current tracker state/selection is recorded by refreshProject, not by rewriting the historical run.
   // Manifests of tickets that are gone, once they're old enough not to explain anything.
   const cutoff = Date.now() - GRAPH.pruneAfterDays * 86_400_000;
   const liveIids = new Set(live.map((r) => Number(r.iid)));
   for (const m of manifests.values()) {
     if (!catalogueById.has(m.iid) && !liveIids.has(m.iid) && Date.parse(m.analyzedAt || "1970-01-01") < cutoff) removeManifest(PROJECT, m.iid);
   }
+}
+
+// ---- jam report (scheduled passes only; see the header) --------------------------
+const jamReport = process.env.FACTORY_JAM_REPORT;
+if (jamReport && !dry) {
+  const jam = findJam({
+    units: issues.map((i) => {
+      const r = runOf.get(i.iid);
+      return { iid: i.iid, stage: r?.stage, openPr: !!r?.branch && openMrs.has(r.branch) };
+    }),
+    decisions,
+    active: runs.filter(running).map((r) => Number(r.iid)),
+    room,
+  });
+  const ours = new Set([...LABELS.ready, LABELS.needsHuman, LABELS.done]);
+  const jammed = new Set<number>(jam.tickets);
+  const watched = issues.filter((i) => jammed.has(i.iid) || ["stopped", "done"].includes(runOf.get(i.iid)?.stage ?? ""));
+  const tickets = watched.map((t) => ({
+    iid: t.iid,
+    content: hashOf.get(t.iid) ?? unitHash(t, tracker.notes(t.iid)),
+    labels: (t.labels ?? []).filter((l) => !ours.has(l)),
+  }));
+  log(jam.tickets.length ? `jam: ${jam.tickets.map((t) => `#${t}`).join(", ")}` : `no jam: ${"none" in jam ? jam.none : ""}`);
+  const temp = `${jamReport}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify({ version: 1, pass: process.env.FACTORY_PASS_ID ?? "", project: PROJECT, at: new Date().toISOString(), ...jam, observed: tickets }, null, 2) + "\n", { mode: 0o600 });
+  renameSync(temp, jamReport);
 }
 
 // ---- launch ------------------------------------------------------------------
@@ -264,6 +360,14 @@ const logDir = resolve(here, "logs");
 mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);
+  const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base };
+  // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
+  const claim = claimRun({ iid, pid: process.pid, cap, patch: meta });
+  if (!claim.ok) {
+    log(`#${iid} not launched: ${claim.reason}`);
+    if (claim.reason.startsWith("no capacity")) break;
+    continue;
+  }
   const out = openSync(resolve(logDir, `run-${iid}.log`), "a");
   const child = spawn(existsSync(npx) ? npx : "npx", ["tsx", resolve(here, "main.mts"), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {
     cwd: process.cwd(),
@@ -272,5 +376,8 @@ for (const [n, d] of launch.entries()) {
     env: process.env,
   });
   child.unref();
+  // The claim goes to the child (main.mts adopts it); a launch that failed to spawn releases it.
+  if (child.pid) reserveRun(iid, child.pid, { ...meta, claim: claim.run.claim });
+  else removeRun(iid, claim.run.claim);
   if (n < launch.length - 1) await new Promise((r) => setTimeout(r, SELECT.staggerSeconds * 1000));
 }
