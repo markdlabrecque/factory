@@ -6,7 +6,8 @@
 // create the missing and replace the unmodified outdated files (`update --apply`; edited and project-owned files are kept), and
 // switch the scheduler (and each project's opt-in) on or off, and list or retire install-dispatch.sh's legacy timers (`legacy status|retire`), and
 // remove a project's merged, clean Factory branches and their Factory-owned worktrees (`clean`; remote branches untouched), and
-// save a manual comment on a ticket in the ticket journal, then post it to the tracker (`ticket comment`, #99). `tick` and `supervise` are internal: `tick` is what the Linux
+// save a manual comment on a ticket in the ticket journal, then post it to the tracker (`ticket comment`, #99), and
+// deliver the journal's unposted comments and corrections, searching for an uncertain one's marker first (`ticket sync`, #100). `tick` and `supervise` are internal: `tick` is what the Linux
 // scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
@@ -48,7 +49,8 @@ factory recovery status|reset|review [--project <name|path>] [--json (status)] [
 factory schedule on|off|status [--project <name|path>] [--json (status)]
 factory legacy status [--json] | factory legacy retire
 factory clean [--dry-run] [--project <name|path>] [--json]
-factory ticket comment <ticket> <text> [--project <name|path>]`;
+factory ticket comment <ticket> <text> [--project <name|path>]
+factory ticket sync [ticket] [--project <name|path>]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
