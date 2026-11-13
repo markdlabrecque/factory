@@ -1,5 +1,5 @@
 // Lifecycle tests run inside a disposable HOME with no host service manager calls. Install-source tests stand in a
-// synthetic checkout and pretend the running script is the installed app.
+// synthetic checkout and pretend the running script is the installed app. The resume-reminder test registers projects by writing the registry directly.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,6 +47,20 @@ test('install twice reuses entries and refreshes copied code', async t => {
   assert.equal(new Set(entries.map(e => e.path)).size, 3);
   assert.ok(entries.every(e => existsSync(e.path)));
   assert.match(readFileSync(join(p.app, 'cli/bin/factory.mts'), 'utf8'), /parseArgs/);
+});
+test('install ends with a resume reminder naming opted-in projects, and only when there is something to resume', async t => {
+  const { p, service } = fixture(t);
+  const logs: string[] = [];
+  t.mock.method(console, 'log', (l: string) => logs.push(l));
+  await install(p, service);
+  assert.equal(logs.some(l => /factory schedule on/.test(l)), false, 'nothing to resume on a fresh install');
+  mkdirSync(p.config, { recursive: true });
+  writeFileSync(p.projects, JSON.stringify({ version: 1, projects: [
+    { name: 'alpha', root: '/alpha', schedule: { enabled: true, branch: 'main', since: '' } },
+    { name: 'beta', root: '/beta', schedule: { enabled: false, branch: 'main', since: '' } }] }));
+  logs.length = 0;
+  await install(p, service);
+  assert.equal(logs.at(-1), 'The scheduler is off; install never turns it back on. Opted-in projects waiting: alpha. Resume it with: factory schedule on');
 });
 for (const phase of ['unit write', 'enable']) test(`crash recovery after ${phase} failure`, async t => {
   const { p, service } = fixture(t);

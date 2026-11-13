@@ -430,6 +430,7 @@ interface ServiceBackend {
 4. Create the board unit from the shipped template (`factory-board.service` or `com.factory.board.plist`), with the absolute Node path filled in. Add a manifest entry. Enable it and start it.
 5. Detect old `sandcastle-*` units, `~/.config/sandcastle/` and `~/.local/state/sandcastle/`. Print a warning naming them and that adoption comes in a later slice. Change nothing.
 6. Print what was installed and the board URL.
+7. If install stopped the scheduler, or any registered project is opted in, end with a reminder that the scheduler is off, naming the opted-in projects waiting, and to resume with `factory schedule on`. Install never turns scheduling back on.
 
 Running it again reuses existing entries and refreshes the files. It never duplicates a manifest entry.
 

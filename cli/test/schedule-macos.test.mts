@@ -356,6 +356,6 @@ test('reinstall stops the supervisor and cancels its tick before replacing files
   assert.equal(up(pids.ticket), true);
   assert.match(readFileSync(w.p.tickPlist, 'utf8'), /<string>supervise<\/string>/, 'the plist was refreshed');
   assert.deepEqual([w.stub.service().disabled, w.stub.service().loaded], [true, false]);
-  assert.match(w.logs.join('\n'), /The scheduler is off\. Resume it with: factory schedule on/);
+  assert.match(w.logs.join('\n'), /The scheduler is off; .*Resume it with: factory schedule on$/);
   assert.equal(readTickState(w.p).projects[a].result, 'interrupted');
 });
