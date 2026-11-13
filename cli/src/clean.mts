@@ -12,6 +12,8 @@
 // registered worktree whose folder is gone is pruned), and the branch is deleted only at the tip that was checked
 // (`git update-ref -d refs/heads/<branch> <tip>`), so a commit made meanwhile keeps it. Anything else is kept and
 // reported with the reason. Run records, receipts, evidence and logs are left alone. `dryRun` only reports.
+// Callers: `factory clean` (commands/clean.mts) and, after each completed scheduled pass, the tick (#97,
+// commands/tick.mts cleanAfterPass).
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';

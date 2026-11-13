@@ -2,7 +2,8 @@
 // Factory branches whose PR/MR merged (their run record is `done` with `mergedAt`) and the Factory-owned worktrees
 // under `.sandcastle/worktrees/` holding them, when nothing would be lost (cli/src/clean.mts cleanProject decides).
 // Offline: no fetch, and remote branches are never touched. Kept branches are listed with the reason. --dry-run
-// deletes nothing. Exits 1 only when a removal Git refused failed.
+// deletes nothing. Exits 1 only when a removal Git refused failed. The tick runs the same cleanup after each completed
+// scheduled pass (#97, tick.mts cleanAfterPass).
 import type { Paths } from '../paths.mts';
 import { cleanProject } from '../clean.mts';
 import { findRun, projectRuns, resolveProject } from '../runs.mts';

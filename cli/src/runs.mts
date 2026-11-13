@@ -4,7 +4,8 @@
 // finds its run records in the shared run-state folder and its run and repair (recover-<n>.log, #62) log files. Read-only: it never writes a
 // record, the registry or a project file. A run whose process is gone without finishing is reported as
 // stopped (as the board does) but its record is left for the board and dispatcher to update. A launch the
-// dispatcher reserved whose process died before the run started is skipped, as the board drops it.
+// dispatcher reserved whose process died before the run started is skipped, as the board drops it. projectRuns and
+// findRun take an optional state folder, for the tick's cleanup (#97), which reads Factory's own whatever its environment says.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -77,20 +78,19 @@ function load(dir: string, file: string): Run | undefined {
   } catch { return undefined; }
 }
 
-/** Every run record of the project, oldest first. Unreadable records are skipped. */
-export function projectRuns(p: Paths, ctx: ProjectContext): Run[] {
-  const dir = runStateDir(p);
+/** Every run record of the project, oldest first. Unreadable records are skipped. `dir` defaults to runStateDir(p). */
+export function projectRuns(p: Paths, ctx: ProjectContext, dir = runStateDir(p)): Run[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter(f => f.endsWith('.json')).map(f => load(dir, f))
     .filter((r): r is Run => !!r && r.project === ctx.tracker)
     .sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''));
 }
 
-/** The record file and (if any) record of one ticket's run in the project. */
-export function findRun(p: Paths, ctx: ProjectContext, ticket: string): { file: string; run?: Run } {
+/** The record file and (if any) record of one ticket's run in the project. `dir` defaults to runStateDir(p). */
+export function findRun(p: Paths, ctx: ProjectContext, ticket: string, dir = runStateDir(p)): { file: string; run?: Run } {
   const key = keyFor(ticketId(ticket), ctx.tracker);
-  const file = join(runStateDir(p), `${key}.json`);
-  return { file, run: existsSync(file) ? load(runStateDir(p), `${key}.json`) : undefined };
+  const file = join(dir, `${key}.json`);
+  return { file, run: existsSync(file) ? load(dir, `${key}.json`) : undefined };
 }
 
 /** A ticket's run log, as dispatch.mts writes it (`.sandcastle/logs/run-<n>.log`). It may not exist yet. */
