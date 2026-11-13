@@ -1,3 +1,4 @@
+// #126: description parsing, approval, failures and reference model configuration regressions.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AGENT as PERSONAL_AGENT, GRAPH as PERSONAL_GRAPH } from "./config.personal.mts";
@@ -8,35 +9,51 @@ import { disallowedModels, piAnalysisArgs, piEnvFor, subscriptionPreflight, tick
 
 const SONNET = "pi-claude-subscription/claude-sonnet-5-5";
 const OPUS = "pi-claude-subscription/claude-opus-5-5";
-const labels = { "model:sonnet": SONNET, "model:opus": OPUS };
+const labels = { sonnet: SONNET, opus: OPUS, "Sonnet 5.5": SONNET };
 
-test("ticket model: exactly one model label selects the subscription model", () => {
-  assert.deepEqual(ticketModel(["ready-for-agent", "model:sonnet"], labels, "x"), { model: SONNET });
-  assert.deepEqual(ticketModel(["model:opus"], labels, "x"), { model: OPUS });
-  assert.ok("error" in ticketModel(["ready-for-agent"], labels, "x"), "no label: not started, no GPT fallback");
-  assert.ok("error" in ticketModel(["model:sonnet", "model:opus"], labels, "x"));
-  assert.ok("error" in ticketModel(["model:sol"], labels, "x"), "an unconfigured label is not a model label");
-  assert.deepEqual(ticketModel([], {}, "fixed"), { model: "fixed" }, "no model labels configured: the fixed model");
+test("ticket model: explicit aliases and approved IDs, never labels or prose", () => {
+  for (const body of ["**Model:** Sonnet 5.5", "Model: SONNET", "**Pi model:** `sonnet`", `**Model**: ${SONNET}`, "Model: sonnet\r\nPi model: Sonnet 5.5"]) {
+    const m = ticketModel(body, labels);
+    assert.equal(m.status, "resolved", body);
+    assert.equal("model" in m && m.model, SONNET);
+    assert.match(m.revision, /^[a-f0-9]{64}$/);
+    assert.ok(m.declarations.length);
+  }
+  for (const body of ["Use Sonnet 5.5", "Labels: model:sonnet", "> Model: opus", "    Model: opus", "```md\nModel: opus\n```", "~~~\nModel: opus\n~~~", "<!--\nModel: opus\n-->", "<!-- Model: opus -->"]) {
+    assert.equal(ticketModel(body, labels).status, "missing", body);
+  }
+  assert.equal(ticketModel("```md\n``` example, not a closing fence\nModel: opus\n```", labels).status, "missing");
+  assert.equal(ticketModel("```html\n<!--\n```\nModel: opus", labels).status, "resolved");
+  assert.equal(ticketModel("~~~html\n<!--\n~~~\nModel: opus", labels).status, "resolved");
+  assert.equal(ticketModel("```html <!--\nexample\n```\nModel: sonnet", labels).status, "resolved");
+  assert.equal(ticketModel("~~~html <!--\nexample\n~~~\nModel: sonnet", labels).status, "resolved");
+  assert.equal(ticketModel("Model: unknown", labels).status, "unsupported");
+  assert.equal(ticketModel("Model:", labels).status, "unsupported");
+  assert.equal(ticketModel("Model: sonnet\nModel: opus", labels).status, "conflicting");
+  assert.equal(ticketModel("Model: openai/gpt-6.1-sol", labels).status, "unsupported");
+  assert.equal(ticketModel("", {}).status, "missing", "no fixed fallback even with no aliases");
+  assert.notEqual(ticketModel("Model: sonnet", labels).revision, ticketModel("Model: sonnet\nEdited requirement", labels).revision);
 });
 
-test("only the labelled models may be configured", () => {
+test("only the approved models may be configured", () => {
   assert.equal(disallowedModels(labels, [SONNET, OPUS]), undefined);
   assert.match(disallowedModels(labels, [OPUS, "openai/gpt-5.5"]) ?? "", /gpt-5\.5/);
   assert.equal(disallowedModels({}, ["anything"]), undefined);
 });
 
-test("personal reference config: labels, verifier and analysis models, provider", () => {
-  assert.deepEqual(PERSONAL_AGENT.modelLabels, labels);
+test("personal reference config: aliases, verifier and analysis models, provider", () => {
+  assert.equal(PERSONAL_AGENT.modelAliases["Sonnet 5.5"], SONNET);
+  assert.equal(PERSONAL_AGENT.modelAliases["Opus 5.5"], OPUS);
   assert.equal(PERSONAL_AGENT.model, OPUS);
   assert.equal(PERSONAL_GRAPH.model, SONNET);
   assert.equal(PERSONAL_AGENT.provider, "pi");
-  assert.equal(disallowedModels(PERSONAL_AGENT.modelLabels, [PERSONAL_AGENT.model, PERSONAL_GRAPH.model]), undefined);
-  assert.match(disallowedModels(PERSONAL_AGENT.modelLabels, ["openai/gpt-6.1-sol", PERSONAL_GRAPH.model]) ?? "", /gpt-6\.1-sol/, "a stray fixed model is rejected");
+  assert.equal(disallowedModels(PERSONAL_AGENT.modelAliases, [PERSONAL_AGENT.model, PERSONAL_GRAPH.model]), undefined);
+  assert.match(disallowedModels(PERSONAL_AGENT.modelAliases, ["openai/gpt-6.1-sol", PERSONAL_GRAPH.model]) ?? "", /gpt-6\.1-sol/, "a stray fixed model is rejected");
 });
 
-test("client reference config keeps Claude Code and a fixed model", () => {
+test("client reference config keeps Claude Code, fixed verifier and explicit aliases", () => {
   assert.equal(CLIENT_AGENT.provider, "claude");
-  assert.deepEqual(CLIENT_AGENT.modelLabels, {});
+  assert.equal(CLIENT_AGENT.modelAliases.opus, CLIENT_AGENT.model);
 });
 
 test("container env: subscription models need no OpenAI credential; openai models still mint one", () => {

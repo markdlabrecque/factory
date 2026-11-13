@@ -1,5 +1,6 @@
 <!doctype html>
-<!-- Factory tracker board/evidence shell: per-ticket dots and centered connectors, solid green/red current dots
+<!-- #126: current description model resolution is separate from the attempt's fixed implementation model.
+     Factory tracker board/evidence shell: per-ticket dots and centered connectors, solid green/red current dots
      with halos and sonar pulses, explicit queue reasons, latest-ten collapsible Shipped and real-history stats.
      Stats return focus to the invoking control, with a fallback for removed/hidden tickets.
      Current assessments always show an explicit unchecked state when absent, distinct from refresh/analysis pending
@@ -920,15 +921,23 @@
     c.assess.hidden = false;
     if (!a) {
       c.assess.replaceChildren(el('span', 'a-title', 'Current ticket: not checked yet'));
+      if (run.implementationModel) c.assess.appendChild(el('div', null, 'Attempt model: ' + run.implementationModel));
       return;
     }
     var rows = [el('span', 'a-title', 'Current ticket')];
+    if (run.implementationModel) rows.push(el('div', null, 'Attempt model: ' + run.implementationModel));
+    if (a.modelResolution) {
+      var m = a.modelResolution;
+      var modelRow = el('div', m.status === 'resolved' ? null : 'a-bad', m.status === 'resolved' ? 'Description model: ' + m.model : m.error);
+      modelRow.title = 'Declaration: ' + (m.declarations.join('; ') || 'none') + '\nDescription revision: ' + m.revision;
+      rows.push(modelRow);
+    }
     if (f) {
       var line = el('div', 'a-row');
       add(line, el('span', null, f.state === 'closed' ? 'Closed in tracker' : 'Open in tracker'));
       if (f.selected === false) line.appendChild(el('span', 'a-bad', 'Not selected: ' + (f.selectionReason || 'outside current filters')));
-      if (f.model) line.appendChild(el('span', null, 'Model ' + f.model));
-      if (f.modelError) line.appendChild(el('span', 'a-bad', f.modelError));
+      if (!a.modelResolution && f.model) line.appendChild(el('span', null, 'Model ' + f.model));
+      if (!a.modelResolution && f.modelError) line.appendChild(el('span', 'a-bad', f.modelError));
       line.appendChild(el('span', null, 'Checked ' + ago(f.checkedAt, now) + ' ago'));
       rows.push(line);
       if (f.title && run.title && f.title !== run.title) rows.push(el('div', null, 'Title now: ' + f.title));

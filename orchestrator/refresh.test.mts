@@ -1,3 +1,4 @@
+// #126: dispatch/refresh resolve description models on both trackers, preserving running attempt models.
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
 // scheduling, whole-project --refresh-only (#93), per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
@@ -18,7 +19,8 @@ import { unitHash } from "./graph.mts";
 
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-const ticket = (iid: number, extra = {}) => ({ iid, title: `Ticket ${iid}`, description: "Requirement DEP:20", state: "open", labels: ["ready-for-agent", "model:sonnet"], ...extra });
+// #126: selected fixtures declare models in descriptions, with no model label required.
+const ticket = (iid: number, extra = {}) => ({ iid, title: `Ticket ${iid}`, description: "**Model:** Sonnet 5.5\nRequirement DEP:20", state: "open", labels: ["ready-for-agent"], ...extra });
 function fixture(t: any, kind = "github") {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-refresh-")));
   t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -71,6 +73,42 @@ function fixture(t: any, kind = "github") {
   return { home, root, dir, fake, env, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
 }
 
+for (const kind of ["github", "gitlab"]) {
+  test(`${kind}: description failures queue without model labels, edits refresh the choice but not the attempt`, (t) => {
+    const f = fixture(t, kind);
+    f.data.tickets = [ticket(7, { description: "No declaration" }), ticket(8, { description: "Model: unknown" }),
+      ticket(9, { description: "Model: sonnet\nModel: opus" })];
+    f.data.ready = [7, 8, 9];
+    f.pass();
+    for (const [n, status] of [[7, "missing"], [8, "unsupported"], [9, "conflicting"]] as const) {
+      assert.equal(JSON.parse(f.bytes(join(f.dir, `${f.key(n)}.json`))).stage, "queued");
+      assert.equal(f.assessment(n).modelResolution?.status, status);
+      assert.ok(f.assessment(n).modelResolution?.revision);
+    }
+    assert.equal(existsSync(join(f.fake, "launches")), false);
+    const original = JSON.parse(f.record(7, "implementing"));
+    original.implementationModel = "attempt-original-model";
+    writeFileSync(join(f.dir, `${f.key(7)}.json`), JSON.stringify(original));
+    f.data.tickets[0].description = "**Model:** sonnet\nNew requirements";
+    f.pass(["--refresh-only", "--ticket", "7"]);
+    const resolved = f.assessment().modelResolution!;
+    assert.equal(resolved.status, "resolved");
+    assert.deepEqual(resolved.declarations, ["sonnet"]);
+    assert.notEqual(resolved.revision, undefined);
+    assert.deepEqual(JSON.parse(f.bytes(join(f.dir, `${f.key(7)}.json`))), original);
+    f.data.tickets[0].description = "**Model:** opus";
+    f.pass(["--refresh-only", "--ticket", "7"]);
+    assert.notEqual(f.assessment().modelResolution!.revision, resolved.revision);
+    assert.notDeepEqual(f.assessment().modelResolution, resolved);
+    assert.deepEqual(JSON.parse(f.bytes(join(f.dir, `${f.key(7)}.json`))), original);
+    f.data.tickets[1].description = 'Model: sonnet';
+    f.manifest(8);
+    f.pass();
+    assert.equal(f.assessment(8).modelResolution?.status, 'resolved');
+    assert.equal(JSON.parse(f.bytes(join(f.dir, `${f.key(8)}.json`))).stage, 'setup', 'an edited valid declaration becomes dispatchable without a model label');
+  });
+}
+
 test("refresh fixtures override a missing inherited Pi extension with their own stub boundary", (t) => {
   const old = process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION;
   process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION = "/fixture-missing-provider/index.ts";
@@ -90,7 +128,7 @@ test("refresh fixtures override a missing inherited Pi extension with their own 
 for (const kind of ["github", "gitlab"]) {
   test(`${kind}: a waiting automatic merge still reserves its open branch footprint`, (t) => {
     const f = fixture(t, kind);
-    f.data.tickets = [ticket(7, { description: "Candidate" }), ticket(8, { description: "Parked merge" })];
+    f.data.tickets = [ticket(7, { description: "Model: sonnet\nCandidate" }), ticket(8, { description: "Model: sonnet\nParked merge" })];
     f.data.ready = [7];
     f.data.openBranches = ["8-topic"];
     f.record(8, "waiting");

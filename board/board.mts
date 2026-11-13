@@ -10,6 +10,8 @@ import type { Assessment } from "./assessment.mts";
 import { projectTicket, readJournal } from "./journal.mts";
 
 // Run-state store + the Factory tracker board/evidence page (light/dark/system appearance).
+// #126: implementationModel is an attempt snapshot; assessment.modelResolution is the current description choice.
+// Invalid-model queuing and parent launch handoff are admission-locked and token-fenced.
 // Presentation alone reads the journal: hidden archived cards and effective verdicts never affect readRuns or evidence.
 // Normal admission assigns executionId so retries cannot inherit manual metadata even when startedAt is retained.
 // Stage visits persist for real timing, blockers and bounce stats; legacy history stays explicitly incomplete.
@@ -63,6 +65,7 @@ export interface RunState {
   stageSince: string;
   startedAt: string;
   executionId?: string; // unique normal admission; older/manual runs use startedAt
+  implementationModel?: string; // chosen once by main.mts, never updated by description refresh
   updatedAt: string;
   pid: number;
   verdict?: string;
@@ -215,8 +218,26 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
  *  in flight while `pid` lives; if `pid` exits before main.mts clears `starting`, readRuns() drops the record. With
  *  `patch.claim`, the claim this process took is handed to `pid` (unless the run already adopted it). */
 export function reserveRun(iid: string, pid: number, patch: Partial<RunState> = {}): void {
-  if (patch.claim) transferClaim(stateDir(), keyFor(iid, project), patch.claim, pid, process.pid);
-  setStage(iid, { ...patch, stage: "setup", note: "starting", starting: true, pid });
+  if (!patch.claim) {
+    setStage(iid, { ...patch, stage: "setup", note: "starting", starting: true, pid });
+    return;
+  }
+  const dir = stateDir(), key = keyFor(iid, project);
+  const reserved = withAdmission(dir, (tx) => {
+    const claim = tx.state.claims[key];
+    // A child can adopt or cancel before its parent returns from spawn. Never undo either transition.
+    if (!claim || claim.token !== patch.claim || claim.kind !== "normal" || claim.owner.pid !== process.pid) return false;
+    let cur: RunState;
+    try { cur = JSON.parse(readFileSync(resolve(dir, `${key}.json`), "utf8")); }
+    catch { return false; }
+    if (cur.claim !== patch.claim || !cur.starting) return false;
+    claim.owner = ownerOf(pid);
+    tx.commit();
+    const at = now();
+    writeRecord(dir, key, trackStage(cur, { ...cur, ...patch, stage: "setup", note: "starting", starting: true, pid, updatedAt: at }, at));
+    return true;
+  });
+  if (reserved) renderBoard();
 }
 
 export type Claim = { ok: true; run: RunState } | { ok: false; reason: string };
@@ -297,6 +318,31 @@ export function claimRun(o: AdmitOptions & { dir?: string }): Claim {
     writeRecord(dir, a.key, a.run);
     return { ok: true, run: a.run };
   });
+}
+
+/** Queue an unresolved description atomically with admission. Only the launch token may cancel its own
+ * unstarted reservation; a direct start or stale dispatcher cannot replace somebody else's new attempt. */
+export function queueModelProblem(iid: string, patch: Pick<RunState, "title" | "ticketUrl" | "base" | "note">,
+  launchToken?: string, dir = stateDir()): boolean {
+  const key = keyFor(iid, project);
+  const queued = withAdmission(dir, (tx) => {
+    const claim = tx.state.claims[key];
+    let cur: Partial<RunState> = {};
+    try { cur = JSON.parse(readFileSync(resolve(dir, `${key}.json`), "utf8")); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") return false; }
+    const ownsReservation = !!launchToken && claim?.token === launchToken && claim.kind === "normal"
+      && cur.claim === launchToken && cur.starting === true;
+    if (claim && !ownsReservation && (claim.kind === "recovery" || claimLive(claim))) return false;
+    if (cur.stage && !PARKED.includes(cur.stage) && !ownsReservation) return false;
+    const at = now();
+    writeRecord(dir, key, trackStage(cur, { startedAt: at, ...cur, ...patch, iid, project, pid: process.pid,
+      stage: "queued", stageSince: cur.stage === "queued" ? cur.stageSince ?? at : at, updatedAt: at,
+      starting: undefined, claim: undefined, queueReasons: undefined } as RunState, at));
+    if (ownsReservation) { delete tx.state.claims[key]; tx.commit(); }
+    return true;
+  });
+  if (queued) renderBoard();
+  return queued;
 }
 
 /** #87: move a stopped or parked card to `done` because its work merged outside Factory. Records the PR (`mr`), its

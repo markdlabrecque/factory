@@ -1,4 +1,5 @@
 // `factory init`: add the missing minimal Sandcastle workflow files to a Git project, then register it.
+// #126: setup guidance names description model aliases, not tracker model labels.
 // Never overwrites, never contacts a tracker, builds images or installs packages. A failed write leaves a
 // repairable scaffold and does not register the project; rerun to fill the gaps.
 // Self-recovery (#63): when this run created every recovery workflow file (recovery-review.mts WORKFLOW), the new copy is
@@ -66,7 +67,7 @@ export async function init(p: Paths, path: string | undefined, options: InitOpti
   console.log([
     'Not ready to run an agent yet. Remaining steps:',
     '  1. In the project: npm install --save-dev @ai-hero/sandcastle tsx',
-    `  2. Review the labels and merge policy in ${scaffoldName}/config.mts${personal ? ' (model labels: model:sonnet, model:opus)' : ''}.`,
+    `  2. Review the labels and merge policy in ${scaffoldName}/config.mts${personal ? ' (description model aliases: Sonnet 5.5, Opus 5.5)' : ''}.`,
     personal
       ? '  3. Host login: claude auth login, and install the pi-claude-subscription provider (git clone --depth 1 --branch <tag> https://github.com/markdlabrecque/pi-claude-subscription.git ~/.pi/agent/extensions/pi-claude-subscription, then npm ci --omit=dev --ignore-scripts there; see orchestrator/ADAPTING.md). Then run `claude setup-token` and put the token in .sandcastle/.env.'
       : '  3. Run `claude setup-token` and put the token in .sandcastle/.env; log in with `glab auth login`.',
