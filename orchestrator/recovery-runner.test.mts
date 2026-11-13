@@ -4,7 +4,7 @@
 // earlier evidence. Only external boundaries are stubbed: docker (fixtures/recovery-fakes.mts, which runs a container's
 // commands on the host with its mounts), the agent (a shell script per scenario), the tracker/push, and a fake clock
 // for the 900000 ms deadline. Unknown docker or host git calls throw. Prerequisite holds (#75) use the real
-// handoff.mts prerequisiteHold over a synthetic ticket analysis.
+// handoff.mts prerequisiteHold over a synthetic ticket analysis. The tracker boundary also covers posting failures.
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -56,7 +56,7 @@ const PASS = `printf 'VERDICT: PASS\\nlooks right\\n' > "$EVIDENCE/verdict.md"`;
 type Scenario = {
   repair?: string; verify?: string; clean?: boolean; setup?: { command: string; timeoutMs?: number }[]; hooks?: Record<string, Hook>;
   stuck?: boolean; runFails?: boolean; recheck?: (stage: "verify" | "deliver") => string | undefined; deliver?: () => Promise<{ url: string; merged: boolean }>;
-  beforeImport?: (f: Fixture) => void;
+  beforeImport?: (f: Fixture) => void; postFailure?: boolean;
 };
 type Fixture = ReturnType<typeof fixture>;
 
@@ -130,8 +130,10 @@ function fixture(t: TestContext, s: Scenario = {}) {
     },
     gitStatus: () => { throw new Error("unexpected gitStatus"); },
     tracker: {
-      comment: (_iid, body) => { comments.push(body); },
-      uploadEvidence: () => [],
+      postVerification: (_iid, _tip, files, body) => {
+        if (s.postFailure) throw new Error("attachment upload failed");
+        comments.push(body(files.map((f) => `![media](${f})`)));
+      },
       openMrBranches: () => new Set(),
       deliver: async (d) => { delivered.push({ sha: d.sha, branch: d.branch }); return s.deliver ? s.deliver() : { url: "https://example.test/pr/9", merged: false }; },
     },
@@ -363,6 +365,18 @@ for (const [name, s, outcome, verifierRan] of [
     assert.equal(f.rec().outcome, outcome);
   });
 }
+
+test("an attachment posting failure stops a real recovery attempt and keeps its local evidence", async (t) => {
+  const f = fixture(t, { postFailure: true });
+  const out = await f.run();
+  assert.equal(out.outcome, "failed", out.reason);
+  assert.match(out.reason ?? "", /Verification posting failed.*Evidence retained/);
+  assert.deepEqual(f.agentRuns, ["repair", "verifier"]);
+  assertPreserved(f);
+  assert.deepEqual(f.comments, []);
+  assert.ok(existsSync(join(f.rec().evidence, "verdict.md")));
+  assert.notEqual(f.rec().outcome, "delivered");
+});
 
 test("a no-change transient repair verifies and delivers the existing committed tip", async (t) => {
   const f = fixture(t, { clean: true, repair: writeReport({ filesChanged: [], cause: "CI runner flaked" }) });

@@ -7,6 +7,7 @@ import * as gitlab from "./tracker.gitlab.mts";
 // config.mts picks the adapter: "gitlab" (tracker.gitlab.mts, `glab`) or "github" (tracker.github.mts,
 // `gh`). A config without `kind` is GitLab. Every call runs on the host with that CLI's own login.
 // mergedPr finds work merged outside Factory: a merged PR/MR from the run's branch, or one titled `#N: ...`.
+// postVerification posts one comment with adapter-specific media hosting, before any delivery.
 
 export interface Ticket {
   iid: number; // the issue number shown as #N, on either tracker
@@ -62,5 +63,5 @@ const impl: typeof gitlab = (TRACKER as { kind?: string }).kind === "github" ? g
 
 export const {
   ticketUrl, catalogue, children, parentOf, workCatalogue, ticket, viewText, notes, readyList, comment,
-  uploadEvidence, openMrBranches, mergedInto, mergedPr, addLabel, close, advance, ensureLabels, deliver,
+  postVerification, openMrBranches, mergedInto, mergedPr, addLabel, close, advance, ensureLabels, deliver,
 } = impl;

@@ -9,7 +9,7 @@ import type { Handoff, Host, VerifierSandbox } from "./handoff.mts";
 
 // Run: node --test 'orchestrator/*.test.mts'
 // The verify/post/deliver hand-off shared by main.mts and recovery runs, and the prerequisite recheck recovery runs make
-// (#75), against a fake host (no tracker, git or Docker).
+// (#75), against a fake host (no tracker, git or Docker). Posting failures stop every verdict before delivery.
 
 type Rec = Record<string, unknown>;
 function fakeHost(record: Rec = {}) {
@@ -22,8 +22,7 @@ function fakeHost(record: Rec = {}) {
     git: (args) => { calls.push(`git ${args.join(" ")}`); return "abc123"; },
     gitStatus: () => ({ status: 0, stdout: "" }),
     tracker: {
-      comment: (_iid, body) => { calls.push("comment"); bodies.push(body); },
-      uploadEvidence: () => [],
+      postVerification: (_iid, _tip, files, body) => { calls.push("comment"); bodies.push(body(files.map((f) => `![media](${f})`))); },
       openMrBranches: () => new Set(),
       deliver: async (d) => { calls.push("deliver"); bodies.push(d.body("CI note")); return { url: "https://example.test/pr/9", merged: false }; },
     },
