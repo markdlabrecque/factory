@@ -37,6 +37,8 @@ import { projectTicket, readJournal } from "./journal.mts";
 // Factory, under the same lock, so a run or recovery admitted meanwhile is never overwritten.
 // Each card also carries the ticket's current assessment (assessment.mts, #78), kept in its own files beside the run records.
 // Assessment reads are best-effort: a broken assessment directory must not break the historical board.
+// A queued card whose last good assessment facts say selected === false is left out of the snapshot (#125); other stages,
+// missing or unknown selection, and raw readRuns are unaffected, and nothing is written.
 // readRuns(dir, false) reads raw records without crash reconciliation, for strictly read-only refresh paths.
 // stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
@@ -401,12 +403,16 @@ export function buildBoardData(mode: "file" | "http"): { runs: BoardRun[]; gener
   const runs = readRuns().flatMap((r) => {
     const view = presentationJournal(r);
     if (view?.archived) return [];
+    const assessment = assessments.get(r.key);
+    // #125: a queued card whose last successfully read facts confirm deselection leaves the snapshot. Only an explicit
+    // false hides it; the raw record stays, so later refreshes reassess it and restored selection brings it back.
+    if (r.stage === "queued" && assessment?.facts?.selected === false) return [];
     return [{
       ...r,
       originalVerdict: r.verdict,
       verdict: view?.verdict ?? r.verdict,
       manuallyCorrected: !!view?.correction,
-      assessment: assessments.get(r.key),
+      assessment,
       evidenceUrl: !r.evidenceDir ? undefined : mode === "http" ? `/evidence/${encodeURIComponent(r.key)}/` : `file://${r.evidenceDir}/`,
       ...latestActivity(r),
     }];
