@@ -1,3 +1,4 @@
+// #126: model-only updates preserve tracker facts with an independent fence that never interrupts full analysis.
 // Current assessments (#78): fail-closed dependencies, separate pending analysis, bounded attempts, store-failure
 // isolation, generation-safe requests and an HTTP manual failure with scheduling off. Cross-process interleavings
 // fence pending, successful and failed old attempts; stale assessment locks are reclaimed without admission writes.
@@ -8,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { assessed, beginAssessment, pendingRequests, pickRefreshes, publishAssessment, readAssessment, refreshCards, requestRefresh } from "./assessment.mts";
+import { assessed, beginAssessment, pendingRequests, pickRefreshes, publishAssessment, readAssessment, recordModelResolution, refreshCards, requestRefresh } from "./assessment.mts";
 import { ownerOf } from "./admission.mts";
 import type { RefreshDeps } from "./assessment.mts";
 
@@ -22,12 +23,41 @@ const fixture = (t: any) => {
   writeFileSync(resolve(dir, "p--7.json"), record);
   const d: RefreshDeps = {
     dir, project: "p", now: () => "now", read: () => ({ iid: 7, title: "T", description: "new", state: "open", labels: [] }),
-    notes: () => [], dependency: () => "satisfied", hash: () => "new", model: () => ({ model: "m" }), log: () => {},
+    notes: () => [], dependency: () => "satisfied", hash: () => "new", model: () => ({ status: "resolved", model: "m", declarations: ["m"], revision: "rev" }), log: () => {},
     selection: () => ({ selected: true }), analysisInput: () => "input", analysisBudget: 1,
     analyse: () => ({ requires: [{ providedBy: 3 }] }),
   };
   return { dir, run, record, d, read: () => readAssessment(dir, run.key)! };
 };
+
+test("model-only resolution updates retain facts and a newer refresh fences an older resolution read", (t) => {
+  const f = fixture(t);
+  refreshCards([f.run], f.d);
+  const before = f.read();
+  const ticket = { iid: '7', project: 'p' };
+  const newer = { status: 'resolved' as const, model: 'new', declarations: ['new'], revision: 'new' };
+  recordModelResolution(f.dir, f.run.key, ticket, () => {
+    recordModelResolution(f.dir, f.run.key, ticket, () => newer);
+    return { status: 'missing', error: 'old missing', declarations: [], revision: 'old' };
+  });
+  assert.deepEqual(f.read().modelResolution, newer);
+  assert.deepEqual(f.read().facts, before.facts);
+  assert.deepEqual(f.read().analysis, before.analysis);
+  assert.equal(readFileSync(resolve(f.dir, 'p--7.json'), 'utf8'), f.record);
+});
+
+test("model-only publication during full analysis does not strand the dependency result", (t) => {
+  const f = fixture(t);
+  const model = { status: 'resolved' as const, model: 'newer', declarations: ['newer'], revision: 'newer' };
+  f.d.analyse = () => {
+    recordModelResolution(f.dir, f.run.key, { iid: '7', project: 'p' }, () => model);
+    return { requires: [{ providedBy: 3 }] };
+  };
+  refreshCards([f.run], f.d);
+  assert.equal(f.read().analysisState, 'current');
+  assert.deepEqual(f.read().analysis?.requires, [{ providedBy: 3 }]);
+  assert.deepEqual(f.read().modelResolution, model, 'older full refresh cannot replace newer model resolution');
+});
 
 test("a failed check keeps the last good facts and records the error; a good one clears it", () => {
   const ok = assessed(undefined, { iid: "1", at: "t1", runHash: "a", ticket: facts("a") });
@@ -135,7 +165,7 @@ for (const pause of ["before pending", "during analysis", "tracker failure", "an
         refreshCards([run], {
           dir, project: 'p', now: () => 'new-time',
           read: () => ({ iid: 7, title: 'NEW', description: 'edited' }), notes: () => [],
-          hash: () => 'new-hash', model: () => ({ model: 'new-model' }),
+          hash: () => 'new-hash', model: () => ({ status: 'resolved', model: 'new-model', declarations: ['new-model'], revision: 'new' }),
           selection: () => ({ selected: false }), analysisInput: () => 'new-input',
           analysisBudget: 1, analyse: () => ({ requires: [{ providedBy: 99 }] }),
           dependency: () => 'unsatisfied', log: (m) => { throw new Error(m); },

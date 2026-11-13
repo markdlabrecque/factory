@@ -1,4 +1,5 @@
-// Current tracker assessments (#78), separate from execution manifests and run records. Store failures are best-effort
+// Current tracker assessments (#78), including description model resolutions (#126), separate from attempts.
+// Model-only publication has an independent read generation, so it cannot interrupt dependency analysis. Store failures are best-effort
 // and never gate admission or board rendering. Analysis has its own freshness key and budget. Unknown dependencies
 // fail closed here, independently of dispatch admission. Request generations preserve newer clicks; assessment
 // attempts fence pending, success and failure publication across processes. A short per-card lock covers only
@@ -28,7 +29,12 @@ export interface Facts {
   hash: string;
   checkedAt: string;
 }
+export type ModelResolution = { declarations: string[]; revision: string } & (
+  { status: "resolved"; model: string } |
+  { status: "missing" | "unsupported" | "conflicting"; error: string }
+);
 export interface Assessment {
+  modelResolution?: ModelResolution;
   iid: string;
   project?: string;
   projectRoot?: string;
@@ -57,9 +63,17 @@ function atomic(path: string, value: unknown) {
     renameSync(tmp, path);
   } finally { rmSync(tmp, { force: true }); }
 }
+const modelFile = (dir: string, key: string) => resolve(folder(dir), "models", `${key}.json`);
+const modelGeneration = (dir: string, key: string) => resolve(folder(dir), "models", `${key}.attempt`);
 function raw(dir: string, key: string): Assessment | undefined {
-  try { return JSON.parse(readFileSync(file(dir, key), "utf8")); }
-  catch (e) { if (!missing(e)) report(e); return undefined; }
+  let assessment: Assessment | undefined;
+  try { assessment = JSON.parse(readFileSync(file(dir, key), "utf8")); }
+  catch (e) { if (!missing(e)) report(e); }
+  try {
+    const model = JSON.parse(readFileSync(modelFile(dir, key), "utf8"));
+    return { ...assessment, ...model };
+  } catch (e) { if (!missing(e)) report(e); }
+  return assessment;
 }
 export function readAssessment(dir: string, key: string): Assessment | undefined {
   const a = raw(dir, key);
@@ -70,14 +84,41 @@ export function readAssessments(dir: string): Map<string, Assessment> {
   const out = new Map<string, Assessment>();
   try {
     const asked = pendingRequests(dir);
-    for (const f of readdirSync(folder(dir)).filter((n) => n.endsWith(".json"))) {
-      const key = f.replace(/\.json$/, ""), a = raw(dir, key);
+    const keys = new Set(readdirSync(folder(dir)).filter((n) => n.endsWith(".json")).map((n) => n.replace(/\.json$/, "")));
+    try {
+      for (const f of readdirSync(resolve(folder(dir), "models")).filter((n) => n.endsWith(".json"))) keys.add(f.replace(/\.json$/, ""));
+    } catch (e) { if (!missing(e)) report(e); }
+    for (const key of keys) {
+      const a = raw(dir, key);
       if (a) out.set(key, { ...a, pending: asked.has(key) });
     }
   } catch (e) { if (!missing(e)) report(e); }
   return out;
 }
 export function writeAssessment(dir: string, key: string, a: Assessment): void { atomic(file(dir, key), a); }
+
+/** Persist description resolution without rewriting historical runs or marking other facts fresh. */
+export function recordModelResolution(dir: string, key: string, ticket: { iid: string; project: string }, read: () => ModelResolution): ModelResolution {
+  let token: string | undefined;
+  try {
+    token = withAssessmentLock(dir, key, () => {
+      const next = randomUUID();
+      atomic(modelGeneration(dir, key), next);
+      return next;
+    });
+  } catch (e) { report(e); }
+  // Allocate before reading, independently of full assessment generations. Store failure never gates choice.
+  const resolution = read();
+  if (token) {
+    try {
+      withAssessmentLock(dir, key, () => {
+        if (JSON.parse(readFileSync(modelGeneration(dir, key), "utf8")) !== token) return;
+        atomic(modelFile(dir, key), { ...ticket, modelResolution: resolution });
+      });
+    } catch (e) { report(e); }
+  }
+  return resolution;
+}
 const generation = (dir: string, key: string) => resolve(folder(dir), `${key}.generation`);
 /** Independent of run admission. The guard serializes stale-owner checks with removal, so two reclaimers cannot
  * unlink a replacement lock. A crash while reclaiming fails closed rather than guessing based on lock age. */
@@ -169,7 +210,7 @@ export interface RefreshDeps {
   read: (iid: number) => RefreshTicket;
   notes: (iid: number) => RefreshNote[];
   hash: (t: RefreshTicket, notes: RefreshNote[]) => string;
-  model: (labels: string[]) => { model: string } | { error: string };
+  model: (description: string) => ModelResolution;
   selection: (t: RefreshTicket) => { selected: boolean; selectionReason?: string };
   analysisInput: (t: RefreshTicket, notes: RefreshNote[]) => string;
   analyse: (t: RefreshTicket, notes: RefreshNote[]) => Dependencies;
@@ -198,11 +239,17 @@ export function refreshCards(runs: RefreshRun[], d: RefreshDeps): string[] {
         const prev = store.read(d.dir).get(key);
         let next: Assessment;
         try {
-          const t = d.read(Number(run.iid)), notes = d.notes(Number(run.iid));
-          const hash = d.hash(t, notes), m = d.model(t.labels ?? []);
+          let t!: RefreshTicket;
+          const m = recordModelResolution(d.dir, key, { iid: run.iid, project: d.project }, () => {
+            t = d.read(Number(run.iid));
+            return d.model(t.description);
+          });
+          const notes = d.notes(Number(run.iid));
+          const hash = d.hash(t, notes);
           next = assessed(prev, { iid: run.iid, project: run.project, at, runHash: run.ticketHash,
             ticket: { title: t.title, state: t.state ?? "open", labels: t.labels ?? [], hash, ...d.selection(t),
               ...("error" in m ? { modelError: m.error } : { model: m.model }) } });
+          next.modelResolution = m;
           next.projectRoot = d.root;
           const input = d.analysisInput(t, notes);
           if (next.analysis?.input !== input) {

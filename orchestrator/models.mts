@@ -1,25 +1,65 @@
-// Model choice. AGENT.modelLabels (config.mts) maps ticket labels to models. Empty: one fixed model,
-// AGENT.model, for every run. Non-empty: the ticket's single model label picks the implementer's
-// model, and those models are the only ones allowed anywhere (AGENT.model, GRAPH.model).
+// Explicit description-only implementer model choice (#126). AGENT.modelAliases supplies aliases
+// and approved IDs. No labels, prose, parent context or defaults participate. Resolutions include
+// source declarations and a description revision for Factory's own ticket state.
 
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
+import type { ModelResolution } from "./assessment.mts";
 
-/** The implementer's model for a ticket, or why it has none. */
-export function ticketModel(labels: string[], modelLabels: Record<string, string>, fixed: string): { model: string } | { error: string } {
-  const choices = Object.keys(modelLabels);
-  if (!choices.length) return { model: fixed };
-  const found = labels.filter((l) => l in modelLabels);
-  if (found.length === 1) return { model: modelLabels[found[0]] };
-  const list = choices.join(", ");
-  return { error: found.length ? `has ${found.length} model labels (${found.join(", ")}); keep one of ${list}` : `needs a model label: one of ${list}` };
+/** Standalone Model: / Pi model: fields, plain or Markdown-bold, outside code, quotes and comments. */
+export function ticketModel(description: string, modelAliases: Record<string, string>): ModelResolution {
+  const revision = createHash("sha256").update(description).digest("hex");
+  const declarations: string[] = [];
+  let fence: string | undefined, comment = false;
+  for (const raw of description.split(/\r?\n/)) {
+    // Fenced contents are literal: HTML comment markers inside them cannot change parser state.
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(raw)?.[1];
+      if (close && close[0] === fence[0] && close.length >= fence.length) fence = undefined;
+      continue;
+    }
+    if (/^(?: {4}|\t| {0,3}>)/.test(raw) && !comment) continue;
+    const rawOpening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
+    if (!comment && rawOpening && !(rawOpening[1][0] === "`" && rawOpening[2].includes("`"))) {
+      fence = rawOpening[1];
+      continue;
+    }
+    let line = raw.replace(/<!--[\s\S]*?-->/g, "");
+    if (comment) {
+      const end = line.indexOf("-->");
+      if (end < 0) continue;
+      line = line.slice(end + 3); comment = false;
+    }
+    const start = line.indexOf("<!--");
+    if (start >= 0) { line = line.slice(0, start); comment = true; }
+    const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (opening && !(opening[1][0] === "`" && opening[2].includes("`"))) {
+      fence = opening[1];
+      continue;
+    }
+    const field = /^\s{0,3}(?:\*\*(?:Pi\s+)?Model:\*\*|\*\*(?:Pi\s+)?Model\*\*:|(?:Pi\s+)?Model:)\s*(.*?)\s*$/i.exec(line);
+    if (field) declarations.push(field[1]);
+  }
+  const base = { declarations, revision };
+  const hint = `Use **Model:** ${Object.keys(modelAliases).join(" or ") || "an alias configured in AGENT.modelAliases"}.`;
+  if (!declarations.length) return { ...base, status: "missing", error: `Missing model declaration. ${hint}` };
+  const aliases = new Map(Object.entries(modelAliases).map(([k, v]) => [k.trim().toLowerCase(), v]));
+  const approved = new Set(Object.values(modelAliases));
+  const resolved = declarations.map((d) => {
+    const value = d.replace(/^`([^`]+)`$/, "$1").trim();
+    return aliases.get(value.toLowerCase()) ?? (approved.has(value) ? value : undefined);
+  });
+  if (resolved.some((m) => !m)) return { ...base, status: "unsupported", error: `Unsupported model declaration: ${declarations.join(", ")}. ${hint}` };
+  if (new Set(resolved).size !== 1) return { ...base, status: "conflicting", error: `Conflicting model declarations: ${declarations.join(", ")}. Keep one model.` };
+  return { ...base, status: "resolved", model: resolved[0]! };
 }
 
 /** Configured models outside the allowlist, as an error message; undefined when all are allowed. */
-export function disallowedModels(modelLabels: Record<string, string>, configured: string[]): string | undefined {
-  const allowed = new Set(Object.values(modelLabels));
+export function disallowedModels(modelAliases: Record<string, string>, configured: string[]): string | undefined {
+  const allowed = new Set(Object.values(modelAliases));
   if (!allowed.size) return undefined;
   const bad = configured.filter((m) => !allowed.has(m));
-  return bad.length ? `model(s) ${bad.join(", ")} are not in AGENT.modelLabels (${[...allowed].join(", ")}); config.mts may only use those.` : undefined;
+  return bad.length ? `model(s) ${bad.join(", ")} are not in AGENT.modelAliases (${[...allowed].join(", ")}); config.mts may only use those.` : undefined;
 }
 
 // ---- Pi provider wiring ------------------------------------------------------------------------

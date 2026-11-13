@@ -1,3 +1,5 @@
+// #126: resolve description models once at attempt start; refresh never changes that model.
+import { recordModelResolution } from "./assessment.mts";
 import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -6,7 +8,7 @@ import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
-import { adoptClaim, keyFor, PARKED, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
+import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
 import { readAdmission } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { parentText } from "./analyze.mts";
@@ -30,8 +32,8 @@ import * as tracker from "./tracker.mts";
 //    Both trackers support MERGE.auto with required named checks on the pushed SHA (ci.mts).
 // Never closes the ticket (the dispatcher closes a Task/sub-issue, or moves a ticket on, once its work
 // merges). Every tracker call runs on the host with your glab/gh login; the container has no tracker token.
-// The agent (Claude Code or Pi) comes from AGENT in config.mts. The implementer's model is AGENT.model, or
-// with AGENT.modelLabels the one the ticket's model label names (models.mts); the verifier always uses AGENT.model.
+// The agent (Claude Code or Pi) comes from AGENT in config.mts. Description fields resolve the implementer's
+// model through AGENT.modelAliases (models.mts); the verifier always uses AGENT.model.
 //
 // Recovery mode (slice four, #60/#74): `main.mts --issue <n> --base <b> --recover <seq> --attempt-record <file>` is
 // started only by Factory's recovery launcher (cli/src/recovery-run.mts) after it claimed the ticket and wrote the
@@ -39,7 +41,7 @@ import * as tracker from "./tracker.mts";
 // the arguments name the same project, ticket, branch, base and attempt (seq and UUID), and that the worktree is inside
 // .sandcastle/worktrees/. It then runs recovery.mts runRecoveryAttempt with the real boundaries: recovery-sandbox.mts's
 // owned container (exact pre-recorded name, private Git metadata, this attempt's evidence only writable; not
-// Sandcastle's createSandbox), the repair agent on AGENT.model whatever the ticket's model label, a 900000 ms deadline
+// Sandcastle's createSandbox), the repair agent on AGENT.model whatever the ticket's model declaration, a 900000 ms deadline
 // from container readiness, the shared verifier and delivery (handoff.mts), and a recheck of the ticket's requirements,
 // state, needs-human label, prerequisite holds (handoff.mts prerequisiteHold over the dispatcher's analysis; unknown
 // holds) and claim before verifying and before delivering. SIGTERM/SIGINT cancel the attempt (exit 143). The record
@@ -130,7 +132,7 @@ if (recovering) {
   if (opts["no-push"]) fail("--recover always delivers normally; --no-push is not allowed with it.");
 }
 const base = opts.base;
-const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
+const badModels = disallowedModels(AGENT.modelAliases, [AGENT.model, GRAPH.model]);
 if (badModels) fail(badModels);
 await tracker.ensureLabels(allLabels());
 
@@ -150,10 +152,17 @@ const withParent = (t: tracker.Ticket): tracker.Ticket => {
   const p = tracker.ticket(parentIid);
   return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
 };
-const startTicket = withParent(tracker.ticket(Number(iid)));
+setProject(PROJECT);
+let startTicket!: tracker.Ticket;
+const picked = recordModelResolution(stateDir(), keyFor(iid, PROJECT), { iid, project: PROJECT }, () => {
+  startTicket = withParent(tracker.ticket(Number(iid)));
+  return ticketModel(startTicket.description, AGENT.modelAliases);
+});
 const issue = startTicket;
-const picked = ticketModel(startTicket.labels ?? [], AGENT.modelLabels, AGENT.model);
-if ("error" in picked && !recovering) fail(`#${iid} ${picked.error}. Not started.`);
+if ("error" in picked && !recovering) {
+  queueModelProblem(iid, { title: startTicket.title, ticketUrl: tracker.ticketUrl(iid), base, note: picked.error }, process.env.FACTORY_LAUNCH_CLAIM);
+  fail(`#${iid} ${picked.error} Not started.`);
+}
 const implementerModel = "error" in picked ? AGENT.model : picked.model; // recovery never uses it
 const ticket = [tracker.viewText(Number(iid)), parentText(startTicket)].filter(Boolean).join("\n\n");
 // The version of the ticket this run builds from; compared again before the MR opens.
@@ -269,6 +278,7 @@ try {
 currentIid = iid;
 setStage(iid, {
   title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
+  implementationModel: implementerModel,
   evidenceDir: resolve(".sandcastle/evidence", iid), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
   parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
   starting: undefined, // this run now owns the record the dispatcher reserved at launch

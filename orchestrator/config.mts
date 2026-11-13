@@ -1,4 +1,5 @@
-// Project settings shared by main.mts and dispatch.mts. Edit this file when adapting to a project.
+// Project settings shared by main.mts and dispatch.mts. Description declarations select implementation
+// models via modelAliases (#126); verifier and analysis choices remain fixed. Edit when adapting.
 // Reference config for client and Affinity Bridge work: GitLab, Claude Code, and MRs a person merges.
 // For personal projects (GitHub, Pi with Claude subscription models, PRs merged once CI passes) start from
 // config.personal.mts instead, installed as config.mts. Lines tagged `// factory:<name>` are the values
@@ -19,11 +20,10 @@ export const TRACKER = {
 // in .sandcastle/.env. "pi": the Pi agent, logged in with the host's pi login (see config.personal.mts).
 export const AGENT = {
   provider: "claude" as "claude" | "pi",
-  // Label -> model. Empty: the implementer uses `model`. Non-empty: every ticket must carry exactly one
-  // of these labels, which picks the implementer's model (see config.personal.mts); `model` and
-  // GRAPH.model must then be among these models too.
-  modelLabels: {} as Record<string, string>,
-  model: "claude-opus-4-8", // the verifier, and the implementer when modelLabels is empty
+  // Explicit **Model:** or **Pi model:** declaration -> approved model. Alias matching ignores case.
+  // Full IDs in these values are approved too. Missing/invalid declarations never use a default.
+  modelAliases: { opus: "claude-opus-4-8", sonnet: "sonnet" } as Record<string, string>,
+  model: "claude-opus-4-8", // fixed: the verifier
   // pi only: reasoning effort, "off" | "minimal" | "low" | "medium" | "high" | "xhigh".
   thinking: undefined as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined,
 };
@@ -53,7 +53,7 @@ export const LABELS = {
   done: "Internal QA",
 };
 
-export const allLabels = () => [...new Set([...LABELS.ready, ...LABELS.exclude, LABELS.needsHuman, LABELS.done, ...Object.keys(AGENT.modelLabels)])];
+export const allLabels = () => [...new Set([...LABELS.ready, ...LABELS.exclude, LABELS.needsHuman, LABELS.done])];
 
 // GitLab Tasks (the "Child items" on an issue).
 export const SUBTASKS = {

@@ -1,4 +1,5 @@
-// Project settings shared by main.mts and dispatch.mts. Edit this file when adapting to a project.
+// Project settings shared by main.mts and dispatch.mts. Description declarations select implementation
+// models via modelAliases (#126); tracker model labels are neither required nor created.
 // Reference config for personal projects: GitHub issues and PRs, the Pi agent with Claude subscription
 // models (the pi-claude-subscription provider), and PRs merged automatically once CI passes. `factory init`
 // installs it into a project as .sandcastle/config.mts. The client / Affinity Bridge reference (GitLab,
@@ -30,12 +31,13 @@ const MODELS = {
 // .sandcastle/.env (`claude setup-token`). There is no Pi login or API key for this provider.
 export const AGENT = {
   provider: "pi" as "claude" | "pi",
-  // The implementer's model comes from the ticket: every ticket must carry exactly one of these
-  // labels. One without (or with two) is not started; the board says why. The label alone selects the
-  // model; a model name written in the ticket body schedules nothing.
-  modelLabels: {
-    "model:sonnet": MODELS.sonnet,
-    "model:opus": MODELS.opus,
+  // A standalone **Model:** / **Pi model:** field selects an alias or an approved full ID.
+  // Aliases ignore case. Missing, unsupported or conflicting fields keep the ticket queued.
+  modelAliases: {
+    "Sonnet 5.5": MODELS.sonnet,
+    sonnet: MODELS.sonnet,
+    "Opus 5.5": MODELS.opus,
+    opus: MODELS.opus,
   } as Record<string, string>,
   model: MODELS.opus, // fixed: the verifier
   // Reasoning effort: "off" | "minimal" | "low" | "medium" | "high" | "xhigh".
@@ -67,7 +69,7 @@ export const LABELS = {
   done: "merged",
 };
 
-export const allLabels = () => [...new Set([...LABELS.ready, ...LABELS.exclude, LABELS.needsHuman, LABELS.done, ...Object.keys(AGENT.modelLabels)])];
+export const allLabels = () => [...new Set([...LABELS.ready, ...LABELS.exclude, LABELS.needsHuman, LABELS.done])];
 
 // GitHub sub-issues.
 export const SUBTASKS = {

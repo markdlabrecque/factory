@@ -1,3 +1,4 @@
+// #126: Board DOM separates current description resolution/errors from a running attempt's fixed model.
 // Archive coverage exercises project/header gates, active/queued refusal, preservation and idempotence over HTTP,
 // plus delayed-success/error DOM state and corrected-verdict badges. All fixtures are local, never live tracker data.
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
@@ -201,6 +202,16 @@ test("assessment DOM distinguishes unchecked, fresh, pending and failed checks w
   assert.match(failed, /Open in tracker.*Checked 1m ago.*Last check failed 1m ago: tracker unavailable.*Showing the last good check/);
   assert.ok(card.assess.children.some(n => n.className === 'a-bad' && /Last check failed/.test(n.textContent)));
   assert.equal(render(), 'Current ticket: not checked yet', 'reused cards clear stale facts and errors');
+  ctx.renderAssessment(card, { implementationModel: 'old-attempt', assessment: { facts, modelResolution: {
+    status: 'resolved', model: 'new-description', declarations: ['Sonnet 5.5'], revision: 'abc',
+  } } }, 0);
+  assert.match(card.assess.textContent, /Attempt model: old-attempt.*Description model: new-description/);
+  assert.doesNotMatch(card.assess.textContent, /Model opus/);
+  ctx.renderAssessment(card, { implementationModel: 'old-attempt', assessment: { modelResolution: {
+    status: 'missing', error: 'Missing model declaration. Use **Model:** sonnet.', declarations: [], revision: 'def',
+  } } }, 0);
+  assert.match(card.assess.textContent, /Attempt model: old-attempt.*Missing model declaration/);
+  assert.ok(card.assess.children.some(n => n.className === 'a-bad'));
   ctx.fileMode = true;
   ctx.renderAssessment(card, {}, 0);
   assert.equal(card.refresh.hidden, true, 'local snapshots still hide the HTTP action');
@@ -518,6 +529,49 @@ test("an in-progress run shows the last line of its newest agent log; parked and
     assert.equal(latestActivity({ ...run, stage: "done" }), undefined);
     assert.equal(latestActivity({ ...run, branch: "missing" }), undefined);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unresolved-model queue writes cannot replace a concurrently admitted attempt", async () => {
+  const board = await import('./board.mts');
+  const dir = mkdtempSync(resolve(tmpdir(), 'board-model-queue-'));
+  const cwd = process.cwd(), previous = process.env.SANDCASTLE_STATE_DIR;
+  try {
+    process.chdir(dir);
+    process.env.SANDCASTLE_STATE_DIR = resolve(dir, 'state');
+    board.setProject('model-test');
+    for (const iid of ['7', '8']) {
+      if (iid === '8') board.queueModelProblem(iid, { note: 'Missing declaration' });
+      // An invalid direct start observed the card absent/parked before another dispatcher admitted it.
+      const staleObservation = board.readRuns().find(r => r.iid === iid);
+      assert.equal(staleObservation?.stage, iid === '8' ? 'queued' : undefined);
+      const admitted = board.claimRun({ iid, pid: process.pid, cap: 10 });
+      assert.equal(admitted.ok, true);
+      const path = resolve(board.stateDir(), `model-test--${iid}.json`);
+      const bytes = readFileSync(path, 'utf8');
+      assert.equal(board.queueModelProblem(iid, { note: 'Missing declaration' }), false);
+      assert.equal(board.queueModelProblem(iid, { note: 'Missing declaration' }, 'stale-token'), false);
+      assert.equal(readFileSync(path, 'utf8'), bytes);
+      if (admitted.ok) {
+        assert.equal(board.queueModelProblem(iid, { note: 'Missing declaration' }, admitted.run.claim), true);
+        assert.equal(JSON.parse(readFileSync(path, 'utf8')).stage, 'queued');
+        const queued = readFileSync(path, 'utf8');
+        board.reserveRun(iid, process.pid, { claim: admitted.run.claim });
+        assert.equal(readFileSync(path, 'utf8'), queued, 'late parent cannot undo child cancellation');
+        assert.equal(board.queueModelProblem(iid, { note: 'Still missing' }), true, 'repeat direct failures remain retryable');
+        const replacement = board.claimRun({ iid, pid: process.pid, cap: 10 });
+        assert.equal(replacement.ok, true);
+        const replacementBytes = readFileSync(path, 'utf8');
+        board.reserveRun(iid, process.pid, { claim: admitted.run.claim });
+        assert.equal(readFileSync(path, 'utf8'), replacementBytes, 'stale parent cannot replace a newer admission');
+        if (replacement.ok) board.queueModelProblem(iid, { note: 'Missing' }, replacement.run.claim);
+      }
+    }
+  } finally {
+    process.chdir(cwd);
+    if (previous === undefined) delete process.env.SANDCASTLE_STATE_DIR;
+    else process.env.SANDCASTLE_STATE_DIR = previous;
     rmSync(dir, { recursive: true, force: true });
   }
 });

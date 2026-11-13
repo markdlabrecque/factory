@@ -1,10 +1,12 @@
+// #126: description model resolutions are persisted independently of immutable running attempt choices.
+import { recordModelResolution } from "./assessment.mts";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
-import { claimRun, markMergedOutside, PARKED, readRuns, removeRun, reserveRun, setProject, setStage, TERMINAL } from "./board.mts";
+import { claimRun, markMergedOutside, PARKED, queueModelProblem, readRuns, removeRun, reserveRun, setProject, setStage, stateDir, keyFor, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
 import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
@@ -39,7 +41,7 @@ import type { Ticket } from "./tracker.mts";
 // into its base (tracker.mergedPr: from the run's recorded branch, or titled "#N: ...") moves to done with the PR, its
 // merge time and "merged outside Factory", keeping its verdict; it is not launched, and its still-open Task is closed or
 // ticket moved to LABELS.done as for Factory's own merges. A closed issue alone is never taken as a merge.
-// With AGENT.modelLabels (config.mts), a ticket without exactly one model label stays queued.
+// Explicit description declarations resolve through AGENT.modelAliases; unresolved tickets stay queued.
 // Existing cards, including deselected parked cards, are retained and reassessed separately (#78, refresh.mts).
 // --refresh-only [--ticket <iid>] is the bounded read-only command: with --ticket the board's one-card check, without it
 // (#93) every card of this project (up to REFRESH_PER_PASS, oldest assessment first, within GRAPH.maxAnalysesPerPass), for
@@ -118,7 +120,7 @@ if (opts["refresh-only"]) {
   process.exit(0);
 }
 
-const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
+const badModels = disallowedModels(AGENT.modelAliases, [AGENT.model, GRAPH.model]);
 if (badModels) {
   console.error(badModels);
   process.exit(1);
@@ -209,16 +211,19 @@ const unstarted = issues.filter((i) => {
   if ([...branches].some((b) => b.startsWith(`${i.iid}-`))) return false; // already has a branch
   return true;
 });
-// Tickets without exactly one model label (when AGENT.modelLabels is set) wait for a person to add one.
+// Resolve all selected descriptions, including active tickets, without touching their attempt model.
 const noModel = new Map<number, string>();
-for (const i of unstarted) {
-  const m = ticketModel(i.labels ?? [], AGENT.modelLabels, AGENT.model);
+for (const i of issues) {
+  const m = dry ? ticketModel(i.description, AGENT.modelAliases) : recordModelResolution(
+    stateDir(), keyFor(String(i.iid), PROJECT), { iid: String(i.iid), project: PROJECT },
+    () => ticketModel(tracker.ticket(i.iid).description, AGENT.modelAliases),
+  );
   if ("error" in m) noModel.set(i.iid, m.error);
 }
 const candidates = unstarted.filter((i) => !noModel.has(i.iid));
 for (const i of unstarted.filter((u) => noModel.has(u.iid))) {
   log(`#${i.iid} ${i.title}: ${noModel.get(i.iid)}`);
-  if (!dry) setStage(String(i.iid), { stage: "queued", title: i.title, ticketUrl: tracker.ticketUrl(i.iid), base, note: noModel.get(i.iid) });
+  if (!dry) queueModelProblem(String(i.iid), { title: i.title, ticketUrl: tracker.ticketUrl(i.iid), base, note: noModel.get(i.iid) });
 }
 log(`${parents.length} ready ticket(s), ${issues.length} unit(s) of work, ${candidates.length} not yet started`);
 
@@ -374,7 +379,7 @@ for (const [n, d] of launch.entries()) {
     cwd: process.cwd(),
     detached: true,
     stdio: ["ignore", out, out],
-    env: process.env,
+    env: { ...process.env, FACTORY_LAUNCH_CLAIM: claim.run.claim! },
   });
   child.unref();
   // The claim goes to the child (main.mts adopts it); a launch that failed to spawn releases it.

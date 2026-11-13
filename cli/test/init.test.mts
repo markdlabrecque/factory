@@ -1,3 +1,4 @@
+// #126: personal scaffolds ship description aliases and never require model tracker labels.
 // Init tests: scaffold contents, no-clobber, rerun repair, failure-doesn't-register, wrapper quoting, shared
 // state, uninstall's treatment of projects, and that every module a scaffolded file imports is scaffolded,
 // including refresh.mts, the independent assessment store (#78) and journal projection (#101-#102).
@@ -81,7 +82,9 @@ test('generated configs import with the right tracker, agent and merge policy; p
   assert.equal(pc.TRACKER.project, 'me/site');
   assert.equal(pc.TRACKER.milestone, undefined);
   assert.equal(pc.AGENT.provider, 'pi');
-  assert.deepEqual(pc.AGENT.modelLabels, { 'model:sonnet': 'pi-claude-subscription/claude-sonnet-5-5', 'model:opus': 'pi-claude-subscription/claude-opus-5-5' });
+  assert.equal(pc.AGENT.modelAliases['Sonnet 5.5'], 'pi-claude-subscription/claude-sonnet-5-5');
+  assert.equal(pc.AGENT.modelAliases['Opus 5.5'], 'pi-claude-subscription/claude-opus-5-5');
+  assert.ok(!pc.allLabels().some((l: string) => l.startsWith('model:')));
   assert.equal(pc.AGENT.model, 'pi-claude-subscription/claude-opus-5-5');
   assert.equal(pc.GRAPH.model, 'pi-claude-subscription/claude-sonnet-5-5');
   assert.equal(pc.MERGE.auto, true);

@@ -1,4 +1,4 @@
-// Read-only current assessment adapter (#78). Shared by scheduled dispatch and --refresh-only (one card with --ticket,
+// Read-only current assessment adapter (#78). Description models use the shared resolver (#126). Shared by scheduled dispatch and --refresh-only (one card with --ticket,
 // else every card of the project, #93), which exits before
 // tracker writes, run updates, admission or launches. Analysis results go only to assessments; execution manifests
 // remain untouched. Assessment uses a separate read-only worktree so a manual check cannot reset the execution
@@ -45,7 +45,7 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
         const p = tracker.ticket(parent);
         return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
       },
-      notes: tracker.notes, hash: unitHash, model: (labels) => ticketModel(labels, AGENT.modelLabels, AGENT.model),
+      notes: tracker.notes, hash: unitHash, model: (description) => ticketModel(description, AGENT.modelAliases),
       selection: (t) => {
         const closed = t.state === "closed", excluded = t.labels?.some((l) => LABELS.exclude.includes(l));
         return { selected: !closed && !excluded && selected.has(t.iid),

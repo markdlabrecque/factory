@@ -1,3 +1,4 @@
+// #126: normal runs snapshot the description model; invalid direct starts queue before Git/container work.
 // Guarded entrypoint smoke test (#74): a claimed, stopped ticket goes from Factory's real launcher (cli/src/recovery-run.mts)
 // through the real scaffolded `.sandcastle/main.mts --recover` (built by cli/src/scaffold.mts, which ships prompt.recover.md,
 // and recorded as reviewed the way factory init records a new scaffold, #63) into runRecoveryAttempt, the owned container, the shared verifier and normal
@@ -179,4 +180,28 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   const rec9 = readRuns(state).find((r) => r.iid === "9")!;
   assert.deepEqual([rec9.stage, rec9.claim], ["stopped", (pre as { run: { claim: string } }).run.claim]);
   assert.equal(readAdmission(state).claims["owner_repo--9"], undefined, "a stopped run released its launch claim");
+  assert.equal(rec9.implementationModel, "pi-claude-subscription/claude-sonnet-5-5");
+
+  // Direct invalid starts preserve actionable internal state, even if dispatched just before a body edit.
+  for (const [n, body, status] of [[10, "No declaration", "missing"], [11, "Model: unknown", "unsupported"],
+    [12, "Model: sonnet\nModel: opus", "conflicting"]] as const) {
+    const pending = claimRun({ dir: state, project: "owner/repo", iid: String(n), pid: process.pid, cap: 99 });
+    assert.equal(pending.ok, true);
+    const result = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", String(n), "--base", "main"],
+      { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: body,
+        FACTORY_LAUNCH_CLAIM: pending.ok ? pending.run.claim : '' } });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /Not started/);
+    const run = JSON.parse(readFileSync(join(state, `owner_repo--${n}.json`), "utf8"));
+    const assessment = JSON.parse(readFileSync(join(state, "assessment", "models", `owner_repo--${n}.json`), "utf8"));
+    assert.equal(run.stage, "queued");
+    assert.equal(assessment.modelResolution.status, status);
+    assert.equal(run.implementationModel, undefined);
+    assert.equal(readAdmission(state).claims[`owner_repo--${n}`], undefined);
+    assert.equal(git(root, "branch", "--list", `${n}-*`), "");
+  }
+  const fixed = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", "10", "--base", "main"],
+    { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model: opus' } });
+  assert.match(fixed.stderr, /docker\(\) must not be used/);
+  assert.equal(readRuns(state).find(r => r.iid === '10')?.implementationModel, 'pi-claude-subscription/claude-opus-5-5');
 });
