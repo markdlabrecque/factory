@@ -5,6 +5,8 @@
 // Tracker coverage includes latest-ten Shipped selection, queue reasons, persisted stage visits, honest legacy stats
 // and focus returned to the actual stats control, including removed/hidden-control fallbacks. Assessment DOM assertions
 // cover unchecked, fresh, pending-analysis, pending-refresh and failed-with-last-good cards, including reused nodes.
+// #121: the scheduler strip's text rules, per-timer entries and live countdown, and GET /api/timers across a stubbed service manager.
+// A hung manager must time out as Unknown without blocking other HTTP requests.
 // The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
 // #125: queued cards with confirmed deselected facts leave the shared snapshot (API, page, live diff/counts) without writes.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
@@ -16,6 +18,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, w
 import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { home, launchctlStub, systemctlStub } from "../cli/test/schedule-helpers.mts";
 
 const template = readFileSync(resolve("board/board.template.html"), "utf8");
 const section = (name: string) => template.slice(template.indexOf(`// ${name}:start`), template.indexOf(`// ${name}:end`));
@@ -624,5 +627,93 @@ test("#87: a stopped or parked card merged outside Factory moves to done with it
     if (prevState === undefined) delete process.env.SANDCASTLE_STATE_DIR;
     else process.env.SANDCASTLE_STATE_DIR = prevState;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#121: the scheduler strip words each state, counts down, keeps one entry per timer and updates in place", () => {
+  const { formatCountdown, timerText, validTimers, paintTimers, tickTimers } = load("timers", ["formatCountdown", "timerText", "validTimers", "paintTimers", "tickTimers"], { Math }) as any;
+  assert.deepEqual([0, 999, 1000, 59_000, 252_000, 3_600_000, 3_900_000].map(formatCountdown), ["due now", "1s", "1s", "59s", "4m 12s", "1h 00m", "1h 05m"]);
+  const now = 1_000_000;
+  const text = (t: any) => timerText(t, now);
+  assert.equal(text({ state: "running", nextAt: now + 5000 }), "Running now");
+  assert.equal(text({ state: "off" }), "Scheduler off");
+  assert.equal(text({ state: "none" }), "No timer");
+  assert.equal(text({ state: "unknown" }), "Unknown");
+  assert.equal(text({ state: "scheduled", nextAt: now + 252_000 }), "Next run in 4m 12s");
+  assert.equal(text({ state: "scheduled", nextAt: now - 1 }), "Next run due now");
+  assert.equal(text({ state: "scheduled" }), "Scheduled, next run unknown");
+  const timers = [{ id: "a.timer", name: "factory-tick", state: "scheduled", nextAt: now + 3000 }, { id: "b.timer", name: "factory-tick-two", state: "off" }];
+  assert.equal(validTimers({ generatedAt: "2026-11-13T12:00:00Z", timers }), true);
+  assert.equal(validTimers({ generatedAt: "x", timers: [{ id: "a", name: "n", state: "paused" }] }), false);
+  assert.equal(validTimers({ generatedAt: "x" }), false);
+  const node = (tag: string) => ({ tag, children: [] as any[], dataset: {} as any, className: "", textContent: "", appendChild(c: any) { this.children.push(c); this.firstChild = this.children[0]; }, removeChild(c: any) { this.children.splice(this.children.indexOf(c), 1); this.firstChild = this.children[0]; }, firstChild: undefined as any });
+  const make = (tag: string, cls: string | null, textContent?: string) => Object.assign(node(tag), { className: cls || "", textContent: textContent ?? "" });
+  const list: any = node("div");
+  const view = paintTimers(list, timers, now, make);
+  assert.deepEqual(list.children.map((n: any) => [n.dataset.state, n.children[1].textContent, n.children[2].textContent]),
+    [["scheduled", "factory-tick", "Next run in 3s"], ["off", "factory-tick-two", "Scheduler off"]]);
+  const first = view.entries[0].when;
+  tickTimers(view, now + 2000);
+  assert.equal(first.textContent, "Next run in 1s", "the countdown updates the same node each second");
+  tickTimers(view, now + 3000);
+  assert.equal(first.textContent, "Next run due now");
+  paintTimers(list, [timers[1]], now, make);
+  assert.equal(list.children.length, 1, "repainting replaces the entries");
+});
+
+test("#121: a hung manager does not block other Board requests", async (t) => {
+  if (process.platform !== "linux" && process.platform !== "darwin") return t.skip("no scheduler backend here");
+  const { p } = home(t, "factory-board-hung-");
+  const bin = resolve(p.home, "bin");
+  mkdirSync(bin, { recursive: true });
+  const marker = resolve(p.home, "query-started");
+  const command = process.platform === "linux" ? "systemctl" : "launchctl";
+  writeFileSync(resolve(bin, command), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started'); setTimeout(() => {}, 60000);\n`, { mode: 0o755 });
+  const child = spawn(process.execPath, [resolve("board/board-server.mts")], {
+    env: { ...process.env, FACTORY_HOME: p.home, HOME: p.home, SANDCASTLE_STATE_DIR: resolve(p.home, "state"),
+      PATH: `${bin}:${process.env.PATH}`, HOST: "127.0.0.1", PORT: "0" }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    const [output] = await once(child.stdout!, "data");
+    const base = String(output).match(/http:\/\/[^\s]+/)![0];
+    const pending = fetch(base + "/api/timers");
+    const deadline = Date.now() + 4000;
+    while (!existsSync(marker) && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
+    assert.ok(existsSync(marker), "query has started before probing the other route");
+    const runs = await fetch(base + "/api/runs", { signal: AbortSignal.timeout(2000) });
+    assert.equal(runs.status, 200);
+    assert.deepEqual((await runs.json()).runs, []);
+    const body = await (await pending).json();
+    assert.equal(body.timers[0].state, "unknown", "query timeout still reports Unknown");
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("#121: GET /api/timers reads the service manager through its stub, read-only, with no last-run data", async (t) => {
+  if (process.platform !== "linux" && process.platform !== "darwin") return t.skip("no scheduler backend here");
+  const { p } = home(t, "factory-board-api-");
+  const stub = process.platform === "linux" ? systemctlStub(t, p) : launchctlStub(t, p);
+  const dir = mkdtempSync(resolve(tmpdir(), "sandcastle-board-test-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const child = spawn(process.execPath, [resolve("board/board-server.mts")], {
+    env: { ...process.env, ...stub.env, FACTORY_HOME: p.home, HOME: p.home, SANDCASTLE_STATE_DIR: dir, PORT: "0" }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    const [output] = await once(child.stdout!, "data");
+    const base = String(output).match(/http:\/\/[^\s]+/)![0];
+    const res = await fetch(base + "/api/timers");
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    const body = await res.json();
+    assert.deepEqual(body.timers.map((x: any) => [x.name, x.state]), [["factory-tick", "none"]], "nothing installed in the fixture home");
+    assert.match(body.generatedAt, /^\d{4}-\d\d-\d\dT/);
+    assert.deepEqual(stub.rejected(), [], "only read-only queries of the fixed shapes were sent");
+    assert.equal(stub.calls().some((c) => c.some((a) => /enable|disable|start|stop|bootstrap|bootout|kickstart/.test(a))), false);
+    assert.equal((await fetch(base + "/api/timers/x")).status, 404);
+  } finally {
+    child.kill();
+    await once(child, "exit");
   }
 });

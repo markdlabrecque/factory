@@ -9,6 +9,9 @@ import { archiveTicket } from "./tickets.mts";
 // GET /api/runs returns the same run snapshot as uncached JSON; the page polls it every 10s.
 // POST /api/projects/<project>/tickets/<iid>/archive requires x-factory: 1 and validates current history eligibility
 // under the admission lock. Only journal state changes; raw records and evidence remain accessible. Errors are JSON.
+// GET /api/timers returns the scheduler strip's data (timers.mts): each factory-tick timer's state and next run, read-only
+// from the service manager ("unknown" when that fails), with no last-run or history data. Queries do not block HTTP.
+// The page polls it every 10s. Standalone installs without cli/ return no entries and hide the strip.
 // GET /evidence/<run-key>/ uses the board shell with image/video/text previews and back navigation.
 // GET /evidence/<run-key>/<file> serves originals. Text previews are bounded to 64 KiB.
 // POST /api/refresh/<run-key> (header x-factory-refresh: 1, which a cross-site page cannot send) starts a read-only
@@ -31,6 +34,20 @@ function previewText(file: string): string {
     return buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0)).toString("utf8");
   } finally {
     closeSync(fd);
+  }
+}
+
+// timers.mts reads the service manager through ../cli, which the standalone installers don't copy. Load it on demand so
+// those boards still serve everything else and hide the unavailable strip rather than report a manager failure.
+async function timerSnapshot() {
+  if (!existsSync(new URL('./timers.mts', import.meta.url)) || !existsSync(new URL('../cli/src/platform/scheduler.mts', import.meta.url))) {
+    return { generatedAt: new Date().toISOString(), timers: [] };
+  }
+  try {
+    return await (await import("./timers.mts")).readTimers();
+  } catch {
+    return { generatedAt: new Date().toISOString(), timers: [{ id: "factory-tick.timer", name: "factory-tick", state: "unknown",
+      reason: "Timer status could not be read." }] };
   }
 }
 
@@ -69,6 +86,13 @@ const server = createServer((req, res) => {
     if (url.pathname === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return void res.end(buildPage("http"));
+    }
+    if (url.pathname === "/api/timers") {
+      void timerSnapshot().then((body) => {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+        res.end(JSON.stringify(body));
+      });
+      return;
     }
     if (url.pathname === "/api/runs") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
