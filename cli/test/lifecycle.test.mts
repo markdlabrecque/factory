@@ -1,5 +1,6 @@
 // Lifecycle tests run inside a disposable HOME with no host service manager calls. Install-source tests stand in a
 // synthetic checkout and pretend the running script is the installed app. The resume-reminder test registers projects by writing the registry directly.
+// A copied install of this (Git) checkout gets the scaffold history catalog `factory update` reads.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,6 +12,7 @@ import { Fake } from '../src/platform/fake.mts';
 import { install, repository } from '../src/commands/install.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { readManifest } from '../src/manifest.mts';
+import { factoryHistory } from '../src/update.mts';
 function fixture(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), 'factory-test-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -47,6 +49,8 @@ test('install twice reuses entries and refreshes copied code', async t => {
   assert.equal(new Set(entries.map(e => e.path)).size, 3);
   assert.ok(entries.every(e => existsSync(e.path)));
   assert.match(readFileSync(join(p.app, 'cli/bin/factory.mts'), 'utf8'), /parseArgs/);
+  // The copied app carries the source checkout's scaffold history for factory update (#91).
+  assert.equal(factoryHistory(p.app).kind, 'catalog');
 });
 test('install ends with a resume reminder naming opted-in projects, and only when there is something to resume', async t => {
   const { p, service } = fixture(t);

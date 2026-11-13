@@ -51,7 +51,7 @@ Do this for every project you will opt in. It must come after step 2, so that no
 3. From a terminal, run `.sandcastle/dispatch.sh --dry-run`. It checks logins, builds a missing image, and shows what a pass would start without launching anything. Scheduled passes run with no terminal and never build an image.
 4. If the project tracks `.sandcastle/`, commit the refresh the way you normally change that project.
 
-Factory never refreshes a copy for you. `factory update` is slice five.
+Factory never refreshes a copy for you. `factory update --dry-run` lists which files are missing, outdated or edited, and writes nothing.
 
 ## 4. Opt the projects in
 

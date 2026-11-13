@@ -12,6 +12,7 @@
 // when scheduling is off. Both standalone board installers copy that worker and the admission/assessment imports.
 // prompt.recover.md, the repair agent's prompt, is copied too (#63), so a new scaffold has the complete recovery workflow;
 // `factory init` records it as reviewed only when it created every workflow file itself (cli/src/recovery-review.mts).
+// FROM_ORCHESTRATOR and FROM_BOARD are exported so `factory update` (cli/src/update.mts) classifies the same file list.
 import { closeSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -23,10 +24,10 @@ export type Profile = 'personal' | 'client';
 export type Settings = { profile: Profile; repo: string; image: string; host?: string; projectId?: number };
 export type PlannedFile = { path: string; content: string | Buffer; mode: number };
 
-const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
+export const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts'];
-const FROM_BOARD = ['board.mts', 'admission.mts', 'assessment.mts', 'board.template.html'];
+export const FROM_BOARD = ['board.mts', 'admission.mts', 'assessment.mts', 'board.template.html'];
 
 type Edit = { tag: string; line?: RegExp; value?: (m: RegExpMatchArray) => string };
 const marker = (tag: string) => new RegExp(`// factory:${tag}(?![\\w:-])`, 'g');
