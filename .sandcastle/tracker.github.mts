@@ -7,13 +7,14 @@ import { ciGate } from "./ci.mts";
 import type { Gate } from "./ci.mts";
 import { LABELS, MERGE, TRACKER } from "./config.mts";
 import type { Child, Note } from "./graph.mts";
-import type { Delivered, Delivery, ReadyTicket, Select, Ticket } from "./tracker.mts";
+import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
 // GitHub adapter for tracker.mts, via `gh` on the host (TRACKER.kind "github", TRACKER.project
 // "owner/repo"). Units of work can be sub-issues. Evidence images can't be uploaded to an issue
 // through the API, so they are committed to the `sandcastle-evidence` branch and linked from there.
 // Delivery: open a PR, and with MERGE.auto merge it only when ciGate (ci.mts) says "pass" for the
 // pushed commit. Failed or missing CI leaves the PR open as a draft and the run stopped.
+// mergedPr: the newest merged PR into the base from the run's branch, else one titled `#N: ...`.
 
 const REPO = TRACKER.project;
 const HOST = (TRACKER as { host?: string }).host ?? "github.com";
@@ -185,6 +186,17 @@ export function openMrBranches(): Set<string> {
 
 export function mergedInto(branch: string, base: string): boolean {
   return json<unknown[]>(["pr", "list", "-R", REPO, "--state", "merged", "--head", branch, "--base", base, "--limit", "1", "--json", "number"]).length > 0;
+}
+
+/** The newest PR merged into `base` from the run's branch, else one whose title starts with `#N:`. */
+export function mergedPr(iid: number, branch: string | undefined, base: string): MergedPr | undefined {
+  type Pr = { number: number; title: string; url: string; mergedAt: string };
+  const list = (filter: string[]) => json<Pr[]>(["pr", "list", "-R", REPO, "--state", "merged", "--base", base, ...filter, "--limit", "100", "--json", "number,title,url,mergedAt"]);
+  const pick = (prs: Pr[], matchedBy: MergedPr["matchedBy"]) => prs.map((p): MergedPr => ({ number: p.number, title: p.title, url: p.url, mergedAt: p.mergedAt, matchedBy }))
+    .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt))[0];
+  // Search is word-based, so the `#N:` prefix is checked here rather than trusted to the query.
+  return (branch ? pick(list(["--head", branch]), "branch") : undefined)
+    ?? pick(list(["--search", `${iid} in:title`]).filter((p) => p.title.startsWith(`#${iid}:`)), "title");
 }
 
 const addLabels = (iid: number, labels: string[]) =>

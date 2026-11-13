@@ -1,4 +1,5 @@
-// Read-only current assessment adapter (#78). Shared by scheduled dispatch and --refresh-only, which exits before
+// Read-only current assessment adapter (#78). Shared by scheduled dispatch and --refresh-only (one card with --ticket,
+// else every card of the project, #93), which exits before
 // tracker writes, run updates, admission or launches. Analysis results go only to assessments; execution manifests
 // remain untouched. Assessment uses a separate read-only worktree so a manual check cannot reset the execution
 // analyst's checkout. Allocate assessment attempts before any tracker reads, including catalogue failures, so older
