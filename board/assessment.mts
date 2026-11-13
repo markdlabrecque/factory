@@ -1,10 +1,14 @@
 // Current tracker assessments (#78), separate from execution manifests and run records. Store failures are best-effort
 // and never gate admission or board rendering. Analysis has its own freshness key and budget. Unknown dependencies
-// fail closed here, independently of dispatch admission. Generation files keep a newer request pending when an older
-// refresh finishes. This module has no orchestrator imports: it also runs beside copied files in .sandcastle/.
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+// fail closed here, independently of dispatch admission. Request generations preserve newer clicks; assessment
+// attempts fence pending, success and failure publication across processes. A short per-card lock covers only
+// generation allocation and compare/write, never tracker/analysis work. Dead owners are reclaimed under a separate
+// guard; an abandoned/unreadable guard fails closed. Only process-identity helpers come from admission, not its locks.
+// No orchestrator imports: this also runs beside copied files in .sandcastle/ and in the installed board.
+import { mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { ownerOf, ownerState } from "./admission.mts";
 
 export const REFRESH_PER_PASS = 25;
 export type DependencyState = "satisfied" | "unsatisfied" | "unknown";
@@ -74,6 +78,48 @@ export function readAssessments(dir: string): Map<string, Assessment> {
   return out;
 }
 export function writeAssessment(dir: string, key: string, a: Assessment): void { atomic(file(dir, key), a); }
+const generation = (dir: string, key: string) => resolve(folder(dir), `${key}.generation`);
+/** Independent of run admission. The guard serializes stale-owner checks with removal, so two reclaimers cannot
+ * unlink a replacement lock. A crash while reclaiming fails closed rather than guessing based on lock age. */
+function withAssessmentLock<T>(dir: string, key: string, fn: () => T): T {
+  const lock = resolve(folder(dir), `${key}.lock`), guard = `${lock}.reap`;
+  mkdirSync(folder(dir), { recursive: true });
+  const owner = JSON.stringify(ownerOf(process.pid)), deadline = Date.now() + 2000;
+  for (;;) {
+    try { symlinkSync(owner, lock); break; }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
+    let guarded = false;
+    try {
+      symlinkSync(owner, guard);
+      guarded = true;
+      const holder = JSON.parse(readlinkSync(lock));
+      if (Number.isInteger(holder.pid) && holder.pid > 0 && ownerState(holder) === "dead") rmSync(lock);
+    } catch (e) {
+      if (!missing(e) && (e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    } finally { if (guarded) rmSync(guard); }
+    if (Date.now() >= deadline) throw new Error(`Assessment lock busy or unreadable: ${lock}; inspect its owner and ${guard}`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+  try { return fn(); }
+  finally { rmSync(lock); }
+}
+/** Allocate before reading tracker facts. The worker's child inherits its attempt instead of superseding it. */
+export function beginAssessment(dir: string, key: string, inherited?: string): string {
+  if (inherited) return inherited;
+  return withAssessmentLock(dir, key, () => {
+    const token = randomUUID();
+    atomic(generation(dir, key), token);
+    return token;
+  });
+}
+/** All production pending/result/error writes and request consumption pass this cross-process CAS. */
+export function publishAssessment(dir: string, key: string, token: string, publish: () => void): boolean {
+  return withAssessmentLock(dir, key, () => {
+    if (JSON.parse(readFileSync(generation(dir, key), "utf8")) !== token) return false;
+    publish();
+    return true;
+  });
+}
 export function assessed(prev: Assessment | undefined,
   o: { iid: string; project?: string; at: string; runHash?: string; ticket?: Omit<Facts, "checkedAt">; error?: string; retryRequired?: string },
 ): Assessment {
@@ -86,7 +132,9 @@ export function assessed(prev: Assessment | undefined,
 /** A request has its own immutable filename. Only the captured generations are consumed by a refresh. */
 export function requestRefresh(dir: string, key: string, iid: string, project?: string): void {
   atomic(resolve(requests(dir), `${key}.${randomUUID()}.json`), { key, at: new Date().toISOString() });
-  if (!raw(dir, key)) writeAssessment(dir, key, { iid, project });
+  withAssessmentLock(dir, key, () => {
+    if (!raw(dir, key)) writeAssessment(dir, key, { iid, project });
+  });
 }
 export function pendingRequests(dir: string): Map<string, string[]> {
   const out = new Map<string, string[]>();
@@ -129,10 +177,11 @@ export interface RefreshDeps {
   dependency: (iid: number) => DependencyState;
   historicalBlockers?: (iid: number) => Dependencies | undefined;
   log: (m: string) => void;
+  attempts?: Map<string, string>; // adapter allocates before catalogue/selection reads
   // Injectable filesystem boundary for failure tests; production uses the functions above.
   store?: Partial<{ read: typeof readAssessments; requests: typeof pendingRequests; write: typeof writeAssessment; clear: typeof clearRequest }>;
 }
-/** Bounded read-only assessment. Publish pending analysis before invoking the analyst so polling can show it. */
+/** Bounded read-only assessment. Fence publication, including the pending state before invoking the analyst. */
 export function refreshCards(runs: RefreshRun[], d: RefreshDeps): string[] {
   const store = { read: readAssessments, requests: pendingRequests, write: writeAssessment, clear: clearRequest, ...d.store };
   const done: string[] = [];
@@ -142,8 +191,11 @@ export function refreshCards(runs: RefreshRun[], d: RefreshDeps): string[] {
     const keys = pickRefreshes(mine.map((r) => r.key), asked, known);
     let budget = d.analysisBudget;
     for (const key of keys) {
-      const run = mine.find((r) => r.key === key)!, prev = known.get(key), at = d.now();
+      const run = mine.find((r) => r.key === key)!, at = d.now();
       try {
+        const token = d.attempts?.get(key) ?? beginAssessment(d.dir, key);
+        // The pass-wide map orders cards only. Re-read after beginning this attempt to preserve the last good result.
+        const prev = store.read(d.dir).get(key);
         let next: Assessment;
         try {
           const t = d.read(Number(run.iid)), notes = d.notes(Number(run.iid));
@@ -157,7 +209,7 @@ export function refreshCards(runs: RefreshRun[], d: RefreshDeps): string[] {
             next.analysisState = "pending";
             next.dependencies = undefined;
             next.analysisError = undefined;
-            store.write(d.dir, key, next);
+            if (!publishAssessment(d.dir, key, token, () => store.write(d.dir, key, next))) continue;
             if (budget > 0) {
               budget--;
               try {
@@ -196,9 +248,10 @@ export function refreshCards(runs: RefreshRun[], d: RefreshDeps): string[] {
           next = assessed(prev, { iid: run.iid, project: run.project, at, error: message(e) });
           d.log(`  refresh of #${run.iid} failed: ${message(e)}`);
         }
-        store.write(d.dir, key, next);
-        store.clear(d.dir, key, asked.get(key));
-        done.push(key);
+        if (publishAssessment(d.dir, key, token, () => {
+          store.write(d.dir, key, next);
+          store.clear(d.dir, key, asked.get(key));
+        })) done.push(key);
       } catch (e) { d.log(`  assessment store for #${run.iid}: ${message(e)}`); }
     }
   } catch (e) { d.log(`  assessment store: ${message(e)}`); }

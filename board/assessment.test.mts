@@ -1,11 +1,15 @@
 // Current assessments (#78): fail-closed dependencies, separate pending analysis, bounded attempts, store-failure
-// isolation, generation-safe requests and an HTTP manual failure with scheduling off. No real trackers or agents.
+// isolation, generation-safe requests and an HTTP manual failure with scheduling off. Cross-process interleavings
+// fence pending, successful and failed old attempts; stale assessment locks are reclaimed without admission writes.
+// All tracker/analyst callbacks are fixtures. No real trackers, agents, Docker or services.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { assessed, pendingRequests, pickRefreshes, readAssessment, refreshCards, requestRefresh } from "./assessment.mts";
+import { assessed, beginAssessment, pendingRequests, pickRefreshes, publishAssessment, readAssessment, refreshCards, requestRefresh } from "./assessment.mts";
+import { ownerOf } from "./admission.mts";
 import type { RefreshDeps } from "./assessment.mts";
 
 const facts = (hash: string, state = "open") => ({ title: "T", state, labels: [], hash });
@@ -117,6 +121,75 @@ for (const method of ["read", "requests", "write", "clear"] as const) {
     assert.equal(readFileSync(resolve(f.dir, "p--7.json"), "utf8"), f.record);
   });
 }
+
+for (const pause of ["before pending", "during analysis", "tracker failure", "analysis failure"] as const) {
+  test(`a newer process stays authoritative after an old attempt resumes ${pause}`, (t) => {
+    const f = fixture(t);
+    requestRefresh(f.dir, f.run.key, "7", "p");
+    const newer = () => {
+      // This separate process models a manual refresh overtaking a scheduled check. Both use real storage/CAS.
+      const script = `
+        import { refreshCards, requestRefresh } from ${JSON.stringify(new URL("./assessment.mts", import.meta.url).href)};
+        const dir = ${JSON.stringify(f.dir)}, run = ${JSON.stringify(f.run)};
+        requestRefresh(dir, run.key, run.iid, run.project);
+        refreshCards([run], {
+          dir, project: 'p', now: () => 'new-time',
+          read: () => ({ iid: 7, title: 'NEW', description: 'edited' }), notes: () => [],
+          hash: () => 'new-hash', model: () => ({ model: 'new-model' }),
+          selection: () => ({ selected: false }), analysisInput: () => 'new-input',
+          analysisBudget: 1, analyse: () => ({ requires: [{ providedBy: 99 }] }),
+          dependency: () => 'unsatisfied', log: (m) => { throw new Error(m); },
+        });`;
+      execFileSync(process.execPath, ["--input-type=module", "-e", script], { env: { ...process.env, HOME: f.dir }, timeout: 10_000 });
+      assert.equal(f.read().facts?.title, "NEW");
+      assert.equal(f.read().pending, false);
+      return JSON.stringify(f.read());
+    };
+    let authoritative = "";
+    f.d.hash = () => "old-hash";
+    f.d.read = () => {
+      if (pause === "before pending" || pause === "tracker failure") authoritative = newer();
+      if (pause === "tracker failure") throw new Error("old tracker failure");
+      return { iid: 7, title: "OLD", description: "old facts" };
+    };
+    f.d.analyse = () => {
+      authoritative = newer();
+      if (pause === "analysis failure") throw new Error("old analysis failure");
+      return { requires: [{ providedBy: 3 }] };
+    };
+    assert.deepEqual(refreshCards([f.run], f.d), [], "superseded attempt publishes nothing");
+    assert.equal(JSON.stringify(f.read()), authoritative);
+    assert.equal(f.read().facts?.hash, "new-hash");
+    assert.equal(f.read().analysis?.input, "new-input");
+    assert.equal(f.read().analysisState, "current");
+    assert.deepEqual(f.read().dependencies, [{ iid: 99, state: "unsatisfied" }]);
+    assert.equal(pendingRequests(f.dir).size, 0);
+    assert.equal(readFileSync(resolve(f.dir, "p--7.json"), "utf8"), f.record);
+    assert.equal(existsSync(resolve(f.dir, "admission")), false);
+  });
+}
+
+test("dead assessment lock owners are reclaimed and old tokens cannot publish errors", (t) => {
+  const f = fixture(t), lock = resolve(f.dir, "assessment", `${f.run.key}.lock`);
+  const dead = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
+    `import { ownerOf } from ${JSON.stringify(new URL("./admission.mts", import.meta.url).href)}; console.log(JSON.stringify(ownerOf(process.pid)));`], { encoding: "utf8" }));
+  mkdirSync(resolve(f.dir, "assessment"));
+  symlinkSync(JSON.stringify(dead), lock);
+  const old = beginAssessment(f.dir, f.run.key), current = beginAssessment(f.dir, f.run.key);
+  assert.equal(existsSync(resolve(f.dir, "admission")), false);
+  assert.equal(publishAssessment(f.dir, f.run.key, old, () => assert.fail("stale error publication")), false);
+  assert.equal(publishAssessment(f.dir, f.run.key, current, () => {}), true);
+});
+
+test("a live assessment lock times out safely without aborting dispatch", (t) => {
+  const f = fixture(t), logs: string[] = [];
+  mkdirSync(resolve(f.dir, "assessment"));
+  symlinkSync(JSON.stringify(ownerOf(process.pid)), resolve(f.dir, "assessment", `${f.run.key}.lock`));
+  f.d.log = (s) => logs.push(s);
+  assert.doesNotThrow(() => refreshCards([f.run], f.d));
+  assert.match(logs.join("\n"), /Assessment lock busy/);
+  assert.equal(readFileSync(resolve(f.dir, "p--7.json"), "utf8"), f.record);
+});
 
 test("board renders without assessments when directory reads fail", async (t) => {
   const f = fixture(t), old = process.env.SANDCASTLE_STATE_DIR;

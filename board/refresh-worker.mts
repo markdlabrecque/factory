@@ -1,12 +1,14 @@
 // Board-triggered refresh (#78): find the project's copy without loading tracker adapters into the server, then run
 // its --refresh-only command in a bounded process group. No scheduler, timer service, admission or ticket execution.
-// One worker per card in this server. Missing projects, old copies and timeouts become recorded assessment failures.
+// One worker per card in this server; assessment attempt tokens fence overlaps with other servers/scheduled passes.
+// Kill this worker's group on exit, close, spawn error and timeout, even when descendants redirect their stdio.
+// Missing projects, old copies and timeouts become fenced assessment failures without changing run records.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { readRuns, stateDir } from "./board.mts";
-import { assessed, clearRequest, pendingRequests, readAssessment, writeAssessment } from "./assessment.mts";
+import { assessed, beginAssessment, clearRequest, pendingRequests, publishAssessment, readAssessment, writeAssessment } from "./assessment.mts";
 
 const workers = new Map<string, Promise<void>>();
 export function executeRefresh(key: string, timeout = 120_000): Promise<void> {
@@ -27,7 +29,9 @@ async function perform(key: string, timeout: number): Promise<void> {
   const dir = stateDir(), run = readRuns(stateDir(), false).find((r) => r.key === key);
   if (!run) return;
   const generations = pendingRequests(dir).get(key);
+  let token: string | undefined;
   try {
+    token = beginAssessment(dir, key);
     const prev = readAssessment(dir, key);
     const roots = new Set<string>([process.cwd(), ...(prev?.projectRoot ? [prev.projectRoot] : [])]);
     try {
@@ -44,18 +48,22 @@ async function perform(key: string, timeout: number): Promise<void> {
     const root = matches[0];
     await new Promise<void>((accept, reject) => {
       const child = spawn(process.execPath, [resolve(root, ".sandcastle/dispatch.mts"), "--refresh-only", "--ticket", run.iid, "--base", run.base ?? "main"], {
-        cwd: root, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SANDCASTLE_STATE_DIR: dir },
+        cwd: root, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SANDCASTLE_STATE_DIR: dir,
+          FACTORY_REFRESH_KEY: key, FACTORY_REFRESH_ATTEMPT: token },
       });
       let output = "", expired = false;
       child.stdout.on("data", (s) => { output = (output + s).slice(-2000); });
       child.stderr.on("data", (s) => { output = (output + s).slice(-2000); });
-      const timer = setTimeout(() => {
-        expired = true;
-        if (child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* exited */ } }
-      }, timeout);
-      child.on("error", (e) => { clearTimeout(timer); reject(e); });
+      const cleanup = () => {
+        if (child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* group already gone */ } }
+      };
+      const timer = setTimeout(() => { expired = true; cleanup(); }, timeout);
+      // Do not wait for close: a descendant may still hold an inherited pipe after the leader exits.
+      child.on("exit", cleanup);
+      child.on("error", (e) => { clearTimeout(timer); cleanup(); reject(e); });
       child.on("close", (code) => {
         clearTimeout(timer);
+        cleanup();
         if (expired) reject(new Error(`Read-only refresh timed out after ${timeout}ms`));
         else if (code !== 0) reject(new Error(`Read-only refresh exited ${code}: ${output.slice(-300)}`));
         else accept();
@@ -66,11 +74,14 @@ async function perform(key: string, timeout: number): Promise<void> {
     }
   } catch (e) {
     try {
-      const prev = readAssessment(dir, key), error = (e as Error).message.slice(0, 400);
-      const next = assessed(prev, { iid: run.iid, project: run.project, at: new Date().toISOString(), error });
-      if (next.analysisState === "pending") { next.analysisState = "error"; next.analysisError = error; }
-      writeAssessment(dir, key, next);
-      clearRequest(dir, key, generations);
+      if (!token) throw e;
+      publishAssessment(dir, key, token, () => {
+        const prev = readAssessment(dir, key), error = (e as Error).message.slice(0, 400);
+        const next = assessed(prev, { iid: run.iid, project: run.project, at: new Date().toISOString(), error });
+        if (next.analysisState === "pending") { next.analysisState = "error"; next.analysisError = error; }
+        writeAssessment(dir, key, next);
+        clearRequest(dir, key, generations);
+      });
     } catch (error) { console.error(`assessment store: ${(error as Error).message}`); }
   }
 }

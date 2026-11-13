@@ -2,6 +2,7 @@
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
 // scheduling, per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
 // The fixture owns the Pi extension path as well as the pi command, so a developer's installed provider cannot mask CI failures.
+// A file-gated analyst deterministically overlaps scheduled/manual dispatch processes and releases the older last.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -234,6 +235,123 @@ test("manual worker has a bounded process group and coalesces overlapping reques
   assert.throws(() => process.kill(Number(pids[0]), 0));
   assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
   assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+});
+
+for (const olderManual of [false, true]) {
+  test(`out-of-order ${olderManual ? "manual then scheduled" : "scheduled then manual"} refresh keeps newer facts and analysis`, async (t) => {
+    const f = fixture(t), record = f.record(7, "stopped"), gate = join(f.fake, "gate");
+    f.save();
+    // Only the older process has the gate variable. The newer analyst runs to completion before we release it.
+    writeFileSync(join(f.home, "bin/pi"), `#!/bin/sh
+if [ -n "$REFRESH_TEST_GATE" ]; then
+  touch "$REFRESH_TEST_GATE.ready"
+  while [ ! -f "$REFRESH_TEST_GATE.release" ]; do sleep 0.02; done
+fi
+exec "${f.node}" "${join(FIXTURES, "refresh-analysis.mjs")}" "$@"
+`, { mode: 0o755 });
+    const older = spawn(f.node, [".sandcastle/dispatch.mts", "--base", "main", ...(olderManual ? ["--refresh-only", "--ticket", "7"] : [])], {
+      cwd: f.root, detached: true, env: { ...f.env, REFRESH_TEST_GATE: gate }, stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    older.stdout.on("data", (s) => { output += s; }); older.stderr.on("data", (s) => { output += s; });
+    const closed = once(older, "close");
+    t.after(() => { try { process.kill(-older.pid!, "SIGKILL"); } catch { /* group already gone */ } });
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(`${gate}.ready`) && older.exitCode === null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(existsSync(`${gate}.ready`), `older analysis paused: ${output}`);
+    assert.equal(f.assessment().analysisState, "pending");
+    assert.equal(f.assessment().facts?.title, "Ticket 7");
+    f.data.tickets[0].title = "Edited NEW ticket";
+    f.data.tickets[0].description = "Edited DEP:21";
+    requestRefresh(f.dir, f.key(7), "7", "owner/repo");
+    f.pass(olderManual ? [] : ["--refresh-only", "--ticket", "7"]);
+    const authoritative = f.assessment();
+    assert.equal(authoritative.facts?.title, "Edited NEW ticket");
+    assert.equal(authoritative.analysisState, "current");
+    assert.equal(authoritative.pending, false);
+    assert.deepEqual(authoritative.dependencies?.map((b) => b.iid), [21]);
+    writeFileSync(`${gate}.release`, "");
+    const [code] = await closed;
+    assert.equal(code, 0, output);
+    assert.deepEqual(f.assessment(), authoritative, "older completion cannot overwrite or erase the newer result");
+    assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
+    assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+    assert.equal(existsSync(join(f.fake, "launches")), false);
+  });
+}
+
+test("an older catalogue failure cannot overwrite a newer process's successful assessment", async (t) => {
+  const f = fixture(t), record = f.record(7, "stopped"), gate = join(f.fake, "catalogue-gate");
+  f.save();
+  writeFileSync(join(f.home, "bin/gh"), `#!/bin/sh
+if [ -n "$REFRESH_TEST_GATE" ] && [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  touch "$REFRESH_TEST_GATE.ready"
+  while [ ! -f "$REFRESH_TEST_GATE.release" ]; do sleep 0.02; done
+  echo 'old catalogue failure' >&2
+  exit 2
+fi
+exec "${f.node}" "${join(FIXTURES, "refresh-tracker.mjs")}" "$@"
+`, { mode: 0o755 });
+  const older = spawn(f.node, [".sandcastle/dispatch.mts", "--refresh-only", "--ticket", "7", "--base", "main"], {
+    cwd: f.root, detached: true, env: { ...f.env, REFRESH_TEST_GATE: gate }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  older.stdout.on("data", (s) => { output += s; }); older.stderr.on("data", (s) => { output += s; });
+  const closed = once(older, "close");
+  t.after(() => { try { process.kill(-older.pid!, "SIGKILL"); } catch { /* group already gone */ } });
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(`${gate}.ready`) && older.exitCode === null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(existsSync(`${gate}.ready`), `older catalogue paused: ${output}`);
+  f.data.tickets[0].title = "Newer facts before catalogue error";
+  requestRefresh(f.dir, f.key(7), "7", "owner/repo");
+  f.pass(["--refresh-only", "--ticket", "7"]);
+  const authoritative = f.assessment();
+  assert.equal(authoritative.analysisState, "current");
+  assert.equal(authoritative.pending, false);
+  writeFileSync(`${gate}.release`, "");
+  const [code] = await closed;
+  assert.equal(code, 0, output);
+  assert.match(output, /old catalogue failure/);
+  assert.deepEqual(f.assessment(), authoritative);
+  assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
+  assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+});
+
+test("a superseded manual worker timeout cannot overwrite a newer scheduled result", async (t) => {
+  const f = fixture(t), record = f.record(7, "stopped"), gate = join(f.fake, "worker-gate");
+  f.save();
+  writeFileSync(join(f.home, "bin/pi"), `#!/bin/sh
+if [ -n "$REFRESH_TEST_GATE" ]; then
+  touch "$REFRESH_TEST_GATE.ready"
+  while [ ! -f "$REFRESH_TEST_GATE.release" ]; do sleep 0.02; done
+fi
+exec "${f.node}" "${join(FIXTURES, "refresh-analysis.mjs")}" "$@"
+`, { mode: 0o755 });
+  const env = { ...process.env };
+  Object.assign(process.env, f.env, { REFRESH_TEST_GATE: gate });
+  t.after(() => { for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key]; Object.assign(process.env, env); });
+  requestRefresh(f.dir, f.key(7), "7", "owner/repo");
+  const { writeAssessment } = await import("../board/assessment.mts");
+  writeAssessment(f.dir, f.key(7), { iid: "7", project: "owner/repo", projectRoot: f.root });
+  const { executeRefresh } = await import("../board/refresh-worker.mts");
+  const job = executeRefresh(f.key(7), 3000);
+  try {
+    const deadline = Date.now() + 2500;
+    while (!existsSync(`${gate}.ready`) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(existsSync(`${gate}.ready`), "manual child reached its pending analysis using the worker's token");
+    assert.equal(f.assessment().analysisState, "pending");
+    f.data.tickets[0].title = "Newer scheduled title";
+    f.data.tickets[0].description = "new DEP:21";
+    f.pass();
+    const authoritative = f.assessment();
+    assert.equal(authoritative.facts?.title, "Newer scheduled title");
+    assert.equal(authoritative.analysisState, "current");
+    assert.equal(authoritative.pending, false);
+    await job;
+    assert.deepEqual(f.assessment(), authoritative, "the worker's timeout error is fenced too");
+    assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
+    assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+  } finally { await job; }
 });
 
 test("analysis is bounded by GRAPH.maxAnalysesPerPass across execution and assessment", (t) => {

@@ -1,10 +1,12 @@
 // Read-only current assessment adapter (#78). Shared by scheduled dispatch and --refresh-only, which exits before
 // tracker writes, run updates, admission or launches. Analysis results go only to assessments; execution manifests
 // remain untouched. Assessment uses a separate read-only worktree so a manual check cannot reset the execution
-// analyst's checkout. The caller gives the remaining per-pass analysis budget; analyse.mts enforces its own timeout.
+// analyst's checkout. Allocate assessment attempts before any tracker reads, including catalogue failures, so older
+// scheduled/manual passes cannot publish over newer facts. The board worker passes its token to its child; neither
+// path takes admission locks. The caller gives the remaining per-pass budget; analyze.mts enforces its own timeout.
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { readRuns, stateDir } from "./board.mts";
-import { assessed, readAssessment, refreshCards, writeAssessment, pendingRequests, clearRequest } from "./assessment.mts";
+import { assessed, beginAssessment, pickRefreshes, publishAssessment, readAssessment, readAssessments, refreshCards, writeAssessment, pendingRequests, clearRequest } from "./assessment.mts";
 import { AGENT, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
 import { contentHash, expandUnits, unitHash } from "./graph.mts";
 import { readManifests } from "./manifests.mts";
@@ -18,8 +20,15 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
   const allRuns = readRuns(dir, false);
   const runs = allRuns.filter((r) => r.project === TRACKER.project && (!o.ticket || r.iid === o.ticket));
   if (!runs.length) return;
-  const asked = pendingRequests(dir);
+  const asked = pendingRequests(dir), attempts = new Map<string, string>();
   try {
+    const keys = pickRefreshes(runs.map((r) => r.key), asked, readAssessments(dir));
+    for (const key of keys) {
+      try {
+        attempts.set(key, beginAssessment(dir, key, process.env.FACTORY_REFRESH_KEY === key ? process.env.FACTORY_REFRESH_ATTEMPT : undefined));
+      } catch (e) { log(`assessment store: ${(e as Error).message}`); }
+    }
+    if (!attempts.size) return;
     const work = tracker.workCatalogue(o.subtasks ?? SUBTASKS.enabled);
     const catalogue = work.tickets;
     const manifests = readManifests(TRACKER.project);
@@ -27,8 +36,8 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
     const selected = new Set(expandUnits(parents.map((t) => t.iid), work.childrenOf, o.subtasks ?? SUBTASKS.enabled).units.map((t) => t.iid));
     const catalogueKey = contentHash({ title: JSON.stringify(catalogue.map((t) => [t.iid, t.title, t.description, t.parent]).sort((a, b) => Number(a[0]) - Number(b[0]))) });
     let worktree: ReturnType<typeof analysisWorktree> | undefined;
-    refreshCards(runs, {
-      dir, project: TRACKER.project, root: process.cwd(), now: () => new Date().toISOString(),
+    refreshCards(runs.filter((r) => attempts.has(r.key)), {
+      dir, attempts, project: TRACKER.project, root: process.cwd(), now: () => new Date().toISOString(),
       read: (iid) => {
         const t = tracker.ticket(iid), parent = tracker.parentOf(iid);
         if (parent === undefined) return t;
@@ -76,8 +85,12 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
     log(`assessment refresh: ${error}`);
     for (const r of runs) {
       try {
-        writeAssessment(dir, r.key, assessed(readAssessment(dir, r.key), { iid: r.iid, project: r.project, at: new Date().toISOString(), error }));
-        clearRequest(dir, r.key, asked.get(r.key));
+        const token = attempts.get(r.key);
+        if (!token) continue;
+        publishAssessment(dir, r.key, token, () => {
+          writeAssessment(dir, r.key, assessed(readAssessment(dir, r.key), { iid: r.iid, project: r.project, at: new Date().toISOString(), error }));
+          clearRequest(dir, r.key, asked.get(r.key));
+        });
       } catch (e) { log(`assessment store: ${(e as Error).message}`); }
     }
   }
