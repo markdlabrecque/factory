@@ -4,6 +4,8 @@
 // the install before it touches a file. Afterwards the owned scheduler units are rewritten from the saved launch
 // configuration and the timer stays disabled, whatever it was before: resume with `factory schedule on`, which also
 // refreshes Node and PATH. Project opt-ins in the registry are untouched and never turn scheduling on by themselves.
+// So the last line install prints is a resume reminder (resumeReminder) whenever scheduling was stopped or any project
+// is opted in, naming the opted-in projects that wait for `factory schedule on`. Install never switches it back on.
 // The source is the checkout install was run from (installSource): the checkout holding the running script, or, when
 // the script is the installed app itself (`factory install` on the PATH), the Factory checkout containing the current
 // directory. Run from the installed app outside any checkout, a copied install refuses rather than reinstall itself.
@@ -11,6 +13,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rm
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readManifest, record, validate } from '../manifest.mts';
+import { readRegistry } from '../projects.mts';
 import { boardURL } from '../paths.mts';
 import type { Paths } from '../paths.mts';
 import type { ServiceBackend } from '../platform/index.mts';
@@ -55,6 +58,17 @@ export function installSource(p: Paths, cwd = process.cwd(), running = repositor
   if (here) return realpathSync(here);
   if (lstatSync(p.app).isSymbolicLink()) return self;
   throw new Error(`This is the installed copy of Factory (${p.app}), not a checkout. Run factory install from inside a Factory checkout, or run node <checkout>/cli/bin/factory.mts install.`);
+}
+/**
+ * The closing reminder that scheduling is off, or null when there is nothing to resume: no scheduler was stopped and
+ * no project is opted in. Lists the opted-in projects; an unreadable registry just leaves the list out.
+ */
+export function resumeReminder(p: Paths, stopped: boolean): string | null {
+  let waiting: string[] = [];
+  try { waiting = readRegistry(p).projects.filter(x => x.schedule?.enabled).map(x => x.name); } catch { /* reminder without names */ }
+  if (!stopped && !waiting.length) return null;
+  const who = waiting.length ? ` Opted-in projects waiting: ${waiting.join(', ')}.` : '';
+  return `The scheduler is off; install never turns it back on.${who} Resume it with: factory schedule on`;
 }
 export async function install(p: Paths, service: ServiceBackend, options: { link?: boolean; source?: string; cwd?: string; running?: string; schedule?: ScheduleBackend; cancel?: CancelOptions } = {}) {
   if (!nodeSupported()) throw new Error(`Node 22.18+ required; found ${process.versions.node}`);
@@ -105,10 +119,11 @@ export async function install(p: Paths, service: ServiceBackend, options: { link
   if (scheduling) {
     const saved = readScheduleConfig(p);
     if (saved) await scheduling.install({ node: saved.node, app: p.app, state: p.state, path: saved.path }, e => record(p, e));
-    console.log('The scheduler is off. Resume it with: factory schedule on');
   }
   const old = legacyPaths(p);
   if (old.length) console.warn(`Legacy Sandcastle paths left untouched (adoption is not available yet):\n${old.join('\n')}`);
   if (!(process.env.PATH || '').split(':').includes(dirname(p.bin))) console.log(`Add to your shell: export PATH="${dirname(p.bin)}:$PATH"`);
   console.log(`Installed ${p.bin}\nBoard: ${boardURL}`);
+  const reminder = resumeReminder(p, !!scheduling);
+  if (reminder) console.log(reminder);
 }
