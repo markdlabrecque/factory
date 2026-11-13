@@ -3,7 +3,8 @@
 // cannot take a ticket or project a recovery claim holds, which outlives its worker until released; a crash between the
 // claim and applying its charge is replayed without charging twice or refunding; a normal admission breaks a pending jam
 // confirmation through the project's activity generation. Disposable state folder; sleeping children stand in for live
-// run processes, and a child that exits mid-claim stands in for a crash. Nothing launches.
+// run processes, and a child that exits mid-claim stands in for a crash; an exited child nobody reaped (a zombie) is a dead
+// owner (#64). Nothing launches.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { admissionFile, generationOf, keyFor, ownerOf, readAdmission, releaseClaim, withAdmission, withAdmissionLock } from '../../board/admission.mts';
+import { admissionFile, generationOf, keyFor, ownerOf, ownerState, readAdmission, releaseClaim, withAdmission, withAdmissionLock } from '../../board/admission.mts';
 import { claimRun, readRuns } from '../../board/board.mts';
 import { paths } from '../src/paths.mts';
 import { claimRecovery, replayAdmitted } from '../src/recovery-claim.mts';
@@ -230,4 +231,18 @@ test('the admission lock is never taken over by age or a live pid alone; corrupt
     assert.equal(readFileSync(admissionFile(dir), 'utf8'), bad, 'never overwritten');
     assert.equal(run(dir, '7'), undefined, 'nothing claimed');
   }
+});
+
+test('an owner that exited but was never reaped (a zombie) is dead, so a crashed repair can be settled (#64)', { skip: process.platform !== 'linux' && 'needs /proc' }, async t => {
+  // `sleep 0` exits at once; its parent becomes `sleep 5`, which never waits for it, so it stays a zombie.
+  const parent = spawn('sh', ['-c', 'sleep 0 & echo $!; exec sleep 5'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  t.after(() => parent.kill('SIGKILL'));
+  const [chunk] = await once(parent.stdout!, 'data');
+  const pid = Number(String(chunk).trim());
+  const fields = () => readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ');
+  const state = () => fields()[0];
+  for (let i = 0; i < 200 && state() !== 'Z'; i++) await new Promise(r => setTimeout(r, 10));
+  assert.equal(state(), 'Z');
+  assert.equal(ownerState({ pid, start: `linux:${fields()[19]}` }), 'dead', 'even with its own start identity');
+  assert.equal(ownerState(ownerOf(process.pid)), 'alive');
 });
