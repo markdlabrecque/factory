@@ -10,6 +10,7 @@
 //   scheduled passes use only that branch and never switch branches.
 // `scheduleBlocker` gives the one-line reason a project would not get a scheduled pass, or null when it would.
 // `optInProblem` and `copyProblem` are the checks `schedule on --project` and each tick make before a pass.
+// Upgrade advice includes the dispatcher's refresh/analysis files and board's mandatory admission/assessment imports (#78).
 // This module only stores, reads and checks: `factory schedule` (commands/schedule.mts) changes things and the tick
 // (commands/tick.mts) runs passes.
 import { execFileSync } from 'node:child_process';
@@ -71,7 +72,7 @@ export function copyProblem(root: string): string | null {
   try { accessSync(script, constants.X_OK); } catch { return `${script} is not executable. Run: chmod +x ${script}`; }
   const read = (name: string) => { try { return readFileSync(join(scaffold, name), 'utf8'); } catch { return ''; } };
   if (!read('dispatch.mts').includes('reserveRun(') || !read('board.mts').includes('export function reserveRun'))
-    return `its ${scaffoldName} dispatcher copy predates launch reservations, so scheduled passes could overfill the run cap. Copy dispatch.mts, main.mts and board.mts from Factory's orchestrator/ and board/ into ${scaffold} (see "Updating a project's copy of the workflow"), then opt in again.`;
+    return `its ${scaffoldName} dispatcher copy predates launch reservations, so scheduled passes could overfill the run cap. Copy dispatch.mts, refresh.mts, analyze.mts, main.mts and ownership.mts from Factory's orchestrator/, and board.mts, admission.mts, assessment.mts and board.template.html from board/ into ${scaffold} (see "Updating a project's copy of the workflow"), then opt in again.`;
   return null;
 }
 

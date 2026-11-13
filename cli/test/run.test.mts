@@ -2,6 +2,7 @@
 // Factory's run-state folder, returns its exit code, and refuses an older dispatch.sh without --issue. Then the
 // real orchestrator/dispatch.sh --issue, with stub tools on the PATH (no tracker, Docker or agent): it runs
 // main.mts for that ticket in the foreground, logs to .sandcastle/logs/run-<n>.log, and rejects pass-only flags.
+// The curl stub drains the piped dummy auth header before returning, avoiding SIGPIPE under dispatch.sh's pipefail.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -62,7 +63,7 @@ function sandcastleProject(t: TestContext) {
   const tool = (name: string, body: string) => writeFileSync(join(bin, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
   for (const name of ['npm', 'glab']) tool(name, '');
   tool('claude', `echo '{"loggedIn": true}'`);
-  tool('curl', 'printf 400');
+  tool('curl', 'while IFS= read -r _; do :; done; printf 400');
   tool('docker', `[ "$1" = image ] && id -u; exit 0`);
   tool('npx', `printf '%s\\n' "$*" > "$PWD/npx-called"; echo "run output"; exit 4`);
   const origin = join(home, 'origin.git');

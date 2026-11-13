@@ -1,3 +1,4 @@
+// The complete reviewed workflow fixture includes assessment.mts, board.mts's mandatory import (#78).
 // Scheduled self-recovery end to end across restarts and failures (#64, the acceptance step of #30's slice four). Every
 // tick is a fresh process (cli/test/fixtures/tick-recovery.mts: `factory tick` as the service runs it, with only the repair
 // command swapped for a stand-in) against the stateful systemctl stub, so nothing carries over between ticks but Factory's
@@ -109,7 +110,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   writeFileSync(join(sc, 'config.mts'), 'export const TRACKER = {\n  kind: "github",\n  host: "github.com",\n  project: "site/site",\n};\n');
   // The complete recovery workflow (board.mts keeps what the scheduler's copy check needs), reviewed by a person.
   writeFileSync(join(sc, 'main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
-  for (const f of ['recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'prompt.recover.md', 'prompt.verify.md']) writeFileSync(join(sc, f), '');
+  for (const f of ['recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'prompt.recover.md', 'prompt.verify.md']) writeFileSync(join(sc, f), '');
   // The ticket's preserved work: a commit and uncommitted changes in its Factory worktree, and earlier evidence.
   git(root, 'branch', '7-fix-login');
   const worktree = join(sc, 'worktrees/7-fix-login');

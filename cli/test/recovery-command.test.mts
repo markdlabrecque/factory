@@ -1,6 +1,7 @@
 // `factory recovery status|reset|review` tests (#62, review #63), plus the recovery summary in `factory status` and repair logs in
 // `factory logs --recovery`. Disposable HOME, Git repo and run-state folder; recovery state is set up through
-// recovery-state.mts and the admission record; no tracker, Docker or service manager.
+// recovery-state.mts and the admission record; no tracker, Docker or service manager. Recovery review also gates
+// assessment.mts, board.mts's mandatory import, on presence and changes since review (#78).
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -151,4 +152,15 @@ test('review lists the workflow, refuses an incomplete copy, and --confirm activ
   await recovery(p, 'review', { cwd: root });
   assert.match(out(), /handoff\.mts +differs from Factory's copy, changed since review/);
   assert.match(out(), /main\.mts +project-specific, reviewed/);
+
+  // The current board's import must be present and included in the reviewed hashes, not just copied by init.
+  rmSync(sc('assessment.mts'));
+  assert.match(recoveryCopyProblem(p, root) ?? '', /missing assessment\.mts/);
+  writeFileSync(sc('assessment.mts'), readFileSync(new URL('../../board/assessment.mts', import.meta.url)));
+  clear();
+  assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 0);
+  assert.match(out(), /assessment\.mts +same as Factory's/);
+  assert.equal(recoveryCopyProblem(p, root), null);
+  writeFileSync(sc('assessment.mts'), '// edited after review\n');
+  assert.match(recoveryCopyProblem(p, root) ?? '', /assessment\.mts changed since/);
 });

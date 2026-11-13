@@ -1,12 +1,16 @@
 import { createServer } from "node:http";
 import { closeSync, createReadStream, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import { buildBoardData, buildEvidencePage, buildPage, readRuns } from "./board.mts";
+import { buildBoardData, buildEvidencePage, buildPage, readRuns, requestRefreshFor } from "./board.mts";
+import { executeRefresh } from "./refresh-worker.mts";
 
 // Always-on board: GET / renders the page from the shared state dir on every request.
 // GET /api/runs returns the same run snapshot as uncached JSON; the page polls it every 10s (read-only).
 // GET /evidence/<run-key>/ uses the board shell with image/video/text previews and back navigation.
 // GET /evidence/<run-key>/<file> serves originals. Text previews are bounded to 64 KiB.
+// POST /api/refresh/<run-key> (header x-factory-refresh: 1, which a cross-site page cannot send) starts a read-only
+// worker to recheck that ticket (#78), even with scheduling off. It runs only the project's bounded --refresh-only
+// command, never ticket work. The server stays tracker-agnostic; missing roots and command failures are recorded.
 // Run directly: node board-server.mts   (Node 22.18+; no build step)
 // Env: PORT (default 4444), HOST (default 127.0.0.1), SANDCASTLE_STATE_DIR.
 
@@ -30,6 +34,18 @@ function previewText(file: string): string {
 const server = createServer((req, res) => {
   try {
     const url = new URL(req.url || "/", "http://x");
+    const refresh = /^\/api\/refresh\/([^/]+)$/.exec(url.pathname);
+    if (refresh) {
+      if (req.method !== "POST" || req.headers["x-factory-refresh"] !== "1") {
+        res.writeHead(405, { "content-type": "text/plain", allow: "POST" });
+        return void res.end("POST with x-factory-refresh: 1");
+      }
+      const key = decodeURIComponent(refresh[1]);
+      requestRefreshFor(key);
+      void executeRefresh(key);
+      res.writeHead(202, { "content-type": "application/json", "cache-control": "no-store" });
+      return void res.end('{"requested":true}');
+    }
     if (url.pathname === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return void res.end(buildPage("http"));
