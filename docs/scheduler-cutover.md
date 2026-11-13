@@ -1,9 +1,10 @@
-<!-- Scheduler cutover runbook (#38): the one-time, by-hand move of one Linux machine from install-dispatch.sh's per-project
-legacy timers to `factory schedule`. Factory never runs it: it reports legacy timers and stale copies, and the developer
-removes the timers and refreshes each copy. Rehearsed against the systemctl stub by cli/test/cutover.test.mts. -->
+<!-- Scheduler cutover runbook (#38): the one-time move of one Linux machine from install-dispatch.sh's per-project
+legacy timers to `factory schedule`. The developer runs each step: `factory legacy status` lists the legacy timers and
+`factory legacy retire` (#95) disables them; Factory reports stale copies and the developer refreshes each one.
+Rehearsed against the systemctl stub by cli/test/cutover.test.mts. -->
 # Scheduler cutover: one machine
 
-This runbook moves one Linux machine from the legacy per-project timers to the single Factory scheduler. The legacy timers are the `sandcastle-dispatch@<name>.timer` units from `orchestrator/install-dispatch.sh`; the Factory scheduler is `factory schedule`. You run every step yourself. Factory does none of it automatically: it lists enabled legacy timers and refuses to opt in an outdated project copy, but it never disables a legacy timer or overwrites a project file. Steps 1 and 3 change nothing on the machine, so you can rehearse them at any time.
+This runbook moves one Linux machine from the legacy per-project timers to the single Factory scheduler. The legacy timers are the `sandcastle-dispatch@<name>.timer` units from `orchestrator/install-dispatch.sh`; the Factory scheduler is `factory schedule`. You run every step yourself. Factory does none of it automatically: it lists enabled legacy timers and refuses to opt in an outdated project copy. Only `factory legacy retire`, which you run in step 2, disables a legacy timer, and only `factory update --apply`, in step 3, writes project files. Steps 1 and 3 change nothing on the machine, so you can rehearse them at any time.
 
 Run legacy timers and `factory schedule` at different times, never together. Both would run passes for the same projects. The run cap is shared, so this would not overfill it, but passes would double up and the turn order would be wrong.
 
@@ -22,25 +23,24 @@ macOS has no legacy timers, so skip step 2 there. The rest applies unchanged; th
 systemctl --user list-timers --all 'sandcastle-dispatch*'      # the legacy timers and their next pass
 grep -H SANDCASTLE_REPO ~/.config/sandcastle/dispatch/*.env    # each timer's name and the checkout it runs
 factory project ls                                             # registered projects and their schedule switch
-factory schedule status                                        # lists enabled legacy timers with the exact disable command
+factory legacy status                                          # each enabled legacy timer, its checkout, and whether Factory has it registered
+factory schedule status                                        # warns about enabled legacy timers
 ```
 
-Write down the exact timer names `schedule status` lists. Those are the only units step 2 touches. Also note any old single-project `sandcastle-dispatch.timer`. Register every checkout that a legacy env file names and the registry lacks: `factory project add <path>`. A new project starts with scheduling off.
+Write down the exact timer names `legacy status` lists. Those are the only units step 2 touches. Also note any old single-project `sandcastle-dispatch.timer`. Register every checkout that a legacy env file names and the registry lacks: `factory project add <path>`. A new project starts with scheduling off.
 
 ## 2. Remove the legacy timers
 
-For each name you wrote down:
-
 ```sh
-<factory>/orchestrator/install-dispatch.sh --uninstall <name>   # systemctl --user disable --now sandcastle-dispatch@<name>.timer, then removes its .env
-systemctl --user is-active sandcastle-dispatch@<name>.service   # a pass the timer had already started finishes on its own; wait for "inactive"
+factory legacy retire                                           # systemctl --user disable --now each enabled legacy timer, then removes its .env
+systemctl --user is-active sandcastle-dispatch@<name>.service   # per name: a pass the timer had already started finishes on its own; wait for "inactive"
 ```
 
-If an old single-project timer is installed, also run `systemctl --user disable --now sandcastle-dispatch.timer`.
+`legacy retire` also disables an old single-project `sandcastle-dispatch.timer`. If it cannot disable a timer, it says so, keeps that timer's env file, still retires the others and exits 1; run it again. By hand, `<factory>/orchestrator/install-dispatch.sh --uninstall <name>` does the same for one timer.
 
 Don't stop a running `sandcastle-dispatch@<name>.service`; let it finish. Ticket runs that the legacy passes launched are detached. They keep running, they still show on the board, and they still count against the cap.
 
-Check: `systemctl --user list-timers --all 'sandcastle-dispatch*'` lists nothing, and `factory schedule status` no longer prints the legacy warning. The template unit files `sandcastle-dispatch@.service` and `@.timer` stay in `~/.config/systemd/user/`, which is harmless while no instance is enabled. Keep them if you might roll back. Retiring `install-dispatch.sh` is slice six.
+Check: `systemctl --user list-timers --all 'sandcastle-dispatch*'` lists nothing, `factory legacy status` says none are enabled, and `factory schedule status` no longer prints the legacy warning. The template unit files `sandcastle-dispatch@.service` and `@.timer` stay in `~/.config/systemd/user/`, which is harmless while no instance is enabled. Keep them if you might roll back. Retiring `install-dispatch.sh` is slice six.
 
 ## 3. Refresh each project's dispatcher copy
 
@@ -86,12 +86,12 @@ Opt-ins and saved branches stay in the registry, so a later `factory schedule on
 
 `cli/test/cutover.test.mts` walks steps 1 to 5 and the rollback against the stateful `systemctl` stub (see [TESTING.md](../TESTING.md)), on a temporary home that starts like a machine still on `install-dispatch.sh`. Run it with `node --test cli/test/cutover.test.mts`. It shows that:
 
-- `schedule status` lists the enabled legacy timer, with its disable command.
+- `schedule status` warns about the enabled legacy timer, and `legacy status` names it with its checkout.
 - An outdated copy is refused, and the refusal changes nothing.
-- `install-dispatch.sh --uninstall <name>` removes only that timer's link and env file. Unrelated timers and the template units stay.
+- `factory legacy retire` removes only that timer's link and env file. Unrelated timers and the template units stay.
 - The shipped `dispatch.mts` and `board.mts` satisfy the opt-in check.
 - Opting in never arms the timer, and `schedule on` sends only `daemon-reload` and `enable --now factory-tick.timer`.
 - Each opted-in project is `ready`, and one that was never opted in is not.
 - `off` disables Factory's timer and keeps the opt-ins.
 
-Throughout the test, Factory itself makes no call that names a legacy unit; the stub would reject one. The stub does not prove what systemd does on disable or stop. That is trusted, so the real cutover is still a step you run and check on the machine itself.
+Throughout the test, no Factory command other than `legacy retire` makes a call that names a legacy unit; the stub would reject one. The stub does not prove what systemd does on disable or stop. That is trusted, so the real cutover is still a step you run and check on the machine itself.
