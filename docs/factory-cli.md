@@ -124,7 +124,7 @@ The board redesign from [#3](https://github.com/markdlabrecque/factory/issues/3)
 
 # Slice five: ticket journal
 
-The shared store for manual ticket metadata (#98, `board/journal.mts`), from the slice 5 plan: comments, verdict corrections and archive state. `factory ticket comment|sync|verdict|archive|archived|show|restore` (#99-#102) and the board's Archive button and corrected-verdict display (#103) build on it; none exist yet.
+The shared store for manual ticket metadata (#98, `board/journal.mts`), from the slice 5 plan: comments, verdict corrections and archive state. `factory ticket comment|sync|verdict|archive|archived|show|restore` (#99-#102) and the board's Archive button and corrected-verdict display (#103) build on it; only `comment` exists so far.
 
 - **Storage.** `<state>/journal/<key>.json` (`keyFor(iid, TRACKER.project)`, folder 0700, files 0600), `{version: 1, project, iid, events}`. It is a subfolder, so the run-record scans (`readRuns`, `projectRuns`) never see it, and run records are never written by it. A file naming another project or ticket (two names that sanitize to one key), a corrupt file and an unknown version fail closed and are never overwritten. A ticket with no journal projects exactly as its run record reads.
 - **Events** are only appended: a UUID `id` (the stable tracker marker), `kind` (`comment`, `verdict`, `archive`, `restore`), `project`, `iid`, `at`, `actor`, and `run`, the run identity it applies to (`runIdentity`: for now the record's `startedAt`; distinguishing executions explicitly is #101). `comment` has `text`; `verdict` has the explanation in `text` and `verdict: {from, to}`, `from` being the effective verdict before (taken under the lock) and `to` `PASS` or `FAIL` (`pass`/`fail` normalized). An empty comment or explanation, any other verdict, or a missing tracker project is refused before anything is written.
@@ -132,7 +132,9 @@ The shared store for manual ticket metadata (#98, `board/journal.mts`), from the
 - **Serialized writes.** Each mutation re-reads the journal under `<key>.lock` (created complete and hard-linked into place, naming its holder's pid and start identity, taken over only when that exact process is gone, never by age) and replaces the file durably (temp file, fsync, rename). Concurrent writers from several processes keep every event.
 - **Delivery.** Comments and corrections start `pending`. `beginDelivery` gives one poster a token and marks the event `posting`, refusing another while that process lives; `finishDelivery` with that token records `delivered` with the tracker's comment id, or the error as `pending` (not posted) or `uncertain` (may have been posted). After an `uncertain` attempt or a poster that died while `posting`, the next `beginDelivery` returns `check: true`: search the tracker for the event's marker before posting again (#100).
 
-Tests: `board/journal.test.mts`.
+- **`factory ticket comment <ticket> <text> [--project <name|path>]`** (#99, `cli/src/commands/ticket.mts`). Saves the comment (`addComment`, with the current run's identity when the ticket has a run record) before any tracker call, then takes it with `beginDelivery` and posts `text` + `markerFor(id)` (`<!-- factory-journal:<id> -->`) through `gh api --hostname <host> -X POST repos/<project>/issues/<n>/comments` or `glab api --hostname <gitlabHost> -X POST projects/<encoded project>/issues/<n>/notes`, kind and host read from `.sandcastle/config.mts`. `finishDelivery` records `delivered` with the returned comment id; `pending` when the CLI could not start or the config names no host; `uncertain` when the CLI ran but failed or returned no id. Exit 0 when posted, 1 when saved but not posted.
+
+Tests: `board/journal.test.mts`, `cli/test/ticket.test.mts`.
 
 # Slice four: self-recovery requirements
 
