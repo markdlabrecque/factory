@@ -1,6 +1,6 @@
 // Init tests: scaffold contents, no-clobber, rerun repair, failure-doesn't-register, wrapper quoting, shared
 // state, uninstall's treatment of projects, and that every module a scaffolded file imports is scaffolded,
-// including refresh.mts and the independent assessment store (#78).
+// including refresh.mts, the independent assessment store (#78) and journal projection (#101-#102).
 // Disposable HOME and Git repos; no network, service manager or credentials.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -22,7 +22,7 @@ import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
 const EXPECTED = ['.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
-  'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
+  'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
   'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'];
 
 function fixture(t: TestContext, homeName = 'home') {
@@ -109,7 +109,7 @@ test('rerun keeps existing bytes and modes, fills gaps, reports skips, never dup
   assert.deepEqual(readFileSync(s('prompt.md')), keep);
   assert.equal(mode(s('prompt.md')), 0o640);
   assert.ok(existsSync(s('ci.mts')), 'missing file recreated');
-  assert.match(out, /Created 1 file\(s\), skipped 29/);
+  assert.match(out, /Created 1 file\(s\), skipped 30/);
   assert.match(out, /skipped .*config\.mts/);
   assert.match(out, /nothing was reconfigured/);
   assert.match(out, /Add: \.env evidence\/ state\/ logs\/ board\.html/);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install (or update) the Sandcastle board as a launchd user agent on macOS.
-# Copy the complete standalone board, including admission/assessment imports and the manual-refresh worker.
+# Copy the complete standalone board, including admission/assessment/journal imports and the manual-refresh worker.
 #   ./install-launchd.sh            install + start
 #   ./install-launchd.sh --uninstall
 set -euo pipefail
@@ -18,7 +18,7 @@ fi
 
 NODE="$(command -v node)" || { echo "node not found on PATH" >&2; exit 1; }
 mkdir -p "$APP" "$(dirname "$PLIST")" "$HOME/.local/state/sandcastle"
-cp "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/refresh-worker.mts" \
+cp "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/journal.mts" "$HERE/tickets.mts" "$HERE/refresh-worker.mts" \
   "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
 sed -e "s#__NODE__#$NODE#" -e "s#__HOME__#$HOME#g" "$HERE/$LABEL.plist" > "$PLIST"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true

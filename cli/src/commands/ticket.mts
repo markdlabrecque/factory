@@ -19,15 +19,19 @@
 // directly. Another project's journal, a delivered event and one a live process is posting are left alone. A verdict
 // correction posts as "Verdict corrected from X to Y." with its explanation and marker (`bodyFor`). Exit 0 when nothing
 // is left undelivered, else 1.
+// Verdict changes create one deliverable correction event with the prior/new verdict and run reference.
+// archive/restore validate under admission through board/tickets.mts; archived/show read journal projections,
+// including original/effective verdicts, full event history and outstanding tracker delivery. No run is rewritten.
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { keyFor } from '../../../board/admission.mts';
-import { addComment, beginDelivery, finishDelivery, journalDir, markerFor, readJournal, runIdentity } from '../../../board/journal.mts';
+import { addComment, beginDelivery, correctVerdict, finishDelivery, journalDir, markerFor, normalizeVerdict, projectTicket, readJournal, runIdentity } from '../../../board/journal.mts';
 import type { JournalEvent, Ticket } from '../../../board/journal.mts';
+import { archiveTicket } from '../../../board/tickets.mts';
 import type { Paths } from '../paths.mts';
-import { findRun, resolveProject, runStateDir, ticketId } from '../runs.mts';
+import { findRun, projectRuns, resolveProject, runStateDir, ticketId } from '../runs.mts';
 import type { ProjectContext } from '../runs.mts';
 
 /** Runs a tracker CLI; the shape of spawnSync's result that posting reads. Injected by tests. */
@@ -36,7 +40,7 @@ const realExec: Exec = (cmd, args) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '', ...(r.error ? { error: r.error } : {}) };
 };
-export type TicketOptions = { project?: string; cwd?: string; exec?: Exec; actor?: string };
+export type TicketOptions = { project?: string; cwd?: string; exec?: Exec; actor?: string; verdict?: string; message?: string; json?: boolean };
 type Post = { remoteId: string; url?: string } | { error: string; uncertain: boolean };
 
 function actorName(): string {
@@ -98,7 +102,7 @@ export function parseConcatenated(text: string): unknown[] {
 /** The tracker body for a comment or verdict correction: its text, then its hidden marker. */
 export function bodyFor(e: JournalEvent): string {
   const head = e.kind === 'verdict' && e.verdict
-    ? `Verdict corrected${e.verdict.from ? ` from ${e.verdict.from}` : ''} to ${e.verdict.to}.\n\n` : '';
+    ? `Manual verdict correction from ${e.verdict.from ?? 'no verdict'} to ${e.verdict.to}.\nRun: ${e.run ?? 'unknown'}.\n\n` : '';
   return `${head}${e.text ?? ''}\n\n${markerFor(e.id)}`;
 }
 
@@ -233,12 +237,95 @@ export function ticketSync(p: Paths, ticket: string | undefined, o: TicketOption
   return left ? 1 : 0;
 }
 
-/** `factory ticket <subcommand>`: `comment` and `sync` so far. */
+/** Correct the current run, save locally, then use the same delivery and sync fencing as comments. */
+export function ticketVerdict(p: Paths, ticket: string | undefined, o: TicketOptions = {}): number {
+  const iid = ticketId(ticket);
+  const verdict = normalizeVerdict(o.verdict ?? '');
+  if (!o.message?.trim()) throw new Error('A verdict correction requires a non-empty --message explanation.');
+  const ctx = resolveProject(p, o);
+  const dir = runStateDir(p);
+  const { run } = findRun(p, ctx, iid, dir);
+  if (!run || run.project !== ctx.tracker || run.iid !== iid || !run.startedAt) {
+    throw new Error(`No matching run for #${iid} in ${ctx.name}.`);
+  }
+  const t = { project: ctx.tracker, iid };
+  const e = correctVerdict(dir, t, run, { verdict, text: o.message, actor: o.actor ?? actorName() });
+  const r = deliver(ctx, dir, t, e.id, o.exec ?? realExec);
+  if (r.state === 'posted' || r.state === 'found' || r.state === 'delivered') {
+    console.log(`Saved manual correction on #${iid}: ${e.verdict?.from ?? 'no verdict'} to ${verdict}, run ${e.run}; posted to tracker.`);
+    return 0;
+  }
+  console.error(`Saved locally; ${ctx.tracker} sync pending. ${r.state === 'failed' ? r.error : r.state}. Run factory ticket sync ${iid}.`);
+  return 1;
+}
+
+/** Archive or restore only after re-reading and validating the raw current record under admission. */
+export function ticketArchive(p: Paths, ticket: string | undefined, archived: boolean, o: TicketOptions = {}): number {
+  const iid = ticketId(ticket);
+  const ctx = resolveProject(p, o);
+  const r = archiveTicket(runStateDir(p), { project: ctx.tracker, iid }, archived, o.actor ?? actorName());
+  console.log(`#${iid}: ${r.changed ? '' : 'already '}${archived ? 'archived' : 'restored'}; run data preserved.`);
+  return 0;
+}
+
+/** Show manual history even when archived. JSON is also available for scripts. */
+export function ticketShow(p: Paths, ticket: string | undefined, o: TicketOptions = {}): number {
+  const iid = ticketId(ticket);
+  const ctx = resolveProject(p, o);
+  const dir = runStateDir(p);
+  const j = readJournal(dir, { project: ctx.tracker, iid });
+  const found = findRun(p, ctx, iid, dir).run;
+  const run = found?.project === ctx.tracker && found.iid === iid && found.startedAt ? found : undefined;
+  if (!run && !j.events.length) throw new Error(`No run or journal for #${iid} in ${ctx.name}.`);
+  const view = projectTicket(j, run ?? { startedAt: '' });
+  const data = { project: ctx.tracker, iid, run, ...view, manuallyCorrected: !!view.correction, history: j.events };
+  if (o.json) console.log(JSON.stringify(data, null, 2));
+  else {
+    console.log(`${ctx.name} #${iid}: ${view.archived ? 'archived' : 'not archived'}`);
+    console.log(`Original verdict: ${view.original ?? 'none'}; effective verdict: ${view.verdict ?? 'none'}${view.correction ? ' (manually corrected)' : ''}`);
+    console.log(`Run: ${run ? runIdentity(run) : 'none'}; pending tracker posts: ${view.undelivered.length}`);
+    for (const e of j.events) console.log(`${e.at} ${e.actor} ${e.kind}${e.verdict ? ` ${e.verdict.from ?? 'none'} -> ${e.verdict.to}` : ''}${e.run ? ` [${e.run}]` : ''}${e.text ? `: ${e.text}` : ''}${e.delivery ? ` [${e.delivery.state}${e.delivery.lastError ? `: ${e.delivery.lastError}` : ''}]` : ''}`);
+  }
+  return 0;
+}
+
+export function ticketArchived(p: Paths, o: TicketOptions = {}): number {
+  const ctx = resolveProject(p, o);
+  const dir = runStateDir(p);
+  const rows = projectRuns(p, ctx, dir).flatMap(run => {
+    const view = projectTicket(readJournal(dir, { project: ctx.tracker, iid: run.iid }), run);
+    return view.archived ? [{ project: ctx.tracker, iid: run.iid, title: run.title, run: runIdentity(run), archivedAt: view.archivedAt, originalVerdict: view.original, verdict: view.verdict }] : [];
+  });
+  if (o.json) console.log(JSON.stringify(rows, null, 2));
+  else if (!rows.length) console.log(`No archived tickets in ${ctx.name}.`);
+  else for (const row of rows) console.log(`#${row.iid} ${row.title ?? ''} (${row.verdict ?? 'no verdict'}, archived ${row.archivedAt})`);
+  return 0;
+}
+
+/** Dispatch ticket commands, rejecting misplaced options before any mutation. */
 export function ticketCommand(p: Paths, sub: string | undefined, ticket: string | undefined, rest: string[], o: TicketOptions = {}): number {
-  if (sub === 'comment') return ticketComment(p, ticket, rest, o);
+  if (o.json && sub !== 'show' && sub !== 'archived') throw new Error('--json applies only to ticket show or archived');
+  if (o.verdict !== undefined && sub !== 'verdict') throw new Error('--verdict applies only to ticket verdict');
+  if (o.message !== undefined && sub !== 'comment' && sub !== 'verdict') throw new Error('--message applies only to ticket comment or verdict');
+  if (sub === 'comment') {
+    if (o.message !== undefined && rest.length) throw new Error('Use comment text or --message, not both');
+    return ticketComment(p, ticket, o.message !== undefined ? [o.message] : rest, o);
+  }
+  if (sub === 'verdict') {
+    if (rest.length) throw new Error('Use --verdict pass|fail --message <explanation>');
+    return ticketVerdict(p, ticket, o);
+  }
+  if (sub === 'archived') {
+    if (ticket || rest.length) throw new Error('Unexpected arguments: factory ticket archived');
+    return ticketArchived(p, o);
+  }
+  if (sub === 'archive' || sub === 'restore' || sub === 'show') {
+    if (rest.length) throw new Error(`Unexpected arguments: factory ticket ${sub} <ticket>`);
+    return sub === 'show' ? ticketShow(p, ticket, o) : ticketArchive(p, ticket, sub === 'archive', o);
+  }
   if (sub === 'sync') {
     if (rest.length) throw new Error('Unexpected arguments: factory ticket sync [ticket]');
     return ticketSync(p, ticket, o);
   }
-  throw new Error(`Unknown ticket subcommand: ${sub ?? '(none)'}. Use: factory ticket comment <ticket> <text> | factory ticket sync [ticket]`);
+  throw new Error(`Unknown ticket subcommand: ${sub ?? '(none)'}. Use: factory ticket comment|sync|verdict|archive|archived|show|restore`);
 }

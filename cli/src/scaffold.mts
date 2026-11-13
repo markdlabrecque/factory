@@ -7,7 +7,7 @@
 // container and private-Git adapter (#74), plus admission.mts (the run-claim admission record board.mts imports) and
 // ownership.mts (the ownership receipts main.mts writes before creating a branch), #75. All are import-safe, so ordinary
 // dispatch of a new scaffold is unaffected. refresh.mts and assessment.mts keep current read-only analysis (#78)
-// separate from execution manifests; assessment.mts is also a mandatory board.mts import and part of recovery review.
+// separate from execution manifests; assessment.mts and journal.mts are mandatory board.mts imports and part of recovery review.
 // The installed service, not the project scaffold, needs refresh-worker.mts to invoke dispatch.mts --refresh-only
 // when scheduling is off. Both standalone board installers copy that worker and the admission/assessment imports.
 // prompt.recover.md, the repair agent's prompt, is copied too (#63), so a new scaffold has the complete recovery workflow;
@@ -27,7 +27,8 @@ export type PlannedFile = { path: string; content: string | Buffer; mode: number
 export const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts'];
-export const FROM_BOARD = ['board.mts', 'admission.mts', 'assessment.mts', 'board.template.html'];
+// journal.mts is a mandatory board projection import, including in project dispatcher copies.
+export const FROM_BOARD = ['board.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.template.html'];
 
 type Edit = { tag: string; line?: RegExp; value?: (m: RegExpMatchArray) => string };
 const marker = (tag: string) => new RegExp(`// factory:${tag}(?![\\w:-])`, 'g');

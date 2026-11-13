@@ -1,11 +1,14 @@
 import { createServer } from "node:http";
 import { closeSync, createReadStream, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import { buildBoardData, buildEvidencePage, buildPage, readRuns, requestRefreshFor } from "./board.mts";
+import { buildBoardData, buildEvidencePage, buildPage, readRuns, requestRefreshFor, stateDir } from "./board.mts";
 import { executeRefresh } from "./refresh-worker.mts";
+import { archiveTicket } from "./tickets.mts";
 
 // Always-on board: GET / renders the page from the shared state dir on every request.
-// GET /api/runs returns the same run snapshot as uncached JSON; the page polls it every 10s (read-only).
+// GET /api/runs returns the same run snapshot as uncached JSON; the page polls it every 10s.
+// POST /api/projects/<project>/tickets/<iid>/archive requires x-factory: 1 and validates current history eligibility
+// under the admission lock. Only journal state changes; raw records and evidence remain accessible. Errors are JSON.
 // GET /evidence/<run-key>/ uses the board shell with image/video/text previews and back navigation.
 // GET /evidence/<run-key>/<file> serves originals. Text previews are bounded to 64 KiB.
 // POST /api/refresh/<run-key> (header x-factory-refresh: 1, which a cross-site page cannot send) starts a read-only
@@ -34,6 +37,23 @@ function previewText(file: string): string {
 const server = createServer((req, res) => {
   try {
     const url = new URL(req.url || "/", "http://x");
+    const archive = /^\/api\/projects\/([^/]+)\/tickets\/(\d+)\/archive$/.exec(url.pathname);
+    if (archive) {
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.setHeader("cache-control", "no-store");
+      if (req.method !== "POST" || req.headers["x-factory"] !== "1") {
+        res.writeHead(405, { allow: "POST" });
+        return void res.end(JSON.stringify({ error: "POST with x-factory: 1 required" }));
+      }
+      try {
+        const result = archiveTicket(stateDir(), { project: decodeURIComponent(archive[1]), iid: archive[2] }, true, "board");
+        res.writeHead(200);
+        return void res.end(JSON.stringify({ archived: true, run: result.run }));
+      } catch (error) {
+        res.writeHead(409);
+        return void res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Archive failed" }));
+      }
+    }
     const refresh = /^\/api\/refresh\/([^/]+)$/.exec(url.pathname);
     if (refresh) {
       if (req.method !== "POST" || req.headers["x-factory-refresh"] !== "1") {
