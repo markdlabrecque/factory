@@ -1,5 +1,5 @@
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
-// /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims.
+// /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims, and marking a card merged outside Factory (#87).
 // Tracker coverage includes latest-ten Shipped selection, queue reasons, persisted stage visits, honest legacy stats
 // and focus returned to the actual stats control, including removed/hidden-control fallbacks. Assessment DOM assertions
 // cover unchecked, fresh, pending-analysis, pending-refresh and failed-with-last-good cards, including reused nodes.
@@ -441,6 +441,43 @@ test("claims are atomic: concurrent claimants never exceed the cap or take one t
     assert.equal(board.readRuns(state).some((r) => r.project === "q"), false);
   } finally {
     sleeper.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#87: a stopped or parked card merged outside Factory moves to done with its PR, keeping its verdict; a claimed card is left alone", async () => {
+  const board = await import("./board.mts");
+  const dir = mkdtempSync(resolve(tmpdir(), "board-merged-outside-"));
+  const cwd = process.cwd();
+  const prevState = process.env.SANDCASTLE_STATE_DIR;
+  const state = resolve(dir, "state");
+  const pr = { number: 41, url: "https://example.test/pr/41", mergedAt: "2026-11-01T10:00:00Z", matchedBy: "title" as const };
+  try {
+    process.chdir(dir);
+    process.env.SANDCASTLE_STATE_DIR = state;
+    board.setProject("p");
+    board.setStage("7", { stage: "stopped", verdict: "FAIL", branch: "7-fix", note: "verifier said FAIL" });
+    assert.equal(board.markMergedOutside("7", "queued", pr), false, "a card no longer at the expected stage is left alone");
+    assert.equal(board.markMergedOutside("7", "stopped", pr), true);
+    const [run] = board.readRuns();
+    assert.equal(run.stage, "done");
+    assert.equal(run.verdict, "FAIL", "the original verdict is kept");
+    assert.equal(run.mr, pr.url);
+    assert.equal(run.mergedAt, pr.mergedAt);
+    assert.deepEqual(run.mergedOutside, { pr: 41, matchedBy: "title" });
+    assert.deepEqual(run.stageHistory!.map((v) => v.stage), ["stopped", "done"]);
+    assert.equal(board.markMergedOutside("7", "done", pr), false, "a done card is not marked again");
+
+    // A queued card a run claimed after the dispatcher read the board is not overwritten.
+    board.setStage("8", { stage: "queued", note: "no room" });
+    assert.equal(board.claimRun({ iid: "8", pid: process.pid, cap: 9 }).ok, true);
+    board.setStage("8", { stage: "queued" }); // even back at the read stage, the live claim still owns it
+    assert.equal(board.markMergedOutside("8", "queued", pr), false);
+    assert.equal(board.readRuns().find((r) => r.iid === "8")!.mergedOutside, undefined);
+  } finally {
+    process.chdir(cwd);
+    if (prevState === undefined) delete process.env.SANDCASTLE_STATE_DIR;
+    else process.env.SANDCASTLE_STATE_DIR = prevState;
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -30,6 +30,8 @@ import type { Assessment } from "./assessment.mts";
 // its ticket, a capacity slot and its whole project (no other run of the project is admitted, and it is refused while
 // another run of the project is in flight) whatever its record's stage or process, until the recovery launcher's settle
 // step releases it after the attempt's exact container is confirmed gone.
+// markMergedOutside() (#87) moves a stopped or parked card to done when the dispatcher finds its work merged outside
+// Factory, under the same lock, so a run or recovery admitted meanwhile is never overwritten.
 // Each card also carries the ticket's current assessment (assessment.mts, #78), kept in its own files beside the run records.
 // Assessment reads are best-effort: a broken assessment directory must not break the historical board.
 // readRuns(dir, false) reads raw records without crash reconciliation, for strictly read-only refresh paths.
@@ -66,7 +68,8 @@ export interface RunState {
   evidenceDir?: string;
   ticketHash?: string; // content hash of the ticket the run was built from
   parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
-  mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on
+  mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on; the PR's merge time when merged outside Factory
+  mergedOutside?: { pr: number; matchedBy: "branch" | "title" }; // #87: a stopped or parked card whose work a person merged outside Factory
   starting?: boolean; // reserved by the dispatcher at launch; main.mts clears it with its first write
   // Set while a recovery attempt owns the ticket: its attempt number, its UUID (#74) and the record's stage/note before the claim.
   recovery?: { attempt: number; id?: string; from?: { stage: Stage; note?: string; stageSince?: string } };
@@ -284,6 +287,32 @@ export function claimRun(o: AdmitOptions & { dir?: string }): Claim {
     writeRecord(dir, a.key, a.run);
     return { ok: true, run: a.run };
   });
+}
+
+/** #87: move a stopped or parked card to `done` because its work merged outside Factory. Records the PR (`mr`), its
+ *  merge time (`mergedAt`) and `mergedOutside`; the verdict and the rest of the record are kept. Under the admission lock,
+ *  so it cannot overwrite a run admitted meanwhile: refused (false, nothing written) when the ticket holds a live claim, or
+ *  its record is gone, already merged, or no longer at stage `from`. */
+export function markMergedOutside(iid: string, from: Stage, pr: { number: number; url: string; mergedAt: string; matchedBy: "branch" | "title" },
+  dir = stateDir()): boolean {
+  const key = keyFor(iid, project);
+  const done = withAdmission(dir, (tx) => {
+    const c = tx.state.claims[key];
+    if (c && claimLive(c)) return false;
+    let cur: RunState;
+    try {
+      cur = JSON.parse(readFileSync(resolve(dir, `${key}.json`), "utf8"));
+    } catch {
+      return false;
+    }
+    if (cur.stage !== from || cur.mergedAt || ![...PARKED, "stopped"].includes(cur.stage)) return false;
+    const at = now();
+    writeRecord(dir, key, trackStage(cur, { ...cur, stage: "done", stageSince: at, updatedAt: at, queueReasons: undefined, mr: pr.url,
+      mergedAt: pr.mergedAt, mergedOutside: { pr: pr.number, matchedBy: pr.matchedBy }, note: `merged outside Factory (matched by ${pr.matchedBy})` }, at));
+    return true;
+  });
+  if (done) renderBoard();
+  return done;
 }
 
 /** Delete a run record (the dispatcher clears parked records for tickets that left the queue, and a launch it claimed
