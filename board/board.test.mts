@@ -1,3 +1,5 @@
+// Archive coverage exercises project/header gates, active/queued refusal, preservation and idempotence over HTTP,
+// plus delayed-success/error DOM state and corrected-verdict badges. All fixtures are local, never live tracker data.
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
 // /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims, and marking a card merged outside Factory (#87) and labelling it on the board (#88).
 // Tracker coverage includes latest-ten Shipped selection, queue reasons, persisted stage visits, honest legacy stats
@@ -20,6 +22,69 @@ function load(name: string, exports: string[], ctx: Record<string, unknown> = {}
   runInNewContext(section(name) + exports.map((e) => `; this.${e} = ${e};`).join(""), ctx);
   return ctx;
 }
+
+test('archive keeps the card until success and exposes errors; corrected badges retain the original', async () => {
+  const run = { key: 'group-demo--1', project: 'group/demo', iid: '1', startedAt: '2026-11-01T00:00:00Z' };
+  const board = { runs: [run] };
+  let respond: (r: any) => void = () => {};
+  let request: any;
+  let patches = 0;
+  const ctx = load('archive', ['archiveCard', 'verdictBadge'], {
+    board, announcer: {}, patch: () => patches++,
+    fetch: (url: string, options: any) => { request = { url, options }; return new Promise(r => { respond = r; }); },
+    el: (_tag: string, className: string, textContent: string) => ({ className, textContent }),
+  });
+  const c = { archive: { disabled: false }, archiveError: { hidden: true, textContent: '' } };
+  const pending = ctx.archiveCard(c, run);
+  assert.equal(c.archive.disabled, true);
+  assert.equal(board.runs.length, 1, 'not removed optimistically');
+  assert.equal(request.url, '/api/projects/group%2Fdemo/tickets/1/archive');
+  assert.equal(request.options.headers['x-factory'], '1');
+  respond({ ok: false, json: async () => ({ error: 'work is active' }) });
+  await pending;
+  assert.equal(board.runs.length, 1);
+  assert.equal(c.archiveError.hidden, false);
+  assert.match(c.archiveError.textContent, /work is active/);
+  assert.equal(c.archive.disabled, false);
+  const retry = ctx.archiveCard(c, run);
+  respond({ ok: true, json: async () => ({ run: 'started:' + run.startedAt }) });
+  await retry;
+  assert.equal(board.runs.length, 0);
+  assert.equal(patches, 1);
+  board.runs = [run];
+  const raced = ctx.archiveCard(c, run);
+  const newer = { ...run, executionId: 'new-execution', stage: 'implementing' };
+  board.runs = [newer];
+  respond({ ok: true, json: async () => ({ run: 'started:' + run.startedAt }) });
+  await raced;
+  assert.equal(board.runs[0], newer, 'delayed archive response must not hide a newer polled execution');
+  const badge = ctx.verdictBadge({ verdict: 'PASS', originalVerdict: 'FAIL', manuallyCorrected: true });
+  assert.equal(badge.textContent, 'Verified · corrected');
+  assert.match(badge.title, /Original verdict: FAIL/);
+  assert.equal(ctx.verdictBadge({ verdict: 'FAIL' }).textContent, 'FAIL');
+  assert.match(template, /aria-label', 'Archive ticket'/);
+  assert.match(template, /c.archive.hidden = fileMode \|\| info.group !== 'history'/);
+});
+
+test('bad presentation journals cannot interrupt stage writes or evidence rendering', async () => {
+  const board = await import('./board.mts');
+  const dir = mkdtempSync(resolve(tmpdir(), 'board-bad-journal-'));
+  const saved = process.env.SANDCASTLE_STATE_DIR;
+  process.env.SANDCASTLE_STATE_DIR = dir;
+  try {
+    const now = new Date().toISOString();
+    writeFileSync(resolve(dir, 'bad--1.json'), JSON.stringify({ project: 'bad', iid: '1', stage: 'done', startedAt: now, updatedAt: now, stageSince: now, pid: process.pid }));
+    mkdirSync(resolve(dir, 'journal'));
+    writeFileSync(resolve(dir, 'journal/bad--1.json'), '{broken');
+    assert.doesNotThrow(() => board.setStage('2', { project: 'other', stage: 'queued' }));
+    assert.equal(board.buildBoardData('http').runs.length, 2);
+    const bad = board.readRuns().find(r => r.project === 'bad')!;
+    assert.doesNotThrow(() => board.buildEvidencePage(bad, []));
+  } finally {
+    if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("appearance keeps light/dark/system, follows the OS live and survives blocked storage", () => {
   const media = { matches: false, listener: () => {}, addEventListener(_: string, fn: () => void) { this.listener = fn; } };
@@ -357,6 +422,24 @@ test("board, /api/runs and evidence agree and render safely", async () => {
     assert.equal((await fetch(base + "/evidence/demo--1/not-a-file")).status, 404);
     assert.equal((await fetch(base + "/evidence/demo--1/%E0%A4%A")).status, 404);
     assert.equal((await fetch(base + "/api/runs/x")).status, 404);
+    const archive = (project: string, method = 'POST', headers: Record<string, string> = { 'x-factory': '1' }) =>
+      fetch(base + '/api/projects/' + encodeURIComponent(project) + '/tickets/1/archive', { method, headers });
+    assert.equal((await archive('demo', 'GET')).status, 405);
+    assert.equal((await archive('demo', 'POST', {})).status, 405);
+    assert.equal((await archive('other')).status, 409, 'queued work refused');
+    writeFileSync(resolve(dir, 'other--1.json'), JSON.stringify({ ...record, project: 'other', iid: '1', stage: 'implementing' }));
+    assert.equal((await archive('other')).status, 409, 'active work refused');
+    assert.equal((await archive('missing')).status, 409);
+    const original = readFileSync(resolve(dir, 'demo--1.json'), 'utf8');
+    assert.equal((await archive('demo')).status, 200);
+    assert.equal((await archive('demo')).status, 200, 'idempotent');
+    const journal = JSON.parse(readFileSync(resolve(dir, 'journal/demo--1.json'), 'utf8'));
+    assert.equal(journal.events.length, 1);
+    const after = await (await fetch(base + '/api/runs')).json();
+    assert.deepEqual(after.runs.map((r: any) => r.key), ['other--1']);
+    assert.equal(readFileSync(resolve(dir, 'demo--1.json'), 'utf8'), original);
+    assert.equal((await fetch(base + '/evidence/demo--1/')).status, 200);
+    assert.equal(await (await fetch(base + '/evidence/demo--1/archive.zip')).text(), 'archive bytes');
     for (const name of ["verdict.md", "large.log", "screen shot.png", "demo.webm", "archive.zip"]) rmSync(resolve(evidence, name));
     const emptyHtml = await (await fetch(base + "/evidence/demo--1/")).text();
     assert.match(emptyHtml, /"files":\[\]/);

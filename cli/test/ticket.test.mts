@@ -1,3 +1,5 @@
+// Verdict/archive tests also exercise real CLI option parsing with stub trackers, presentation-only filtering,
+// raw record preservation, admission validation and new-execution isolation.
 // `factory ticket comment` and `factory ticket sync` tests (#99, #100): the comment is saved in the ticket journal first and kept whatever the post does;
 // the post goes through the project's tracker CLI (`gh api` / `glab api`) with the event's marker, and its outcome is
 // recorded as delivered, pending (the CLI never ran) or uncertain (it ran and failed); sync delivers what is left, and
@@ -13,7 +15,9 @@ import { join, resolve } from 'node:path';
 import { addComment, beginDelivery, finishDelivery, markerFor, readJournal } from '../../board/journal.mts';
 import { paths } from '../src/paths.mts';
 import { addProject } from '../src/projects.mts';
-import { ticketComment, ticketSync } from '../src/commands/ticket.mts';
+import { ticketArchive, ticketArchived, ticketComment, ticketShow, ticketSync, ticketVerdict } from '../src/commands/ticket.mts';
+import { buildBoardData, claimRun, readRuns } from '../../board/board.mts';
+import { keyFor, ownerOf, withAdmission } from '../../board/admission.mts';
 import type { Exec } from '../src/commands/ticket.mts';
 
 const GITHUB = 'export const TRACKER = {\n  kind: "github" as "gitlab" | "github",\n  host: "github.com",\n  project: "me/site",\n};\n';
@@ -36,6 +40,17 @@ function fixture(t: TestContext, config = GITHUB) {
   return { home, p, root };
 }
 const journal = (p: ReturnType<typeof paths>, project: string, iid: string) => readJournal(p.state, { project, iid }).events;
+
+test('verdict and show reject a foreign run at a colliding sanitized key', t => {
+  const { p, root } = fixture(t);
+  writeFileSync(join(p.state, 'me_site--12.json'), JSON.stringify({ iid: '12', project: 'me_site', stage: 'done', startedAt: '2026-11-01', executionId: 'foreign', verdict: 'FAIL' }));
+  let calls = 0;
+  const exec: Exec = () => { calls++; return { status: 0, stdout: '{"id":1}', stderr: '' }; };
+  assert.throws(() => ticketVerdict(p, '12', { cwd: root, verdict: 'pass', message: 'verified', exec }), /No matching run/);
+  assert.throws(() => ticketShow(p, '12', { cwd: root }), /No run or journal/);
+  assert.equal(calls, 0);
+  assert.equal(journal(p, 'me/site', '12').length, 0);
+});
 
 test('saves the comment, posts it with its marker through gh, and records the tracker comment id', t => {
   const { p, root } = fixture(t);
@@ -169,4 +184,130 @@ test('sync never posts an uncertain event when the marker search fails, and keep
   assert.equal(e.delivery?.state, 'uncertain');
   assert.match(e.delivery?.lastError ?? '', /marker search failed.*503/);
   assert.equal(journal(p, 'me/site', '7')[0].delivery?.attempts, 1);
+});
+
+function completed(p: ReturnType<typeof paths>, iid = '12', project = 'me/site', stage = 'done') {
+  const at = '2026-11-01T00:00:00.000Z';
+  const file = join(p.state, `${keyFor(iid, project)}.json`);
+  const run = { iid, project, stage, startedAt: at, stageSince: at, updatedAt: at, pid: process.pid, verdict: 'FAIL', evidenceDir: '/unchanged/evidence' };
+  writeFileSync(file, JSON.stringify(run));
+  return { file, run };
+}
+
+test('verdict requires explanation, preserves original, chains corrections and retains pending delivery', t => {
+  const { p, root } = fixture(t);
+  const { file } = completed(p);
+  const original = readFileSync(file, 'utf8');
+  const calls: string[][] = [];
+  const exec: Exec = (cmd, args) => { calls.push([cmd, ...args]); return { status: 1, stdout: '', stderr: 'timeout' }; };
+  assert.throws(() => ticketVerdict(p, '12', { cwd: root, verdict: 'pass', message: '  ', exec }), /explanation/);
+  assert.throws(() => ticketVerdict(p, '12', { cwd: root, verdict: 'maybe', message: 'why', exec }), /pass or fail/);
+  assert.deepEqual(journal(p, 'me/site', '12'), []);
+  assert.equal(ticketVerdict(p, '12', { cwd: root, verdict: 'pass', message: '14 tests passed', actor: 'human', exec }), 1);
+  let events = journal(p, 'me/site', '12');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, 'verdict');
+  assert.deepEqual(events[0].verdict, { from: 'FAIL', to: 'PASS' });
+  assert.match(calls[0].at(-1)!, /Manual verdict correction from FAIL to PASS.*\nRun: started:/);
+  assert.match(calls[0].at(-1)!, /14 tests passed/);
+  assert.equal(ticketVerdict(p, '12', { cwd: root, verdict: 'FAIL', message: 'regression', exec: () => ({ status: 0, stdout: '{"id":9}', stderr: '' }) }), 0);
+  events = journal(p, 'me/site', '12');
+  assert.deepEqual(events[1].verdict, { from: 'PASS', to: 'FAIL' });
+  assert.equal(readFileSync(file, 'utf8'), original);
+  const logs: string[] = [];
+  t.mock.method(console, 'log', (s: string) => logs.push(s));
+  ticketShow(p, '12', { cwd: root, json: true });
+  const shown = JSON.parse(logs.pop()!);
+  assert.equal(shown.original, 'FAIL');
+  assert.equal(shown.manuallyCorrected, true);
+  assert.equal(shown.history.length, 2);
+  assert.equal(shown.undelivered.length, 1);
+});
+
+test('archive filters board only, preserves raw records and evidence, restores idempotently and isolates new admission', t => {
+  const { p, root } = fixture(t);
+  process.env.SANDCASTLE_STATE_DIR = p.state;
+  const { file } = completed(p);
+  completed(p, '12', 'other/site');
+  const original = readFileSync(file, 'utf8');
+  const exec: Exec = () => ({ status: 0, stdout: '{"id":9}', stderr: '' });
+  ticketVerdict(p, '12', { cwd: root, verdict: 'pass', message: 'verified manually', exec });
+  let data = buildBoardData('http');
+  assert.equal(data.runs.find(r => r.project === 'me/site')?.verdict, 'PASS');
+  assert.equal(data.runs.find(r => r.project === 'me/site')?.originalVerdict, 'FAIL');
+  assert.equal(data.runs.find(r => r.project === 'me/site')?.manuallyCorrected, true);
+  ticketArchive(p, '12', true, { cwd: root });
+  ticketArchive(p, '12', true, { cwd: root });
+  assert.equal(journal(p, 'me/site', '12').filter(e => e.kind === 'archive').length, 1);
+  assert.equal(buildBoardData('http').runs.length, 1);
+  assert.equal(readRuns(p.state, false).length, 2);
+  assert.equal(readFileSync(file, 'utf8'), original);
+  const logs: string[] = [];
+  t.mock.method(console, 'log', (s: string) => logs.push(s));
+  ticketArchived(p, { cwd: root, json: true });
+  assert.equal(JSON.parse(logs.pop()!)[0].iid, '12');
+  ticketShow(p, '12', { cwd: root, json: true });
+  assert.equal(JSON.parse(logs.pop()!).archived, true);
+  ticketArchive(p, '12', false, { cwd: root });
+  ticketArchive(p, '12', false, { cwd: root });
+  assert.equal(journal(p, 'me/site', '12').filter(e => e.kind === 'restore').length, 1);
+  assert.equal(buildBoardData('http').runs.length, 2);
+  ticketArchive(p, '12', true, { cwd: root });
+  const claimed = claimRun({ dir: p.state, iid: '12', project: 'me/site', pid: process.pid, cap: 4 });
+  assert.ok(claimed.ok);
+  data = buildBoardData('http');
+  const next = data.runs.find(r => r.project === 'me/site')!;
+  assert.equal(next.verdict, 'FAIL');
+  assert.equal(next.manuallyCorrected, false);
+  assert.ok(next.executionId);
+  assert.equal(data.runs.length, 2);
+});
+
+test('archive helper refuses queued, waiting, stopped, active and live recovery claims without journal events', t => {
+  const { p, root } = fixture(t);
+  for (const stage of ['queued', 'waiting', 'stopped', 'setup', 'implementing', 'verifying', 'posting', 'pushing', 'ci']) {
+    completed(p, '12', 'me/site', stage);
+    assert.throws(() => ticketArchive(p, '12', true, { cwd: root }), /only completed history/);
+  }
+  completed(p);
+  withAdmission(p.state, tx => {
+    tx.state.claims[keyFor('12', 'me/site')] = { token: 'recovery', attempt: 'attempt-1', iid: '12', project: 'me/site', kind: 'recovery', owner: ownerOf(process.pid), at: new Date().toISOString() };
+    tx.commit();
+  });
+  assert.throws(() => ticketArchive(p, '12', true, { cwd: root }), /without active work/);
+  assert.deepEqual(journal(p, 'me/site', '12'), []);
+  assert.throws(() => ticketArchive(p, '99', true, { cwd: root }), /No readable run/);
+});
+
+test('CLI verdict/message options post exactly one GitLab correction and archive commands never call tracker', t => {
+  const { home, p } = fixture(t, GITLAB);
+  completed(p, '12', 'group/site');
+  const bin = join(home, 'bin');
+  mkdirSync(bin);
+  const log = join(home, 'glab-calls.jsonl');
+  writeFileSync(join(bin, 'glab'), `#!/usr/bin/env node
+const a = process.argv.slice(2);
+require('node:fs').appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + '\\n');
+if (a[0] !== 'api' || a[4] !== 'POST' || a[5] !== 'projects/group%2Fsite/issues/12/notes') process.exit(64);
+console.log('{"id":42}');
+`);
+  chmodSync(join(bin, 'glab'), 0o755);
+  const cli = resolve(import.meta.dirname, '../bin/factory.mts');
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, 'ticket', ...args, '--project', 'site'], {
+    cwd: home, encoding: 'utf8', env: { ...process.env, FACTORY_HOME: home, PATH: `${bin}:${process.env.PATH}` },
+  });
+  let r = run('verdict', '12', '--verdict', 'pass', '--message', 'all tests pass');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(journal(p, 'group/site', '12').length, 1);
+  r = run('archive', '12');
+  assert.equal(r.status, 0, r.stderr);
+  r = run('archived', '--json');
+  assert.equal(JSON.parse(r.stdout)[0].iid, '12');
+  r = run('show', '12', '--json');
+  assert.equal(JSON.parse(r.stdout).verdict, 'PASS');
+  r = run('restore', '12');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, 1);
+  assert.notEqual(run('verdict', '12', '--verdict', 'pass').status, 0);
+  assert.notEqual(run('archive', '12', '--message', 'bad option').status, 0);
 });

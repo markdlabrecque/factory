@@ -10,6 +10,7 @@
 // deliver the journal's unposted comments and corrections, searching for an uncertain one's marker first (`ticket sync`, #100). `tick` and `supervise` are internal: `tick` is what the Linux
 // scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
+// Ticket commands also correct verdicts and archive/restore history without changing run records or tracker state.
 import { parseArgs } from 'node:util';
 import { paths } from '../src/paths.mts';
 import { backend } from '../src/platform/index.mts';
@@ -50,7 +51,10 @@ factory schedule on|off|status [--project <name|path>] [--json (status)]
 factory legacy status [--json] | factory legacy retire
 factory clean [--dry-run] [--project <name|path>] [--json]
 factory ticket comment <ticket> <text> [--project <name|path>]
-factory ticket sync [ticket] [--project <name|path>]`;
+factory ticket sync [ticket] [--project <name|path>]
+factory ticket verdict <ticket> --verdict pass|fail --message <explanation> [--project <name|path>]
+factory ticket archive|restore|show <ticket> [--project <name|path>] [--json (show)]
+factory ticket archived [--project <name|path>] [--json]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
@@ -66,7 +70,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
   legacy: { json: { type: 'boolean' } },
   clean: { 'dry-run': { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
-  ticket: { project: { type: 'string' } },
+  ticket: { project: { type: 'string' }, verdict: { type: 'string' }, message: { type: 'string' }, json: { type: 'boolean' } },
   tick: {}, supervise: {},
 };
 try {
@@ -116,7 +120,7 @@ try {
       if (first) throw new Error('Unexpected arguments (name a project with --project)');
       process.exitCode = clean(p, { dryRun: v['dry-run'], json: v.json, project: v.project });
     } else if (command === 'ticket') {
-      process.exitCode = ticketCommand(p, first, second, extra, { project: v.project });
+      process.exitCode = ticketCommand(p, first, second, extra, { project: v.project, verdict: v.verdict, message: v.message, json: v.json });
     } else if (command === 'tick') {
       // Internal: what factory-tick.service runs. SIGTERM (systemctl stop) and SIGINT cancel the tick and its dispatcher pass.
       if (first) throw new Error('Unexpected arguments');

@@ -6,6 +6,8 @@
      and failed checks. They show selection, pending dependency analysis and fail-closed dependency checks separately
      from historical results. Refresh runs a short-lived read-only command, even when scheduling is off.
      Legacy history is marked incomplete; stopped tickets remain unfinished. A card merged outside Factory (#87) is labelled
+     History cards archive through a validated project-scoped endpoint with error feedback. Corrected verdicts retain
+     the original in a tooltip. Archive preserves run data, logs and evidence.
      "Merged outside Factory" with its PR and merge time beside its original verdict (#88). Light, dark and system appearance
      (saved in the browser as sandcastle-theme). The HTTP board polls /api/runs every 10s and patches run cards by
      BoardRun.key with FLIP motion, so focus, scroll and filters survive updates. A local board.html is a static snapshot
@@ -192,6 +194,8 @@
   .card-foot { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
   .card-foot:empty { display: none; }
   .verdict { font: 700 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; border-radius: 4px; border: 1px solid currentColor; }
+  .archive-error { color: var(--bad); margin: 0; }
+  .archive-ticket { margin-left: auto; }
   .verdict.pass { color: var(--ok); }
   .verdict.fail { color: var(--bad); }
   .merged-outside { font: 600 11.5px/1 var(--mono); padding: 5px 8px; border-radius: 4px; border: 1px dashed var(--line-strong); color: var(--soft); }
@@ -753,6 +757,38 @@
     board.refs = refs;
   }
 
+  // archive:start
+  function archiveCard(c, run) {
+    if (c.archive.disabled) return;
+    c.archive.disabled = true;
+    c.archiveError.hidden = true;
+    return fetch('/api/projects/' + encodeURIComponent(run.project) + '/tickets/' + encodeURIComponent(run.iid) + '/archive',
+      { method: 'POST', headers: { 'x-factory': '1' } })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (body) { throw new Error(body.error || 'Archive failed'); });
+        return r.json().then(function (body) {
+          board.runs = board.runs.filter(function (r) {
+            var identity = r.executionId ? 'execution:' + r.executionId : 'started:' + r.startedAt;
+            return r.key !== run.key || identity !== body.run;
+          });
+          patch(true);
+          announcer.textContent = 'Ticket archived. Run data is preserved.';
+        });
+      })
+      .catch(function (error) {
+        c.archiveError.textContent = 'Could not archive ticket: ' + error.message;
+        c.archiveError.hidden = false;
+      })
+      .then(function () { c.archive.disabled = false; });
+  }
+  function verdictBadge(run) {
+    var text = run.verdict === 'PASS' ? 'Verified' : run.verdict;
+    var badge = el('span', 'verdict ' + (run.verdict === 'PASS' ? 'pass' : 'fail'), text + (run.manuallyCorrected ? ' · corrected' : ''));
+    if (run.manuallyCorrected) badge.title = 'Manually corrected. Original verdict: ' + (run.originalVerdict || 'none');
+    return badge;
+  }
+  // archive:end
+
   function buildCard(run) {
     var card = el('article', 'panel card');
     var top = el('div', 'card-top');
@@ -761,7 +797,15 @@
     var status = el('span', 'status');
     var statusText = el('span');
     add(status, el('i', 'dot'), statusText);
-    add(top, tid, proj, status);
+    var archive = el('button', 'stats-button archive-ticket', '×');
+    archive.type = 'button';
+    archive.setAttribute('aria-label', 'Archive ticket');
+    archive.title = 'Archive ticket. Run data, logs and evidence are preserved.';
+    var archiveError = el('p', 'archive-error');
+    archiveError.setAttribute('role', 'alert');
+    archiveError.hidden = true;
+    archive.addEventListener('click', function () { archiveCard({ archive: archive, archiveError: archiveError }, run); });
+    add(top, tid, proj, status, archive);
     var title = el('h3');
     var selectTicket = el('button', 'ticket-select');
     selectTicket.type = 'button';
@@ -800,8 +844,8 @@
     stats.type = 'button';
     stats.addEventListener('click', function () { openStats(run.key, stats); });
     card.addEventListener('click', function (event) { if (!event.target.closest('a, button')) openStats(run.key, selectTicket); });
-    add(card, top, title, pipe, unknownStage, reasons, facts, note, activity, assess, foot, refresh, stats);
-    return { el: card, tid: tid, proj: proj, statusText: statusText, title: selectTicket, pipe: pipe, segs: segs,
+    add(card, top, archiveError, title, pipe, unknownStage, reasons, facts, note, activity, assess, foot, refresh, stats);
+    return { el: card, archive: archive, archiveError: archiveError, tid: tid, proj: proj, statusText: statusText, title: selectTicket, pipe: pipe, segs: segs,
       unknownStage: unknownStage, reasons: reasons, branch: branch, timing: timing, note: note, activity: activity, assess: assess, refresh: refresh, foot: foot, sig: '', stage: run.stage };
   }
 
@@ -841,6 +885,7 @@
 
   function updateCard(c, run, now) {
     var info = stageInfo(run.stage), quiet = isQuiet(run, now);
+    c.archive.hidden = fileMode || info.group !== 'history';
     c.el.dataset.key = run.key;
     c.el.dataset.health = needsAttention(run, now) ? 'bad' : 'good';
     c.el.dataset.tone = quiet ? 'bad' : info.tone;
@@ -880,12 +925,12 @@
     renderAssessment(c, run, now);
     // Links are rebuilt only when they change, so a focused link survives a refresh.
     var merged = mergedOutsideText(run);
-    var sig = JSON.stringify([run.iid, run.ticketUrl, run.mr, run.evidenceUrl, run.verdict, merged && merged.text]);
+    var sig = JSON.stringify([run.iid, run.ticketUrl, run.mr, run.evidenceUrl, run.verdict, run.originalVerdict, run.manuallyCorrected, merged && merged.text]);
     if (sig !== c.sig) {
       c.sig = sig;
       c.tid.replaceChildren(run.ticketUrl ? link(run.ticketUrl, ticketLabel(run)) : document.createTextNode(ticketLabel(run)));
       c.foot.replaceChildren();
-      if (run.verdict) c.foot.appendChild(el('span', 'verdict ' + (run.verdict === 'PASS' ? 'pass' : 'fail'), run.verdict === 'PASS' ? 'Verified' : run.verdict));
+      if (run.verdict) c.foot.appendChild(verdictBadge(run));
       if (merged) { var badge = el('span', 'merged-outside', merged.text); badge.title = merged.title; c.foot.appendChild(badge); }
       var links = el('div', 'links');
       if (run.ticketUrl) links.appendChild(link(run.ticketUrl, 'Ticket'));
@@ -1142,7 +1187,7 @@
     var status = el('span', 'status');
     add(status, el('i', 'dot'), el('span', null, info.label + ' · ' + (run.stage === 'done' || run.stage === 'stopped' ? 'finished ' + ago(run.stageSince, now) + ' ago' : 'for ' + ago(run.stageSince, now))));
     var foot = el('div', 'card-foot');
-    if (run.verdict) foot.appendChild(el('span', 'verdict ' + (run.verdict === 'PASS' ? 'pass' : 'fail'), run.verdict === 'PASS' ? 'Verified' : run.verdict));
+    if (run.verdict) foot.appendChild(verdictBadge(run));
     var merged = mergedOutsideText(run);
     if (merged) { var badge = el('span', 'merged-outside', merged.text); badge.title = merged.title; foot.appendChild(badge); }
     var links = el('div', 'links');

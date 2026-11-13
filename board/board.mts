@@ -7,8 +7,11 @@ import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
 import { readAssessments, requestRefresh } from "./assessment.mts";
 import type { Assessment } from "./assessment.mts";
+import { projectTicket, readJournal } from "./journal.mts";
 
 // Run-state store + the Factory tracker board/evidence page (light/dark/system appearance).
+// Presentation alone reads the journal: hidden archived cards and effective verdicts never affect readRuns or evidence.
+// Normal admission assigns executionId so retries cannot inherit manual metadata even when startedAt is retained.
 // Stage visits persist for real timing, blockers and bounce stats; legacy history stays explicitly incomplete.
 // Completed tickets appear in the template's latest-ten Shipped section; stopped runs remain unfinished.
 // Writers (main.mts) call setStage(); each call writes <stateDir>/<key>.json and regenerates
@@ -57,6 +60,7 @@ export interface RunState {
   stage: Stage;
   stageSince: string;
   startedAt: string;
+  executionId?: string; // unique normal admission; older/manual runs use startedAt
   updatedAt: string;
   pid: number;
   verdict?: string;
@@ -79,6 +83,8 @@ export interface RunState {
 
 export interface BoardRun extends RunState {
   key: string;
+  originalVerdict?: string;
+  manuallyCorrected?: boolean;
   evidenceUrl?: string;
   activity?: string; // newest line of the agent's log, for a run that is in progress
   activityAt?: string; // when that log was last written
@@ -183,6 +189,7 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
     startedAt: at,
     ...cur,
     ...patch,
+    executionId: !held && patch.startedAt && patch.startedAt !== cur.startedAt ? newToken() : patch.executionId ?? cur.executionId,
     iid,
     project,
     pid: patch.pid ?? process.pid,
@@ -263,7 +270,8 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   if (kind === "normal") tx.state.generations[claim.project] = (tx.state.generations[claim.project] ?? 0) + 1;
   const { key: _key, evidenceUrl: _url, activity: _a, activityAt: _at, ...cur } = (current ?? {}) as Partial<BoardRun>;
   const run = trackStage(cur, { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
-    queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token, updatedAt: at, stageSince: at } as RunState, at);
+    queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token,
+    executionId: kind === "normal" ? token : cur.executionId, updatedAt: at, stageSince: at } as RunState, at);
   return { ok: true, key, token, claim, current, run };
 }
 
@@ -378,16 +386,31 @@ export function latestActivity(run: RunState): { activity: string; activityAt: s
   }
 }
 
+// Presentation must not propagate a damaged journal into setStage/renderBoard or unrelated evidence access.
+// Mutations still use strict journal reads and fail closed rather than overwriting damaged metadata.
+function presentationJournal(run: BoardRun) {
+  if (!run.project) return undefined;
+  try { return projectTicket(readJournal(stateDir(), { project: run.project, iid: run.iid }), run); }
+  catch { return undefined; }
+}
+
 /** Board snapshot shared by the embedded page data and GET /api/runs. mode "http" links evidence through the
  *  service's /evidence route; "file" links the folder directly. */
 export function buildBoardData(mode: "file" | "http"): { runs: BoardRun[]; generatedAt: string } {
   const assessments = readAssessments(stateDir());
-  const runs = readRuns().map((r) => ({
-    ...r,
-    assessment: assessments.get(r.key),
-    evidenceUrl: !r.evidenceDir ? undefined : mode === "http" ? `/evidence/${encodeURIComponent(r.key)}/` : `file://${r.evidenceDir}/`,
-    ...latestActivity(r),
-  }));
+  const runs = readRuns().flatMap((r) => {
+    const view = presentationJournal(r);
+    if (view?.archived) return [];
+    return [{
+      ...r,
+      originalVerdict: r.verdict,
+      verdict: view?.verdict ?? r.verdict,
+      manuallyCorrected: !!view?.correction,
+      assessment: assessments.get(r.key),
+      evidenceUrl: !r.evidenceDir ? undefined : mode === "http" ? `/evidence/${encodeURIComponent(r.key)}/` : `file://${r.evidenceDir}/`,
+      ...latestActivity(r),
+    }];
+  });
   return { runs, generatedAt: now() };
 }
 
@@ -407,7 +430,9 @@ export function buildPage(mode: "file" | "http"): string {
 
 /** Render evidence using the board's shell. Evidence pages never poll, so media keeps playing. */
 export function buildEvidencePage(run: BoardRun, files: { name: string; kind: string; url: string; text?: string; truncated?: boolean }[]): string {
-  return embed({ evidence: { run, files, url: `/evidence/${encodeURIComponent(run.key)}/` } });
+  const view = presentationJournal(run);
+  const projected = { ...run, originalVerdict: run.verdict, verdict: view?.verdict ?? run.verdict, manuallyCorrected: !!view?.correction };
+  return embed({ evidence: { run: projected, files, url: `/evidence/${encodeURIComponent(run.key)}/` } });
 }
 
 export function renderBoard(): void {

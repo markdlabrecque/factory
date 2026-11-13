@@ -21,6 +21,7 @@
 //   poster is refused while that owner lives. An attempt that may have reached the tracker (an owner that died while
 //   posting, or a failure reported as uncertain) leaves the event `uncertain`, and the next `beginDelivery` says to
 //   search for the event's marker before posting again (`factory ticket sync` does, #100). Only the token holder can finish (`finishDelivery`).
+// New normal admissions use executionId, with startedAt as the legacy/manual fallback, so retries are distinct.
 // Import-safe and dependency-free apart from Node and admission.mts (process identity and durable writes).
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
@@ -58,7 +59,7 @@ export interface JournalEvent {
 export interface Journal { version: 1; project: string; iid: string; events: JournalEvent[] }
 export interface Ticket { project: string; iid: string }
 /** What projection needs from a run record. */
-export interface RunRef { startedAt: string; verdict?: string }
+export interface RunRef { startedAt: string; executionId?: string; verdict?: string }
 
 export const journalDir = (stateDir: string) => join(stateDir, "journal");
 const fileOf = (stateDir: string, t: Ticket) => join(journalDir(stateDir), `${keyFor(t.iid, t.project)}.json`);
@@ -66,7 +67,7 @@ const now = () => new Date().toISOString();
 const missing = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT";
 
 /** The identity of a run record's execution, which verdict corrections and archive state apply to. */
-export const runIdentity = (run: RunRef): string => `started:${run.startedAt}`;
+export const runIdentity = (run: RunRef): string => run.executionId ? `execution:${run.executionId}` : `started:${run.startedAt}`;
 
 /** The hidden marker a posted comment or correction carries, so `factory ticket sync` (#100) can find it on the tracker. */
 export const markerFor = (id: string) => `<!-- factory-journal:${id} -->`;
