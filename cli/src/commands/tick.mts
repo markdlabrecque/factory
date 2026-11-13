@@ -46,7 +46,12 @@
 // afterPass (settle the project's recovery attempt, observe the tickets, count the pass, and for a confirmed jam start at
 // most one repair attempt, detached like ticket runs) once the pass is recorded, so its time is not the pass's. It asks
 // the service manager again before launching and launches nothing once cancellation or off has taken effect. Its errors
-// are logged, never a failed pass. The report file is removed after; reports a dead tick left are removed by the next. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
+// are logged, never a failed pass. The report file is removed after; reports a dead tick left are removed by the next.
+// Cleanup (#97): before jam confirmation, the same completed pass (exit 0, not cancelled) gets `factory clean` for its
+// project (cleanAfterPass, clean.mts cleanProject over the run records in Factory's state folder): merged, clean local
+// Factory branches and their Factory-owned worktrees are removed, kept ones are logged with the reason, and remote branches are
+// never touched. It never fetches; its failures are logged and never fail the pass or the tick. A failed or cancelled
+// pass, and a read-only refresh, get no cleanup. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -69,6 +74,8 @@ import type { ScheduleBackend, ScheduleStatus } from '../platform/scheduler.mts'
 import { runDispatchSh } from './dispatch.mts';
 import { afterPass } from '../jam-detect.mts';
 import type { ProjectContext } from '../runs.mts';
+import { findRun, projectRuns } from '../runs.mts';
+import { cleanProject } from '../clean.mts';
 import type { SpawnOptions } from './dispatch.mts';
 /** Runs one pass for a project; resolves to dispatch.sh's exit code. The default is runDispatchSh. */
 export type Pass = (ctx: ProjectContext, args: string[], o: Required<Pick<SpawnOptions, 'env' | 'onSpawn'>> & { group: true }) => Promise<number>;
@@ -80,6 +87,8 @@ export type TickOptions = {
   recovery?: typeof afterPass;
   /** Runs one read-only refresh for a project not opted in; resolves to its exit code. The default is runRefreshOnly. */
   refresh?: Pass;
+  /** Cleanup after a completed pass (#97); the default is cleanAfterPass. */
+  clean?: typeof cleanAfterPass;
 };
 export type TickResult = {
   result: 'done' | 'busy' | 'off' | 'unknown' | 'interrupted' | 'failed';
@@ -141,6 +150,19 @@ export const runRefreshOnly = (node: string): Pass => (ctx, args, o) => {
     child.on('exit', (code, sig) => done(code ?? (sig ? 128 : 1)));
   });
 };
+
+/** `factory clean` for one project after its completed scheduled pass (#97): removes merged, clean Factory branches and
+ *  their Factory-owned worktrees (clean.mts cleanProject), reading run records from Factory's state folder as the pass
+ *  did, and logs each removal, kept branch and failure. Never throws: a failure is logged and is not the pass's. */
+export function cleanAfterPass(p: Paths, ctx: ProjectContext, log: (line: string) => void): void {
+  try {
+    const r = cleanProject(ctx.root, projectRuns(p, ctx, p.state), { current: iid => findRun(p, ctx, iid, p.state).run });
+    const where = (e: { branch: string; worktree?: string }) => `${e.branch}${e.worktree ? ` and worktree ${e.worktree}` : ''}`;
+    for (const e of r.removed) log(`clean ${ctx.name}: removed #${e.ticket}: ${where(e)}`);
+    for (const e of r.kept) log(`clean ${ctx.name}: kept #${e.ticket}: ${e.branch} ${e.reason}`);
+    for (const e of r.failed) log(`clean ${ctx.name}: could not remove #${e.ticket}: ${where(e)}: ${e.reason}`);
+  } catch (e) { log(`clean ${ctx.name}: failed: ${((e as Error).message ?? String(e)).split('\n')[0]}`); }
+}
 
 const takesTurns = (x: Project) => !!x.schedule?.enabled;
 /** The registry rotated to start at this tick's first project, and the project that goes first next tick. */
@@ -292,8 +314,10 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       lock.clearPass();
       out.passes.push(project.name);
       log(`pass ${project.name}: ${result.error ? `failed: ${result.error}` : `exit ${result.code}`} after ${secs(from)}${result.cancelled ? ' (cancelled)' : ''}${result.leftover ? ' (leftover processes terminated)' : ''}`);
-      // Jam confirmation, after the pass is recorded so its time is not the pass's. Only a completed pass counts.
+      // Cleanup and jam confirmation, after the pass is recorded so their time is not the pass's. Only a completed pass
+      // counts. Clean goes first, so a repair attempt jam confirmation launches never races it.
       if (result.code === 0 && !result.cancelled && !result.error && !signal.aborted) {
+        try { (o.clean ?? cleanAfterPass)(p, ctx, log); } catch (e) { log(`clean ${project.name}: failed: ${(e as Error).message}`); }
         await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall,
           mayLaunch: async () => !signal.aborted && (await schedulingState(o.backend)).state === 'on' && !signal.aborted });
       }

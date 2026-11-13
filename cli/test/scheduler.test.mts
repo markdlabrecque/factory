@@ -1,10 +1,11 @@
 // Scheduler logic against the in-memory FakeSchedule (the production adapter is covered in schedule-linux.test.mts):
 // `schedule on|off|status`, install/uninstall/reinstall ordering, the tick's gating on the service manager, its
-// project visits and their rotation, the read-only refresh of projects not opted in (#94), state file, bounded timing history, exit codes and lock, and the unit directives. The service manager is the only global
+// project visits and their rotation, the read-only refresh of projects not opted in (#94), `factory clean` after each completed pass (#97), state file, bounded timing history, exit codes and lock, and the unit directives. The service manager is the only global
 // state: no test reads or writes a local on/off flag. Disposable HOME and Git repos only.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { Fake, FakeSchedule } from '../src/platform/fake.mts';
 import { schedulerUnits } from '../src/platform/scheduler-systemd.mts';
@@ -503,4 +504,36 @@ test('each completed pass hands its own jam report to jam confirmation; a failed
   const abort = new AbortController();
   await tick(p, { backend: sched, signal: abort.signal, log: () => {}, recovery: async () => { called = true; }, pass: pass(0, async () => abort.abort()) as any });
   assert.equal(called, false, 'a cancelled pass is not handed on');
+});
+
+test('each completed pass is followed by factory clean for its project; a failed pass, a refresh or a failing clean is not (#97)', async t => {
+  const { p, sched, roots: [a, b] } = await armed(t, ['a', 'b']);
+  setProjectSchedule(p, a, true);
+  mkdirSync(p.state, { recursive: true });
+  const merged = (iid: number) => {
+    const name = `${iid}-x`, wt = `${a}/.sandcastle/worktrees/${name}`;
+    git(a, 'worktree', 'add', '-q', '-b', name, wt, 'main');
+    writeFileSync(`${p.state}/a_a--${iid}.json`, JSON.stringify({ iid: String(iid), project: 'a/a', stage: 'done', mergedAt: '2026-11-12T00:00:00Z',
+      startedAt: new Date().toISOString(), pid: process.pid, base: 'main', branch: name }));
+    return { name, wt };
+  };
+  const has = (branch: string) => execFileSync('git', ['branch', '--list', branch], { cwd: a, encoding: 'utf8' }).trim() !== '';
+  const first = merged(7);
+  const failed = await tick(p, { backend: sched, log: () => {}, refresh: async () => 0, pass: async () => 1 });
+  assert.equal(failed.result, 'failed');
+  assert.equal(has(first.name), true, 'a failed pass gets no cleanup');
+  const lines: string[] = [];
+  const r = await tick(p, { backend: sched, log: l => lines.push(l), refresh: async () => 0, pass: async () => 0, recovery: async () => {} });
+  assert.equal(r.result, 'done');
+  assert.equal(has(first.name), false, 'the merged branch is removed after the completed pass');
+  assert.equal(existsSync(first.wt), false, 'with its Factory worktree');
+  assert.ok(lines.includes(`clean a: removed #7: ${first.name} and worktree ${first.wt}`), lines.join('\n'));
+  assert.equal(r.refreshed.b, 'ok');
+  assert.equal(lines.some(l => l.startsWith('clean b')), false, 'a read-only refresh gets no cleanup');
+  const second = merged(8);
+  const broken = await tick(p, { backend: sched, log: l => lines.push(l), refresh: async () => 0, pass: async () => 0, recovery: async () => {},
+    clean: () => { throw new Error('boom'); } });
+  assert.equal(broken.result, 'done', 'a failing clean never fails the tick');
+  assert.ok(lines.includes('clean a: failed: boom'));
+  assert.equal(has(second.name), true);
 });
