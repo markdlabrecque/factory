@@ -6,6 +6,7 @@ import * as gitlab from "./tracker.gitlab.mts";
 // Tracker facade: every tracker call main.mts, dispatch.mts and the ticket graph make. TRACKER.kind in
 // config.mts picks the adapter: "gitlab" (tracker.gitlab.mts, `glab`) or "github" (tracker.github.mts,
 // `gh`). A config without `kind` is GitLab. Every call runs on the host with that CLI's own login.
+// mergedPr finds work merged outside Factory: a merged PR/MR from the run's branch, or one titled `#N: ...`.
 
 export interface Ticket {
   iid: number; // the issue number shown as #N, on either tracker
@@ -45,9 +46,21 @@ export interface Delivered {
   merged: boolean;
 }
 
+/**
+ * A PR/MR merged into the base that delivers a ticket: from the run's recorded branch ("branch"), or, failing
+ * that, one whose title starts with `#N:` ("title"). The newest merge wins. A closed issue is never proof of a merge.
+ */
+export interface MergedPr {
+  number: number; // the PR/MR number (GitLab: !iid)
+  title: string;
+  url: string;
+  mergedAt: string; // ISO time of the merge
+  matchedBy: "branch" | "title";
+}
+
 const impl: typeof gitlab = (TRACKER as { kind?: string }).kind === "github" ? github : gitlab;
 
 export const {
   ticketUrl, catalogue, children, parentOf, workCatalogue, ticket, viewText, notes, readyList, comment,
-  uploadEvidence, openMrBranches, mergedInto, addLabel, close, advance, ensureLabels, deliver,
+  uploadEvidence, openMrBranches, mergedInto, mergedPr, addLabel, close, advance, ensureLabels, deliver,
 } = impl;

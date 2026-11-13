@@ -2,10 +2,11 @@ import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { LABELS, TRACKER } from "./config.mts";
 import type { Child, Note } from "./graph.mts";
-import type { Delivered, Delivery, ReadyTicket, Select, Ticket } from "./tracker.mts";
+import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
 // GitLab adapter for tracker.mts, via `glab` on the host. Units of work can be GitLab Tasks (the
 // "Child items" on an issue). Delivery: wait for the branch pipeline, then open an MR. Never merges.
+// mergedPr: the newest merged MR into the base from the run's branch, else one titled `#N: ...`.
 
 // Cast: the shipped config.personal.mts (GitHub) has no GitLab fields, and this module still loads there.
 const { gitlabHost: HOST = "", projectId: ID = 0 } = TRACKER as { gitlabHost?: string; projectId?: number };
@@ -177,6 +178,17 @@ export function openMrBranches(): Set<string> {
 
 export function mergedInto(branch: string, base: string): boolean {
   return api<unknown[]>(`projects/${ID}/merge_requests?state=merged&source_branch=${enc(branch)}&target_branch=${enc(base)}&per_page=1`).length > 0;
+}
+
+/** The newest MR merged into `base` from the run's branch, else one whose title starts with `#N:`. */
+export function mergedPr(iid: number, branch: string | undefined, base: string): MergedPr | undefined {
+  type Mr = { iid: number; title: string; web_url: string; merged_at: string | null };
+  const list = (filter: string) => api<Mr[]>(`projects/${ID}/merge_requests?state=merged&target_branch=${enc(base)}&${filter}&per_page=100`);
+  const pick = (mrs: Mr[], matchedBy: MergedPr["matchedBy"]) => mrs.map((m): MergedPr => ({ number: m.iid, title: m.title, url: m.web_url, mergedAt: m.merged_at ?? "", matchedBy }))
+    .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt))[0];
+  // Search matches anywhere in the title, so the `#N:` prefix is checked here.
+  return (branch ? pick(list(`source_branch=${enc(branch)}`), "branch") : undefined)
+    ?? pick(list(`in=title&search=${enc(`#${iid}:`)}`).filter((m) => m.title.startsWith(`#${iid}:`)), "title");
 }
 
 export function addLabel(iid: number, label: string): void {
