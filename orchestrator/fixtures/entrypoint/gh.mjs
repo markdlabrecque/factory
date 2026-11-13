@@ -1,6 +1,7 @@
 // Test-only `gh` for the recovery entrypoint smoke test (#74). Answers exactly the calls main.mts --recover and the
 // GitHub tracker adapter make for one open ticket (#7, labelled model:sonnet), records every call to
 // $FAKE_STATE/gh.jsonl (with stdin for comments and PR bodies), and exits 2 on anything else.
+// $FAKE_MERGED_PR (a JSON PR) is the answer to merged-PR lookups (#87); label writes (tracker.advance) succeed.
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
@@ -22,7 +23,9 @@ if (a === "api" && b === "graphql") {
   out({ data: { repository: repo } });
 }
 if (a === "api" && args.includes("--paginate")) out([[]]);
+if (a === "pr" && b === "list" && args.includes("merged") && process.env.FAKE_MERGED_PR) out([JSON.parse(process.env.FAKE_MERGED_PR)]);
 if (a === "pr" && b === "list") out([]);
+if (a === "api" && b === "-X" && /\/issues\/\d+\/labels/.test(args[3] ?? "")) out("[]");
 if (a === "pr" && b === "create") out("https://github.com/owner/repo/pull/9\n");
 if (a === "pr" && b === "checks") out([{ name: "ci", bucket: "pass" }]);
 if (a === "pr" && b === "merge") out("");

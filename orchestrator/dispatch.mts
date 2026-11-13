@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
-import { claimRun, PARKED, readRuns, removeRun, reserveRun, setProject, setStage, TERMINAL } from "./board.mts";
+import { claimRun, markMergedOutside, PARKED, readRuns, removeRun, reserveRun, setProject, setStage, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
 import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
@@ -33,6 +33,10 @@ import type { Ticket } from "./tracker.mts";
 // With SUBTASKS.enabled (config.mts), a ready issue that has Tasks gets one run per open Task instead.
 // Each pass also finishes merged work: a Task whose branch merged into the base is closed, a whole
 // ticket moves to LABELS.done, and a parent moves to LABELS.done once all its Tasks are closed.
+// Work merged outside Factory (#87): a stopped or parked card (stopped, queued, waiting) whose ticket has a PR/MR merged
+// into its base (tracker.mergedPr: from the run's recorded branch, or titled "#N: ...") moves to done with the PR, its
+// merge time and "merged outside Factory", keeping its verdict; it is not launched, and its still-open Task is closed or
+// ticket moved to LABELS.done as for Factory's own merges. A closed issue alone is never taken as a merge.
 // With AGENT.modelLabels (config.mts), a ticket without exactly one model label stays queued.
 // Existing cards, including deselected parked cards, are retained and reassessed separately (#78, refresh.mts).
 // --refresh-only --ticket <iid> is the board's bounded read-only command. It exits before tracker writes or admission.
@@ -150,6 +154,37 @@ for (const p of advance) {
   log(`#${p}: every Task is closed; ${dry ? `would move to ${LABELS.done} (dry run)` : `moving to ${LABELS.done}`}`);
   if (!dry) tracker.advance(p);
 }
+
+// ---- merged outside Factory (#87) ----------------------------------------------
+const taskIids = new Set([...work.childrenOf.values()].flat().map((k) => k.iid));
+for (const r of allRuns) {
+  if (r.project !== PROJECT || r.mergedAt || !(r.stage === "stopped" || PARKED.includes(r.stage))) continue;
+  const into = r.base ?? base;
+  let pr: tracker.MergedPr | undefined;
+  try {
+    pr = tracker.mergedPr(Number(r.iid), r.branch, into);
+  } catch (e) {
+    log(`#${r.iid}: could not check for a merge outside Factory: ${(e as Error).message}`);
+    continue;
+  }
+  if (!pr) continue;
+  log(`#${r.iid} (${r.stage}) merged into ${into} outside Factory by ${pr.url}: ${dry ? "would move to done (dry run)" : "moving to done"}`);
+  if (dry) continue;
+  if (!markMergedOutside(r.iid, r.stage, pr)) {
+    log(`#${r.iid}: left as is; its card changed or a run claimed it meanwhile`);
+    continue;
+  }
+  r.stage = "done"; // this pass must not launch it
+  r.mergedAt = pr.mergedAt;
+  try {
+    if (tracker.ticket(Number(r.iid)).state === "closed") continue;
+    if (r.parentIid || taskIids.has(Number(r.iid))) tracker.close(Number(r.iid));
+    else tracker.advance(Number(r.iid));
+  } catch (e) {
+    log(`#${r.iid}: card is done, but the tracker update failed: ${(e as Error).message}`);
+  }
+}
+
 const workById = new Map(work.tickets.map((t) => [t.iid, t]));
 const parentById = new Map(parents.map((p) => [p.iid, p]));
 const issues = units
