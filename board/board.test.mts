@@ -1,5 +1,5 @@
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
-// /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims, and marking a card merged outside Factory (#87).
+// /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims, and marking a card merged outside Factory (#87) and labelling it on the board (#88).
 // Tracker coverage includes latest-ten Shipped selection, queue reasons, persisted stage visits, honest legacy stats
 // and focus returned to the actual stats control, including removed/hidden-control fallbacks. Assessment DOM assertions
 // cover unchecked, fresh, pending-analysis, pending-refresh and failed-with-last-good cards, including reused nodes.
@@ -147,6 +147,19 @@ test("trackers filter secondary capacity and select the latest ten completions a
   assert.equal(m.trackerStep({ stage: "waiting" }), -1, "legacy blocker has no invented current stage");
   assert.equal(m.trackerStep({ stage: "waiting", stageHistory: [{ stage: "implementing", at: new Date(now - 2000).toISOString() }, { stage: "waiting", at: new Date(now - 1000).toISOString() }] }), 2);
   assert.equal(m.trackerStep({ stage: "implementing" }), 2, "a bounce returns to the current stage");
+});
+
+test("#88: a card merged outside Factory is labelled with its PR, and an ordinary shipped card is not", () => {
+  const m = load("model", ["mergedOutsideText"]);
+  const gh = { iid: "7", mr: "https://github.com/o/r/pull/12", mergedAt: "2026-11-12T10:00:00Z", mergedOutside: { pr: 12, matchedBy: "branch" } };
+  const label = m.mergedOutsideText(gh);
+  assert.equal(label.text, "Merged outside Factory · PR #12");
+  assert.match(label.title, /recorded branch.*did not verify it again.*2026-11-12T10:00:00/);
+  const gl = m.mergedOutsideText({ iid: "7", mr: "https://gitlab.com/g/p/-/merge_requests/3", mergedOutside: { pr: 3, matchedBy: "title" } });
+  assert.equal(gl.text, "Merged outside Factory · MR !3");
+  assert.match(gl.title, /"#7:" title/);
+  // Factory's own merge (mergedAt without mergedOutside) gets no label.
+  assert.equal(m.mergedOutsideText({ iid: "8", stage: "done", verdict: "PASS", mr: gh.mr, mergedAt: gh.mergedAt }), null);
 });
 
 test("real visit stats count holds, repeated stages and bounces without inventing legacy totals", () => {

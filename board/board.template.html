@@ -5,7 +5,8 @@
      Current assessments always show an explicit unchecked state when absent, distinct from refresh/analysis pending
      and failed checks. They show selection, pending dependency analysis and fail-closed dependency checks separately
      from historical results. Refresh runs a short-lived read-only command, even when scheduling is off.
-     Legacy history is marked incomplete; stopped tickets remain unfinished. Light, dark and system appearance
+     Legacy history is marked incomplete; stopped tickets remain unfinished. A card merged outside Factory (#87) is labelled
+     "Merged outside Factory" with its PR and merge time beside its original verdict (#88). Light, dark and system appearance
      (saved in the browser as sandcastle-theme). The HTTP board polls /api/runs every 10s and patches run cards by
      BoardRun.key with FLIP motion, so focus, scroll and filters survive updates. A local board.html is a static snapshot
      with no polling. Evidence pages never poll. All motion respects prefers-reduced-motion, live.
@@ -193,6 +194,7 @@
   .verdict { font: 700 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px; border-radius: 4px; border: 1px solid currentColor; }
   .verdict.pass { color: var(--ok); }
   .verdict.fail { color: var(--bad); }
+  .merged-outside { font: 600 11.5px/1 var(--mono); padding: 5px 8px; border-radius: 4px; border: 1px dashed var(--line-strong); color: var(--soft); }
   .links { display: flex; gap: 6px 14px; flex-wrap: wrap; font: 600 12.5px/1.6 var(--sans); }
   .links:empty { display: none; }
 
@@ -524,6 +526,18 @@
     if (h < 48) return h + 'h ' + (m % 60) + 'm';
     return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
   }
+  // #88: the label for a card the dispatcher marked done because a person merged its work outside Factory (#87).
+  // The run's own verdict is shown beside it unchanged; this only says how the work landed.
+  // Stable text (no relative time), so a live refresh does not rebuild the card's links; the Time row shows when it merged.
+  function mergedOutsideText(run) {
+    var m = run && run.mergedOutside;
+    if (!m) return null;
+    var text = 'Merged outside Factory';
+    if (typeof m.pr === 'number') text += ' · ' + (run.mr && /\/pull\/\d+/.test(run.mr) ? 'PR #' : 'MR !') + m.pr;
+    var at = time(run.mergedAt);
+    return { text: text, title: 'Found by its ' + (m.matchedBy === 'title' ? '"#' + run.iid + ':" title' : 'recorded branch') +
+      '; Factory did not verify it again' + (at !== null ? '. Merged ' + new Date(at).toISOString() : '') };
+  }
   // model:end
 
   // poller:start
@@ -853,23 +867,26 @@
     c.branch.dt.hidden = c.branch.dd.hidden = !b;
     var t;
     if (run.stage === 'queued' || run.stage === 'waiting') t = (run.stage === 'waiting' ? 'blocked ' : 'queued ') + ago(run.stageSince, now);
+    else if (run.mergedOutside) t = 'merged outside Factory ' + ago(run.mergedAt, now) + ' ago · started ' + ago(run.startedAt, now) + ' ago';
     else if (run.stage === 'done' || run.stage === 'stopped') t = (run.stage === 'stopped' ? 'stopped ' : 'completed ') + ago(run.stageSince, now) + ' ago · started ' + ago(run.startedAt, now) + ' ago';
     else t = 'in stage ' + ago(run.stageSince, now) + ' · started ' + ago(run.startedAt, now) + ' ago';
     if (quiet) t += ' · last update ' + ago(run.updatedAt, now) + ' ago · pid ' + run.pid;
     c.timing.dd.textContent = t;
     c.note.textContent = run.note || '';
-    c.note.hidden = !run.note || run.stage === 'queued' || run.stage === 'waiting';
+    c.note.hidden = !run.note || run.stage === 'queued' || run.stage === 'waiting' || !!run.mergedOutside; // the merged-outside label says it
     c.activity.textContent = run.activity || '';
     c.activity.title = run.activity ? 'Latest agent output, ' + ago(run.activityAt, now) + ' ago' : '';
     c.activity.hidden = !run.activity;
     renderAssessment(c, run, now);
     // Links are rebuilt only when they change, so a focused link survives a refresh.
-    var sig = JSON.stringify([run.iid, run.ticketUrl, run.mr, run.evidenceUrl, run.verdict]);
+    var merged = mergedOutsideText(run);
+    var sig = JSON.stringify([run.iid, run.ticketUrl, run.mr, run.evidenceUrl, run.verdict, merged && merged.text]);
     if (sig !== c.sig) {
       c.sig = sig;
       c.tid.replaceChildren(run.ticketUrl ? link(run.ticketUrl, ticketLabel(run)) : document.createTextNode(ticketLabel(run)));
       c.foot.replaceChildren();
       if (run.verdict) c.foot.appendChild(el('span', 'verdict ' + (run.verdict === 'PASS' ? 'pass' : 'fail'), run.verdict === 'PASS' ? 'Verified' : run.verdict));
+      if (merged) { var badge = el('span', 'merged-outside', merged.text); badge.title = merged.title; c.foot.appendChild(badge); }
       var links = el('div', 'links');
       if (run.ticketUrl) links.appendChild(link(run.ticketUrl, 'Ticket'));
       if (run.mr) links.appendChild(link(run.mr, mrLabel(run.mr)));
@@ -1126,6 +1143,8 @@
     add(status, el('i', 'dot'), el('span', null, info.label + ' · ' + (run.stage === 'done' || run.stage === 'stopped' ? 'finished ' + ago(run.stageSince, now) + ' ago' : 'for ' + ago(run.stageSince, now))));
     var foot = el('div', 'card-foot');
     if (run.verdict) foot.appendChild(el('span', 'verdict ' + (run.verdict === 'PASS' ? 'pass' : 'fail'), run.verdict === 'PASS' ? 'Verified' : run.verdict));
+    var merged = mergedOutsideText(run);
+    if (merged) { var badge = el('span', 'merged-outside', merged.text); badge.title = merged.title; foot.appendChild(badge); }
     var links = el('div', 'links');
     if (run.ticketUrl) links.appendChild(link(run.ticketUrl, 'Ticket #' + run.iid));
     if (run.mr) links.appendChild(link(run.mr, mrLabel(run.mr)));
