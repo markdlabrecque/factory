@@ -3,23 +3,24 @@
 // enabled legacy `sandcastle-dispatch@alpha.timer` (template units, its timers.target.wants link and its env file), an
 // unrelated enabled timer, a project whose `.sandcastle` copy predates launch reservations, a current one and one that is
 // never opted in. Factory's real CLI runs against stubs/systemctl WITHOUT legacy support, so any call Factory made to a
-// legacy unit would be rejected; only the developer's own step (the legacy installer's `--uninstall`) runs with
-// STUB_LEGACY=1. What this proves: Factory reports legacy timers and never touches them, refuses a stale copy until the
-// shipped files are copied in, and arms only its own timer once the legacy one is gone; rollback leaves the opt-ins.
+// legacy unit would be rejected; only the explicit `factory legacy retire` step (#95) runs with STUB_LEGACY=1. What this
+// proves: only `legacy retire` touches legacy timers (one `disable --now` each, then the env file), every other command just
+// reports them; a stale copy is refused until the shipped files are copied in, and Factory arms only its own timer once the
+// legacy one is gone; rollback leaves the opt-ins.
 // It does not prove systemd's own disable/stop behaviour, which is trusted (TESTING.md).
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readRegistry } from '../src/projects.mts';
 import { factoryBin, home, repo, repoRoot, systemctlStub } from './schedule-helpers.mts';
 
 type World = { p: ReturnType<typeof home>['p']; stub: ReturnType<typeof systemctlStub> };
-function cli(w: World, args: string[]): Promise<{ code: number | null; out: string; err: string }> {
+function cli(w: World, args: string[], extra: Record<string, string> = {}): Promise<{ code: number | null; out: string; err: string }> {
   return new Promise(done => {
-    const c = spawn(process.execPath, [factoryBin, ...args], { env: { ...process.env, FACTORY_HOME: w.p.home, ...w.stub.env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const c = spawn(process.execPath, [factoryBin, ...args], { env: { ...process.env, FACTORY_HOME: w.p.home, ...w.stub.env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
     c.stdout.on('data', d => out += d); c.stderr.on('data', d => err += d);
     c.on('exit', code => done({ code, out, err }));
@@ -42,7 +43,7 @@ function legacyMachine(t: TestContext, w: World, name: string, root: string) {
   return { units, wants, env: join(conf, `${name}.env`) };
 }
 
-test('cutover rehearsal: report legacy timers, remove them by hand, refresh the copy, opt in, arm; Factory never touches legacy units', { timeout: 60_000 }, async t => {
+test('cutover rehearsal: report legacy timers, retire them, refresh the copy, opt in, arm; only legacy retire touches legacy units', { timeout: 60_000 }, async t => {
   const { p } = home(t, 'factory-cutover-');
   const w: World = { p, stub: systemctlStub(t, p) };
   const alpha = repo(p, 'alpha', { current: false });
@@ -55,7 +56,10 @@ test('cutover rehearsal: report legacy timers, remove them by hand, refresh the 
   let s = await json(w);
   assert.deepEqual(s.legacyTimers, ['sandcastle-dispatch@alpha.timer']);
   assert.equal(s.scheduler.serviceEnabled, false);
-  assert.match((await cli(w, ['schedule', 'status'])).out, /systemctl --user disable --now sandcastle-dispatch@alpha\.timer/);
+  assert.match((await cli(w, ['schedule', 'status'])).out, /factory legacy retire/);
+  const inventory = await cli(w, ['legacy', 'status', '--json']);
+  assert.equal(inventory.code, 0, inventory.err);
+  assert.deepEqual(JSON.parse(inventory.out).timers.map((x: { timer: string; repo: string }) => [x.timer, x.repo]), [['sandcastle-dispatch@alpha.timer', alpha]]);
 
   // 2. A stale copy cannot be opted in, and the refusal changes nothing.
   const refused = await cli(w, ['schedule', 'on', '--project', 'alpha']);
@@ -63,9 +67,9 @@ test('cutover rehearsal: report legacy timers, remove them by hand, refresh the 
   assert.match(refused.err, /predates launch reservations/);
   assert.equal(readRegistry(p).projects.find(x => x.name === 'alpha')!.schedule, undefined);
 
-  // 3. The developer removes the legacy timer (the runbook's command; Factory never runs it).
-  execFileSync(join(repoRoot, 'orchestrator/install-dispatch.sh'), ['--uninstall', 'alpha'],
-    { env: { ...process.env, HOME: p.home, ...w.stub.env, STUB_LEGACY: '1' }, stdio: 'ignore' });
+  // 3. The developer retires the legacy timer with the explicit command (the only one allowed to send a legacy call).
+  const retired = await cli(w, ['legacy', 'retire'], { STUB_LEGACY: '1' });
+  assert.equal(retired.code, 0, retired.err);
   assert.equal(existsSync(join(legacy.wants, 'sandcastle-dispatch@alpha.timer')), false);
   assert.equal(existsSync(legacy.env), false);
   assert.equal(existsSync(join(legacy.wants, 'unrelated.timer')), true, 'unrelated timers stay');
@@ -95,7 +99,7 @@ test('cutover rehearsal: report legacy timers, remove them by hand, refresh the 
   assert.deepEqual([w.stub.unit('factory-tick.timer').enabled, w.stub.unit('factory-tick.timer').active], [false, false]);
   assert.deepEqual(readRegistry(p).projects.filter(x => x.schedule?.enabled).map(x => [x.name, x.schedule!.branch]), [['alpha', 'main'], ['beta', 'main']]);
 
-  // Factory made no call naming a legacy unit (it would have been rejected); the one legacy call was the developer's.
+  // No other command made a call naming a legacy unit (it would have been rejected); the one legacy call was legacy retire's.
   assert.deepEqual(w.stub.rejected(), []);
   assert.deepEqual(w.stub.lines().filter(l => l.includes('sandcastle-dispatch')), ['disable --now sandcastle-dispatch@alpha.timer']);
   assert.equal(readFileSync(join(legacy.units, 'unrelated.timer'), 'utf8'), '[Timer]\nOnCalendar=daily\n');

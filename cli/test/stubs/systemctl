@@ -7,8 +7,8 @@
 // (exit 64, logged as `rejected`), so a call that would have reached a real manager is visible. A line in $STUB_DIR/fail is an
 // exact space-joined argv that exits 1 when called; `once:` in front makes it fail only the first time. In state.json,
 // units[<name>].forcedActiveState overrides the reported ActiveState (tests use it to say a tick is running).
-// STUB_LEGACY=1 (the cutover rehearsal only) also accepts `disable --now` on a legacy `sandcastle-dispatch[@<name>].timer`,
-// the command the runbook has the developer run, and does its one documented effect Factory reads: the timer's
+// STUB_LEGACY=1 (for `factory legacy retire` tests only) also accepts `disable --now` on a legacy `sandcastle-dispatch[@<name>].timer`,
+// the one call `legacy retire` sends, and does its one documented effect Factory reads: the timer's
 // timers.target.wants symlink is removed. Without it, any call naming a legacy unit is rejected, so Factory never sends one.
 const fs = require('node:fs');
 const path = require('node:path');

@@ -11,7 +11,7 @@
 //   (macOS: the supervisor keeps that cadence itself, commands/supervise.mts). If installing or
 //   enabling fails, the ledger stays, and the error is reported with what the manager says now. Repeat it to retry or to
 //   refresh PATH/Node. It refuses unit files Factory does not own, never touches legacy `sandcastle-dispatch` timers
-//   (it prints the commands to disable them) and starts no project that was not opted in.
+//   (it points to `factory legacy retire`, legacy.mts) and starts no project that was not opted in.
 // - `off` disables and stops the timer, then stops the tick service and waits for it (macOS: disables the label, then boots
 //   the agent out, which SIGTERMs the supervisor and waits for it), then confirms the tick and its
 //   dispatcher pass group are gone (stopScheduling, tick-cancel.mts). The active tick, its pass and the pass's non-detached
@@ -57,7 +57,7 @@ export function findProject(p: Paths, arg: string): Project {
   return found;
 }
 
-/** Enabled legacy dispatcher timers (install-dispatch.sh). Factory reports them and never touches them. */
+/** Enabled legacy dispatcher timers (install-dispatch.sh). Only `factory legacy retire` (legacy.mts) touches them. */
 export function legacyTimers(p: Paths): string[] {
   const wants = join(dirname(p.systemd), 'timers.target.wants');
   return existsSync(wants) ? readdirSync(wants).filter(n => /^sandcastle-dispatch(@.+)?\.timer$/.test(n)).sort() : [];
@@ -65,8 +65,8 @@ export function legacyTimers(p: Paths): string[] {
 export function legacyAdvice(p: Paths): string[] {
   const timers = legacyTimers(p);
   if (!timers.length) return [];
-  return [`Legacy dispatcher timers are enabled and would run passes too. Factory leaves them alone; disable them yourself:`,
-    ...timers.map(t => `  systemctl --user disable --now ${t}`)];
+  return [`Legacy dispatcher timers are enabled and would run passes too: ${timers.join(', ')}. Retire them with: factory legacy retire`,
+    `  (factory legacy status shows the checkout each one runs; by hand: ${timers.map(t => `systemctl --user disable --now ${t}`).join('; ')})`];
 }
 
 /** What stopScheduling saw. `tickActive` is the manager's answer before it stopped anything (null when the query failed,
