@@ -425,7 +425,7 @@ interface ServiceBackend {
 ## `factory install`
 
 1. Check Node is 22.18 or newer. Stop with the version found if not.
-2. Create the app dir `~/.local/share/factory/app/` by copying (or, with `--link`, symlinking) the repo checkout it runs from. Add a manifest entry.
+2. Create the app dir `~/.local/share/factory/app/` by copying (or, with `--link`, symlinking) the repo checkout it runs from. Add a manifest entry. That is the checkout holding the running script; when the script is the installed app (the `factory` command on the PATH), it is the Factory checkout containing the current directory (one with `cli/bin/factory.mts`, `board`, `orchestrator` and `skills`). Outside any checkout, a linked install reuses its linked checkout and a copied install stops with an error rather than reinstall itself. Install prints the checkout it uses.
 3. Symlink `~/.local/bin/factory` to `app/cli/bin/factory.mts`. Add a manifest entry. If `~/.local/bin` is not on the PATH, print the line to add.
 4. Create the board unit from the shipped template (`factory-board.service` or `com.factory.board.plist`), with the absolute Node path filled in. Add a manifest entry. Enable it and start it.
 5. Detect old `sandcastle-*` units, `~/.config/sandcastle/` and `~/.local/state/sandcastle/`. Print a warning naming them and that adoption comes in a later slice. Change nothing.
