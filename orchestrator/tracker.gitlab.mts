@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { LABELS, TRACKER } from "./config.mts";
+import { LABELS, MERGE, TRACKER } from "./config.mts";
+import { ciGate, missingChecks } from "./ci.mts";
 import type { Child, Note } from "./graph.mts";
 import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
 // GitLab adapter for tracker.mts, via `glab` on the host. Units of work can be GitLab Tasks (the
-// "Child items" on an issue). Delivery: wait for the branch pipeline, then open an MR. Never merges.
+// "Child items" on an issue). Manual delivery waits for branch CI. Auto delivery opens an MR first,
+// gates its head pipeline and required jobs on the pushed SHA, then merges with a SHA guard.
 // mergedPr: the newest merged MR into the base from the run's branch, else one titled `#N: ...`.
 // postVerification preserves GitLab's upload-then-comment flow, shared by normal and recovery runs.
 
@@ -150,7 +152,7 @@ function uploadEvidence(_iid: string, _tip: string, files: string[]): string[] {
  * `noCiMinutes`, the MR opens anyway and CI runs on it. Never merges.
  */
 export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered> {
-  if (d.autoMerge) throw new Error("MERGE.auto is only supported with TRACKER.kind \"github\".");
+  if (d.autoMerge) return autoDeliver(d);
   d.onStage("ci");
   let status = "none";
   const deadline = Date.now() + d.waitMinutes * 60_000;
@@ -170,6 +172,55 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
   ]);
   console.log(out);
   return { url: out.split(/\s+/).find((w) => w.startsWith("http")) ?? "", merged: false };
+}
+
+/** Open first so MR-only pipelines can run. Never merge an old pipeline or a changed head. */
+async function autoDeliver(d: Delivery & { waitMinutes: number; noCiMinutes: number }): Promise<Delivered> {
+  const path = `projects/${ID}/merge_requests`;
+  const mr = JSON.parse(glab(["api", "-X", "POST", path, "--hostname", HOST,
+    "-f", `source_branch=${d.branch}`, "-f", `target_branch=${d.base}`, "-f", `title=${d.title}`,
+    "-f", `description=${d.body("Sandcastle merges only after the head pipeline and required jobs pass on the pushed commit.")}`,
+  ])) as { iid: number; web_url: string };
+  const url = mr.web_url;
+  console.log(url);
+  d.onStage("ci");
+  const block = (blocked: string): Delivered => {
+    glab(["api", "-X", "POST", `${path}/${mr.iid}/notes`, "--hostname", HOST,
+      "-f", `body=Sandcastle did not merge this MR: ${blocked}. Waiting for a person.`]);
+    return { url, merged: false, blocked };
+  };
+  const required = MERGE.requiredChecks ?? [];
+  const deadline = Date.now() + d.waitMinutes * 60_000;
+  const noPipelineBy = Date.now() + d.noCiMinutes * 60_000;
+  let reason = "no pipeline on the pushed commit";
+  while (Date.now() < deadline) {
+    const head = api<{ sha: string; head_pipeline: { id: number; sha: string; status: string } | null }>(`${path}/${mr.iid}`);
+    if (head.sha !== d.sha) return block("MR head changed since Factory pushed");
+    const pipeline = head.head_pipeline;
+    if (pipeline?.sha === d.sha) {
+      const jobs = apiAll<{ name: string; status: string }>(`projects/${ID}/pipelines/${pipeline.id}/jobs?include_retried=false`);
+      const checks = jobs.map((j) => ({ name: j.name, bucket: j.status === "success" ? "pass" : j.status === "skipped" ? "skipping" : j.status === "failed" ? "fail" : j.status === "canceled" ? "cancel" : "pending" }));
+      const gate = ciGate(checks, required);
+      const missing = missingChecks(checks, required);
+      reason = `pipeline ${pipeline.status}; job gate ${gate}${missing.length ? `; required jobs not passed: ${missing.join(", ")}` : ""}`;
+      if (["failed", "canceled", "skipped", "manual"].includes(pipeline.status) || gate === "fail") return block(reason);
+      if (pipeline.status === "success" && gate === "pass") {
+        // GitLab's project setting controls merge vs rebase; squash is selectable per MR.
+        try {
+          const merged = JSON.parse(glab(["api", "-X", "PUT", `${path}/${mr.iid}/merge`, "--hostname", HOST,
+            "-f", `sha=${d.sha}`, "-F", `squash=${MERGE.method === "squash"}`])) as { state: string };
+          if (merged.state !== "merged") return block("GitLab did not confirm the merge");
+          return { url, merged: true };
+        } catch {
+          return block("GitLab refused the SHA-guarded merge; check conflicts and project merge settings");
+        }
+      }
+    } else if (Date.now() >= noPipelineBy) {
+      return block(reason);
+    }
+    await new Promise((r) => setTimeout(r, 15_000));
+  }
+  return block(`CI deadline reached after ${d.waitMinutes} min: ${reason}`);
 }
 
 /** Comments, oldest first. */

@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { ciGate } from "./ci.mts";
+import { ciGate, missingChecks } from "./ci.mts";
 import type { Gate } from "./ci.mts";
 import { LABELS, MERGE, TRACKER } from "./config.mts";
 import type { Child, Note } from "./graph.mts";
@@ -228,7 +228,8 @@ function checks(pr: string): { name: string; bucket: string }[] {
 /**
  * Open a PR into the base. Without `autoMerge`, stop there (you merge it). With it, poll the checks
  * until ciGate decides: "pass" merges (only while the head is still the pushed commit); "fail", no
- * checks within `noCiMinutes`, or still pending at `waitMinutes` turns the PR into a draft and throws.
+ * checks within `noCiMinutes`, or still pending at `waitMinutes` parks it for a person. Failed CI
+ * retains the existing draft-and-fail behaviour. Required checks must pass, not skip.
  */
 export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered> {
   const note = d.autoMerge
@@ -240,20 +241,35 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
 
   d.onStage("ci");
   let gate: Gate = "none";
+  let observed: { name: string; bucket: string }[] = [];
+  const required = MERGE.requiredChecks ?? [];
   const deadline = Date.now() + d.waitMinutes * 60_000;
   const noChecksBy = Date.now() + d.noCiMinutes * 60_000;
   while (Date.now() < deadline) {
-    gate = ciGate(checks(url));
+    observed = checks(url);
+    gate = ciGate(observed, required);
     if (gate === "pass" || gate === "fail") break;
     if (gate === "none" && Date.now() > noChecksBy) break;
     await new Promise((r) => setTimeout(r, 15_000));
   }
   if (gate !== "pass") {
     const why = { fail: "CI failed", none: `no CI checks ran within ${d.noCiMinutes} min`, pending: `CI still running after ${d.waitMinutes} min` }[gate];
+    if (gate !== "fail") {
+      const missing = missingChecks(observed, required);
+      const blocked = `${why}${missing.length ? `; required checks not passed: ${missing.join(", ")}` : ""}`;
+      gh(["pr", "comment", url, "--body", `Sandcastle did not merge this PR: ${blocked}. Waiting for a person.`]);
+      return { url, merged: false, blocked };
+    }
     spawnSync("gh", ["pr", "ready", url, "--undo"], { stdio: "ignore" });
     spawnSync("gh", ["pr", "comment", url, "--body", `Sandcastle did not merge this PR: ${why}. Marked as a draft.`], { stdio: "ignore" });
     throw new Error(`Not merged: ${why} on ${d.branch}. PR left open as a draft: ${url}`);
   }
-  gh(["pr", "merge", url, `--${MERGE.method}`, "--match-head-commit", d.sha]);
-  return { url, merged: true };
+  try {
+    gh(["pr", "merge", url, `--${MERGE.method}`, "--match-head-commit", d.sha]);
+    return { url, merged: true };
+  } catch {
+    const blocked = "GitHub refused the SHA-guarded merge; check the PR head, conflicts and repository merge settings";
+    gh(["pr", "comment", url, "--body", `Sandcastle did not merge this PR: ${blocked}. Waiting for a person.`]);
+    return { url, merged: false, blocked };
+  }
 }

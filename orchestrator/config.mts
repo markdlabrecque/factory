@@ -30,9 +30,10 @@ export const AGENT = {
 
 // What happens after the verifier passes and the branch is pushed.
 export const MERGE = {
-  // false: open the MR and stop; a person merges it. true (GitHub only): merge the PR once every CI
-  // check on the pushed commit passes; no CI, or failed CI, means no merge.
+  // false: a person merges. true: merge GitHub PRs or GitLab MRs only after CI on the pushed SHA.
+  // Missing/pending gates wait for a person. GitHub failed CI still drafts and fails the run.
   auto: false,
+  requiredChecks: [] as string[], // optional exact check/job names; each must pass, not skip
   method: "squash" as "merge" | "squash" | "rebase", // auto merges only
 };
 

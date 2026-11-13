@@ -10,6 +10,7 @@ import type { Handoff, Host, VerifierSandbox } from "./handoff.mts";
 // Run: node --test 'orchestrator/*.test.mts'
 // The verify/post/deliver hand-off shared by main.mts and recovery runs, and the prerequisite recheck recovery runs make
 // (#75), against a fake host (no tracker, git or Docker). Posting failures stop every verdict before delivery.
+// Blocked merge gates park as waiting.
 
 type Rec = Record<string, unknown>;
 function fakeHost(record: Rec = {}) {
@@ -50,6 +51,18 @@ test("a repaired branch is independently verified, posted and delivered like an 
   assert.match(bodies[1], /Refs #7\n\nRepaired by Factory recovery attempt 2, then verified independently\. Verdict: \*\*PASS\*\*/);
   assert.equal(record.stage, "done");
   assert.equal(record.mr, "https://example.test/pr/9");
+});
+
+test("a blocked automatic merge parks the run with its open PR for a person", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "handoff-"));
+  writeFileSync(join(dir, "verdict.md"), "VERDICT: PASS");
+  const { host, record } = fakeHost();
+  host.tracker.deliver = async () => ({ url: "https://example.test/pr/9", merged: false, blocked: "required check test missing" });
+  const result = await postAndDeliver(handoff(dir, { autoMerge: true }), host);
+  assert.equal(result.ok, true);
+  assert.equal(record.stage, "waiting");
+  assert.equal(record.mr, "https://example.test/pr/9");
+  assert.match(String(record.note), /Waiting for a person: required check test missing/);
 });
 
 test("a stale verdict cannot stand in for this run's verifier", async () => {

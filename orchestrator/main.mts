@@ -27,7 +27,7 @@ import * as tracker from "./tracker.mts";
 // 4. host posts the evidence to the ticket   5. on PASS: push and deliver (tracker adapter).
 //    Steps 3-5 live in handoff.mts, shared with recovery runs so a repaired branch is verified and delivered the same way:
 //    GitLab: wait for the branch pipeline, open an MR into <base>; never merges.
-//    GitHub: open a PR into <base>; with MERGE.auto, merge it once every CI check passes (ci.mts).
+//    Both trackers support MERGE.auto with required named checks on the pushed SHA (ci.mts).
 // Never closes the ticket (the dispatcher closes a Task/sub-issue, or moves a ticket on, once its work
 // merges). Every tracker call runs on the host with your glab/gh login; the container has no tracker token.
 // The agent (Claude Code or Pi) comes from AGENT in config.mts. The implementer's model is AGENT.model, or
@@ -101,9 +101,10 @@ function sh(cmd: string, args: string[]): string {
   return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 }
 // The host side of the hand-off (handoff.mts): board, git and tracker.
+// Any open PR/MR reserves its branch's conflicts, including blocked automatic merges parked as waiting.
 const host: Host = {
   setStage, readRuns,
-  live: (r, openMrs) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (r.stage === "done" && openMrs.has(r.branch!)),
+  live: (r, openMrs) => (!TERMINAL.includes(r.stage) && !PARKED.includes(r.stage)) || (!!r.branch && openMrs.has(r.branch)),
   git: (args) => sh("git", args),
   gitStatus: (args) => {
     const res = spawnSync("git", args, { encoding: "utf8" });
@@ -129,7 +130,6 @@ if (recovering) {
   if (opts["no-push"]) fail("--recover always delivers normally; --no-push is not allowed with it.");
 }
 const base = opts.base;
-if (MERGE.auto && (TRACKER as { kind?: string }).kind !== "github" && !opts["no-push"]) fail('MERGE.auto needs TRACKER.kind "github" (config.mts).');
 const badModels = disallowedModels(AGENT.modelLabels, [AGENT.model, GRAPH.model]);
 if (badModels) fail(badModels);
 await tracker.ensureLabels(allLabels());

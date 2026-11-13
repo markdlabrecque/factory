@@ -7,7 +7,7 @@ import type { Delivered, Delivery } from "./tracker.mts";
 
 // The hand-off every branch goes through before it leaves the host: the independent verifier, then evidence posted to
 // the ticket, then on PASS push and normal delivery (tracker.deliver: an MR on GitLab, a PR merged after CI on GitHub
-// with MERGE.auto). main.mts calls it after its implementer; a recovery run (slice four) calls the same functions after
+// with MERGE.auto). Blocked merge gates leave the run waiting for a person. main.mts calls it after its implementer; a recovery run (slice four) calls the same functions after
 // its repair agent, so a repaired branch gets no shortcut: the same verifier prompt and model (AGENT.model), the same
 // "verifier must not change the branch" check, the same PASS gate, push and delivery limits. Two things protect a run
 // that reuses a ticket's record and evidence folder (a recovery attempt on a preserved branch): beginVerification
@@ -183,7 +183,10 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   } catch (e) {
     return { ok: false, verdict, reason: (e as Error).message };
   }
-  host.setStage(iid, { stage: "done", mr: delivered.url, note: delivered.merged ? "merged after CI passed" : "" });
+  host.setStage(iid, {
+    stage: delivered.blocked ? "waiting" : "done", mr: delivered.url,
+    note: delivered.blocked ? `Waiting for a person: ${delivered.blocked}` : delivered.merged ? "merged after CI passed" : "",
+  });
   return { ok: true, verdict, pushed: true, url: delivered.url, merged: delivered.merged };
 }
 

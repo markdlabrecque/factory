@@ -2,6 +2,7 @@
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
 // scheduling, whole-project --refresh-only (#93), per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
 // #125: a queued card disappears from buildBoardData only after a successful refresh confirms deselection, and returns when reselected.
+// #122: parked runs with open PRs/MRs still reserve conflicting footprints.
 // The fixture owns the Pi extension path as well as the pi command, so a developer's installed provider cannot mask CI failures.
 // A file-gated analyst deterministically overlaps scheduled/manual dispatch processes and releases the older last.
 import { test } from "node:test";
@@ -87,6 +88,25 @@ test("refresh fixtures override a missing inherited Pi extension with their own 
 });
 
 for (const kind of ["github", "gitlab"]) {
+  test(`${kind}: a waiting automatic merge still reserves its open branch footprint`, (t) => {
+    const f = fixture(t, kind);
+    f.data.tickets = [ticket(7, { description: "Candidate" }), ticket(8, { description: "Parked merge" })];
+    f.data.ready = [7];
+    f.data.openBranches = ["8-topic"];
+    f.record(8, "waiting");
+    for (const iid of [7, 8]) {
+      f.manifest(iid);
+      const path = join(f.dir, "graph", `${f.key(iid)}.json`);
+      const m = JSON.parse(readFileSync(path, "utf8"));
+      m.footprint = m.actualFootprint = ["shared.mts"];
+      writeFileSync(path, JSON.stringify(m));
+    }
+    const result = f.pass();
+    assert.equal(f.bytes(join(f.fake, "launches")), "absent", result.stdout + result.stderr);
+    assert.match(result.stdout, /overlap|conflict|shared\.mts/i);
+    assert.equal(JSON.parse(f.bytes(join(f.dir, `${f.key(8)}.json`))).stage, "waiting");
+  });
+
   test(`${kind}: closed, deselected, excluded and out-of-milestone parked cards retain history and never launch`, (t) => {
     const f = fixture(t, kind);
     f.data.tickets = [ticket(7, { state: "closed" }), ticket(8, { labels: [] }), ticket(9, { labels: ["blocked"] }), ticket(10)];
