@@ -6,6 +6,8 @@
 // again until the copy is reviewed once more. `factory init` records the review when it created every workflow file
 // itself (a new scaffold is Factory's own workflow); an existing project is upgraded by hand (orchestrator/ADAPTING.md,
 // "Upgrading an existing project for self-recovery") and then reviewed with `factory recovery review --confirm`.
+// assessment.mts belongs in the reviewed workflow because board.mts imports it even on the repair path (#78).
+// refresh-worker.mts is service-only and is not copied into projects or run by recovery.
 // Nothing here copies, merges or changes project files; automated scaffold upgrades are out of scope.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -15,12 +17,12 @@ import { recoveryFile } from './recovery-state.mts';
 import { appRoot } from './scaffold.mts';
 
 /** Every .sandcastle file the repair path runs, as the review covers them. config.mts is project configuration, not workflow. */
-export const WORKFLOW = ['main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'board.mts',
+export const WORKFLOW = ['main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'board.mts',
   'prompt.recover.md', 'prompt.verify.md'];
 /** Where Factory's own copy of each workflow file lives, for showing which project files differ. main.mts is templated, so it has none. */
 const SHIPPED: Record<string, string> = {
   'recovery.mts': 'orchestrator/recovery.mts', 'recovery-sandbox.mts': 'orchestrator/recovery-sandbox.mts', 'handoff.mts': 'orchestrator/handoff.mts',
-  'ownership.mts': 'orchestrator/ownership.mts', 'admission.mts': 'board/admission.mts', 'board.mts': 'board/board.mts',
+  'ownership.mts': 'orchestrator/ownership.mts', 'admission.mts': 'board/admission.mts', 'assessment.mts': 'board/assessment.mts', 'board.mts': 'board/board.mts',
   'prompt.recover.md': 'orchestrator/prompt.recover.md', 'prompt.verify.md': 'cli/templates/project/prompt.verify.md',
 };
 export type Review = { version: 1; root: string; reviewedAt: string; by: 'init' | 'review'; files: Record<string, string> };

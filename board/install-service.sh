@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Install (or update) the Sandcastle board as a systemd user service on Linux.
+# Copy the complete standalone board, including admission/assessment imports and the manual-refresh worker.
 #   ./install-service.sh            install + start
 #   ./install-service.sh --uninstall
 set -euo pipefail
@@ -15,7 +16,8 @@ fi
 
 NODE="$(command -v node)" || { echo "node not found on PATH" >&2; exit 1; }
 mkdir -p "$APP" "$(dirname "$UNIT")" "$HOME/.local/state/sandcastle"
-cp "$HERE/board.mts" "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
+cp "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/refresh-worker.mts" \
+  "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
 sed "s#__NODE__#$NODE#" "$HERE/sandcastle-board.service" > "$UNIT"
 systemctl --user daemon-reload
 systemctl --user enable --now sandcastle-board.service

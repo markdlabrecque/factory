@@ -1,7 +1,8 @@
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
 // /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims.
 // Tracker coverage includes latest-ten Shipped selection, queue reasons, persisted stage visits, honest legacy stats
-// and focus returned to the actual stats control, including removed/hidden-control fallbacks.
+// and focus returned to the actual stats control, including removed/hidden-control fallbacks. Assessment DOM assertions
+// cover unchecked, fresh, pending-analysis, pending-refresh and failed-with-last-good cards, including reused nodes.
 // The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
 import { test } from "node:test";
@@ -41,6 +42,52 @@ test("appearance keeps light/dark/system, follows the OS live and survives block
   assert.equal(root.dataset.theme, "light");
   // The design picker is gone: no design storage key or renderer branches remain.
   assert.doesNotMatch(template, /sandcastle-design|setDesign|data-design/);
+});
+
+test("assessment DOM distinguishes unchecked, fresh, pending and failed checks without hiding refresh", () => {
+  class Node {
+    hidden = false;
+    disabled = false;
+    children: Node[] = [];
+    tag: string;
+    className: string;
+    private text: string;
+    constructor(tag = 'div', className = '', text = '') { this.tag = tag; this.className = className; this.text = text; }
+    get textContent(): string { return this.text + this.children.map(n => n.textContent).join(' '); }
+    appendChild(n: Node) { this.children.push(n); }
+    replaceChildren(...nodes: Node[]) { this.text = ''; this.children = nodes; }
+  }
+  const ctx = load("assessment", ["renderAssessment"], {
+    fileMode: false,
+    el: (tag: string, cls?: string, text?: string) => new Node(tag, cls, text),
+    add: (parent: Node, ...children: Node[]) => children.forEach(n => parent.appendChild(n)),
+    ago: () => '1m',
+  });
+  const card = { assess: new Node(), refresh: new Node('button', '', 'Refresh ticket') };
+  const facts = { state: 'open', selected: true, checkedAt: '2026-11-10T12:00:00Z', model: 'opus' };
+  const render = (assessment?: object) => {
+    ctx.renderAssessment(card, { title: 'Run title', assessment }, 0);
+    assert.equal(card.assess.hidden, false);
+    assert.equal(card.refresh.hidden, false);
+    assert.equal(card.refresh.disabled, false);
+    assert.equal(card.refresh.textContent, 'Refresh ticket');
+    return card.assess.textContent;
+  };
+  assert.equal(render(), 'Current ticket: not checked yet');
+  assert.equal(card.assess.children[0].className, 'a-title');
+  const fresh = render({ facts, analysisState: 'current' });
+  assert.match(fresh, /Current ticket.*Open in tracker.*Model opus.*Checked 1m ago/);
+  assert.doesNotMatch(fresh, /not checked|Pending|Refresh requested|failed/i);
+  assert.match(render({ facts, analysisState: 'pending' }), /Pending analysis: dependency conclusions are stale/);
+  assert.match(render({ facts, pending: { generation: 'g' } }), /Refresh requested: checking current tracker facts/);
+  const failed = render({ facts, error: 'tracker unavailable', attemptedAt: facts.checkedAt });
+  assert.match(failed, /Open in tracker.*Checked 1m ago.*Last check failed 1m ago: tracker unavailable.*Showing the last good check/);
+  assert.ok(card.assess.children.some(n => n.className === 'a-bad' && /Last check failed/.test(n.textContent)));
+  assert.equal(render(), 'Current ticket: not checked yet', 'reused cards clear stale facts and errors');
+  ctx.fileMode = true;
+  ctx.renderAssessment(card, {}, 0);
+  assert.equal(card.refresh.hidden, true, 'local snapshots still hide the HTTP action');
+  assert.equal(card.assess.hidden, false);
 });
 
 test("run model groups every stage, flags attention and rejects unsafe links", () => {

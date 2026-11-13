@@ -2,13 +2,14 @@
 <!-- Factory tracker board/evidence shell: per-ticket dots and centered connectors, solid green/red current dots
      with halos and sonar pulses, explicit queue reasons, latest-ten collapsible Shipped and real-history stats.
      Stats return focus to the invoking control, with a fallback for removed/hidden tickets.
-     Current assessments show selection, pending dependency analysis and fail-closed dependency checks separately
+     Current assessments always show an explicit unchecked state when absent, distinct from refresh/analysis pending
+     and failed checks. They show selection, pending dependency analysis and fail-closed dependency checks separately
      from historical results. Refresh runs a short-lived read-only command, even when scheduling is off.
      Legacy history is marked incomplete; stopped tickets remain unfinished. Light, dark and system appearance
      (saved in the browser as sandcastle-theme). The HTTP board polls /api/runs every 10s and patches run cards by
      BoardRun.key with FLIP motion, so focus, scroll and filters survive updates. A local board.html is a static snapshot
      with no polling. Evidence pages never poll. All motion respects prefers-reduced-motion, live.
-     Code between "// <name>:start" and "// <name>:end" markers is DOM-free and loaded by board.test.mts. -->
+     Code between "// <name>:start" and "// <name>:end" markers is loaded by board.test.mts with stubbed DOM boundaries where needed. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -790,12 +791,16 @@
       unknownStage: unknownStage, reasons: reasons, branch: branch, timing: timing, note: note, activity: activity, assess: assess, refresh: refresh, foot: foot, sig: '', stage: run.stage };
   }
 
+  // assessment:start
   // The ticket as the tracker shows it now (run.assessment), apart from the run's own record above.
   function renderAssessment(c, run, now) {
     var a = run.assessment, f = a && a.facts;
     c.refresh.hidden = fileMode;
-    c.assess.hidden = !a;
-    if (!a) return;
+    c.assess.hidden = false;
+    if (!a) {
+      c.assess.replaceChildren(el('span', 'a-title', 'Current ticket: not checked yet'));
+      return;
+    }
     var rows = [el('span', 'a-title', 'Current ticket')];
     if (f) {
       var line = el('div', 'a-row');
@@ -818,6 +823,7 @@
     if (a.error) rows.push(el('div', 'a-bad', 'Last check failed ' + ago(a.attemptedAt, now) + ' ago: ' + a.error + (f ? ' Showing the last good check.' : '')));
     c.assess.replaceChildren.apply(c.assess, rows);
   }
+  // assessment:end
 
   function updateCard(c, run, now) {
     var info = stageInfo(run.stage), quiet = isQuiet(run, now);

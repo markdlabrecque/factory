@@ -7,7 +7,9 @@
 // container and private-Git adapter (#74), plus admission.mts (the run-claim admission record board.mts imports) and
 // ownership.mts (the ownership receipts main.mts writes before creating a branch), #75. All are import-safe, so ordinary
 // dispatch of a new scaffold is unaffected. refresh.mts and assessment.mts keep current read-only analysis (#78)
-// separate from execution manifests; the board invokes the project's dispatch.mts --refresh-only when scheduling is off.
+// separate from execution manifests; assessment.mts is also a mandatory board.mts import and part of recovery review.
+// The installed service, not the project scaffold, needs refresh-worker.mts to invoke dispatch.mts --refresh-only
+// when scheduling is off. Both standalone board installers copy that worker and the admission/assessment imports.
 // prompt.recover.md, the repair agent's prompt, is copied too (#63), so a new scaffold has the complete recovery workflow;
 // `factory init` records it as reviewed only when it created every workflow file itself (cli/src/recovery-review.mts).
 import { closeSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
