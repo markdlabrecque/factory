@@ -19,6 +19,7 @@ import type { Ticket } from "./tracker.mts";
 // main.mts run per ticket that is free to go (up to a cap on concurrent runs). Usually started through
 // dispatch.sh (by hand, or by a sandcastle-dispatch@<project>.timer), which checks the tools and image first.
 //   node .sandcastle/dispatch.mts --base sal-develop [--max 3] [--dry-run] [--whole-issues]
+//   node .sandcastle/dispatch.mts --refresh-only [--ticket <iid>] [--base sal-develop]
 // A ticket is free to go when its manifest is current, every ticket it depends on is merged into the
 // base or closed, and its files don't overlap a live run (in flight, or MR still open).
 // Tickets that aren't free get a "queued" card on the board saying why. A ticket whose run failed
@@ -39,7 +40,9 @@ import type { Ticket } from "./tracker.mts";
 // ticket moved to LABELS.done as for Factory's own merges. A closed issue alone is never taken as a merge.
 // With AGENT.modelLabels (config.mts), a ticket without exactly one model label stays queued.
 // Existing cards, including deselected parked cards, are retained and reassessed separately (#78, refresh.mts).
-// --refresh-only --ticket <iid> is the board's bounded read-only command. It exits before tracker writes or admission.
+// --refresh-only [--ticket <iid>] is the bounded read-only command: with --ticket the board's one-card check, without it
+// (#93) every card of this project (up to REFRESH_PER_PASS, oldest assessment first, within GRAPH.maxAnalysesPerPass), for
+// projects that are not scheduled. It exits before tracker writes, run-record updates or admission.
 // Jam report (slice four self-recovery, #61): when the scheduler's tick sets FACTORY_JAM_REPORT (and FACTORY_PASS_ID),
 // a pass that is not a dry run writes there, after the board update and before launching, whether the project is jammed
 // (graph.mts findJam: still-ready stopped tickets and the holds behind them, with no run in flight, nothing launched,
@@ -109,7 +112,7 @@ const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 
 if (opts["refresh-only"]) {
-  if (!opts.ticket || !/^\d+$/.test(opts.ticket)) throw new Error("--refresh-only requires --ticket <iid>");
+  if (opts.ticket !== undefined && !/^\d+$/.test(opts.ticket)) throw new Error("--refresh-only takes --ticket <iid> (a number), or no --ticket for the whole project");
   refreshProject({ base, ticket: opts.ticket, subtasks, select: SELECT, log });
   process.exit(0);
 }

@@ -1,6 +1,6 @@
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
-// scheduling, per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
+// scheduling, whole-project --refresh-only (#93), per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
 // The fixture owns the Pi extension path as well as the pi command, so a developer's installed provider cannot mask CI failures.
 // A file-gated analyst deterministically overlaps scheduled/manual dispatch processes and releases the older last.
 import { test } from "node:test";
@@ -185,6 +185,31 @@ for (const kind of ["github", "gitlab"]) {
     }
   });
 }
+
+test("refresh-only without --ticket reassesses every card of the project and nothing else (#93)", (t) => {
+  const f = fixture(t);
+  f.data.tickets.push(ticket(8), ticket(9));
+  const records = new Map([[7, "stopped"], [8, "done"], [9, "waiting"]].map(([iid, stage]) => [iid as number, f.record(iid as number, stage as string)]));
+  const other = join(f.dir, "other_repo--7.json"), otherRecord = JSON.stringify({ iid: "7", project: "other/repo", stage: "stopped", pid: process.pid, base: "main" });
+  writeFileSync(other, otherRecord);
+  f.pass(["--refresh-only"]);
+  for (const [iid, record] of records) {
+    assert.equal(f.assessment(iid).analysisState, "current", `#${iid} assessed`);
+    assert.equal(f.bytes(join(f.dir, `${f.key(iid)}.json`)), record, `#${iid} run record untouched`);
+  }
+  assert.equal(readAssessment(f.dir, "other_repo--7"), undefined, "another project's card is not touched");
+  assert.equal(f.bytes(other), otherRecord);
+  assert.equal(existsSync(join(f.fake, "launches")), false);
+  assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+  assert.doesNotMatch(f.bytes(join(f.fake, "tracker.jsonl")), /"create"|"POST"|"edit"|"comment"|"close"/);
+});
+
+test("refresh-only rejects a malformed --ticket", (t) => {
+  const f = fixture(t); f.save();
+  const r = spawnSync(f.node, [".sandcastle/dispatch.mts", "--refresh-only", "--ticket", "x"], { cwd: f.root, encoding: "utf8", env: f.env, timeout: 20_000 });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--ticket <iid>/);
+});
 
 test("refresh-only does not reconcile or delete records whose process has died", (t) => {
   const f = fixture(t); f.record(7, "implementing");
