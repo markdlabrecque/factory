@@ -1,12 +1,13 @@
 // Read-only gh/glab boundary for #78 refresh/dispatch and #122 open-MR conflict tests.
-// All data and exact call logs are fixture-owned.
+// All data and exact call logs are fixture-owned. #135: write large capped-selection responses synchronously
+// so process.exit cannot truncate JSON still buffered on stdout.
 // Reject every mutation and unexpected command, including label creation, comments, issue closes and PR creation.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2), dir = process.env.FAKE_STATE;
 appendFileSync(join(dir, "tracker.jsonl"), JSON.stringify(args) + "\n");
 const data = JSON.parse(readFileSync(join(dir, "tracker.json"), "utf8"));
-const out = (v) => { process.stdout.write(JSON.stringify(v)); process.exit(0); };
+const out = (v) => { writeFileSync(1, JSON.stringify(v)); process.exit(0); };
 const fail = (s) => { process.stderr.write(s); process.exit(2); };
 const isGh = process.env.FAKE_TRACKER === "github";
 const ghTicket = (t) => ({ number: t.iid, title: t.title, body: t.description, state: t.state.toUpperCase(), labels: t.labels.map((name) => ({ name })), assignees: [] });

@@ -3,6 +3,7 @@
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
 // scheduling, whole-project --refresh-only (#93), per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
 // #125: a queued card disappears from buildBoardData only after a successful refresh confirms deselection, and returns when reselected.
+// #135: capped GitHub selection fails refresh without hiding queued cards or overwriting last-good facts.
 // #122: parked runs with open PRs/MRs still reserve conflicting footprints.
 // The fixture owns the Pi extension path as well as the pi command, so a developer's installed provider cannot mask CI failures.
 // A file-gated analyst deterministically overlaps scheduled/manual dispatch processes and releases the older last.
@@ -286,6 +287,32 @@ test("#125: a refreshed deselected queued card leaves the board, keeps its recor
   assert.equal(shown(), true, "restored selection brings the card back");
   assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
   assert.equal(existsSync(join(f.fake, "launches")), false);
+});
+
+test("#135: capped GitHub selection preserves queued cards and last-good facts", async (t) => {
+  const f = fixture(t), record = f.record(7, "queued");
+  const saved = process.env.SANDCASTLE_STATE_DIR;
+  process.env.SANDCASTLE_STATE_DIR = f.dir;
+  t.after(() => { if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved; });
+  const { buildBoardData } = await import("../board/board.mts");
+  f.pass(["--refresh-only", "--ticket", "7"]);
+  const facts = f.assessment().facts;
+  assert.equal(facts?.selected, true);
+  // A Search-sized response that omits our still-eligible ticket is not proof of deselection.
+  const others = Array.from({ length: 1000 }, (_, i) => ticket(100 + i));
+  f.data.tickets.push(...others);
+  f.data.ready = others.map((x) => x.iid);
+  for (const args of [["--refresh-only", "--ticket", "7"], ["--refresh-only"]]) {
+    f.pass(args);
+    assert.match(f.assessment().error!, /Selection is unknown/);
+    assert.deepEqual(f.assessment().facts, facts);
+    assert.ok(buildBoardData("http").runs.some((r) => r.key === f.key(7)));
+    assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
+  }
+  f.data.ready = [];
+  f.pass(["--refresh-only", "--ticket", "7"]);
+  assert.equal(f.assessment().facts?.selected, false);
+  assert.equal(buildBoardData("http").runs.some((r) => r.key === f.key(7)), false);
 });
 
 test("refresh-only rejects a malformed --ticket", (t) => {

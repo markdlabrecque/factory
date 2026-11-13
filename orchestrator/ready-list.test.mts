@@ -1,6 +1,6 @@
-// #135: readyList returns every ready ticket, not only the first page (GitLab) or the first `--limit` (GitHub);
-// a ticket past such a limit would be judged "not selected" and hidden from the board. Recording gh/glab stubs on
-// PATH serve a fixed count of tickets and honour --page/--per-page and --limit, so no tracker is contacted.
+// #135: GitLab readyList reads every page; GitHub rejects capped search results rather than publish false
+// deselection. Recording gh/glab stubs model Search's hard 1000-result cap and later-page failures.
+// All calls stay on fixture-owned PATH boundaries; no tracker is contacted.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,8 +15,11 @@ const [tool, ...a] = process.argv.slice(2);
 const total = Number(process.env.READY_TOTAL), opt = (f) => { const i = a.indexOf(f); return i < 0 ? undefined : Number(a[i + 1]); };
 if (a[0] !== "issue" || a[1] !== "list") { console.error("unexpected: " + a.join(" ")); process.exit(9); }
 let from = 0, n;
-if (tool === "gh") n = opt("--limit") ?? 30;
-else { n = opt("--per-page") ?? 20; from = ((opt("--page") ?? 1) - 1) * n; }
+if (tool === "gh") n = Math.min(opt("--limit") ?? 30, 1000);
+else {
+  n = opt("--per-page") ?? 20; from = ((opt("--page") ?? 1) - 1) * n;
+  if (process.env.READY_FAIL_PAGE === String(opt("--page"))) process.exit(9);
+}
 const ids = Array.from({ length: Math.max(0, Math.min(n, total - from)) }, (_, k) => from + k + 1);
 console.log(JSON.stringify(ids.map((i) => tool === "gh"
   ? { number: i, title: "t" + i, body: "", state: "OPEN", labels: [], assignees: [] }
@@ -42,13 +45,24 @@ test("GitLab: every page of ready tickets is read, stopping at the first short p
   assert.equal(calls("glab").length, 2, "an exactly full page is followed by one empty page");
 });
 
-test("GitHub: a list that fills the limit is re-read with a larger one", () => {
-  reset(2500);
-  const all = github.readyList({});
-  assert.equal(all.length, 2500);
-  assert.equal(all.at(-1)?.iid, 2500);
-  assert.deepEqual(calls("gh").map((c) => c.match(/--limit (\d+)/)?.[1]), ["1000", "2000", "4000"]);
-  reset(3);
-  assert.equal(github.readyList({}).length, 3);
+test("GitHub: capped search results fail safely instead of implying deselection", () => {
+  for (const total of [1000, 1001, 2500]) {
+    reset(total);
+    assert.throws(() => github.readyList({}), /Selection is unknown/);
+    assert.equal(calls("gh").length, 1, "a larger --limit cannot bypass Search's cap");
+  }
+  reset(999);
+  assert.equal(github.readyList({}).length, 999);
   assert.equal(calls("gh").length, 1);
+});
+
+test("GitLab: a later-page failure never returns partial selection facts", () => {
+  reset(250);
+  process.env.READY_FAIL_PAGE = "2";
+  try {
+    assert.throws(() => gitlab.readyList({}));
+    assert.equal(calls("glab").length, 2);
+  } finally {
+    delete process.env.READY_FAIL_PAGE;
+  }
 });
