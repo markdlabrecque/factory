@@ -6,12 +6,13 @@
 // and focus returned to the actual stats control, including removed/hidden-control fallbacks. Assessment DOM assertions
 // cover unchecked, fresh, pending-analysis, pending-refresh and failed-with-last-good cards, including reused nodes.
 // The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
+// #125: queued cards with confirmed deselected facts leave the shared snapshot (API, page, live diff/counts) without writes.
 // Run with node --test board/board.test.mts. All state and evidence are temporary.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -80,6 +81,54 @@ test('bad presentation journals cannot interrupt stage writes or evidence render
     assert.equal(board.buildBoardData('http').runs.length, 2);
     const bad = board.readRuns().find(r => r.project === 'bad')!;
     assert.doesNotThrow(() => board.buildEvidencePage(bad, []));
+  } finally {
+    if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#125: a queued card leaves the snapshot only once refreshed facts confirm deselection', async () => {
+  const board = await import('./board.mts');
+  const { writeAssessment } = await import('./assessment.mts');
+  const dir = mkdtempSync(resolve(tmpdir(), 'board-deselected-'));
+  const saved = process.env.SANDCASTLE_STATE_DIR;
+  process.env.SANDCASTLE_STATE_DIR = dir;
+  try {
+    const now = new Date().toISOString();
+    const facts = (selected?: boolean) => ({ title: 't', state: 'open', labels: [], hash: 'h', checkedAt: now, ...(selected === undefined ? {} : { selected }) });
+    const card = (iid: string, stage: string, assessment?: object) => {
+      writeFileSync(resolve(dir, `p--${iid}.json`), JSON.stringify({ project: 'p', iid, stage, startedAt: now, updatedAt: now, stageSince: now, pid: process.pid }));
+      if (assessment) writeAssessment(dir, `p--${iid}`, { iid, project: 'p', ...assessment });
+    };
+    card('1', 'queued');                                                     // never assessed
+    card('2', 'queued', { facts: facts() });                                 // selection unknown
+    card('3', 'queued', { facts: facts(true) });
+    card('4', 'queued', { error: 'tracker down', attemptedAt: now });        // failed refresh, no prior facts
+    card('5', 'queued', { facts: facts(false) });                            // confirmed deselection
+    card('6', 'queued', { facts: facts(false), error: 'later failure' });    // last good facts still say deselected
+    for (const [n, stage] of ['waiting', 'implementing', 'stopped', 'done'].entries()) card(String(10 + n), stage, { facts: facts(false) });
+    const raw = () => board.readRuns().map(r => readFileSync(resolve(dir, `${r.key}.json`), 'utf8'));
+    const before = raw();
+    const keys = (runs: { key: string }[]) => runs.map(r => r.key).sort();
+    const shown = keys(board.buildBoardData('http').runs);
+    assert.deepEqual(shown, ['p--1', 'p--10', 'p--11', 'p--12', 'p--13', 'p--2', 'p--3', 'p--4']);
+    const embedded = JSON.parse(board.buildPage('file').match(/<script id="data" type="application\/json">(.*?)<\/script>/s)![1]);
+    assert.deepEqual(keys(embedded.runs), shown, 'embedded page agrees with /api/runs');
+    assert.equal(board.readRuns().length, 10, 'raw records remain for dispatch and later refreshes');
+    assert.deepEqual(raw(), before, 'filtering writes nothing');
+    assert.equal(existsSync(resolve(dir, 'journal')), false);
+
+    // The live page drops the absent card and its queue count on the next poll.
+    const m = load('model', ['summarize', 'diffRuns']);
+    const prev = board.buildBoardData('http').runs;
+    writeAssessment(dir, 'p--3', { iid: '3', project: 'p', facts: facts(false) });
+    const next = board.buildBoardData('http').runs;
+    assert.deepEqual([...m.diffRuns(new Map(prev.map(r => [r.key, r.stage])), next).removed], ['p--3']);
+    assert.equal(m.summarize(next, Date.now()).waiting, m.summarize(prev, Date.now()).waiting - 1);
+
+    // Restoring selection and refreshing successfully brings the retained card back.
+    writeAssessment(dir, 'p--5', { iid: '5', project: 'p', facts: facts(true) });
+    assert.ok(board.buildBoardData('http').runs.some(r => r.key === 'p--5'));
   } finally {
     if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved;
     rmSync(dir, { recursive: true, force: true });

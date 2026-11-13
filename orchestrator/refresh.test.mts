@@ -1,6 +1,7 @@
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
 // scheduling, whole-project --refresh-only (#93), per-pass analysis budget, and admission equivalence when assessment storage fails. No external services.
+// #125: a queued card disappears from buildBoardData only after a successful refresh confirms deselection, and returns when reselected.
 // The fixture owns the Pi extension path as well as the pi command, so a developer's installed provider cannot mask CI failures.
 // A file-gated analyst deterministically overlaps scheduled/manual dispatch processes and releases the older last.
 import { test } from "node:test";
@@ -202,6 +203,31 @@ test("refresh-only without --ticket reassesses every card of the project and not
   assert.equal(existsSync(join(f.fake, "launches")), false);
   assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
   assert.doesNotMatch(f.bytes(join(f.fake, "tracker.jsonl")), /"create"|"POST"|"edit"|"comment"|"close"/);
+});
+
+test("#125: a refreshed deselected queued card leaves the board, keeps its record and returns when reselected", async (t) => {
+  const f = fixture(t), record = f.record(7, "queued");
+  const saved = process.env.SANDCASTLE_STATE_DIR;
+  process.env.SANDCASTLE_STATE_DIR = f.dir;
+  t.after(() => { if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved; });
+  const { buildBoardData } = await import("../board/board.mts");
+  const shown = () => buildBoardData("http").runs.some((r) => r.key === f.key(7));
+  f.data.ready = []; f.data.errors = [7];
+  f.pass(["--refresh-only", "--ticket", "7"]);
+  assert.ok(f.assessment().error);
+  assert.equal(f.assessment().facts, undefined);
+  assert.equal(shown(), true, "a failed refresh without confirmed deselection removes nothing");
+  f.data.errors = [];
+  f.pass(["--refresh-only", "--ticket", "7"]);
+  assert.equal(f.assessment().facts?.selected, false);
+  assert.equal(shown(), false, "confirmed deselection hides the queued card");
+  assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record, "the raw run record is retained untouched");
+  f.data.ready = [7];
+  f.pass(["--refresh-only", "--ticket", "7"]);
+  assert.equal(f.assessment().facts?.selected, true);
+  assert.equal(shown(), true, "restored selection brings the card back");
+  assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
+  assert.equal(existsSync(join(f.fake, "launches")), false);
 });
 
 test("refresh-only rejects a malformed --ticket", (t) => {
