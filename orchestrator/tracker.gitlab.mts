@@ -7,6 +7,7 @@ import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from 
 // GitLab adapter for tracker.mts, via `glab` on the host. Units of work can be GitLab Tasks (the
 // "Child items" on an issue). Delivery: wait for the branch pipeline, then open an MR. Never merges.
 // mergedPr: the newest merged MR into the base from the run's branch, else one titled `#N: ...`.
+// postVerification preserves GitLab's upload-then-comment flow, shared by normal and recovery runs.
 
 // Cast: the shipped config.personal.mts (GitHub) has no GitLab fields, and this module still loads there.
 const { gitlabHost: HOST = "", projectId: ID = 0 } = TRACKER as { gitlabHost?: string; projectId?: number };
@@ -133,8 +134,13 @@ export function comment(iid: number | string, body: string): void {
   glab(["issue", "note", String(iid), "-R", TRACKER.project, "-m", body]);
 }
 
+/** Upload media through GitLab's existing endpoint, then post the verification comment. */
+export function postVerification(iid: string, tip: string, files: string[], body: (media: string[]) => string): void {
+  comment(iid, body(uploadEvidence(iid, tip, files)));
+}
+
 /** Upload evidence files; returns the markdown for each, in order. */
-export function uploadEvidence(_iid: string, _tip: string, files: string[]): string[] {
+function uploadEvidence(_iid: string, _tip: string, files: string[]): string[] {
   return files.map((f) => String(JSON.parse(glab(["api", `projects/${ID}/uploads`, "--hostname", HOST, "--form", `file=@${f}`])).markdown));
 }
 

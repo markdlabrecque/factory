@@ -1,6 +1,4 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { ciGate } from "./ci.mts";
@@ -10,8 +8,8 @@ import type { Child, Note } from "./graph.mts";
 import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
 // GitHub adapter for tracker.mts, via `gh` on the host (TRACKER.kind "github", TRACKER.project
-// "owner/repo"). Units of work can be sub-issues. Evidence images can't be uploaded to an issue
-// through the API, so they are committed to the `sandcastle-evidence` branch and linked from there.
+// "owner/repo"). Units of work can be sub-issues. Verification media is attached to one issue
+// comment with native `gh --attach` support. Upload failure stops delivery; no evidence branch is pushed.
 // Delivery: open a PR, and with MERGE.auto merge it only when ciGate (ci.mts) says "pass" for the
 // pushed commit. Failed or missing CI leaves the PR open as a draft and the run stopped.
 // mergedPr: the newest merged PR into the base from the run's branch, else one titled `#N: ...`.
@@ -19,7 +17,6 @@ import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from 
 const REPO = TRACKER.project;
 const HOST = (TRACKER as { host?: string }).host ?? "github.com";
 const [OWNER, NAME] = REPO.split("/");
-const EVIDENCE_BRANCH = "sandcastle-evidence";
 
 function gh(args: string[], input?: string): string {
   return execFileSync("gh", args, { encoding: "utf8", input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
@@ -146,37 +143,13 @@ export function comment(iid: number | string, body: string): void {
   gh(["issue", "comment", String(iid), "-R", REPO, "--body-file", "-"], body);
 }
 
-/**
- * Commit the files to `<iid>/<tip>/` on the evidence branch (without touching any checkout) and
- * return markdown linking each one: images inline, anything else as a link. Retries when a
- * concurrent run pushed first.
- */
-export function uploadEvidence(iid: string, tip: string, files: string[]): string[] {
-  const dir = `${iid}/${tip.slice(0, 8)}`;
-  const tmp = mkdtempSync(resolve(tmpdir(), "sandcastle-evidence-"));
-  const env = { ...process.env, GIT_INDEX_FILE: resolve(tmp, "index") };
-  try {
-    for (let attempt = 1; ; attempt++) {
-      let parent = "";
-      if (spawnSync("git", ["fetch", "--quiet", "origin", `+refs/heads/${EVIDENCE_BRANCH}:refs/sandcastle/evidence`]).status === 0) {
-        parent = git(["rev-parse", "refs/sandcastle/evidence"]);
-      }
-      git(parent ? ["read-tree", parent] : ["read-tree", "--empty"], env);
-      for (const f of files) git(["update-index", "--add", "--cacheinfo", `100644,${git(["hash-object", "-w", f])},${dir}/${basename(f)}`], env);
-      const tree = git(["write-tree"], env);
-      const commit = git(["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", `Evidence for #${iid} at ${tip.slice(0, 8)}`]);
-      if (spawnSync("git", ["push", "--quiet", "origin", `${commit}:refs/heads/${EVIDENCE_BRANCH}`], { stdio: "inherit" }).status === 0) {
-        return files.map((f) => {
-          const name = basename(f);
-          const url = `https://${HOST}/${REPO}/blob/${commit}/${dir}/${name}`;
-          return name.endsWith(".png") ? `![${name}](${url}?raw=true)` : `[${name}](${url})`;
-        });
-      }
-      if (attempt === 3) throw new Error(`Couldn't push evidence to ${EVIDENCE_BRANCH} after 3 tries.`);
-    }
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
+/** Post one verification comment. Standalone image references let gh render videos inline too.
+ * Requires gh 2.99+ and repository push access. Never retry with Git hosting on upload failure. */
+export function postVerification(iid: string, _tip: string, files: string[], body: (media: string[]) => string): void {
+  const paths = files.map((f) => resolve(f));
+  // Angle brackets preserve spaces and parentheses in local Markdown destinations.
+  const markdown = paths.map((f) => `![${basename(f)}](<${f}>)`);
+  gh(["issue", "comment", iid, "-R", REPO, "--body-file", "-", ...paths.flatMap((f) => ["--attach", f])], body(markdown));
 }
 
 /** Source branches of every open PR. */

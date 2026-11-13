@@ -19,6 +19,8 @@ import type { Delivered, Delivery } from "./tracker.mts";
 // merged, whether in flight or waiting in an open PR, holds the ticket; a missing or out-of-date analysis, or a lookup
 // that fails, is unknown and holds it too. Host calls are passed in (Host), so this file imports no tracker, config or
 // board module (only graph.mts's marker and edges) and is tested with fakes (handoff.test.mts).
+// Posting is one adapter operation: GitHub attaches native media, GitLab uploads then comments.
+// A posting error retains local evidence and stops before the PASS/no-push and delivery gates.
 
 /** What the hand-off needs from the host: board, tracker and git. main.mts passes the real ones. */
 export interface Host {
@@ -31,8 +33,7 @@ export interface Host {
   /** git returning its exit status instead of throwing (rev-parse --verify, merge-tree). */
   gitStatus(args: string[]): { status: number | null; stdout: string };
   tracker: {
-    comment(iid: string, body: string): void;
-    uploadEvidence(iid: string, tip: string, files: string[]): string[];
+    postVerification(iid: string, tip: string, files: string[], body: (media: string[]) => string): void;
     openMrBranches(): Set<string>;
     deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered>;
   };
@@ -112,22 +113,28 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   const repaired = h.origin.kind === "repaired" ? `Repaired by Factory recovery attempt ${h.origin.attempt}, then verified independently.` : "";
 
   const files = readdirSync(h.evidenceHost).sort();
-  const media = (label: string) => files.filter((f) => (f.startsWith(`${label}-`) && f.endsWith(".png")) || f === `${label}.webm`);
+  const media = (label: string) => files.filter((f) => (f.startsWith(`${label}-`) && f.endsWith(".png")) || [`${label}.webm`, `${label}.mp4`].includes(f));
   const shown = [...media("before"), ...media("after")];
-  const uploaded = new Map(host.tracker.uploadEvidence(iid, tip, shown.map((f) => resolve(h.evidenceHost, f))).map((md, i) => [shown[i], md]));
-  const section = (label: string, title: string) => {
-    const items = media(label).map((f) => `**${f}**\n\n${uploaded.get(f)}`);
-    return items.length ? `### ${title}\n\n${items.join("\n\n")}` : "";
-  };
-  host.tracker.comment(iid, [
-    `## Sandcastle verification: ${verdict}`,
-    `Branch \`${branch}\` @ \`${tip.slice(0, 8)}\` (from \`${base}\` @ \`${h.baseSha.slice(0, 8)}\`). Synthetic data.`,
-    repaired,
-    verdictText.replace(/^VERDICT:.*\n?/, ""),
-    section("before", "Before"),
-    section("after", "After"),
-    SANDCASTLE_MARK,
-  ].filter(Boolean).join("\n\n"));
+  try {
+    host.tracker.postVerification(iid, tip, shown.map((f) => resolve(h.evidenceHost, f)), (markdown) => {
+      const uploaded = new Map(markdown.map((md, i) => [shown[i], md]));
+      const section = (label: string, title: string) => {
+        const items = media(label).map((f) => `**${f}**\n\n${uploaded.get(f)}`);
+        return items.length ? `### ${title}\n\n${items.join("\n\n")}` : "";
+      };
+      return [
+        `## Sandcastle verification: ${verdict}`,
+        `Branch \`${branch}\` @ \`${tip.slice(0, 8)}\` (from \`${base}\` @ \`${h.baseSha.slice(0, 8)}\`). Synthetic data.`,
+        repaired,
+        verdictText.replace(/^VERDICT:.*\n?/, ""),
+        section("before", "Before"),
+        section("after", "After"),
+        SANDCASTLE_MARK,
+      ].filter(Boolean).join("\n\n");
+    });
+  } catch (e) {
+    return { ok: false, verdict, reason: `Verification posting failed: ${(e as Error).message}. Evidence retained in ${h.evidenceHost}; nothing pushed or delivered. Check tracker CLI upload support and repository permissions before retrying.` };
+  }
   console.log(`Evidence posted to #${iid} (verdict ${verdict}).`);
   host.setStage(iid, { verdict });
 
