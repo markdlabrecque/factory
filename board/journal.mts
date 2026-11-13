@@ -8,7 +8,7 @@
 // - Each event has a stable UUID (also its tracker marker), the ticket identity, a timestamp, an actor and a kind:
 //   `comment` (text), `verdict` (the previous effective and the new verdict, the explanation, the run it corrects),
 //   `archive` or `restore` (the run that was current). Comments and verdicts carry a tracker `delivery` state; archive and
-//   restore never post. Events are only appended; delivery state is the one thing updated in place.
+//   restore never post. A posted event's body ends with `markerFor(id)` (`factory ticket comment`, #99). Events are only appended; delivery state is the one thing updated in place.
 // - Projection (`projectTicket`): the effective verdict is the latest correction for the current run, else the run's
 //   own verdict; the ticket is archived while its latest archive/restore event is an archive of the current run. So a
 //   new execution inherits neither a previous run's corrected verdict nor its archive. The run identity is
@@ -20,7 +20,7 @@
 // - Delivery is serialized per event: `beginDelivery` hands one poster a token and marks the event `posting`; another
 //   poster is refused while that owner lives. An attempt that may have reached the tracker (an owner that died while
 //   posting, or a failure reported as uncertain) leaves the event `uncertain`, and the next `beginDelivery` says to
-//   search for the event's marker before posting again. Only the token holder can finish (`finishDelivery`).
+//   search for the event's marker before posting again (`factory ticket sync` does, #100). Only the token holder can finish (`finishDelivery`).
 // Import-safe and dependency-free apart from Node and admission.mts (process identity and durable writes).
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
@@ -67,6 +67,9 @@ const missing = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT";
 
 /** The identity of a run record's execution, which verdict corrections and archive state apply to. */
 export const runIdentity = (run: RunRef): string => `started:${run.startedAt}`;
+
+/** The hidden marker a posted comment or correction carries, so `factory ticket sync` (#100) can find it on the tracker. */
+export const markerFor = (id: string) => `<!-- factory-journal:${id} -->`;
 
 /** `pass`/`fail` in any case, as stored on run records (`PASS`/`FAIL`). */
 export function normalizeVerdict(v: string): "PASS" | "FAIL" {
