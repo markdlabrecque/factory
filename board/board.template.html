@@ -12,6 +12,10 @@
      (saved in the browser as sandcastle-theme). The HTTP board polls /api/runs every 10s and patches run cards by
      BoardRun.key with FLIP motion, so focus, scroll and filters survive updates. A local board.html is a static snapshot
      with no polling. Evidence pages never poll. All motion respects prefers-reduced-motion, live.
+     A slim strip under the nav shows each factory-tick timer (the macOS supervisor counts as one) from /api/timers, polled
+     every 10s with a live second-by-second countdown: "Next run in 4m 12s", "Running now", "Scheduler off", "No timer" or
+     "Unknown" (the service manager can't be read, or the board can't be reached). It has no last-run, history or timing and no
+     controls. The countdown uses the server's clock, so a skewed browser clock doesn't shift it. Snapshots and evidence pages hide it.
      Code between "// <name>:start" and "// <name>:end" markers is loaded by board.test.mts with stubbed DOM boundaries where needed. -->
 <html lang="en">
 <head>
@@ -90,6 +94,17 @@
   .sync[data-state="offline"] .lamp { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
   .sync[data-state="offline"] b { color: var(--bad); }
   .sync[data-state="snapshot"] .lamp { background: var(--wait); }
+  .timer-strip { border-bottom: 1px solid var(--line); background: var(--panel-2); }
+  .timer-strip[hidden] { display: none; }
+  .timer-list { max-width: 1440px; margin: auto; padding: 4px 16px; display: flex; flex-wrap: wrap; gap: 2px 20px; min-height: 28px; align-items: center; }
+  .timer { display: inline-flex; align-items: center; gap: 8px; font: 500 12px/1.2 var(--mono); color: var(--soft); min-width: 0; overflow-wrap: anywhere; }
+  .timer b { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
+  .timer .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .timer[data-state="scheduled"] .lamp { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+  .timer[data-state="running"] .lamp { background: var(--run); box-shadow: 0 0 0 3px var(--run-soft); }
+  .timer[data-state="off"] .lamp, .timer[data-state="none"] .lamp { background: var(--faint); }
+  .timer[data-state="unknown"] .lamp { background: var(--wait); box-shadow: 0 0 0 3px var(--wait-soft); }
+  .timer[data-state="unknown"] .when { color: var(--wait); }
   .icon-btn { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; transition: border-color .15s ease, color .15s ease, background-color .18s ease; }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .icon-btn svg { width: 20px; height: 20px; }
@@ -326,6 +341,7 @@
     </div>
   </div>
 </nav>
+<div class="timer-strip" id="timer-strip" role="group" aria-label="Scheduler timer" hidden><div class="timer-list" id="timer-list"></div></div>
 <p class="sr-only" id="announce" aria-live="polite"></p>
 <main id="app"></main>
 
@@ -562,6 +578,7 @@
     }
     return {
       start: schedule,
+      refresh: function () { if (!inFlight) { clear(); tick(); } },
       visibilityChanged: function () {
         if (o.isHidden()) clear();
         else if (!inFlight) { clear(); tick(); }
@@ -569,6 +586,52 @@
     };
   }
   // poller:end
+
+  // timers:start
+  // The scheduler strip: pure text rules and DOM painting through the injected `make(tag, className, text)`.
+  var TIMER_STATES = ['running', 'scheduled', 'off', 'none', 'unknown'];
+  function validTimers(d) {
+    return !!d && typeof d === 'object' && typeof d.generatedAt === 'string' && Array.isArray(d.timers) && d.timers.every(function (t) {
+      return !!t && typeof t.id === 'string' && typeof t.name === 'string' && TIMER_STATES.indexOf(t.state) >= 0 &&
+        (t.nextAt === undefined || typeof t.nextAt === 'number');
+    });
+  }
+  function two(n) { return n < 10 ? '0' + n : String(n); }
+  function formatCountdown(ms) {
+    var s = Math.ceil(ms / 1000);
+    if (s <= 0) return 'due now';
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ' + two(s % 60) + 's';
+    return Math.floor(m / 60) + 'h ' + two(m % 60) + 'm';
+  }
+  function timerText(t, now) {
+    if (t.state === 'running') return 'Running now';
+    if (t.state === 'off') return 'Scheduler off';
+    if (t.state === 'none') return 'No timer';
+    if (t.state === 'scheduled') return typeof t.nextAt === 'number' ? (t.nextAt <= now ? 'Next run due now' : 'Next run in ' + formatCountdown(t.nextAt - now)) : 'Scheduled, next run unknown';
+    return 'Unknown';
+  }
+  // Rebuilds the entries (one per timer) and returns the view tickTimers updates every second.
+  function paintTimers(list, timers, now, make) {
+    while (list.firstChild) list.removeChild(list.firstChild);
+    var view = { entries: [] };
+    timers.forEach(function (t) {
+      var node = make('span', 'timer'), when = make('span', 'when', timerText(t, now));
+      node.dataset.state = t.state;
+      if (t.reason) node.title = t.reason;
+      node.appendChild(make('i', 'lamp'));
+      node.appendChild(make('b', null, t.name));
+      node.appendChild(when);
+      list.appendChild(node);
+      view.entries.push({ timer: t, when: when });
+    });
+    return view;
+  }
+  function tickTimers(view, now) {
+    view.entries.forEach(function (e) { var text = timerText(e.timer, now); if (e.when.textContent !== text) e.when.textContent = text; });
+  }
+  // timers:end
 
   // settings:start
   var MODES = ['light', 'dark', 'system'];
@@ -1163,6 +1226,34 @@
     });
     document.addEventListener('visibilitychange', poller.visibilityChanged);
     poller.start();
+    startTimers();
+  }
+
+  // The strip lives only on the polling board. `offset` is the server's clock minus this browser's, so the countdown follows the server.
+  function startTimers() {
+    var strip = document.getElementById('timer-strip'), list = document.getElementById('timer-list');
+    var view = { entries: [] }, offset = 0, last = null;
+    function now() { return Date.now() + offset; }
+    function show(timers) { view = paintTimers(list, timers, now(), el); strip.hidden = false; }
+    var timerPoller = createPoller({
+      url: '/api/timers',
+      interval: 10000,
+      fetch: function (u, o) { return fetch(u, o); },
+      setTimeout: function (f, ms) { return setTimeout(f, ms); },
+      clearTimeout: function (t) { clearTimeout(t); },
+      isHidden: function () { return document.visibilityState === 'hidden'; },
+      valid: validTimers,
+      onData: function (d) { offset = (time(d.generatedAt) || Date.now()) - Date.now(); last = d.timers; show(d.timers); },
+      onError: function () {
+        // A countdown from data we can no longer refresh would be a guess: say Unknown until the board answers again.
+        var names = last && last.length ? last : [{ id: 'factory-tick.timer', name: 'factory-tick' }];
+        show(names.map(function (t) { return { id: t.id, name: t.name, state: 'unknown', reason: 'Could not reach the board service.' }; }));
+      }
+    });
+    document.addEventListener('visibilitychange', timerPoller.visibilityChanged);
+    setInterval(function () { if (!document.hidden) tickTimers(view, now()); }, 1000);
+    timerPoller.refresh();
+    timerPoller.start();
   }
 
   // ---------- evidence ----------

@@ -1,11 +1,11 @@
 // In-memory service managers with real fixture files; they never invoke a host manager. `Fake` is the board service.
 // `FakeSchedule` models the tick timer's enablement and activity and the tick service's activity as separate states,
 // logs every call in order (`calls`), and fails on demand (`fail`: method names, or 'stop' for the tick service stop).
-// Its `files` and `logHint` are the Linux ones.
+// Its `files` and `logHint` are the Linux ones. `timers()` reports the one timer, plus any `extraTimers` a test sets, with `nextAt`.
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ServiceBackend, ServiceSpec, ServiceStatus } from './index.mts';
-import type { ScheduleBackend, ScheduleSpec, ScheduleStatus, UnitState } from './scheduler.mts';
+import type { ScheduleBackend, ScheduleSpec, ScheduleStatus, TimerReport, UnitState } from './scheduler.mts';
 import type { Paths } from '../paths.mts';
 import type { ManifestEntry } from '../manifest.mts';
 export class Fake implements ServiceBackend {
@@ -33,7 +33,7 @@ export class FakeSchedule implements ScheduleBackend {
   enabled = false;
   tick: UnitState = 'missing';
   calls: string[] = [];
-  /** Operations that throw: 'install', 'install-timer', 'enable', 'disable', 'stop', 'status', 'remove'. */
+  /** Operations that throw: 'install', 'install-timer', 'enable', 'disable', 'stop', 'status' (also timers()), 'remove'. */
   fail = new Set<string>();
   /** Runs inside disable() after the timer is stopped, before the tick service stop; tests use it to order events. */
   onStop?: () => void | Promise<void>;
@@ -62,6 +62,13 @@ export class FakeSchedule implements ScheduleBackend {
     if (this.tick !== 'missing') this.tick = 'inactive';
   }
   async status(): Promise<ScheduleStatus> { this.step('status'); return { timer: this.timer, enabled: this.enabled, tick: this.tick }; }
+  /** `nextAt` is the timer's next run; `extraTimers` are further reports a test wants returned after it. */
+  nextAt?: number;
+  extraTimers: TimerReport[] = [];
+  async timers(): Promise<TimerReport[]> {
+    this.step('timers', 'status');
+    return [{ id: 'factory-tick.timer', status: { timer: this.timer, enabled: this.enabled, tick: this.tick }, ...(this.nextAt ? { nextAt: this.nextAt } : {}) }, ...this.extraTimers];
+  }
   async remove(entry: ManifestEntry) {
     this.step(`remove ${entry.unit}`, 'remove');
     if (entry.unit === 'factory-tick.timer') { this.timer = 'missing'; this.enabled = false; } else this.tick = 'missing';

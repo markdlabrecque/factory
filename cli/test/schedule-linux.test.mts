@@ -146,6 +146,37 @@ test('adapter: status reads enablement and activity of the timer and the tick se
   });
 });
 
+test('adapter: timers() lists every factory-tick timer with its next run, always includes factory-tick.timer, and never asks about legacy units (#121)', async t => {
+  const w = world(t);
+  const backend = new SystemdSchedule(w.p);
+  const spec = { node: '/usr/bin/node', app: w.p.app, state: w.p.state, path: '/usr/bin' };
+  const nextUsec = (Date.now() + 240_000) * 1000;
+  await w.stub.using(async () => {
+    assert.deepEqual(await backend.timers(), [{ id: 'factory-tick.timer', status: { timer: 'missing', enabled: false, tick: 'missing' } }], 'not installed still reports the one timer');
+    await backend.install(spec, () => {});
+    w.stub.set('factory-tick.timer', { enabled: false, active: false, nextUsec });
+    assert.deepEqual(await backend.timers(), [{ id: 'factory-tick.timer', status: { timer: 'inactive', enabled: false, tick: 'inactive' } }], 'a disabled timer has no next run');
+    w.stub.set('factory-tick.timer', { enabled: true, active: true, nextUsec, lastTrigger: 'Tue 2026-11-10 10:00:00 UTC' });
+    assert.deepEqual(await backend.timers(), [{ id: 'factory-tick.timer', status: { timer: 'active', enabled: true, tick: 'inactive' }, nextAt: Math.floor(nextUsec / 1000) }], 'next run in ms, and no last-run time');
+    w.stub.set('factory-tick.timer', { nextUsec: undefined });
+    assert.equal('nextAt' in (await backend.timers())[0], false, 'an active timer the manager has no next run for');
+    // A second timer is its own entry, after factory-tick.timer.
+    writeFileSync(join(w.stub.env.STUB_UNIT_DIR, 'factory-tick-second.timer'), '');
+    w.stub.set('factory-tick-second.timer', { enabled: true, active: true, nextUsec });
+    const two = await backend.timers();
+    assert.deepEqual(two.map(r => r.id), ['factory-tick.timer', 'factory-tick-second.timer']);
+    assert.equal(two[1].nextAt, Math.floor(nextUsec / 1000));
+    // Failures and output that isn't a list throw (the Board reads that as unknown).
+    w.stub.fail('--user list-timers --all --output=json --no-pager factory-tick*.timer');
+    await assert.rejects(backend.timers(), /injected failure/);
+    w.stub.clearFail();
+    writeFileSync(join(w.stub.bin, 'systemctl'), '#!/bin/sh\necho "{}"\n');
+    await assert.rejects(backend.timers(), /gave no list/);
+  });
+  assert.deepEqual(w.stub.rejected(), [], 'only the fixed list-timers and show shapes were sent');
+  assert.equal(w.stub.lines().some(l => l.includes('sandcastle-dispatch')), false);
+});
+
 test('adapter: disable disables and stops the timer first, then stops the tick service; either failure throws and nothing later runs', async t => {
   const w = world(t);
   const backend = new SystemdSchedule(w.p);

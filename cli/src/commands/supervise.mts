@@ -11,17 +11,22 @@
 // never brings it back. If the pass group could not be confirmed gone, the tick lock keeps it recorded and `schedule off`
 // reports the failure. Ticket runs the dispatcher detached are in their own process groups and keep going. Output is
 // timestamped lines on stdout, which launchd writes to <state>/scheduler/tick.log.
+// Before each wait the supervisor reports when that wait ends (`onNext`; the launch agent saves it to next-tick.json,
+// next-tick.mts) so the Board can count down to the next tick, and clears it when the wait ends and when it stops.
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Paths } from '../paths.mts';
 import type { ScheduleBackend } from '../platform/scheduler.mts';
 import { tick } from './tick.mts';
 import type { TickOptions, TickResult } from './tick.mts';
+import { writeNextTick } from '../next-tick.mts';
 export const FIRST_DELAY_MS = 60_000;
 export const INTERVAL_MS = 300_000;
 export type SuperviseOptions = Omit<TickOptions, 'signal' | 'log'> & {
   signal: AbortSignal; log?: (line: string) => void; firstDelayMs?: number; intervalMs?: number;
   /** Resolves true after `ms`, false as soon as `signal` aborts. Tests inject one. */
   wait?: (ms: number, signal: AbortSignal) => Promise<boolean>;
+  /** Called with when the next tick is due (epoch ms) before each wait, and with null when a tick starts or the supervisor stops. */
+  onNext?: (at: number | null) => void;
   /** The tick; tests inject one. */
   tick?: (p: Paths, o: TickOptions) => Promise<TickResult>;
 };
@@ -36,7 +41,11 @@ export async function supervise(p: Paths, o: SuperviseOptions): Promise<number> 
   const { signal } = o;
   log(`supervisor start (pid ${process.pid}): first tick in ${Math.round((o.firstDelayMs ?? FIRST_DELAY_MS) / 1000)}s`);
   let next = o.firstDelayMs ?? FIRST_DELAY_MS;
-  while (!signal.aborted && await wait(next, signal) && !signal.aborted) {
+  while (!signal.aborted) {
+    o.onNext?.(Date.now() + next);
+    const waited = await wait(next, signal);
+    o.onNext?.(null);
+    if (!waited || signal.aborted) break;
     try {
       const r = await run(p, { ...o, log, signal });
       log(`tick ${r.result}`);
@@ -50,5 +59,6 @@ export async function supervise(p: Paths, o: SuperviseOptions): Promise<number> 
 export async function superviseProcess(p: Paths, backend: ScheduleBackend, o: Partial<SuperviseOptions> = {}): Promise<number> {
   const abort = new AbortController();
   for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => abort.abort());
-  return supervise(p, { ...o, backend, signal: abort.signal });
+  const onNext = (at: number | null) => { try { writeNextTick(p, at); } catch { /* a display hint; never stops the supervisor */ } };
+  return supervise(p, { onNext, ...o, backend, signal: abort.signal });
 }

@@ -12,7 +12,7 @@ import { test as nodeTest } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Fake } from '../src/platform/fake.mts';
@@ -24,8 +24,10 @@ import { schedule } from '../src/commands/schedule.mts';
 import { supervise, FIRST_DELAY_MS, INTERVAL_MS } from '../src/commands/supervise.mts';
 import { readManifest, validate } from '../src/manifest.mts';
 import { readTickState } from '../src/schedule-state.mts';
+import { readNextTick, writeNextTick } from '../src/next-tick.mts';
 import { setProjectSchedule } from '../src/schedule.mts';
 import { acquireTickLock, groupAlive, readLock, sameProcess } from '../src/tick-lock.mts';
+import type { HeldLock } from '../src/tick-lock.mts';
 import { QUICK, held, heldScript, home, launchctlStub, repo } from './schedule-helpers.mts';
 
 const test = (name: string, fn: (t: TestContext) => Promise<void> | void) => nodeTest(name, { timeout: 60_000 }, fn);
@@ -135,6 +137,63 @@ test('adapter: status reads enablement, loaded and running separately, and the t
     writeFileSync(join(w.stub.bin, 'launchctl'), '#!/bin/sh\necho gibberish\n');
     await assert.rejects(w.backend.status(), /gave no/);
   });
+});
+
+test('adapter: timers() reports the agent as the one timer, with the supervisor\'s own next-tick time only while it runs (#121)', async t => {
+  const w = world(t);
+  await armed(w);
+  const at = Date.now() + 240_000;
+  await w.stub.using(async () => {
+    assert.deepEqual(await w.backend.timers(), [{ id: 'com.factory.tick', status: { timer: 'active', enabled: true, loaded: true, tick: 'inactive' } }], 'no record yet');
+    writeNextTick(w.p, at);   // this test process stands in for the supervisor
+    assert.deepEqual((await w.backend.timers())[0].nextAt, at);
+    w.stub.set('com.factory.tick', { running: false });
+    assert.equal('nextAt' in (await w.backend.timers())[0], false, 'a stopped agent has no next run');
+    w.stub.set('com.factory.tick', { running: true });
+    const lock = acquireTickLock(w.p) as HeldLock;   // a tick holds the lock: running now, no countdown
+    try { const [r] = await w.backend.timers(); assert.equal(r.status.tick, 'active'); assert.equal('nextAt' in r, false); } finally { lock.release(); }
+    w.stub.set('com.factory.tick', { loaded: false, running: false });
+    rmSync(w.p.tickPlist);
+    assert.deepEqual((await w.backend.timers())[0].status.timer, 'missing');
+    w.stub.fail('print gui/' + process.getuid!());
+    await assert.rejects(w.backend.timers(), /injected failure/);
+  });
+});
+
+test('next-tick: a record left by a dead supervisor, or a malformed one, is ignored', t => {
+  const w = world(t);
+  writeNextTick(w.p, Date.now() + 1000);
+  assert.ok(readNextTick(w.p));
+  writeFileSync(w.p.nextTick, JSON.stringify({ version: 1, pid: 2 ** 22 + 12345, startTicks: 1, at: new Date(Date.now() + 1000).toISOString() }));
+  assert.equal(readNextTick(w.p), null, 'pid is not running');
+  writeFileSync(w.p.nextTick, '{nope');
+  assert.equal(readNextTick(w.p), null);
+  writeNextTick(w.p, null);
+  assert.equal(existsSync(w.p.nextTick), false);
+});
+
+test('supervisor: says when each wait ends and clears it when the tick starts and when it stops (#121)', async () => {
+  const seen: Array<number | null> = [];
+  const abort = new AbortController();
+  let n = 0;
+  await supervise({} as never, {
+    backend: {} as never, signal: abort.signal, log: () => {},
+    onNext: at => seen.push(at === null ? null : Math.round((at - Date.now()) / 1000)),
+    wait: async () => { if (n === 1) abort.abort(); return !abort.signal.aborted; },
+    tick: async () => { n++; return { result: 'done', passes: [], skipped: {}, errors: {} }; },
+  });
+  assert.deepEqual(seen, [FIRST_DELAY_MS / 1000, null, INTERVAL_MS / 1000, null]);
+});
+
+test('the real supervisor saves when its next tick is due while it waits, and removes it when it stops (#121)', async t => {
+  const w = world(t);
+  await armed(w);
+  const sup = startSupervisor(w);
+  const at = await waitFor('a next-tick time ten minutes out, after the first tick', () => { const v = readNextTick(w.p); return v !== null && v > Date.now() + 300_000 ? v : undefined; });
+  assert.ok(at < Date.now() + 700_000);
+  sup.child.kill('SIGTERM');
+  assert.equal(await sup.exited, 0, sup.output());
+  assert.equal(existsSync(w.p.nextTick), false);
 });
 
 test('adapter: disable disables the label before booting the agent out; a failed disable signals nothing; remove deletes only the plist', async t => {

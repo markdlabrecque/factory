@@ -7,6 +7,9 @@
 // (exit 64, logged as `rejected`), so a call that would have reached a real manager is visible. A line in $STUB_DIR/fail is an
 // exact space-joined argv that exits 1 when called; `once:` in front makes it fail only the first time. In state.json,
 // units[<name>].forcedActiveState overrides the reported ActiveState (tests use it to say a tick is running).
+// `list-timers --all --output=json --no-pager factory-tick*.timer` (the Board's timer strip) lists each factory-tick*.timer unit
+// file in $STUB_UNIT_DIR as JSON rows `{next, unit, activates}` like systemd 262: `next` is epoch microseconds
+// (units[<name>].nextUsec), null unless the timer is active. Other `factory-tick-*` units (a second timer) are accepted by `show`.
 // STUB_LEGACY=1 (for `factory legacy retire` tests only) also accepts `disable --now` on a legacy `sandcastle-dispatch[@<name>].timer`,
 // the one call `legacy retire` sends, and does its one documented effect Factory reads: the timer's
 // timers.target.wants symlink is removed. Without it, any call naming a legacy unit is rejected, so Factory never sends one.
@@ -39,6 +42,8 @@ if (argv[0] !== '--user') reject('missing --user');
 const [verb, ...rest] = argv.slice(1);
 const NAME = /^[A-Za-z0-9@._:-]+\.(service|timer)$/;
 const ALLOWED = ['factory-tick.service', 'factory-tick.timer', 'factory-board.service'];
+const EXTRA = /^factory-tick-[A-Za-z0-9._-]+\.(service|timer)$/;
+const allowed = (n) => ALLOWED.includes(n) || EXTRA.test(n);
 const LEGACY = /^sandcastle-dispatch(@[A-Za-z0-9._-]+)?\.timer$/;
 if (process.env.STUB_LEGACY === '1' && argv.length === 4 && argv[1] === 'disable' && argv[2] === '--now' && LEGACY.test(argv[3])) {
   const n = argv[3];
@@ -51,9 +56,18 @@ if (process.env.STUB_LEGACY === '1' && argv.length === 4 && argv[1] === 'disable
 switch (verb) {
   case 'show-environment': if (rest.length) reject('show-environment args'); console.log('PATH=/usr/bin'); break;
   case 'daemon-reload': if (rest.length) reject('daemon-reload args'); state.reloads++; break;
+  case 'list-timers': {
+    if (rest.join(' ') !== '--all --output=json --no-pager factory-tick*.timer') reject('list-timers shape');
+    const rows = (fs.existsSync(U) ? fs.readdirSync(U) : []).filter((n) => /^factory-tick.*\.timer$/.test(n)).sort().map((n) => {
+      const u = state.units[n];
+      return { next: u?.active && u.nextUsec ? u.nextUsec : null, unit: n, activates: n.replace(/\.timer$/, '.service') };
+    });
+    console.log(JSON.stringify(rows));
+    break;
+  }
   case 'show': {
     const [n, prop, ...more] = rest;
-    if (!NAME.test(n ?? '') || !ALLOWED.includes(n) || more.length || !/^--property=[A-Za-z,]+$/.test(prop ?? '')) reject('show shape');
+    if (!NAME.test(n ?? '') || !allowed(n) || more.length || !/^--property=[A-Za-z,]+$/.test(prop ?? '')) reject('show shape');
     const u = state.units[n];
     const loaded = onDisk(n);
     const values = {
@@ -68,7 +82,7 @@ switch (verb) {
   case 'enable': case 'disable': {
     const now = rest[0] === '--now';
     const n = now ? rest[1] : rest[0];
-    if (!NAME.test(n ?? '') || !ALLOWED.includes(n) || rest.length !== (now ? 2 : 1)) reject(`${verb} shape`);
+    if (!NAME.test(n ?? '') || !allowed(n) || rest.length !== (now ? 2 : 1)) reject(`${verb} shape`);
     if (!onDisk(n)) { log({ error: 'unit file missing' }); console.error(`Failed to ${verb} unit: Unit file ${n} does not exist.`); process.exit(1); }
     unit(n).enabled = verb === 'enable';
     if (now) unit(n).active = verb === 'enable';
@@ -76,7 +90,7 @@ switch (verb) {
   }
   case 'start': case 'restart': case 'stop': {
     const [n, ...more] = rest;
-    if (!NAME.test(n ?? '') || !ALLOWED.includes(n) || more.length) reject(`${verb} shape`);
+    if (!NAME.test(n ?? '') || !allowed(n) || more.length) reject(`${verb} shape`);
     if (verb !== 'stop' && !onDisk(n)) { console.error(`Unit ${n} not found.`); process.exit(5); }
     unit(n).active = verb !== 'stop';
     if (verb === 'stop') delete unit(n).forcedActiveState;

@@ -1,6 +1,7 @@
 // Standalone Linux/macOS installer regressions (#78): run the real scripts in temporary HOMEs against strict,
 // ordered systemctl/launchctl stubs, then import and serve only the copied board files. No real service is touched.
 // Required journal/tickets modules are copied too, for verdict projection and shared archive validation.
+// The standalone board has no cli/, so /api/timers returns no entries and hides the strip there (#121).
 // Each installer is run twice to cover updates; the ephemeral HTTP child never invokes trackers or refresh commands.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -81,6 +82,8 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     const response = await fetch(`${address}/api/runs`);
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).runs, []);
+    const timers = await (await fetch(`${address}/api/timers`)).json();
+    assert.deepEqual(timers.timers, [], 'the standalone board has no cli/, so its unavailable timer strip is hidden');
     const page = await fetch(address);
     assert.equal(page.status, 200, 'copied template renders without repository files');
     assert.match(await page.text(), /Factory/);
