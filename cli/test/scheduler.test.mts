@@ -1,6 +1,6 @@
 // Scheduler logic against the in-memory FakeSchedule (the production adapter is covered in schedule-linux.test.mts):
 // `schedule on|off|status`, install/uninstall/reinstall ordering, the tick's gating on the service manager, its
-// project visits and their rotation, state file, bounded timing history, exit codes and lock, and the unit directives. The service manager is the only global
+// project visits and their rotation, the read-only refresh of projects not opted in (#94), state file, bounded timing history, exit codes and lock, and the unit directives. The service manager is the only global
 // state: no test reads or writes a local on/off flag. Disposable HOME and Git repos only.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -164,7 +164,7 @@ test('a tick visits ready projects in turn, logs why others are skipped, records
   for (const root of [a, b, c]) setProjectSchedule(p, root, true);
   git(b, 'checkout', '-q', '-b', 'other');
   const visited: string[] = [];
-  const r = await tick(p, { backend: sched, log: l => lines.push(l), pass: async (ctx, args, o) => {
+  const r = await tick(p, { backend: sched, log: l => lines.push(l), refresh: async () => 0, pass: async (ctx, args, o) => {
     visited.push(ctx.name);
     o.onSpawn(4242);
     assert.deepEqual(readTickState(p).projects[ctx.root].result, 'running', 'running is saved before the pass finishes');
@@ -173,7 +173,8 @@ test('a tick visits ready projects in turn, logs why others are skipped, records
     return 0;
   } });
   assert.deepEqual(visited, ['a']);
-  assert.deepEqual(r.skipped, { b: 'checkout is on other, scheduled branch is main', c: 'project paused', d: 'project not opted in' });
+  assert.deepEqual(r.skipped, { b: 'checkout is on other, scheduled branch is main', c: 'project paused' });
+  assert.deepEqual(r.refreshed, { d: 'ok' }, 'the project never opted in is refreshed, the paused one is not');
   assert.equal(r.result, 'done');
   assert.equal(existsSync(p.tickLock), false, 'the lock is released');
   assert.ok(lines.some(l => /^pass a: exit 0 after \d+s$/.test(l)));
@@ -182,9 +183,41 @@ test('a tick visits ready projects in turn, logs why others are skipped, records
   assert.equal(s.projects[a].exitCode, 0);
   assert.ok(s.projects[a].durationMs! >= 0 && s.projects[a].finishedAt);
   assert.equal(s.projects[c].result, 'skipped');
-  assert.equal(s.projects[d].reason, 'project not opted in');
+  assert.equal(s.projects[d].reason, 'project not opted in; read-only refresh ok');
   assert.equal(s.currentRoot, undefined);
   assert.ok(s.startedAt && s.finishedAt && s.durationMs !== undefined && s.pid === undefined);
+});
+
+test('a project never opted in gets a read-only refresh each tick, never a pass; its failure does not fail the tick (#94)', async t => {
+  const { p, sched, roots: [a, b, c, d] } = await armed(t);
+  setProjectSchedule(p, a, true);
+  setProjectSchedule(p, d, true); setProjectSchedule(p, d, false);
+  git(c, 'checkout', '-q', '--detach');
+  const calls: { name: string; args: string[]; env: NodeJS.ProcessEnv }[] = [];
+  const passes: string[] = [];
+  const lines: string[] = [];
+  const r = await tick(p, { backend: sched, log: l => lines.push(l), pass: async ctx => { passes.push(ctx.name); return 0; },
+    refresh: async (ctx, args, o) => { calls.push({ name: ctx.name, args, env: o.env }); o.onSpawn(4343); assert.equal(readTickState(p).projects[ctx.root].pid, 4343); return 2; } });
+  assert.deepEqual(passes, ['a']);
+  assert.deepEqual(calls.map(x => [x.name, x.args]), [['b', ['--refresh-only', '--base', 'main']]], 'c (detached HEAD) and d (paused) get no refresh');
+  assert.equal(calls[0].env.SANDCASTLE_STATE_DIR, p.state);
+  assert.equal(calls[0].env.PATH, '/usr/bin:/bin');
+  assert.equal(calls[0].env.FACTORY_SCHEDULED, undefined, 'a refresh is not a scheduled pass');
+  assert.deepEqual(r.refreshed, { b: 'exit 2' });
+  assert.deepEqual(r.skipped, { c: 'project not opted in; no refresh: detached HEAD', d: 'project paused' });
+  assert.equal(r.result, 'done', 'a failed refresh is reported, not a failed tick');
+  assert.ok(lines.includes('refresh b (main): start'));
+  const s = readTickState(p);
+  assert.deepEqual([s.projects[b].result, s.projects[b].reason, s.projects[b].exitCode, s.projects[b].pid], ['skipped', 'project not opted in; read-only refresh failed: exit 2', 2, undefined]);
+  assert.deepEqual(readHistory(p).filter(e => e.kind === 'pass').map(e => (e as any).name), ['a'], 'a refresh is not pass history');
+  // Cancelling during a refresh interrupts the tick like a pass, and starts nothing after it.
+  const abort = new AbortController();
+  const after: string[] = [];
+  setProjectSchedule(p, a, false);
+  const x = await tick(p, { backend: sched, signal: abort.signal, log: () => {}, pass: async ctx => { after.push(ctx.name); return 0; },
+    refresh: async ctx => { after.push(ctx.name); abort.abort(); return 143; } });
+  assert.equal(x.result, 'interrupted');
+  assert.deepEqual(after, ['b']);
 });
 
 test('a failing pass makes the tick fail, and the next project still runs; the timer is never touched', async t => {
@@ -414,7 +447,7 @@ test('each tick starts at the next opted-in project in rotation, also after a ca
   for (const root of [a, b, d]) setProjectSchedule(p, root, true);
   const run = async (o: Partial<Parameters<typeof tick>[1]> = {}) => {
     const visited: string[] = [];
-    const r = await tick(p, { backend: sched, log: () => {}, pass: async ctx => { visited.push(ctx.name); return 0; }, ...o });
+    const r = await tick(p, { backend: sched, log: () => {}, pass: async ctx => { visited.push(ctx.name); return 0; }, refresh: async () => 0, ...o });
     return { r, visited, next: readTickState(p).nextRoot };
   };
   assert.deepEqual((await run()).visited, ['a', 'b', 'd']);
@@ -422,7 +455,7 @@ test('each tick starts at the next opted-in project in rotation, also after a ca
   const second = await run();
   assert.deepEqual(second.visited, ['b', 'd', 'a']);
   assert.equal(second.next, d, 'c is not opted in, so it never takes a turn');
-  assert.deepEqual(second.r.skipped, { c: 'project not opted in' }, 'every project is still visited and gated');
+  assert.deepEqual([second.r.skipped, second.r.refreshed], [{}, { c: 'ok' }], 'every project is still visited: c is refreshed, not given a turn');
   // A cancelled tick still uses up its turn, and starts nothing after the cancellation.
   const abort = new AbortController();
   const visited: string[] = [];

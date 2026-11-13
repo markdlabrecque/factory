@@ -9,6 +9,7 @@
 // Synthetic dispatchers hold a pass open with nested non-detached children (a shell, an "analysis" process with its own
 // child) and one detached "ticket run" in its own process group. Everything lives under a temporary HOME; no host service,
 // tracker, Docker or credential is touched, and every spawned process is killed at the end of its test.
+// The end-to-end CLI test also has a project never opted in whose synthetic dispatch.mts records the read-only refresh a tick gives it (#94).
 import { test as nodeTest } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -217,6 +218,9 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   const w = world(t);
   const root = repo(w.p, 'alpha', { script: QUICK });
   const other = repo(w.p, 'beta', { script: QUICK });
+  // beta is never opted in: each tick runs its dispatch.mts --refresh-only (#94), which records what it got.
+  writeFileSync(join(other, '.sandcastle/dispatch.mts'), "import { writeFileSync } from 'node:fs';\n" +
+    "writeFileSync('.sandcastle/refresh.json', JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), state: process.env.SANDCASTLE_STATE_DIR, scheduled: process.env.FACTORY_SCHEDULED ?? null, jam: process.env.FACTORY_JAM_REPORT ?? null }));\n");
   const unrelated = join(w.p.home, '.config/systemd/user/unrelated.service');
   mkdirSync(join(w.p.home, '.config/systemd/user'), { recursive: true });
   writeFileSync(unrelated, '[Service]\nExecStart=/bin/true\n');
@@ -258,7 +262,12 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   assert.equal(ran, '--max 3');
   assert.equal(readFileSync(join(root, '.sandcastle/quick.cwd'), 'utf8').trim(), root);
   assert.equal(existsSync(join(other, '.sandcastle/ran')), false, 'a project that was not opted in is not run');
-  assert.match(t1.output(), /skip beta: project not opted in/);
+  assert.match(t1.output(), /refresh beta \(main\): start/);
+  assert.match(t1.output(), /refresh beta: exit 0/);
+  assert.deepEqual(JSON.parse(readFileSync(join(other, '.sandcastle/refresh.json'), 'utf8')),
+    { args: ['--refresh-only', '--base', 'main'], cwd: other, state: w.p.state, scheduled: null, jam: null }, 'a read-only refresh, not a pass, against shared state');
+  assert.match(t1.output(), /1 passes, 1 refreshed, 0 skipped, 0 failed/);
+  assert.equal(readTickState(w.p).projects[other].reason, 'project not opted in; read-only refresh ok');
   assert.match(t1.output(), /pass alpha: exit 0/);
   const st = readTickState(w.p);
   assert.deepEqual([st.projects[root].result, st.projects[root].exitCode, typeof st.projects[root].pid], ['ok', 0, 'number']);
