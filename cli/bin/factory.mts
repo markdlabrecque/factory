@@ -5,7 +5,9 @@
 // .sandcastle copy against Factory's (`update --dry-run`: missing, outdated, edited, project-owned; writes nothing) and
 // create the missing and replace the unmodified outdated files (`update --apply`; edited and project-owned files are kept), and
 // switch the scheduler (and each project's opt-in) on or off, and list or retire install-dispatch.sh's legacy timers (`legacy status|retire`), and
-// remove a project's merged, clean Factory branches and their Factory-owned worktrees (`clean`; remote branches untouched). `tick` and `supervise` are internal: `tick` is what the Linux
+// remove a project's merged, clean Factory branches and their Factory-owned worktrees (`clean`; remote branches untouched), and
+// save a manual comment on a ticket in the ticket journal, then post it to the tracker (`ticket comment`, #99), and
+// deliver the journal's unposted comments and corrections, searching for an uncertain one's marker first (`ticket sync`, #100). `tick` and `supervise` are internal: `tick` is what the Linux
 // scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
@@ -27,6 +29,7 @@ import { update } from '../src/commands/update.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { legacy } from '../src/commands/legacy.mts';
 import { clean } from '../src/commands/clean.mts';
+import { ticketCommand } from '../src/commands/ticket.mts';
 import { tick, tickExitCode } from '../src/commands/tick.mts';
 import { superviseProcess } from '../src/commands/supervise.mts';
 import { scheduleBackend } from '../src/platform/scheduler.mts';
@@ -45,7 +48,9 @@ factory update --dry-run|--apply [--project <name|path>] [--json]
 factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]
 factory schedule on|off|status [--project <name|path>] [--json (status)]
 factory legacy status [--json] | factory legacy retire
-factory clean [--dry-run] [--project <name|path>] [--json]`;
+factory clean [--dry-run] [--project <name|path>] [--json]
+factory ticket comment <ticket> <text> [--project <name|path>]
+factory ticket sync [ticket] [--project <name|path>]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
@@ -61,6 +66,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
   legacy: { json: { type: 'boolean' } },
   clean: { 'dry-run': { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
+  ticket: { project: { type: 'string' } },
   tick: {}, supervise: {},
 };
 try {
@@ -109,6 +115,8 @@ try {
     } else if (command === 'clean') {
       if (first) throw new Error('Unexpected arguments (name a project with --project)');
       process.exitCode = clean(p, { dryRun: v['dry-run'], json: v.json, project: v.project });
+    } else if (command === 'ticket') {
+      process.exitCode = ticketCommand(p, first, second, extra, { project: v.project });
     } else if (command === 'tick') {
       // Internal: what factory-tick.service runs. SIGTERM (systemctl stop) and SIGINT cancel the tick and its dispatcher pass.
       if (first) throw new Error('Unexpected arguments');
