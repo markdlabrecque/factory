@@ -1,8 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ciGate } from "./ci.mts";
+import { ciGate, missingChecks } from "./ci.mts";
 
-// Run: node --test 'orchestrator/*.test.mts'
+// Shared GitHub/GitLab gate, including required names. Run: node --test 'orchestrator/*.test.mts'
+
+test("required checks must be present and pass, not skip or match a substring", () => {
+  for (const checks of [[], [{ name: "test", bucket: "skipping" }], [{ name: "test-other", bucket: "pass" }]]) {
+    assert.notEqual(ciGate(checks, ["test"]), "pass");
+    assert.deepEqual(missingChecks(checks, ["test"]), ["test"]);
+  }
+  assert.equal(ciGate([{ name: "test", bucket: "pass" }], ["test"]), "pass");
+  assert.equal(ciGate([{ name: "test", bucket: "pass" }, { name: "other", bucket: "fail" }], ["test"]), "fail");
+});
 
 const b = (...buckets: string[]) => buckets.map((bucket) => ({ bucket }));
 

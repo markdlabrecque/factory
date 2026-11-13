@@ -1,4 +1,4 @@
-// CI gate for automatic merges (tracker.github.mts). Pure, so the rule is tested on its own.
+// Shared CI gate for GitHub checks and GitLab jobs. Required names must pass, never skip.
 // Input: the checks on a PR's head, each with the `bucket` from `gh pr checks --json bucket`
 // (pass, fail, pending, skipping, cancel).
 //   fail     any check failed or was cancelled
@@ -9,8 +9,13 @@
 
 export type Gate = "pass" | "fail" | "pending" | "none";
 
-export function ciGate(checks: { bucket?: string }[]): Gate {
+export function missingChecks(checks: { name?: string; bucket?: string }[], required: readonly string[]): string[] {
+  return required.filter((name) => !checks.some((c) => c.name === name && c.bucket === "pass"));
+}
+
+export function ciGate(checks: { name?: string; bucket?: string }[], required: readonly string[] = []): Gate {
   if (checks.some((c) => c.bucket === "fail" || c.bucket === "cancel")) return "fail";
   if (checks.some((c) => c.bucket !== "pass" && c.bucket !== "skipping")) return "pending";
+  if (missingChecks(checks, required).length) return checks.length ? "pending" : "none";
   return checks.some((c) => c.bucket === "pass") ? "pass" : "none";
 }

@@ -22,6 +22,7 @@ import type { Ticket } from "./tracker.mts";
 //   node .sandcastle/dispatch.mts --refresh-only [--ticket <iid>] [--base sal-develop]
 // A ticket is free to go when its manifest is current, every ticket it depends on is merged into the
 // base or closed, and its files don't overlap a live run (in flight, or MR still open).
+// Open PRs/MRs reserve footprints even when a blocked auto-merge parks the run as waiting.
 // Tickets that aren't free get a "queued" card on the board saying why. A ticket whose run failed
 // is not retried every pass: delete its file in the state dir to retry it.
 // Each launch is recorded on the board (stage "setup", note "starting", the child's pid) the moment it is spawned,
@@ -222,7 +223,7 @@ for (const i of unstarted.filter((u) => noModel.has(u.iid))) {
 log(`${parents.length} ready ticket(s), ${issues.length} unit(s) of work, ${candidates.length} not yet started`);
 
 // ---- ticket graph ------------------------------------------------------------
-const live = runs.filter((r) => running(r) || (r.stage === "done" && !!r.branch && openMrs.has(r.branch)));
+const live = runs.filter((r) => running(r) || (!!r.branch && openMrs.has(r.branch)));
 const catalogue = work.tickets;
 const catalogueById = new Map(catalogue.map((t) => [t.iid, t]));
 const catalogueHash = new Map(catalogue.map((t) => [t.iid, contentHash({ title: t.title, description: t.description })]));

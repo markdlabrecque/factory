@@ -6,6 +6,7 @@ import * as gitlab from "./tracker.gitlab.mts";
 // Tracker facade: every tracker call main.mts, dispatch.mts and the ticket graph make. TRACKER.kind in
 // config.mts picks the adapter: "gitlab" (tracker.gitlab.mts, `glab`) or "github" (tracker.github.mts,
 // `gh`). A config without `kind` is GitLab. Every call runs on the host with that CLI's own login.
+// Delivery can return a blocked merge gate so handoff parks the run for a person.
 // mergedPr finds work merged outside Factory: a merged PR/MR from the run's branch, or one titled `#N: ...`.
 // postVerification posts one comment with adapter-specific media hosting, before any delivery.
 
@@ -45,6 +46,7 @@ export interface Delivery {
 export interface Delivered {
   url: string;
   merged: boolean;
+  blocked?: string; // open PR/MR waiting for a person, not a failed implementation
 }
 
 /**

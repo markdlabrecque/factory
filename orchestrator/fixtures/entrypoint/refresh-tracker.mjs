@@ -1,4 +1,5 @@
-// Read-only gh/glab boundary for #78 refresh/dispatch tests. All data and exact call logs are fixture-owned.
+// Read-only gh/glab boundary for #78 refresh/dispatch and #122 open-MR conflict tests.
+// All data and exact call logs are fixture-owned.
 // Reject every mutation and unexpected command, including label creation, comments, issue closes and PR creation.
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +24,7 @@ if (args[0] === "issue" && args[1] === "list") {
 }
 if (isGh && args[0] === "issue" && args[1] === "view" && args.includes("--json")) out(ghTicket(ticket(args[2])));
 if (isGh && args[0] === "pr" && args[1] === "list") {
+  if (args.includes("open")) out((data.openBranches ?? []).map((headRefName) => ({ headRefName })));
   out(args.includes("merged") && (data.merged ?? []).includes(args[args.indexOf("--head") + 1]) ? [{ number: 1 }] : []);
 }
 if (args[0] === "api" && args[1] === "graphql") {
@@ -48,6 +50,7 @@ if (!isGh && args[0] === "api") {
   if (n) out(n[2] ? data.notes?.[n[1]] ?? [] : ticket(n[1]));
   if (/\/merge_requests\?/.test(path)) {
     const q = new URLSearchParams(path.split("?")[1]);
+    if (q.get("state") === "opened") out((data.openBranches ?? []).map((source_branch) => ({ source_branch })));
     out(q.get("state") === "merged" && (data.merged ?? []).includes(q.get("source_branch")) ? [{ iid: 1 }] : []);
   }
 }

@@ -44,10 +44,12 @@ export const AGENT = {
 
 // After the verifier passes and the branch is pushed, Sandcastle opens a PR and merges it once every
 // CI check on the pushed commit passes. This is a deterministic gate (ci.mts): failed checks, no
-// checks, or checks still running at the deadline mean no merge, and the PR is left as a draft. CI must
+// checks, or checks still running at the deadline mean no merge. Failed CI drafts the PR; other
+// blocked gates wait for a person. Required named checks must pass, not skip. CI must
 // run on every PR (no `paths` filter), or PRs that touch no matching file will never merge.
 export const MERGE = {
   auto: true,
+  requiredChecks: [] as string[], // optional exact check/job names on either tracker
   method: "squash" as "merge" | "squash" | "rebase",
 };
 
