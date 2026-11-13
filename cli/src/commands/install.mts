@@ -9,11 +9,15 @@
 // The source is the checkout install was run from (installSource): the checkout holding the running script, or, when
 // the script is the installed app itself (`factory install` on the PATH), the Factory checkout containing the current
 // directory. Run from the installed app outside any checkout, a copied install refuses rather than reinstall itself.
+// A copied app has no Git history, so install also writes scaffold-history.json (update.mts writeHistoryCatalog): the
+// blob ids of every committed version of each scaffolded source file, which `factory update` uses to tell an unmodified
+// older project copy from an edited one. A source without Git history gets no catalog.
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readManifest, record, validate } from '../manifest.mts';
 import { readRegistry } from '../projects.mts';
+import { writeHistoryCatalog } from '../update.mts';
 import { boardURL } from '../paths.mts';
 import type { Paths } from '../paths.mts';
 import type { ServiceBackend } from '../platform/index.mts';
@@ -103,6 +107,7 @@ export async function install(p: Paths, service: ServiceBackend, options: { link
         mkdirSync(p.app, { recursive: true });
         record(p, entries[0]);
         for (const name of ['cli', 'board', 'orchestrator', 'skills']) cpSync(join(source, name), join(p.app, name), { recursive: true });
+        writeHistoryCatalog(source, p.app); // earlier scaffold versions, so `factory update` can tell old copies from edited ones
       }
     }
   }

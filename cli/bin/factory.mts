@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Factory CLI: install (from the checkout it is run from, install.mts), diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
-// failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show, reset or review a project's self-recovery (`recovery status|reset|review`), and
+// failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show, reset or review a project's self-recovery (`recovery status|reset|review`), classify a project's
+// .sandcastle copy against Factory's (`update --dry-run`: missing, outdated, edited, project-owned; writes nothing), and
 // switch the scheduler (and each project's opt-in) on or off. `tick` and `supervise` are internal: `tick` is what the Linux
 // scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
@@ -20,6 +21,7 @@ import { run } from '../src/commands/run.mts';
 import { retry } from '../src/commands/retry.mts';
 import { status } from '../src/commands/status.mts';
 import { recovery } from '../src/commands/recovery.mts';
+import { update } from '../src/commands/update.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { tick, tickExitCode } from '../src/commands/tick.mts';
 import { superviseProcess } from '../src/commands/supervise.mts';
@@ -35,6 +37,7 @@ factory run <ticket> [--project <name>]
 factory retry <ticket> [--project <name>]
 factory status [--json] [--project <name>]
 factory logs [ticket] [-f] [--recovery] [--project <name>]
+factory update --dry-run [--project <name|path>] [--json]
 factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]
 factory schedule on|off|status [--project <name|path>] [--json (status)]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
@@ -47,6 +50,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   retry: { project: { type: 'string' } },
   status: { json: { type: 'boolean' }, project: { type: 'string' } },
   logs: { follow: { type: 'boolean', short: 'f' }, recovery: { type: 'boolean' }, project: { type: 'string' } },
+  update: { 'dry-run': { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
   recovery: { json: { type: 'boolean' }, confirm: { type: 'boolean' }, project: { type: 'string' } },
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
   tick: {}, supervise: {},
@@ -75,6 +79,9 @@ try {
     } else if (command === 'status') {
       if (first) throw new Error('Unexpected arguments');
       await status(p, { status: () => backend(p).status() }, { project: v.project, json: v.json, schedule: scheduleBackend(p) });
+    } else if (command === 'update') {
+      if (first) throw new Error('Unexpected arguments (name a project with --project)');
+      process.exitCode = update(p, { dryRun: v['dry-run'], json: v.json, project: v.project });
     } else if (command === 'recovery') {
       if (second || extra.length) throw new Error('Unexpected arguments (name a project with --project)');
       if (v.json && first !== 'status') throw new Error('--json applies to recovery status');
