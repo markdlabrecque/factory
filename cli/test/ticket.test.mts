@@ -1,6 +1,7 @@
-// `factory ticket comment` tests (#99): the comment is saved in the ticket journal first and kept whatever the post does;
+// `factory ticket comment` and `factory ticket sync` tests (#99, #100): the comment is saved in the ticket journal first and kept whatever the post does;
 // the post goes through the project's tracker CLI (`gh api` / `glab api`) with the event's marker, and its outcome is
-// recorded as delivered, pending (the CLI never ran) or uncertain (it ran and failed). Disposable HOME, project and state
+// recorded as delivered, pending (the CLI never ran) or uncertain (it ran and failed); sync delivers what is left, and
+// searches for an uncertain event's marker before posting so nothing is posted twice. Disposable HOME, project and state
 // folder; the tracker CLI is an injected fake, or a test-owned `gh` stub first on PATH for the end-to-end run. No tracker.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -9,10 +10,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { markerFor, readJournal } from '../../board/journal.mts';
+import { addComment, beginDelivery, finishDelivery, markerFor, readJournal } from '../../board/journal.mts';
 import { paths } from '../src/paths.mts';
 import { addProject } from '../src/projects.mts';
-import { ticketComment } from '../src/commands/ticket.mts';
+import { ticketComment, ticketSync } from '../src/commands/ticket.mts';
 import type { Exec } from '../src/commands/ticket.mts';
 
 const GITHUB = 'export const TRACKER = {\n  kind: "github" as "gitlab" | "github",\n  host: "github.com",\n  project: "me/site",\n};\n';
@@ -105,4 +106,67 @@ console.log(JSON.stringify({ id: 42, html_url: 'https://github.com/me/site/issue
   const [e] = journal(p, 'me/site', '8');
   assert.equal(e.delivery?.remoteId, '42');
   assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, 1);
+});
+
+/** An event whose earlier post failed: pending (`uncertain` false) or uncertain (it may have posted). */
+function failed(p: ReturnType<typeof paths>, iid: string, text: string, uncertain: boolean, project = 'me/site') {
+  const t = { project, iid };
+  const e = addComment(p.state, t, { text, actor: 'a' });
+  const s = beginDelivery(p.state, t, e.id);
+  assert.ok(s.ok);
+  finishDelivery(p.state, t, e.id, s.token, { error: 'HTTP 502', uncertain });
+  return e;
+}
+
+test('sync finds an uncertain post by its marker and records it without posting again', t => {
+  const { p, root } = fixture(t);
+  const e = failed(p, '5', 'maybe posted', true);
+  const calls: string[][] = [];
+  // Two pages, as `gh api --paginate` prints them; the marker is on the second.
+  const exec: Exec = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (args.includes('POST')) assert.fail('must not post a comment that is already on the tracker');
+    return { status: 0, stdout: `[{"id":1,"body":"other ] text"}]\n[{"id":77,"body":"maybe posted\\n\\n${markerFor(e.id)}"}]\n`, stderr: '' };
+  };
+  assert.equal(ticketSync(p, undefined, { cwd: root, exec }), 0);
+  assert.deepEqual(calls, [['gh', 'api', '--hostname', 'github.com', '--paginate', 'repos/me/site/issues/5/comments?per_page=100']]);
+  const [after] = journal(p, 'me/site', '5');
+  assert.equal(after.delivery?.state, 'delivered');
+  assert.equal(after.delivery?.remoteId, '77');
+});
+
+test('sync posts pending events and unfound uncertain ones once, then has nothing left to do', t => {
+  const { p, root } = fixture(t, GITLAB);
+  const pend = failed(p, '2', 'never sent', false, 'group/site');
+  const unsure = failed(p, '9', 'lost reply', true, 'group/site');
+  failed(p, '9', 'someone else', false, 'other/site'); // another project's journal is not this project's to sync
+  const posts: string[] = [];
+  let lists = 0;
+  const exec: Exec = (cmd, args) => {
+    assert.equal(cmd, 'glab');
+    if (!args.includes('POST')) { lists++; return { status: 0, stdout: '[]', stderr: '' }; }
+    posts.push(args.at(-1)!);
+    return { status: 0, stdout: JSON.stringify({ id: 100 + posts.length }), stderr: '' };
+  };
+  assert.equal(ticketSync(p, undefined, { cwd: root, exec }), 0);
+  assert.equal(lists, 1); // only the uncertain event needed a search
+  assert.deepEqual(posts, [`body=never sent\n\n${markerFor(pend.id)}`, `body=lost reply\n\n${markerFor(unsure.id)}`]);
+  assert.equal(journal(p, 'group/site', '2')[0].delivery?.remoteId, '101');
+  assert.equal(journal(p, 'other/site', '9')[0].delivery?.state, 'pending');
+  assert.equal(ticketSync(p, undefined, { cwd: root, exec: () => assert.fail('nothing left to deliver') }), 0);
+});
+
+test('sync never posts an uncertain event when the marker search fails, and keeps it for the next sync', t => {
+  const { p, root } = fixture(t);
+  failed(p, '6', 'unsure', true);
+  failed(p, '7', 'other ticket', false);
+  const exec: Exec = (_cmd, args) => {
+    if (args.includes('POST')) assert.fail('nothing may be posted');
+    return { status: 1, stdout: '', stderr: 'HTTP 503' };
+  };
+  assert.equal(ticketSync(p, '#6', { cwd: root, exec }), 1); // one ticket only: #7 is not touched
+  const [e] = journal(p, 'me/site', '6');
+  assert.equal(e.delivery?.state, 'uncertain');
+  assert.match(e.delivery?.lastError ?? '', /marker search failed.*503/);
+  assert.equal(journal(p, 'me/site', '7')[0].delivery?.attempts, 1);
 });
