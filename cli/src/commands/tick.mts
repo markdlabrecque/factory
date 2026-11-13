@@ -7,9 +7,9 @@
 // state folder but no FACTORY_SCHEDULED or jam report. It is recorded in the lock and cancelled like a pass, takes no
 // turn, adds no pass history, gets no jam confirmation, and is recorded `skipped` (or `interrupted`) with the refresh
 // result in the reason; a failed refresh is in the result's `refreshed`, logged, and never fails the tick. A detached
-// HEAD or a missing dispatch.mts skips it. Each pass runs as `dispatch.sh --max 3` with FACTORY_SCHEDULED=1, the saved PATH, and
-// SANDCASTLE_STATE_DIR set to Factory's state folder whatever the caller had set. The dispatcher itself enforces the
-// three-slot cap across projects, counting launches not yet on the board (#32). Stdin is inherited: the service has
+// HEAD or a missing dispatch.mts skips it. Each pass runs as `dispatch.sh` with no --max override, with FACTORY_SCHEDULED=1, the saved PATH, and
+// SANDCASTLE_STATE_DIR set to Factory's state folder whatever the caller had set. The project's dispatcher config
+// (SELECT.maxConcurrent in .sandcastle/dispatch.mts) sets the cap across projects, counting launches not yet on the board (#32). Stdin is inherited: the service has
 // none, and a tick started by hand from a terminal keeps the dispatcher's interactive behaviour.
 // Global state comes from the service manager only. Before taking the lock, after taking it, and before every
 // project, the tick asks the manager: work needs the timer enabled and active (macOS: the agent enabled and running). A timer that is off ends the tick, and an
@@ -98,7 +98,7 @@ export type TickResult = {
   /** Set when a cancellation could not be confirmed: the pass group that is still alive. */
   unconfirmed?: number;
 };
-export const SCHEDULED_ARGS = ['--max', '3'];
+export const SCHEDULED_ARGS: string[] = [];
 /** The exit code for a tick result. */
 export const tickExitCode = (r: TickResult) => r.result === 'interrupted' ? 143 : r.result === 'failed' || r.result === 'unknown' ? 1 : 0;
 

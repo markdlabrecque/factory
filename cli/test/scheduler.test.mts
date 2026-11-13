@@ -1,3 +1,4 @@
+// Scheduled passes preserve the saved environment and pass no --max, leaving the cap to the project's dispatcher config (#117).
 // Scheduler logic against the in-memory FakeSchedule (the production adapter is covered in schedule-linux.test.mts):
 // `schedule on|off|status`, install/uninstall/reinstall ordering, the tick's gating on the service manager, its
 // project visits and their rotation, the read-only refresh of projects not opted in (#94), `factory clean` after each completed pass (#97), state file, bounded timing history, exit codes and lock, and the unit directives. The service manager is the only global
@@ -238,7 +239,7 @@ test('a failing pass makes the tick fail, and the next project still runs; the t
   assert.match(readTickState(p).projects[a].reason!, /spawn EACCES/);
 });
 
-test('the scheduled pass gets --max 3, FACTORY_SCHEDULED=1, the saved PATH and Factory state, whatever the caller set', async t => {
+test('the scheduled pass gets no --max, FACTORY_SCHEDULED=1, the saved PATH and Factory state, whatever the caller set', async t => {
   const { p, sched, roots: [a] } = await armed(t, ['a']);
   setProjectSchedule(p, a, true);
   const saved = process.env.SANDCASTLE_STATE_DIR;
@@ -246,7 +247,7 @@ test('the scheduled pass gets --max 3, FACTORY_SCHEDULED=1, the saved PATH and F
   t.after(() => { if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved; });
   let seen: any;
   await tick(p, { backend: sched, log: () => {}, pass: async (ctx, args, o) => { seen = { cwd: ctx.root, args, env: o.env, group: o.group }; return 0; } });
-  assert.deepEqual(seen.args, ['--max', '3']);
+  assert.deepEqual(seen.args, []);
   assert.equal(seen.cwd, a);
   assert.equal(seen.group, true, 'the pass leads its own process group');
   assert.deepEqual([seen.env.PATH, seen.env.SANDCASTLE_STATE_DIR, seen.env.FACTORY_SCHEDULED], ['/usr/bin:/bin', p.state, '1']);
