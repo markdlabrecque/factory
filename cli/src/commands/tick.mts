@@ -1,7 +1,13 @@
 // One scheduler tick: the internal command `factory tick`, run by factory-tick.service on Linux (not for people to type;
 // it takes no flags), and on macOS called in-process by the launchd supervisor (commands/supervise.mts). It visits the registered projects one after another, in registry order rotated so that a different project
 // goes first each tick (rotation(), with state.json's `nextRoot`), and runs one dispatcher pass, the project's own `.sandcastle/dispatch.sh` through runDispatchSh, for each project that
-// scheduleBlocker() clears. Each pass runs as `dispatch.sh --max 3` with FACTORY_SCHEDULED=1, the saved PATH, and
+// scheduleBlocker() clears. A registered project never opted in (no `schedule` entry; a paused one gets nothing) instead
+// gets a read-only refresh of its cards (#94): runRefreshOnly runs the saved Node on its `.sandcastle/dispatch.mts
+// --refresh-only --base <current branch>` (#93) as the leader of its own process group, with the saved PATH and the shared
+// state folder but no FACTORY_SCHEDULED or jam report. It is recorded in the lock and cancelled like a pass, takes no
+// turn, adds no pass history, gets no jam confirmation, and is recorded `skipped` (or `interrupted`) with the refresh
+// result in the reason; a failed refresh is in the result's `refreshed`, logged, and never fails the tick. A detached
+// HEAD or a missing dispatch.mts skips it. Each pass runs as `dispatch.sh --max 3` with FACTORY_SCHEDULED=1, the saved PATH, and
 // SANDCASTLE_STATE_DIR set to Factory's state folder whatever the caller had set. The dispatcher itself enforces the
 // three-slot cap across projects, counting launches not yet on the board (#32). Stdin is inherited: the service has
 // none, and a tick started by hand from a terminal keeps the dispatcher's interactive behaviour.
@@ -41,11 +47,13 @@
 // most one repair attempt, detached like ticket runs) once the pass is recorded, so its time is not the pass's. It asks
 // the service manager again before launching and launches nothing once cancellation or off has taken effect. Its errors
 // are logged, never a failed pass. The report file is removed after; reports a dead tick left are removed by the next. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { Paths } from '../paths.mts';
+import { scaffoldName } from '../paths.mts';
 import { readRegistry } from '../projects.mts';
 import type { Project } from '../projects.mts';
 import { resolveProject } from '../runs.mts';
@@ -70,10 +78,14 @@ export type TickOptions = {
   now?: () => Date; mono?: () => number;
   /** Jam confirmation after a completed pass (jam-detect.mts afterPass); replaceable in tests. */
   recovery?: typeof afterPass;
+  /** Runs one read-only refresh for a project not opted in; resolves to its exit code. The default is runRefreshOnly. */
+  refresh?: Pass;
 };
 export type TickResult = {
   result: 'done' | 'busy' | 'off' | 'unknown' | 'interrupted' | 'failed';
   passes: string[]; skipped: Record<string, string>; errors: Record<string, string>;
+  /** Projects not opted in whose cards were refreshed this tick: `ok`, `exit N` or the spawn error. Never a failed tick. */
+  refreshed: Record<string, string>;
   /** Set when a cancellation could not be confirmed: the pass group that is still alive. */
   unconfirmed?: number;
 };
@@ -101,6 +113,35 @@ export function scheduledEnv(p: Paths, config: ScheduleConfig, base: NodeJS.Proc
   return { ...base, PATH: config.path, SANDCASTLE_STATE_DIR: p.state, FACTORY_SCHEDULED: '1' };
 }
 
+/** The environment a read-only refresh gets: the saved PATH and shared state, without the scheduled-pass markers. */
+export function refreshEnv(p: Paths, config: ScheduleConfig, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...base, PATH: config.path, SANDCASTLE_STATE_DIR: p.state };
+  for (const k of ['FACTORY_SCHEDULED', 'FACTORY_PASS_ID', 'FACTORY_JAM_REPORT', 'FACTORY_REFRESH_KEY', 'FACTORY_REFRESH_ATTEMPT']) delete env[k];
+  return env;
+}
+/** The arguments of a whole-project read-only refresh against `base` (dispatch.mts --refresh-only, #93). */
+export const refreshArgs = (base: string) => ['--refresh-only', '--base', base];
+/** Why a project not opted in can't be refreshed now, or null. */
+export function refreshProblem(root: string, exists: boolean, branch: string | null): string | null {
+  if (!exists) return 'checkout missing';
+  if (!existsSync(join(root, scaffoldName, 'dispatch.mts'))) return `no ${scaffoldName}/dispatch.mts`;
+  if (!branch) return 'detached HEAD';
+  return null;
+}
+/** Runs the project's `dispatch.mts` with `args` under the saved Node, from its root, as the leader of its own process
+ *  group; stdin is closed. Resolves to its exit code. */
+export const runRefreshOnly = (node: string): Pass => (ctx, args, o) => {
+  const child = spawn(node, [join(ctx.scaffold, 'dispatch.mts'), ...args], { cwd: ctx.root, stdio: ['ignore', 'inherit', 'inherit'], detached: true, env: o.env });
+  if (child.pid !== undefined) {
+    try { o.onSpawn(child.pid); }
+    catch (e) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } throw e; }
+  }
+  return new Promise((done, fail) => {
+    child.on('error', fail);
+    child.on('exit', (code, sig) => done(code ?? (sig ? 128 : 1)));
+  });
+};
+
 const takesTurns = (x: Project) => !!x.schedule?.enabled;
 /** The registry rotated to start at this tick's first project, and the project that goes first next tick. */
 export function rotation(projects: Project[], nextRoot: string | undefined): { order: Project[]; nextRoot?: string } {
@@ -118,7 +159,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
   const wall = o.now ?? (() => new Date());
   const mono = o.mono ?? (() => performance.now());
   const signal = o.signal ?? new AbortController().signal;
-  const out: TickResult = { result: 'done', passes: [], skipped: {}, errors: {} };
+  const out: TickResult = { result: 'done', passes: [], skipped: {}, errors: {}, refreshed: {} };
   const secs = (from: number) => `${Math.round((mono() - from) / 1000)}s`;
   const stop = (result: TickResult['result'], line: string): TickResult => { log(line); return { ...out, result }; };
   const gate = async (): Promise<TickResult | null> => {
@@ -172,22 +213,48 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       const record = (s: ProjectState) => { state.projects[root] = s; writeTickState(p, state); };
       const skip = (reason: string) => { log(`skip ${project.name}: ${reason}`); out.skipped[project.name] = reason; record({ attemptedAt: attempt, result: 'skipped', reason }); };
       const exists = existsSync(root);
-      const reason = scheduleBlocker({ state: 'on' }, project, exists, exists ? currentBranch(root) : null) ?? (exists ? copyProblem(root) : null);
-      if (reason) { skip(reason); continue; }
+      const branch = exists ? currentBranch(root) : null;
+      const reason = scheduleBlocker({ state: 'on' }, project, exists, branch) ?? (exists ? copyProblem(root) : null);
+      // A project never opted in gets a read-only refresh of its cards instead of a pass (#94); a paused one gets nothing.
+      const refreshing = !project.schedule;
+      if (reason && !refreshing) { skip(reason); continue; }
+      if (refreshing) {
+        const problem = refreshProblem(root, exists, branch);
+        if (problem) { skip(`${reason}; no refresh: ${problem}`); continue; }
+      }
       let ctx: ProjectContext;
-      try { ctx = resolveProject(p, { project: root }); } catch (e) { skip((e as Error).message); continue; }
-      log(`pass ${project.name} (${project.schedule!.branch}): start`);
+      try { ctx = resolveProject(p, { project: root }); } catch (e) { skip(refreshing ? `${reason}; no refresh: ${(e as Error).message}` : (e as Error).message); continue; }
+      const what = refreshing ? 'refresh' : 'pass';
+      log(`${what} ${project.name} (${refreshing ? branch : project.schedule!.branch}): start`);
       const from = mono();
       state.currentRoot = root;
-      record({ attemptedAt: attempt, result: 'running' });
+      record({ attemptedAt: attempt, result: 'running', ...(refreshing ? { reason: `${reason}; read-only refresh` } : {}) });
       const passId = randomUUID();
       const report = join(p.schedulerState, 'jam', `${passId}.json`);
-      mkdirSync(dirname(report), { recursive: true });
-      const result = await runPass(p, o, lock, ctx, project, root, config, state, signal, log, { FACTORY_PASS_ID: passId, FACTORY_JAM_REPORT: report });
+      const result = refreshing
+        ? await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.refresh ?? runRefreshOnly(config.node))(ctx, refreshArgs(branch!), { ...spawnOptions, env: refreshEnv(p, config) }))
+        : (mkdirSync(dirname(report), { recursive: true }),
+          await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.pass ?? ((c, args, so) => runDispatchSh(p, c, args, so)))(ctx, SCHEDULED_ARGS,
+            { ...spawnOptions, env: { ...scheduledEnv(p, config), FACTORY_PASS_ID: passId, FACTORY_JAM_REPORT: report } })));
       const entry = state.projects[root];
       entry.finishedAt = wall().toISOString();
       entry.durationMs = Math.max(0, Math.round(mono() - from));
       delete state.currentRoot;
+      if (refreshing && result.unconfirmed === undefined) {
+        // A refresh is recorded on the project as skipped (it got no pass) with what the refresh did. It is not pass
+        // history, never a tick failure, and gets no jam confirmation.
+        const did = result.cancelled ? 'cancelled' : result.error ? `failed: ${result.error}` : result.code === 0 ? 'ok' : `failed: exit ${result.code}`;
+        entry.result = result.cancelled ? 'interrupted' : 'skipped';
+        entry.reason = `${reason}; read-only refresh ${did}${result.leftover ? `; left processes running in its process group, terminated${result.leftover.escalated ? ' with SIGKILL' : ''}` : ''}`;
+        if (result.code !== undefined) entry.exitCode = result.code;
+        delete entry.pid;
+        writeTickState(p, state);
+        lock.clearPass();
+        out.refreshed[project.name] = result.error ?? (result.cancelled ? 'cancelled' : result.code === 0 ? 'ok' : `exit ${result.code}`);
+        log(`refresh ${project.name}: ${result.error ? `failed: ${result.error}` : `exit ${result.code}`} after ${secs(from)}${result.cancelled ? ' (cancelled)' : ''}${result.leftover ? ' (leftover processes terminated)' : ''}`);
+        if (result.cancelled) cancelled = true;
+        continue;
+      }
       if (result.unconfirmed !== undefined) {
         // The lock stays so no pass starts over a live group. What the leader did is still recorded as observed: an exit
         // code gives ok or error with its finish and duration; `interrupted` is only for a cancellation that was requested.
@@ -202,11 +269,12 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
         }
         // The tick ends here: its end is recorded, while pid and currentRoot stay with the kept lock.
         const ended = tickEntry('failed');
+        if (refreshing) { entry.result = result.cancelled ? 'interrupted' : 'skipped'; entry.reason = `${reason}; read-only refresh: ${entry.reason}`; delete out.errors[project.name]; }
         writeTickState(p, state);
-        history(passEntry(root, project.name, entry), { ...ended, reason: `process group ${result.unconfirmed} unconfirmed gone` });
+        history(...(refreshing ? [] : [passEntry(root, project.name, entry)]), { ...ended, reason: `process group ${result.unconfirmed} unconfirmed gone` });
         rmSync(report, { force: true });
         keepLock = true; out.unconfirmed = result.unconfirmed;
-        log(`pass ${project.name}: termination unconfirmed, ${alive}; scheduler lock kept`);
+        log(`${what} ${project.name}: termination unconfirmed, ${alive}; scheduler lock kept`);
         return { ...out, result: 'failed' };
       }
       if (result.cancelled) { entry.result = 'interrupted'; entry.reason = 'cancelled'; }
@@ -240,16 +308,17 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
     history(interrupted ? { ...ended, reason: 'cancelled' } : out.result === 'off' || out.result === 'unknown' ? { ...ended, reason: 'scheduler is no longer on' } : ended);
     if (interrupted) return stop('interrupted', `tick interrupted after ${secs(startedMono)}`);
     if (out.result !== 'done' && out.result !== 'failed') return stop(out.result, `tick stopped after ${secs(startedMono)}: scheduler is no longer on`);
-    log(`tick end: ${out.passes.length} passes, ${Object.keys(out.skipped).length} skipped, ${Object.keys(out.errors).length} failed, ${secs(startedMono)}`);
+    log(`tick end: ${out.passes.length} passes, ${Object.keys(out.refreshed).length} refreshed, ${Object.keys(out.skipped).length} skipped, ${Object.keys(out.errors).length} failed, ${secs(startedMono)}`);
     return out;
   } finally { if (!keepLock) lock.release(); }
 }
 
 type PassOutcome = { code?: number; error?: string; unconfirmed?: number; cancelled?: boolean; leftover?: { escalated: boolean } };
-/** Runs one pass and cancels it if `signal` aborts. The pass group is recorded in the lock and the state file at spawn. */
-async function runPass(p: Paths, o: TickOptions, lock: HeldLock, ctx: ProjectContext, project: Project, root: string, config: ScheduleConfig,
-  state: TickState, signal: AbortSignal, log: (line: string) => void, extraEnv: Record<string, string>): Promise<PassOutcome> {
-  const pass: Pass = o.pass ?? ((c, args, spawnOptions) => runDispatchSh(p, c, args, spawnOptions));
+type Launch = (o: { onSpawn: (pid: number) => void; group: true }) => Promise<number>;
+/** Runs one pass (or a refresh) through `launch` and cancels it if `signal` aborts. The process group is recorded in the
+ *  lock and the state file at spawn. */
+async function runPass(p: Paths, o: TickOptions, lock: HeldLock, project: Project, root: string,
+  state: TickState, signal: AbortSignal, log: (line: string) => void, launch: Launch): Promise<PassOutcome> {
   let pid: number | undefined;
   let cancelling: Promise<{ confirmed: boolean }> | undefined;
   let leftoverTerm: Promise<{ confirmed: boolean; escalated: boolean }> | undefined;
@@ -266,7 +335,7 @@ async function runPass(p: Paths, o: TickOptions, lock: HeldLock, ctx: ProjectCon
   };
   signal.addEventListener('abort', cancel, { once: true });
   try {
-    const done = pass(ctx, SCHEDULED_ARGS, { env: { ...scheduledEnv(p, config), ...extraEnv }, onSpawn, group: true });
+    const done = launch({ onSpawn, group: true });
     if (signal.aborted) cancel();
     const code = await done;
     if (cancelling) return (await cancelling).confirmed ? { code, cancelled: true } : { code, unconfirmed: pid, cancelled: true };
