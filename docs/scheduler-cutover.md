@@ -46,12 +46,12 @@ Check: `systemctl --user list-timers --all 'sandcastle-dispatch*'` lists nothing
 
 Do this for every project you will opt in. It must come after step 2, so that no legacy pass reads the files while you replace them. Follow the README's ["Updating a project's copy of the workflow"](../README.md#updating-a-projects-copy-of-the-workflow). In the project, on its integration branch:
 
-1. Copy the unadapted files that `orchestrator/ADAPTING.md` ("Install into a project") lists, which must include `orchestrator/dispatch.mts` and `board/board.mts`. Merge changes into the files you adapted by hand: `config.mts`, `main.mts`'s `CONFIG`, `prompt.md`, `prompt.verify.md` and `sandbox/bootstrap-site.sh`.
+1. Run `factory update --dry-run`, then `factory update --apply`. It creates the missing files and replaces the unedited outdated ones, which must include `dispatch.mts` and `board.mts`; if either is listed as edited locally, merge it by hand. Merge changes into the files you adapted by hand: `config.mts`, `main.mts`'s `CONFIG`, `prompt.md`, `prompt.verify.md` and `sandbox/bootstrap-site.sh`.
 2. Review the result with `git diff -- .sandcastle`.
 3. From a terminal, run `.sandcastle/dispatch.sh --dry-run`. It checks logins, builds a missing image, and shows what a pass would start without launching anything. Scheduled passes run with no terminal and never build an image.
 4. If the project tracks `.sandcastle/`, commit the refresh the way you normally change that project.
 
-Factory never refreshes a copy for you. `factory update --dry-run` lists which files are missing, outdated or edited, and writes nothing.
+Factory never refreshes a copy on its own. `factory update --dry-run` lists which files are missing, outdated or edited, and writes nothing; `factory update --apply` writes only the missing and unedited outdated ones.
 
 ## 4. Opt the projects in
 

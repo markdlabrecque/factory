@@ -1,6 +1,6 @@
-// `factory update --dry-run` (#91): classification of a project's .sandcastle copy against a synthetic Factory app with
+// `factory update --dry-run` (#91) and `--apply` (#92): classification of a project's .sandcastle copy against a synthetic Factory app with
 // two committed versions, from its Git history, from an install catalog, and with no history; and that the dry run
-// writes nothing. Disposable HOME, app and project; no network, service manager or credentials.
+// writes nothing; and that --apply creates missing and replaces outdated files only. Disposable HOME, app and project; no network, service manager or credentials.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -73,7 +73,7 @@ test('a copied app uses the install catalog; with no history nothing counts as o
   assert.deepEqual(classes(classifyCopy(p, root, { app: copy })), classes(classifyCopy(p, root, { app })));
 });
 
-test('factory update --dry-run reports by class and writes nothing; without --dry-run it refuses', t => {
+test('factory update --dry-run reports by class and writes nothing; without --dry-run or --apply it refuses', t => {
   const { p, app, root, sc } = fixture(t);
   addProject(p, root);
   const snapshot = () => readdirSync(sc).sort().map(f => [f, readFileSync(join(sc, f), 'utf8'), statSync(join(sc, f)).mtimeMs]);
@@ -91,6 +91,36 @@ test('factory update --dry-run reports by class and writes nothing; without --dr
   const json = JSON.parse(out.join('\n'));
   assert.equal(json.history, 'git');
   assert.equal(json.files.find((f: any) => f.file === 'graph.mts').class, 'outdated');
-  assert.throws(() => update(p, { cwd: root, app }), /--dry-run/);
+  assert.throws(() => update(p, { cwd: root, app }), /--dry-run.*--apply/);
+  assert.throws(() => update(p, { dryRun: true, apply: true, cwd: root, app }), /not both/);
   assert.deepEqual(snapshot(), before);
+});
+
+test('factory update --apply creates missing and replaces outdated files, keeping edited and project-owned ones', t => {
+  const { p, app, root, sc } = fixture(t);
+  addProject(p, root);
+  const kept = ['ci.mts', 'dispatch.sh', 'prompt.md', 'config.mts', 'main.mts', '.env'].map(f => [f, readFileSync(join(sc, f), 'utf8')]);
+  const out: string[] = [];
+  t.mock.method(console, 'log', (s: string) => out.push(s));
+  assert.equal(update(p, { apply: true, cwd: root, app }), 0);
+  const text = out.join('\n');
+  assert.match(text, /1 created, 3 replaced/);
+  assert.match(text, /Edited locally \(kept; merge by hand\): 1\n  ci\.mts/);
+  assert.doesNotMatch(text, /recovery review/); // none of the written files is in the recovery workflow
+  for (const f of ['tracker.mts', 'graph.mts']) assert.deepEqual(readFileSync(join(sc, f)), readFileSync(join(app, 'orchestrator', f)), f);
+  assert.equal(readFileSync(join(sc, 'factory-dispatch.sh'), 'utf8'),
+    readFileSync(join(app, 'cli/templates/project/factory-dispatch.sh'), 'utf8').replace('{{STATE_DIR_QUOTED}}', `'${p.state}'`));
+  assert.equal(statSync(join(sc, 'factory-dispatch.sh')).mode & 0o777, 0o755);
+  for (const [f, before] of kept) assert.equal(readFileSync(join(sc, f), 'utf8'), before, f);
+  assert.deepEqual(readdirSync(sc).filter(f => f.includes('factory-update')), []);
+  const after = classes(classifyCopy(p, root, { app }));
+  assert.deepEqual(Object.values(after).filter(c => c === 'missing' || c === 'outdated'), []);
+  // A recovery workflow file that was outdated asks for a fresh review.
+  appendFileSync(join(app, 'board/board.mts'), '\n// v3\n');
+  git(app, 'commit', '-qam', 'v3');
+  out.length = 0;
+  update(p, { apply: true, json: true, cwd: root, app });
+  const json = JSON.parse(out.join('\n'));
+  assert.deepEqual(json.replaced, ['board.mts']);
+  assert.equal(json.recoveryReviewNeeded, true);
 });
