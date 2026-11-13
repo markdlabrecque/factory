@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Factory CLI: install, diagnose, control the board, reverse the manifest, register projects, init them, run a
+// Factory CLI: install (from the checkout it is run from, install.mts), diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
 // failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show, reset or review a project's self-recovery (`recovery status|reset|review`), and
 // switch the scheduler (and each project's opt-in) on or off. `tick` and `supervise` are internal: `tick` is what the Linux

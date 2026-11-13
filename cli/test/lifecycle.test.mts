@@ -1,4 +1,5 @@
-// Lifecycle tests run inside a disposable HOME with no host service manager calls.
+// Lifecycle tests run inside a disposable HOME with no host service manager calls. Install-source tests stand in a
+// synthetic checkout and pretend the running script is the installed app.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -63,6 +64,31 @@ test('--link reinstall and uninstall never delete the source checkout', async t 
   assert.ok(lstatSync(p.app).isSymbolicLink());
   await uninstall(p, service);
   assert.ok(existsSync(join(repository, 'cli/bin/factory.mts')));
+});
+function fakeCheckout(t: TestContext, marker: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'factory-checkout-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const name of ['board', 'orchestrator', 'skills']) mkdirSync(join(dir, name));
+  mkdirSync(join(dir, 'cli/bin'), { recursive: true });
+  writeFileSync(join(dir, 'cli/bin/factory.mts'), marker);
+  mkdirSync(join(dir, 'cli/src'));
+  return dir;
+}
+test('the installed factory command installs the checkout it is run from', async t => {
+  const { p, service } = fixture(t);
+  await install(p, service);
+  const checkout = fakeCheckout(t, 'updated checkout');
+  // Run as the installed app, from a subfolder of another checkout.
+  await install(p, service, { running: p.app, cwd: join(checkout, 'cli/src') });
+  assert.equal(readFileSync(join(p.app, 'cli/bin/factory.mts'), 'utf8'), 'updated checkout');
+  assert.equal(readManifest(p)!.entries.length, 3);
+});
+test('the installed factory command outside a checkout refuses and leaves the app alone', async t => {
+  const { p, service } = fixture(t);
+  await install(p, service);
+  writeFileSync(join(p.app, 'cli/bin/factory.mts'), 'installed');
+  await assert.rejects(install(p, service, { running: p.app, cwd: p.home }), /not a checkout/);
+  assert.equal(readFileSync(join(p.app, 'cli/bin/factory.mts'), 'utf8'), 'installed');
 });
 test('refuses unowned collisions and manifest paths outside HOME', async t => {
   const { p, service } = fixture(t);

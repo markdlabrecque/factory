@@ -4,6 +4,9 @@
 // the install before it touches a file. Afterwards the owned scheduler units are rewritten from the saved launch
 // configuration and the timer stays disabled, whatever it was before: resume with `factory schedule on`, which also
 // refreshes Node and PATH. Project opt-ins in the registry are untouched and never turn scheduling on by themselves.
+// The source is the checkout install was run from (installSource): the checkout holding the running script, or, when
+// the script is the installed app itself (`factory install` on the PATH), the Factory checkout containing the current
+// directory. Run from the installed app outside any checkout, a copied install refuses rather than reinstall itself.
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,9 +31,35 @@ export function legacyPaths(p: Paths) {
   }
   return found;
 }
-export async function install(p: Paths, service: ServiceBackend, options: { link?: boolean; source?: string; schedule?: ScheduleBackend; cancel?: CancelOptions } = {}) {
+const realOrNull = (path: string) => { try { return realpathSync(path); } catch { return null; } };
+/** A Factory checkout has the CLI entry point and every folder install copies. */
+export function isFactoryCheckout(dir: string) {
+  return existsSync(join(dir, 'cli/bin/factory.mts')) && ['cli', 'board', 'orchestrator', 'skills'].every(name => existsSync(join(dir, name)));
+}
+/** The nearest Factory checkout at or above dir, or null. */
+export function findCheckout(dir: string) {
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (isFactoryCheckout(d)) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+/**
+ * The checkout to install from. `running` is the checkout of the script being run; when that is the installed app
+ * (the `factory` command on the PATH), use the Factory checkout around `cwd` instead, so `factory install` in an
+ * updated checkout installs that checkout. A linked app falls back to its own checkout; a copied one refuses.
+ */
+export function installSource(p: Paths, cwd = process.cwd(), running = repository) {
+  const self = realpathSync(running);
+  if (self !== realOrNull(p.app)) return self;
+  const here = findCheckout(cwd);
+  if (here) return realpathSync(here);
+  if (lstatSync(p.app).isSymbolicLink()) return self;
+  throw new Error(`This is the installed copy of Factory (${p.app}), not a checkout. Run factory install from inside a Factory checkout, or run node <checkout>/cli/bin/factory.mts install.`);
+}
+export async function install(p: Paths, service: ServiceBackend, options: { link?: boolean; source?: string; cwd?: string; running?: string; schedule?: ScheduleBackend; cancel?: CancelOptions } = {}) {
   if (!nodeSupported()) throw new Error(`Node 22.18+ required; found ${process.versions.node}`);
-  const source = realpathSync(options.source || repository);
+  const source = realpathSync(options.source || installSource(p, options.cwd, options.running));
+  console.log(`Installing from ${source}`);
   const manifest = readManifest(p);
   const entries = [ { kind: 'dir' as const, path: p.app }, { kind: 'file' as const, path: p.bin },
     process.platform === 'darwin' ? { kind: 'launchd' as const, label: 'com.factory.board', path: p.launchd } : { kind: 'systemd' as const, unit: 'factory-board.service', path: p.systemd } ];
