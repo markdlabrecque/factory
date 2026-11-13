@@ -41,6 +41,7 @@ factory schedule on|off [--project <name|path>]   the scheduler, or one project'
 factory schedule status [--project <name|path>] [--json]   timer, tick, and why each project would or would not run
 factory legacy status [--json]             enabled legacy sandcastle-dispatch timers and the checkout each runs
 factory legacy retire                      disable them and remove their env files (the only command that touches them)
+factory clean [--dry-run] [--project <name|path>] [--json]   delete merged, clean local Factory branches and their worktrees
 factory board start|stop|status|open        the always-on board
 factory config get|set
 ```
@@ -401,6 +402,7 @@ cli/
   src/tick-cancel.mts        cancelling the active tick and its pass group (slice four)
   src/commands/schedule.mts  factory schedule on|off|status (slice four)
   src/commands/legacy.mts    factory legacy status|retire (slice 4.5, #95)
+  src/commands/clean.mts     factory clean (slice 4.5, #96); the rules are in src/clean.mts
   src/commands/tick.mts      internal factory tick: gate on the manager, visit projects, run passes (slice four)
   src/platform/
     index.mts                picks the adapter

@@ -4,7 +4,8 @@
 // failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show, reset or review a project's self-recovery (`recovery status|reset|review`), classify a project's
 // .sandcastle copy against Factory's (`update --dry-run`: missing, outdated, edited, project-owned; writes nothing) and
 // create the missing and replace the unmodified outdated files (`update --apply`; edited and project-owned files are kept), and
-// switch the scheduler (and each project's opt-in) on or off, and list or retire install-dispatch.sh's legacy timers (`legacy status|retire`). `tick` and `supervise` are internal: `tick` is what the Linux
+// switch the scheduler (and each project's opt-in) on or off, and list or retire install-dispatch.sh's legacy timers (`legacy status|retire`), and
+// remove a project's merged, clean Factory branches and their Factory-owned worktrees (`clean`; remote branches untouched). `tick` and `supervise` are internal: `tick` is what the Linux
 // scheduler service runs, `supervise` what the macOS scheduler agent runs (it runs the ticks itself).
 // Each command parses only its own flags, so one command's flags never leak into another.
 import { parseArgs } from 'node:util';
@@ -25,6 +26,7 @@ import { recovery } from '../src/commands/recovery.mts';
 import { update } from '../src/commands/update.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { legacy } from '../src/commands/legacy.mts';
+import { clean } from '../src/commands/clean.mts';
 import { tick, tickExitCode } from '../src/commands/tick.mts';
 import { superviseProcess } from '../src/commands/supervise.mts';
 import { scheduleBackend } from '../src/platform/scheduler.mts';
@@ -42,7 +44,8 @@ factory logs [ticket] [-f] [--recovery] [--project <name>]
 factory update --dry-run|--apply [--project <name|path>] [--json]
 factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]
 factory schedule on|off|status [--project <name|path>] [--json (status)]
-factory legacy status [--json] | factory legacy retire`;
+factory legacy status [--json] | factory legacy retire
+factory clean [--dry-run] [--project <name|path>] [--json]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
@@ -57,6 +60,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   recovery: { json: { type: 'boolean' }, confirm: { type: 'boolean' }, project: { type: 'string' } },
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
   legacy: { json: { type: 'boolean' } },
+  clean: { 'dry-run': { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
   tick: {}, supervise: {},
 };
 try {
@@ -102,6 +106,9 @@ try {
     } else if (command === 'legacy') {
       if (second || extra.length) throw new Error('Unexpected arguments');
       process.exitCode = legacy(p, first, { json: v.json });
+    } else if (command === 'clean') {
+      if (first) throw new Error('Unexpected arguments (name a project with --project)');
+      process.exitCode = clean(p, { dryRun: v['dry-run'], json: v.json, project: v.project });
     } else if (command === 'tick') {
       // Internal: what factory-tick.service runs. SIGTERM (systemctl stop) and SIGINT cancel the tick and its dispatcher pass.
       if (first) throw new Error('Unexpected arguments');
