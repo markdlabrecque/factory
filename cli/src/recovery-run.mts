@@ -36,11 +36,13 @@
 // touches branches, worktrees, commits or evidence, and the budget the attempt spent stays spent (recovery-state.mts).
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { claimLive, generationOf, keyFor, ownerState, readAdmission, releaseClaim, transferClaim, withAdmission } from '../../board/admission.mts';
 import type { AdmissionClaim } from '../../board/admission.mts';
-import { PARKED, readRuns, TERMINAL } from '../../board/board.mts';
+// Launcher patches share the persisted stage writer; settlement is observational, after charge/cleanup locks.
+import { observeEvent } from '../../board/execution-events.mts';
+import { PARKED, readRuns, TERMINAL, writeRecord } from '../../board/board.mts';
 import type { RunState } from '../../board/board.mts';
 import { fillReceipt, projectId, readReceipt, receiptFile, recordIntent } from '../../orchestrator/ownership.mts';
 import type { Receipt, TrackerIdentity } from '../../orchestrator/ownership.mts';
@@ -104,8 +106,7 @@ function patchRecord(dir: string, tracker: string, ticket: number, patch: Partia
   const cur = JSON.parse(readFileSync(file, 'utf8'));
   const at = new Date().toISOString();
   const next = { ...cur, ...patch, updatedAt: at, ...(patch.stage && patch.stage !== cur.stage ? { stageSince: at } : {}) };
-  writeFileSync(`${file}.${process.pid}.tmp`, JSON.stringify(next, null, 2));
-  renameSync(`${file}.${process.pid}.tmp`, file);
+  writeRecord(dir, keyFor(String(ticket), tracker), next, 'recovery');
 }
 
 /** Where the launcher keeps host-owned attempt records. */
@@ -164,7 +165,14 @@ export function settleRecovery(p: Paths, o: Common): Settled {
   const done = finishAttempt(p, o.root, a.seq, { at, result, reason, ...(report ? { report } : {}) });
   // The container is confirmed gone and the attempt finished: only now does the claim let go of the ticket, its slot and the project.
   if (mine) release(mine);
+  observeSettlement(dir, o.tracker, done, run?.executionId);
   return { state: 'settled', attempt: done };
+}
+
+function observeSettlement(dir: string, project: string, a: Attempt, executionId?: string): void {
+  observeEvent(dir, { eventId: `${a.id}-settled`, observedAt: a.finishedAt!, project, ticket: String(a.ticket),
+    executionId, recoveryAttemptId: a.id, identityComplete: !!executionId, eventKind: 'recovery-settled',
+    from: 'running', to: a.result, origin: 'recovery', reasonCode: a.result === 'interrupted' ? 'process-exited' : 'unspecified' });
 }
 
 /** Read-only local screening before spending analysis time. Only proven local ticket refusals permit scanning.
@@ -298,7 +306,7 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; preparati
       fillReceipt(receiptPath, { worktreeAt: at });
     }
     const rec: AttemptRecord = { version: 1, id, seq, project: o.tracker, iid: String(o.ticket), branch: target.branch, base: target.base,
-      implementationBaseSha: run.implementationBaseSha, executionId: run.executionId,
+      implementationBaseSha: run.implementationBaseSha, executionId: run.executionId, telemetryState: dir,
       startSha: target.tip, worktree, container, evidence: attemptEvidence(o.root, String(o.ticket), id), gitDir: attemptGitDir(o.root, id),
       phase: 'claimed', createdAt: at, updatedAt: at, events: [{ at, phase: 'claimed' }] };
     writeAttemptRecord(record, rec);
@@ -312,9 +320,10 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; preparati
       const r = readAttemptRecord(record);
       if (r.ok) writeAttemptRecord(record, { ...r.record, phase: 'finished', outcome: 'interrupted', reason, finishedAt: at, updatedAt: at });
     }
-    finishAttempt(p, o.root, seq, { at, result: 'interrupted', reason, log });
+    const done = finishAttempt(p, o.root, seq, { at, result: 'interrupted', reason, log });
     // Nothing was started, so its container cannot exist; release once docker confirms that (else the next settle does).
     if (ownedContainerGone(container, docker).ok) releaseClaim(dir, key, claim.token, 'recovery');
+    observeSettlement(dir, o.tracker, done, run.executionId);
     return { ok: false, kind: 'admitted-failed', admitted: true, attempt: readRecovery(p, o.root).attempts.find(a => a.id === id) ?? claim.attempt, reason };
   }
   // Hand the claim to the repair process, so the ticket stays owned (and counted) while it lives.

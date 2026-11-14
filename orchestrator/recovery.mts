@@ -1,3 +1,5 @@
+// Persisted phase observations are separate from attempt evidence and never control cleanup or delivery.
+import { eventIdFor, observeEvent } from './execution-events.mts';
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -65,6 +67,7 @@ export interface AttemptRecord {
   startSha: string;
   implementationBaseSha?: string;
   executionId?: string;
+  telemetryState?: string; // host state directory, outside sandbox mounts; absent in legacy records
   worktree: string;
   container: string;
   evidence: string;
@@ -113,10 +116,19 @@ export function readAttemptRecord(file: string): { ok: true; record: AttemptReco
 
 /** Write the record atomically (temp + rename, 0600). */
 export function writeAttemptRecord(file: string, r: AttemptRecord): void {
+  const previous = readAttemptRecord(file);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(r, null, 2) + "\n", { mode: 0o600 });
   renameSync(tmp, file);
+  if (r.telemetryState && (!previous.ok || previous.record.phase !== r.phase)) {
+    // Producer projection is observational too; malformed legacy metadata must not change a saved attempt's result.
+    const count = Array.isArray(r.events) ? r.events.length : 0;
+    observeEvent(r.telemetryState, { eventId: eventIdFor(r.id, 'phase', String(count), r.phase, r.updatedAt), project: r.project, ticket: r.iid,
+      executionId: r.executionId, recoveryAttemptId: r.id, identityComplete: !!r.executionId,
+      observedAt: r.updatedAt, eventKind: 'recovery-phase-changed', from: previous.ok ? previous.record.phase : undefined,
+      to: r.phase, reasonCode: r.outcome === 'interrupted' ? 'process-exited' : r.outcome === 'ownership-refused' ? 'ownership-unknown' : 'unspecified', origin: 'recovery' });
+  }
 }
 
 // ---- the repair agent's report ------------------------------------------------------------------------------------

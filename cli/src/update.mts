@@ -1,3 +1,4 @@
+// execution-events.mts inherits FROM_BOARD classification, catalog history and customized-copy protection.
 // Read-only workflow reports can classify selected files independently so unreadable facts stay unknown.
 // scaffoldSources inherits the observer/checkpoint module pair; customized workflow stays protected.
 // #137: TOML is project-owned even when absent; shared offline-parser assets remain Factory-owned.

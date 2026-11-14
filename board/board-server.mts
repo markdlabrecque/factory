@@ -3,7 +3,9 @@ import { closeSync, createReadStream, existsSync, openSync, readdirSync, readSyn
 import { basename, extname, resolve } from "node:path";
 import { buildBoardData, buildEvidencePage, buildPage, readRuns, requestRefreshFor, stateDir } from "./board.mts";
 import { executeRefresh } from "./refresh-worker.mts";
-import { archiveTicket } from "./tickets.mts";
+import { ArchiveRefused, archiveTicket } from "./tickets.mts";
+import { startAction } from './execution-events.mts';
+// Only an authenticated archive request records an explicit control, with actor identity unknown.
 
 // Always-on board: GET / renders the page from the shared state dir on every request.
 // GET /api/runs returns the same run snapshot as uncached JSON; the page polls it every 10s.
@@ -62,11 +64,15 @@ const server = createServer((req, res) => {
         res.writeHead(405, { allow: "POST" });
         return void res.end(JSON.stringify({ error: "POST with x-factory: 1 required" }));
       }
+      const target = { project: decodeURIComponent(archive[1]), ticket: archive[2] };
+      const done = startAction(stateDir(), target, 'ticket-archive', 'board');
       try {
-        const result = archiveTicket(stateDir(), { project: decodeURIComponent(archive[1]), iid: archive[2] }, true, "board");
+        const result = archiveTicket(stateDir(), { project: target.project, iid: target.ticket }, true, "board");
+        done(result.changed ? 'changed' : 'no-op');
         res.writeHead(200);
         return void res.end(JSON.stringify({ archived: true, run: result.run }));
       } catch (error) {
+        done(error instanceof ArchiveRefused ? 'refused' : 'failed');
         res.writeHead(409);
         return void res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Archive failed" }));
       }

@@ -1,3 +1,5 @@
+// Local observations retain separate execution/attempt identities; recorder failures cannot refund charges or skip cleanup.
+import { exportEvents } from '../../board/execution-events.mts';
 // #154: only read-only refusals are ticket-local; explicit settlement, preparation faults and post-commit failures never grant a free attempt.
 // #153: missing observer/checkpoint/dispatch dependencies refuse repair admission before any charge.
 // #149: a copy missing dependency evaluation cannot claim recovery work.
@@ -110,11 +112,45 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   return { home, root, p, dir, git, worktree, evidence, launched, containers, stuck, removed, common, run, kill, record, readRecord, advance };
 }
 
+test('launcher admission, direct patches and settlement emit once with stable separate identities', async t => {
+  const f = fixture(t);
+  const executionId = f.run().executionId;
+  const result = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) }); assert.equal(result.ok, true);
+  f.advance(0, { phase: 'setup', updatedAt: at(11) });
+  f.advance(0, { phase: 'setup', updatedAt: at(12) });
+  await f.kill(f.launched[0].child);
+  assert.equal(settleRecovery(f.p, { ...f.common, at: at(13) }).state, 'settled');
+  assert.equal(settleRecovery(f.p, { ...f.common, at: at(14) }).state, 'none');
+  const report = exportEvents(f.dir); assert.deepEqual(report.diagnostics, []);
+  assert.equal(report.events.filter(e => e.eventKind === 'execution-admitted').length, 1);
+  assert.equal(report.events.filter(e => e.eventKind === 'recovery-admitted').length, 1);
+  assert.equal(report.events.filter(e => e.eventKind === 'recovery-settled').length, 1);
+  assert.equal(report.events.filter(e => e.eventKind === 'recovery-phase-changed' && e.to === 'setup').length, 1);
+  assert.ok(report.events.filter(e => e.recoveryAttemptId).every(e => e.recoveryAttemptId === IDS[0] && e.executionId === executionId));
+});
+
+test('recorder failure after charge and during settlement cannot renew budgets, release early or skip cleanup', async t => {
+  const f = fixture(t);
+  rmSync(join(f.dir, 'telemetry'), { recursive: true }); writeFileSync(join(f.dir, 'telemetry'), 'failure injection');
+  t.mock.method(console, 'warn', () => {});
+  assert.equal(launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) }).ok, true);
+  assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
+  const mine = containerFor(IDS[0]); f.containers.add(mine); f.stuck.add(mine);
+  f.advance(0, { phase: 'cleanup-pending', intended: 'failed', updatedAt: at(11) });
+  await f.kill(f.launched[0].child);
+  assert.equal(settleRecovery(f.p, { ...f.common, at: at(12) }).state, 'unconfirmed');
+  assert.equal(readAdmission(f.dir).claims['proj--7'].attempt, IDS[0]);
+  f.stuck.clear(); assert.equal(settleRecovery(f.p, { ...f.common, at: at(13) }).state, 'settled');
+  assert.equal(readAdmission(f.dir).claims['proj--7'], undefined);
+  assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
+  assert.ok(!f.containers.has(mine)); assert.equal(readFileSync(join(f.evidence, 'before-1.png'), 'utf8'), 'old evidence');
+});
+
 test('an attempt is refused without the recovery workflow copy, claiming nothing', t => {
   const f = fixture(t, { copy: false });
   const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, false);
-  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing recovery-analysis\.mts, recovery-analysis-contract\.mts, analyze\.mts, graph\.mts, manifests\.mts, models\.mts, prompt\.analyze\.md, config-read\.mts, dependencies\.mts, delivery\.mts, dispatch\.mts, delivery-followup\.mts, verification\.mts, tracker\.mts, tracker\.github\.mts, tracker\.gitlab\.mts, ci\.mts, main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md, project-config\.mts, runtime-config\.mts, selection\.mts, vendor\/smol-toml\/index\.js/);
+  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing execution-events\.mts, recovery-analysis\.mts, recovery-analysis-contract\.mts, analyze\.mts, graph\.mts, manifests\.mts, models\.mts, prompt\.analyze\.md, config-read\.mts, dependencies\.mts, delivery\.mts, dispatch\.mts, delivery-followup\.mts, verification\.mts, tracker\.mts, tracker\.github\.mts, tracker\.gitlab\.mts, ci\.mts, main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md, project-config\.mts, runtime-config\.mts, selection\.mts, vendor\/smol-toml\/index\.js/);
   assert.equal(f.launched.length, 0);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'no attempt recorded, no budget spent');
   assert.equal(f.run().stage, 'stopped');

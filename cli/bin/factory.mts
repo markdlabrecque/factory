@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Telemetry exports local observations as JSON/JSONL without recording controls or reconciling state.
 // workflow status compares source/app/project content and local image identity without changing state.
 // selection explain reads authoritative TOML and tracker membership without starting work.
 // Factory CLI: install (from the checkout it is run from, install.mts), diagnose, control the board, reverse the manifest, register projects, init them, run a
@@ -34,6 +35,7 @@ import { schedule } from '../src/commands/schedule.mts';
 import { legacy } from '../src/commands/legacy.mts';
 import { clean } from '../src/commands/clean.mts';
 import { selectionExplain } from '../src/commands/selection.mts';
+import { telemetry } from '../src/commands/telemetry.mts';
 import { ticketCommand } from '../src/commands/ticket.mts';
 import { tick, tickExitCode } from '../src/commands/tick.mts';
 import { superviseProcess } from '../src/commands/supervise.mts';
@@ -60,7 +62,8 @@ factory ticket comment <ticket> <text> [--project <name|path>]
 factory ticket sync [ticket] [--project <name|path>]
 factory ticket verdict <ticket> --verdict pass|fail --message <explanation> [--project <name|path>]
 factory ticket archive|restore|show <ticket> [--project <name|path>] [--json (show)]
-factory ticket archived [--project <name|path>] [--json]`;
+factory ticket archived [--project <name|path>] [--json]
+factory telemetry export [--project <name|path>] [--ticket <iid>] [--since <ISO-8601>] [--format json|jsonl]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
   install: { link: { type: 'boolean' } }, doctor: {}, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
@@ -79,6 +82,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   clean: { 'dry-run': { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
   ticket: { project: { type: 'string' }, verdict: { type: 'string' }, message: { type: 'string' }, json: { type: 'boolean' } },
   selection: { project: { type: 'string' }, json: { type: 'boolean' } },
+  telemetry: { project: { type: 'string' }, ticket: { type: 'string' }, since: { type: 'string' }, format: { type: 'string' } },
   tick: {}, supervise: {},
 };
 try {
@@ -133,6 +137,9 @@ try {
     } else if (command === 'selection') {
       if (extra.length) throw new Error('Unexpected arguments');
       process.exitCode = await selectionExplain(p, first, second, { project: v.project, json: v.json });
+    } else if (command === 'telemetry') {
+      if (second || extra.length) throw new Error('Unexpected arguments');
+      process.exitCode = telemetry(p, first, { project: v.project, ticket: v.ticket, since: v.since, format: v.format });
     } else if (command === 'ticket') {
       process.exitCode = ticketCommand(p, first, second, extra, { project: v.project, verdict: v.verdict, message: v.message, json: v.json });
     } else if (command === 'tick') {

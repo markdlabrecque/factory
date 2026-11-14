@@ -222,7 +222,7 @@ test('review lists the workflow, refuses an incomplete copy, and --confirm activ
   writeFileSync(sc('assessment.mts'), '// edited after review\n');
   assert.match(recoveryCopyProblem(p, root) ?? '', /assessment\.mts changed since/);
   // Partial dependency/observer/checkpoint upgrades never silently renew recovery review.
-  for (const name of ['dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'dispatch.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts']) {
+  for (const name of ['execution-events.mts', 'dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'dispatch.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts']) {
     assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 0);
     const previous = readFileSync(sc(name));
     rmSync(sc(name));

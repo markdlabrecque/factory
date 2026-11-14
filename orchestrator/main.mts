@@ -2,6 +2,7 @@
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
 // #137: authoritative TOML sandbox/CI settings; legacy CONFIG remains unchanged only when absent.
 // #126: resolve description models once at attempt start; refresh never changes that model.
+// Provenance covers the copied local-observation helper along with its board/admission imports.
 // #149: unknown dependency reads hold implementer and recovery work without needs-human labels.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
 import { recordModelResolution } from "./assessment.mts";
@@ -181,7 +182,7 @@ const provenance = async (sandbox: { exec(cmd: string): Promise<{ stdout: string
   if (!/^[a-zA-Z0-9_.-]+$/.test(name)) throw Error('Cannot establish verifier container identity');
   const imageId = sh('docker', ['container', 'inspect', '--format', '{{.Image}}', name]);
   return { imageId, nodeVersion: (await sandbox.exec('node --version')).stdout.trim(),
-    code: Object.fromEntries([...(effectiveConfig ? ['factory.toml'] : ['config.mts']), 'graph.mts', 'config-read.mts', 'delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
+    code: Object.fromEntries([...(effectiveConfig ? ['factory.toml'] : ['config.mts']), 'graph.mts', 'config-read.mts', 'delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
     settings: { image: IMAGE, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: CONFIG.ciWaitMinutes, noPipelineMinutes: CONFIG.noPipelineMinutes } };
 };
 const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);

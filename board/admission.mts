@@ -1,3 +1,4 @@
+// Persisted writers may defer observational callbacks until every admission critical section has exited.
 // Admission reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent.
 // #153: short-lived delivery ownership uses normal PID/start fencing and advances project activity without repair charges.
 import { randomUUID } from "node:crypto";
@@ -170,6 +171,22 @@ export function writeDurable(file: string, text: string): void {
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Take <stateDir>/admission/lock, run `fn`, release. See the file comment for when a lock is taken over. */
+// Observational callbacks run only after all authoritative admission locks have been released.
+// A callback cannot change the result, even when persistence or the callback fails.
+let admissionDepth = 0;
+let observations: (() => void)[] = [];
+export function observationFailure(): void {
+  try { console.warn('Factory telemetry: recorder failed'); } catch { /* diagnostics cannot change safety results */ }
+}
+export function afterAdmission(fn: () => void): void {
+  if (admissionDepth) observations.push(fn);
+  else { try { fn(); } catch { observationFailure(); } }
+}
+function flushObservations(): void {
+  if (admissionDepth) return;
+  const pending = observations; observations = [];
+  for (const fn of pending) { try { fn(); } catch { observationFailure(); } }
+}
 export function withAdmissionLock<T>(stateDir: string, fn: () => T, waitMs = 10_000): T {
   const dir = admissionDir(stateDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -219,10 +236,12 @@ export function withAdmissionLock<T>(stateDir: string, fn: () => T, waitMs = 10_
   } finally {
     rmSync(tmp, { force: true });
   }
+  admissionDepth++;
   try {
     return fn();
   } finally {
-    rmSync(lock, { force: true });
+    try { rmSync(lock, { force: true }); }
+    finally { admissionDepth--; flushObservations(); }
   }
 }
 

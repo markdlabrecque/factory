@@ -28,6 +28,10 @@
 //   every registered project, its switch and why it would not get a pass, or `ready`, the result of its last pass
 //   (state.json) and its pass timings (history.json). A malformed state or history file is shown as a problem. `factory
 //   status` shows the same health and timings for one project (#37).
+// Observed controls are scoped to this command, never stopScheduling or install helpers.
+import { createHash } from 'node:crypto';
+import { startAction } from '../../../board/execution-events.mts';
+import { resolveProject, runStateDir } from '../runs.mts';
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { Paths } from '../paths.mts';
@@ -73,7 +77,7 @@ export function legacyAdvice(p: Paths): string[] {
  *  with the reason in `unknown`); `cancelled` is whether Factory itself had to signal a tick or pass; `interrupted` names the
  *  projects whose `running` entry in state.json is `interrupted` afterwards (cancelled by the stop); `finished` names those whose
  *  entry became `ok`, `error` or `skipped` in the meantime (the pass ended by itself before the stop took effect). */
-export type StopReport = { tickActive: boolean | null; unknown?: string; cancelled: boolean; escalated: boolean; interrupted: string[]; finished: string[] };
+export type StopReport = { schedulerWasOff?: boolean; tickActive: boolean | null; unknown?: string; cancelled: boolean; escalated: boolean; interrupted: string[]; finished: string[] };
 
 /** Stops scheduling, in this order: disable and stop the timer, stop the tick service and wait for it, then confirm
  *  the tick and its dispatcher pass group are gone. Throws at the first step that fails; nothing later runs and no file
@@ -82,7 +86,11 @@ export type StopReport = { tickActive: boolean | null; unknown?: string; cancell
 export async function stopScheduling(backend: ScheduleBackend, p: Paths, cancel?: CancelOptions): Promise<StopReport> {
   let tickActive: boolean | null = null;
   let unknown: string | undefined;
-  try { tickActive = (await backend.status()).tick === 'active'; } catch (e) { unknown = (e instanceof Error ? e.message : String(e)).split('\n')[0]; }
+  let schedulerWasOff: boolean | undefined;
+  try {
+    const s = await backend.status(); tickActive = s.tick === 'active';
+    schedulerWasOff = !s.enabled && s.timer !== 'active' && !s.loaded;
+  } catch (e) { unknown = (e instanceof Error ? e.message : String(e)).split('\n')[0]; }
   const results = () => { try { return Object.fromEntries(Object.entries(readTickState(p).projects).map(([root, x]) => [root, x.result])); } catch { return {} as Record<string, string>; } };
   const before = Object.entries(results()).filter(([, result]) => result === 'running').map(([root]) => root);
   await backend.disable();
@@ -90,7 +98,7 @@ export async function stopScheduling(backend: ScheduleBackend, p: Paths, cancel?
   const after = results();
   const names = new Map<string, string>();
   try { for (const x of readRegistry(p).projects) names.set(x.root, x.name); } catch { /* roots are shown as they are */ }
-  return { tickActive, ...(unknown ? { unknown } : {}), cancelled: r.active, escalated: r.escalated,
+  return { tickActive, ...(schedulerWasOff !== undefined ? { schedulerWasOff } : {}), ...(unknown ? { unknown } : {}), cancelled: r.active, escalated: r.escalated,
     interrupted: before.filter(root => after[root] === 'interrupted').map(root => names.get(root) ?? root),
     finished: before.filter(root => after[root] !== undefined && after[root] !== 'running' && after[root] !== 'interrupted').map(root => names.get(root) ?? root) };
 }
@@ -118,17 +126,28 @@ export async function schedule(p: Paths, backend: ScheduleBackend, action: strin
   if (action !== 'on' && action !== 'off') throw new Error('Usage: factory schedule on|off|status [--project <name|path>] [--json (status)]');
   if (o.json) throw new Error('--json applies to schedule status');
   const on = action === 'on';
-  if (o.project !== undefined) return setProject(p, backend, on, o.project);
-  if (on) return globalOn(p, backend);
-  const r = await stopScheduling(backend, p, o.cancel);
-  console.log(`Scheduler off: timer disabled and stopped. ${describeStop(r)} Ticket runs already launched keep going.`);
-  return 0;
+  const project = o.project !== undefined ? findProject(p, o.project) : undefined;
+  let identity = 'factory:global';
+  if (project) {
+    try { identity = resolveProject(p, { project: project.root }).tracker; }
+    catch { identity = `factory:unresolved:${createHash('sha256').update(project.root).digest('hex')}`; }
+  }
+  const done = startAction(runStateDir(p), { project: identity }, on ? 'schedule-on' : 'schedule-off');
+  try {
+    if (o.project !== undefined) return await setProject(p, backend, on, o.project, done);
+    if (on) { const code = await globalOn(p, backend, done); done('changed'); return code; }
+    const r = await stopScheduling(backend, p, o.cancel);
+    done(r.schedulerWasOff && !r.tickActive && !r.cancelled && !r.interrupted.length ? 'no-op' : 'changed', 'operator-pause');
+    console.log(`Scheduler off: timer disabled and stopped. ${describeStop(r)} Ticket runs already launched keep going.`);
+    return 0;
+  } catch (error) { done('failed'); throw error; }
 }
 
-async function setProject(p: Paths, backend: ScheduleBackend, on: boolean, target: string): Promise<number> {
+async function setProject(p: Paths, backend: ScheduleBackend, on: boolean, target: string, done: ReturnType<typeof startAction>): Promise<number> {
   const project = findProject(p, target);
-  if (on) { const problem = copyProblem(project.root); if (problem) throw new Error(`Not scheduling ${project.name}: ${problem}`); }
+  if (on) { const problem = copyProblem(project.root); if (problem) { done('refused', 'environment-unready'); throw new Error(`Not scheduling ${project.name}: ${problem}`); } }
   const s = setProjectSchedule(p, project.root, on);
+  done(project.schedule?.enabled === on && (!on || project.schedule?.branch === s?.branch) || !project.schedule && !s ? 'no-op' : 'changed', on ? 'unspecified' : 'operator-pause');
   if (on) {
     console.log(`Scheduled ${project.name} on branch ${s!.branch}. Scheduled passes use only that branch and skip the project while another is checked out.`);
     const g = await schedulingState(backend);
@@ -137,11 +156,11 @@ async function setProject(p: Paths, backend: ScheduleBackend, on: boolean, targe
   return 0;
 }
 
-async function globalOn(p: Paths, backend: ScheduleBackend): Promise<number> {
+async function globalOn(p: Paths, backend: ScheduleBackend, done: ReturnType<typeof startAction>): Promise<number> {
   const manifest = readManifest(p);
-  if (!manifest) throw new Error('Factory is not installed. Run factory install first.');
+  if (!manifest) { done('refused'); throw new Error('Factory is not installed. Run factory install first.'); }
   const owned = manifest.entries.map(e => e.path);
-  for (const path of backend.files) if (existsSync(path) && !owned.includes(path)) throw new Error(`Refusing to overwrite unowned path: ${path}`);
+  for (const path of backend.files) if (existsSync(path) && !owned.includes(path)) { done('refused'); throw new Error(`Refusing to overwrite unowned path: ${path}`); }
   const config = writeScheduleConfig(p, { path: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', node: process.execPath });
   try {
     await backend.install({ node: config.node, app: p.app, state: p.state, path: config.path }, e => record(p, e));

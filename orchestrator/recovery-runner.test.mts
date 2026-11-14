@@ -1,3 +1,5 @@
+// Persisted phase observations and recorder-failure fixtures use the same isolated runner and exact-container cleanup.
+import { exportEvents } from '../board/execution-events.mts';
 // #149: recovery prerequisite rechecks consume unknown/satisfied/unsatisfied results.
 // #150: fresh synthetic reports and execution proof bind repaired tips after confirmed cleanup.
 // The recovery attempt lifecycle end to end (#60 acceptance, #74): the real runRecoveryAttempt (recovery.mts) with the
@@ -98,7 +100,7 @@ function fixture(t: TestContext, s: Scenario = {}) {
   writeFileSync(join(logs, "recover-7.log"), "previous log\n");
 
   const record = join(home, "state/recovery/attempts", `${ID}.json`);
-  const rec: AttemptRecord = { version: 1, id: ID, seq: 1, project: "proj", iid: "7", branch: "7-fix-login", base: "main", startSha, worktree,
+  const rec: AttemptRecord = { version: 1, telemetryState: join(home, 'state'), id: ID, seq: 1, project: "proj", iid: "7", branch: "7-fix-login", base: "main", startSha, worktree,
     container: containerFor(ID), evidence: attemptEvidence(root, "7", ID), gitDir: attemptGitDir(root, ID), phase: "claimed",
     createdAt: "2026-11-12T00:00:00.000Z", updatedAt: "2026-11-12T00:00:00.000Z", events: [{ at: "2026-11-12T00:00:00.000Z", phase: "claimed" }] };
   writeAttemptRecord(record, rec);
@@ -188,6 +190,30 @@ function assertPreserved(f: Fixture, o: { input?: string; refs?: string } = {}) 
   for (const u of f.unrelated) assert.ok(f.world.live.has(u), `${u} untouched`);
   assert.ok(f.world.syncCalls.every((c) => c.at(-1) === containerFor(ID)), "only the attempt's own container is ever named");
 }
+
+test('phase observations have one attempt identity, no setup heartbeat or raw evidence, even after duplicate writes', async t => {
+  const f = fixture(t);
+  const result = await f.run(); assert.equal(result.outcome, 'delivered');
+  writeAttemptRecord(f.record, f.rec());
+  const report = exportEvents(join(f.home, 'state'));
+  assert.deepEqual(report.diagnostics, []);
+  assert.deepEqual(report.events.map(e => e.to), ['claimed','setup','repairing','verifying','delivering','finished']);
+  assert.ok(report.events.every(e => e.eventKind === 'recovery-phase-changed' && e.recoveryAttemptId === ID));
+  assert.ok(report.events.every(e => !e.identityComplete && !e.executionId), 'a legacy attempt gets no fabricated execution identity');
+  assert.doesNotMatch(JSON.stringify(report), /secret-token|ticket text|previous log/);
+});
+
+test('recorder failure during setup, verification and settlement never prevents cleanup or changes delivery', async t => {
+  const f = fixture(t);
+  rmSync(join(f.home, 'state/telemetry'), { recursive: true });
+  writeFileSync(join(f.home, 'state/telemetry'), 'failure injection');
+  t.mock.method(console, 'warn', () => {});
+  const result = await f.run(); assert.equal(result.outcome, 'delivered');
+  assert.equal(f.rec().phase, 'finished'); assert.equal(f.delivered.length, 1);
+  assert.ok(!f.world.live.has(containerFor(ID)));
+  for (const u of f.unrelated) assert.ok(f.world.live.has(u));
+  assert.deepEqual(hashTree(f.evidenceRoot), f.oldEvidence);
+});
 
 test("a committed repair is verified separately and the exact tip delivered; attempt recorded once", async (t) => {
   const f = fixture(t, { setup: [{ command: SETUP_SLOW }] });

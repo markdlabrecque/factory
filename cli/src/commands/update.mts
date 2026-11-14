@@ -5,6 +5,9 @@
 // (applyCopy) writes only the missing and outdated files and lists the rest for a hand merge. Exactly one of the two is
 // required. Updating a recovery workflow file makes self-recovery inactive until `factory recovery review --confirm` is
 // run again; --apply says so but never records a review itself.
+// Only --apply records an explicit action; classification and install helpers remain unobserved controls.
+import { controlAction } from '../../../board/execution-events.mts';
+import { runStateDir } from '../runs.mts';
 import type { Paths } from '../paths.mts';
 import { WORKFLOW } from '../recovery-review.mts';
 import { resolveProject } from '../runs.mts';
@@ -36,9 +39,11 @@ export function update(p: Paths, o: UpdateOptions = {}): number {
   const ctx = resolveProject(p, o);
   const app = o.app ?? appRoot;
   const history = factoryHistory(app);
+  const apply = (done?: (result: 'changed' | 'no-op') => void) => {
   const result = o.apply ? applyCopy(p, ctx.root, { app, history }) : { files: classifyCopy(p, ctx.root, { app, history }), created: [], replaced: [] };
   const { files } = result;
   const written = [...result.created, ...result.replaced];
+  done?.(written.length ? 'changed' : 'no-op');
   const review = written.some(f => WORKFLOW.includes(f));
   if (o.json) {
     console.log(JSON.stringify({
@@ -63,4 +68,6 @@ export function update(p: Paths, o: UpdateOptions = {}): number {
     console.log(`Recovery workflow files changed (${written.filter(f => WORKFLOW.includes(f)).join(', ')}); self-recovery stays inactive until you check them and run: factory recovery review --confirm --project ${ctx.name}`);
   }
   return 0;
+  };
+  return o.apply ? controlAction(runStateDir(p), { project: ctx.tracker }, 'update-apply', apply) : apply();
 }

@@ -7,6 +7,8 @@
 // once its attempt's container is confirmed gone), a launch claim whose owner may still run, or an admission record it
 // cannot read (unknown). It keeps the ticket's ownership receipt (<state>/ownership/), so a later repair still knows
 // which branch and worktree Factory created.
+// Explicit retries record unknown-actor request/result pairs; branch and evidence cleanup is unchanged.
+import { startAction } from '../../../board/execution-events.mts';
 import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { keyFor, ownerState, readAdmission } from '../../../board/admission.mts';
@@ -24,26 +26,32 @@ function ticketBranches(root: string, iid: string): string[] {
 export async function retry(p: Paths, ticket: string | undefined, o: RetryOptions = {}): Promise<void> {
   const iid = ticketId(ticket);
   const ctx = resolveProject(p, { project: o.project, cwd: o.cwd });
+  const done = startAction(runStateDir(p), { project: ctx.tracker, ticket: iid }, 'retry');
+  try {
   const { file, run } = findRun(p, ctx, iid);
-  if (!run) throw new Error(`No run record for #${iid} in ${ctx.name} (${file}); the next pass can already pick it up.`);
+  if (!run) { done('no-op'); throw new Error(`No run record for #${iid} in ${ctx.name} (${file}); the next pass can already pick it up.`); }
   if (run.stage !== 'stopped') {
     const why = run.stage === 'done' ? 'finished' : run.stage === 'queued' || run.stage === 'waiting' ? `${run.stage}; the dispatcher re-checks it every pass` : `still running (stage ${run.stage}, pid ${run.pid})`;
+    done('refused');
     throw new Error(`#${iid} in ${ctx.name} is ${why}. Only a stopped run can be retried.`);
   }
   let claims;
   try { claims = readAdmission(runStateDir(p)).claims; }
-  catch (e) { throw new Error(`#${iid} in ${ctx.name} may be claimed, and the claim is unknown: ${(e as Error).message}`); }
+  catch (e) { done('refused', 'ownership-unknown'); throw new Error(`#${iid} in ${ctx.name} may be claimed, and the claim is unknown: ${(e as Error).message}`); }
   const claim = claims[keyFor(iid, ctx.tracker)];
   if (claim && (claim.kind === 'recovery' || ownerState(claim.owner) !== 'dead')) {
+    done('refused', 'ownership-unknown');
     throw new Error(claim.kind === 'recovery'
       ? `#${iid} in ${ctx.name} is held by recovery attempt ${claim.attempt} until its container is confirmed gone; not cleared.`
       : `#${iid} in ${ctx.name} is claimed by process ${claim.owner.pid}, which may still be running; not cleared.`);
   }
   rmSync(file, { force: true });
+  done('changed');
   console.log(`Cleared #${iid} in ${ctx.name}${run.note ? ` (was stopped: ${run.note})` : ''}. The next pass picks it up.`);
   const branches = ticketBranches(ctx.root, iid);
   if (branches.length) {
     console.log(`But the dispatcher skips a ticket that has a branch, and #${iid} has: ${branches.join(', ')}. `
       + `Delete it once you no longer need its work (git branch -D <branch>; git push origin --delete <branch>).`);
   }
+  } catch (error) { done('failed'); throw error; }
 }
