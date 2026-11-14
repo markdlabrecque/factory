@@ -1,4 +1,5 @@
-import { TRACKER } from "./config.mts";
+// #137: tracker identity/selection labels come from the validated runtime facade.
+import { TRACKER } from "./runtime-config.mts";
 import type { Parent } from "./graph.mts";
 import * as github from "./tracker.github.mts";
 import * as gitlab from "./tracker.gitlab.mts";
@@ -16,11 +17,17 @@ export interface Ticket {
   description: string;
   state?: string; // "opened"/"open" or "closed"
   labels?: string[];
+  assignees?: { username: string }[];
+  author?: { username: string };
+  milestone?: { title: string } | null;
+  issue_type?: string;
+  confidential?: boolean;
   parent?: Parent; // set on a Task (GitLab) or sub-issue (GitHub) whose parent is a container
 }
 
 /** Ready-list filters (the SELECT block in dispatch.mts). Fields one tracker lacks are ignored there. */
 export interface Select {
+  excludeAssignees?: string[];
   assignee?: string;
   author?: string;
   issueType?: string; // GitLab only
@@ -64,6 +71,6 @@ export interface MergedPr {
 const impl: typeof gitlab = (TRACKER as { kind?: string }).kind === "github" ? github : gitlab;
 
 export const {
-  ticketUrl, catalogue, children, parentOf, workCatalogue, ticket, viewText, notes, readyList, comment,
+  currentUsername, ticketUrl, catalogue, children, parentOf, workCatalogue, ticket, viewText, notes, readyList, comment,
   postVerification, openMrBranches, mergedInto, mergedPr, addLabel, close, advance, ensureLabels, deliver,
 } = impl;

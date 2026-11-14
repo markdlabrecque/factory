@@ -1,3 +1,4 @@
+// #137: update snapshots cover nested vendor assets and project-owned TOML.
 // `factory update --dry-run` (#91) and `--apply` (#92): classification of a project's .sandcastle copy against a synthetic Factory app with
 // two committed versions, from its Git history, from an install catalog, and with no history; and that the dry run
 // writes nothing; and that --apply creates missing and replaces outdated files only. Disposable HOME, app and project; no network, service manager or credentials.
@@ -76,7 +77,8 @@ test('a copied app uses the install catalog; with no history nothing counts as o
 test('factory update --dry-run reports by class and writes nothing; without --dry-run or --apply it refuses', t => {
   const { p, app, root, sc } = fixture(t);
   addProject(p, root);
-  const snapshot = () => readdirSync(sc).sort().map(f => [f, readFileSync(join(sc, f), 'utf8'), statSync(join(sc, f)).mtimeMs]);
+  // #137: snapshot nested vendored assets too, without trying to read directories as files.
+  const snapshot = () => readdirSync(sc, { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => join(e.parentPath, e.name).slice(sc.length + 1)).sort().map(f => [f, readFileSync(join(sc, f), 'utf8'), statSync(join(sc, f)).mtimeMs]);
   const before = snapshot();
   const out: string[] = [];
   t.mock.method(console, 'log', (s: string) => out.push(s));
@@ -85,7 +87,7 @@ test('factory update --dry-run reports by class and writes nothing; without --dr
   assert.match(text, /Missing \(would create\): 1\n  tracker\.mts/);
   assert.match(text, /Outdated, unmodified \(would replace\): 3/);
   assert.match(text, /Edited locally \(kept; merge by hand\): 1\n  ci\.mts/);
-  assert.match(text, /Project-owned .*: 4/);
+  assert.match(text, /Project-owned .*: 5/);
   out.length = 0;
   update(p, { dryRun: true, json: true, cwd: root, app });
   const json = JSON.parse(out.join('\n'));

@@ -1,3 +1,4 @@
+// #137: reviewed workflow fixtures include nested offline-parser/runtime assets.
 // Jam confirmation after normal dispatch (#61, cli/src/jam-detect.mts): a pass's report is counted only for its own pass
 // and project; the same jam on two completed passes is confirmed and one repair is launched on the stopped ticket, only
 // when the project's copy has the recovery workflow and new work is still allowed; a running attempt or a normal
@@ -27,7 +28,8 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   const sc = join(root, '.sandcastle');
   mkdirSync(sc, { recursive: true });
   if (o.copy !== false) {
-    for (const f of WORKFLOW) writeFileSync(join(sc, f), '');
+    // #137: reviewed workflow includes nested vendored parser assets.
+    for (const f of WORKFLOW) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
     writeFileSync(join(sc, 'main.mts'), '"attempt-record": { type: "string" }\n');
     recordReview(p, root);
   }

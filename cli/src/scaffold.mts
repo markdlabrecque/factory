@@ -1,3 +1,4 @@
+// #137: new scaffolds ship versioned TOML and offline parser; legacy reruns never opt in implicitly.
 // Scaffold writer: builds the allowlisted `.sandcastle/` assets from the installed app (never from cwd) and
 // creates only the files that are missing. Existing files are never touched; symlinked or mistyped
 // destinations are rejected before any write; creation is exclusive ('wx'), so a race fails instead of
@@ -26,7 +27,8 @@ export type PlannedFile = { path: string; content: string | Buffer; mode: number
 
 export const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
-  'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts'];
+  'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
+  ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];
 // journal.mts is a mandatory board projection import, including in project dispatcher copies.
 export const FROM_BOARD = ['board.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.template.html'];
 
@@ -73,6 +75,14 @@ export function buildAssets(s: Settings, stateDir: string, root = appRoot): Plan
     ]),
   ];
   add('config.mts', fillTags(config, edits));
+  const toml = read(`orchestrator/factory.${s.profile}.toml`).toString('utf8').split('\n').map(line => {
+    if (line.includes('# factory:project-id')) return `project_id = ${s.projectId} # factory:project-id`;
+    if (line.includes('# factory:project')) return `project = ${JSON.stringify(s.repo)} # factory:project`;
+    if (line.includes('# factory:host')) return `host = ${JSON.stringify(s.host)} # factory:host`;
+    if (line.includes('# factory:image')) return `image = ${JSON.stringify(s.image)} # factory:image`;
+    return line;
+  }).join('\n');
+  add('factory.toml', toml);
 
   let main = read('orchestrator/main.mts').toString('utf8');
   main = fillTags(main, [{ tag: 'image', line: /^(\s*image:\s*)"[^"]*"/, value: m => `${m[1]}${JSON.stringify(s.image)}` }]);
@@ -113,6 +123,10 @@ function inspect(root: string, rel: string): 'file' | 'missing' {
 }
 
 export function writeScaffold(root: string, files: PlannedFile[], hooks: { beforeWrite?: (path: string, index: number) => void } = {}) {
+  // Decide before repairing ANY missing file: an existing workflow without TOML stays legacy.
+  const legacy = inspect(root, `${scaffoldName}/factory.toml`) === 'missing' &&
+    ['config.mts','main.mts','dispatch.mts','dispatch.sh'].some(f => inspect(root, `${scaffoldName}/${f}`) === 'file');
+  if (legacy) files = files.filter(f => f.path !== `${scaffoldName}/factory.toml`);
   const todo = files.filter(f => inspect(root, f.path) === 'missing'); // all preflight checks finish before the first write
   const skipped = files.filter(f => !todo.includes(f)).map(f => f.path);
   const created: string[] = [];

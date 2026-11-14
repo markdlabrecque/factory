@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# #137: include offline TOML metadata/parser for standalone refresh lookup.
 # Install (or update) the Sandcastle board as a systemd user service on Linux.
 # Copy the complete standalone board, including admission/assessment/journal imports and the manual-refresh worker.
 #   ./install-service.sh            install + start
@@ -18,10 +19,13 @@ NODE="$(command -v node)" || { echo "node not found on PATH" >&2; exit 1; }
 mkdir -p "$APP" "$(dirname "$UNIT")" "$HOME/.local/state/sandcastle"
 cp "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/journal.mts" "$HERE/tickets.mts" "$HERE/refresh-worker.mts" \
   "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
+cp "$HERE/../orchestrator/project-config.mts" "$APP/"
+mkdir -p "$APP/vendor"
+cp -R "$HERE/../orchestrator/vendor/smol-toml" "$APP/vendor/"
 sed "s#__NODE__#$NODE#" "$HERE/sandcastle-board.service" > "$UNIT"
 systemctl --user daemon-reload
 systemctl --user enable --now sandcastle-board.service
 systemctl --user restart sandcastle-board.service
 echo "Board: http://127.0.0.1:4444"
-echo "Keep it up when logged out: loginctl enable-linger $USER"
+echo "Keep it up when logged out: loginctl enable-linger ${USER:-$(id -un)}"
 echo "Point runs at the same state: export SANDCASTLE_STATE_DIR=\$HOME/.local/state/sandcastle"

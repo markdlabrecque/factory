@@ -1,6 +1,7 @@
+// #137: validated TOML selection; confidential=false is explicitly non-confidential, not unrestricted.
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { LABELS, MERGE, TRACKER } from "./config.mts";
+import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
 import { ciGate, missingChecks } from "./ci.mts";
 import type { Child, Note } from "./graph.mts";
 import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
@@ -17,9 +18,10 @@ const { gitlabHost: HOST = "", projectId: ID = 0 } = TRACKER as { gitlabHost?: s
 const enc = encodeURIComponent;
 
 function glab(args: string[], input?: string): string {
-  return execFileSync("glab", args, { encoding: "utf8", input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
+  return execFileSync("glab", args, { encoding: "utf8", env: { ...process.env, GITLAB_HOST: HOST }, input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
 }
 
+export const currentUsername = () => JSON.parse(glab(['api', 'user', '--hostname', HOST])).username as string;
 export const ticketUrl = (iid: number | string) => `https://${HOST}/${TRACKER.project}/-/issues/${iid}`;
 const api = <T,>(path: string): T => JSON.parse(glab(["api", path, "--hostname", HOST]));
 /** GET every page of a list endpoint (100 per page). */
@@ -37,7 +39,7 @@ export function catalogue(milestone = TRACKER.milestone): Ticket[] {
   const filter = milestone ? `&milestone=${enc(milestone)}` : "";
   return apiAll<Ticket>(`projects/${ID}/issues?state=opened${filter}`).map(slim);
 }
-const slim = (t: Ticket): Ticket => ({ iid: t.iid, title: t.title, description: t.description ?? "", state: t.state, labels: t.labels ?? [] });
+const slim = (t: Ticket): Ticket => ({ iid: t.iid, title: t.title, description: t.description ?? "", state: t.state, labels: t.labels ?? [], assignees: t.assignees, author: t.author, milestone: t.milestone, issue_type: t.issue_type, confidential: t.confidential });
 
 /** Open tickets by iid, whatever their milestone. */
 function openTickets(iids: number[]): Ticket[] {
@@ -109,7 +111,7 @@ export function workCatalogue(subtasks: boolean): { tickets: Ticket[]; childrenO
 
 export function ticket(iid: number): Ticket {
   const t = api<Ticket>(`projects/${ID}/issues/${iid}`);
-  return { iid: t.iid, title: t.title, description: t.description ?? "", state: t.state, labels: t.labels ?? [] };
+  return slim(t);
 }
 
 /** The ticket with its comments, as text for the agents' prompts. */
@@ -129,12 +131,15 @@ export function readyList(select: Select = {}): ReadyTicket[] {
   if (select.assignee) args.push("--assignee", select.assignee);
   if (select.author) args.push("--author", select.author);
   if (select.issueType) args.push("--issue-type", select.issueType);
-  if (select.confidential) args.push("--confidential");
+  if (select.confidential === true) args.push('--confidential');
   if (select.search) args.push("--search", select.search);
   const all: ReadyTicket[] = [];
   for (let page = 1; ; page++) {
-    const batch = JSON.parse(glab([...args, "--page", String(page)]) || "[]") as ReadyTicket[];
-    all.push(...batch);
+    const batch = JSON.parse(glab([...args, "--page", String(page)]) || "[]") as (ReadyTicket & { confidential?: boolean })[];
+    // glab's boolean flag cannot express non-confidential-only reliably. Filter reliable API facts
+    // after reading every page; missing facts fail closed rather than silently broaden eligibility.
+    if (select.confidential === false && batch.some(t => typeof t.confidential !== 'boolean')) throw new Error('GitLab confidentiality facts missing; selection is unknown');
+    all.push(...(select.confidential === false ? batch.filter(t => t.confidential === false) : batch));
     if (batch.length < 100) return all;
   }
 }
@@ -282,7 +287,7 @@ export async function ensureLabels(names: string[]): Promise<void> {
   if (!missing.length) return;
   const list = missing.map((m) => `"${m}"`).join(", ");
   if (!process.stdin.isTTY) {
-    console.error(`Missing label(s) in ${TRACKER.project}: ${list}. Run this once from a terminal to create them, or change LABELS in config.mts.`);
+    console.error(`Missing label(s) in ${TRACKER.project}: ${list}. Run this once from a terminal to create them, or change labels in factory.toml (legacy: LABELS in config.mts).`);
     process.exit(1);
   }
   const rl = createInterface({ input: process.stdin, output: process.stdout });

@@ -1,3 +1,4 @@
+// #137: read validated TOML identity first without executing any project modules.
 // Shared project and run lookup for the slice 3 commands (dispatch, run, retry, status, logs). Picks the
 // registered project a command is for (`--project <name|path>`, else the registered checkout the caller is
 // standing in), reads its tracker name from `.sandcastle/config.mts` (the name its run records carry), and
@@ -6,6 +7,8 @@
 // stopped (as the board does) but its record is left for the board and dispatcher to update. A launch the
 // dispatcher reserved whose process died before the run started is skipped, as the board drops it. projectRuns and
 // findRun take an optional state folder, for the tick's cleanup (#97), which reads Factory's own whatever its environment says.
+import { tomlIdentity } from '../../orchestrator/project-config.mts';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -22,6 +25,20 @@ export type Run = RunState & { key: string };
 export function resolveProject(p: Paths, options: { project?: string; cwd?: string } = {}): ProjectContext {
   const registered = readRegistry(p).projects;
   const known = registered.length ? ` Registered: ${registered.map(x => x.name).join(', ')}.` : ' No projects are registered; run: factory project add';
+  const checkout = (root: string | undefined): Project | undefined => {
+    if (!root) return;
+    const exact = registered.find(x => x.root === root);
+    if (exact) return exact;
+    // Linked worktrees share Git identity, but use their own versioned settings/workflow.
+    const common = (r: string) => {
+      try { return execFileSync('git', ['-C', r, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore','pipe','ignore'] }).trim(); }
+      catch { return undefined; }
+    };
+    const dir = common(root);
+    const matches = dir ? registered.filter(x => common(x.root) === dir) : [];
+    if (matches.length > 1) throw new Error('Several registered checkouts share this worktree; pass a registered --project name');
+    return matches[0] ? { ...matches[0], root } : undefined;
+  };
   let found: Project | undefined;
   if (options.project) {
     const named = registered.filter(x => x.name === options.project);
@@ -30,18 +47,20 @@ export function resolveProject(p: Paths, options: { project?: string; cwd?: stri
     if (!found && existsSync(options.project)) {
       let root: string | undefined;
       try { root = canonicalRoot(options.project); } catch { /* not a checkout: reported below */ }
-      found = registered.find(x => x.root === root);
+      found = checkout(root);
     }
     if (!found) throw new Error(`No registered project ${options.project}.${known}`);
   } else {
     const cwd = options.cwd ?? process.cwd();
     let root: string | undefined;
     try { root = canonicalRoot(cwd); } catch { /* not a checkout: reported below */ }
-    found = registered.find(x => x.root === root);
+    found = checkout(root);
     if (!found) throw new Error(`${root ?? cwd} is not a registered project. Run this inside one, or pass --project <name>.${known}`);
   }
   if (!existsSync(found.root)) throw new Error(`Checkout missing for project ${found.name}: ${found.root}`);
   const scaffold = join(found.root, scaffoldName);
+  const toml = tomlIdentity(scaffold);
+  if (toml) return { ...found, scaffold, tracker: toml.project };
   const config = join(scaffold, 'config.mts');
   if (!existsSync(config)) throw new Error(`No ${scaffoldName}/config.mts in ${found.root}. Run: factory init ${found.root}`);
   // Same reading as dispatch.sh: the first `project: "..."` line is TRACKER.project.

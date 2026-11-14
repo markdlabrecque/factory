@@ -1,3 +1,4 @@
+// #137: approved aliases come from TOML in opted-in projects, otherwise the legacy configuration.
 // Explicit description-only implementer model choice (#126). AGENT.modelAliases supplies aliases
 // and approved IDs. No labels, prose, parent context or defaults participate. Resolutions include
 // source declarations and a description revision for Factory's own ticket state.
@@ -59,7 +60,7 @@ export function disallowedModels(modelAliases: Record<string, string>, configure
   const allowed = new Set(Object.values(modelAliases));
   if (!allowed.size) return undefined;
   const bad = configured.filter((m) => !allowed.has(m));
-  return bad.length ? `model(s) ${bad.join(", ")} are not in AGENT.modelAliases (${[...allowed].join(", ")}); config.mts may only use those.` : undefined;
+  return bad.length ? `model(s) ${bad.join(", ")} are not in AGENT.modelAliases (${[...allowed].join(", ")}); factory.toml (legacy: config.mts) may only use those.` : undefined;
 }
 
 // ---- Pi provider wiring ------------------------------------------------------------------------

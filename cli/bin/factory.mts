@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// #137: selection explain reads authoritative TOML and tracker membership without starting work.
 // Factory CLI: install (from the checkout it is run from, install.mts), diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
 // failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show, reset or review a project's self-recovery (`recovery status|reset|review`), classify a project's
@@ -30,6 +31,7 @@ import { update } from '../src/commands/update.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { legacy } from '../src/commands/legacy.mts';
 import { clean } from '../src/commands/clean.mts';
+import { selectionExplain } from '../src/commands/selection.mts';
 import { ticketCommand } from '../src/commands/ticket.mts';
 import { tick, tickExitCode } from '../src/commands/tick.mts';
 import { superviseProcess } from '../src/commands/supervise.mts';
@@ -50,6 +52,7 @@ factory recovery status|reset|review [--project <name|path>] [--json (status)] [
 factory schedule on|off|status [--project <name|path>] [--json (status)]
 factory legacy status [--json] | factory legacy retire
 factory clean [--dry-run] [--project <name|path>] [--json]
+factory selection explain <ticket> [--project <name|path>] [--json]
 factory ticket comment <ticket> <text> [--project <name|path>]
 factory ticket sync [ticket] [--project <name|path>]
 factory ticket verdict <ticket> --verdict pass|fail --message <explanation> [--project <name|path>]
@@ -71,6 +74,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   legacy: { json: { type: 'boolean' } },
   clean: { 'dry-run': { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
   ticket: { project: { type: 'string' }, verdict: { type: 'string' }, message: { type: 'string' }, json: { type: 'boolean' } },
+  selection: { project: { type: 'string' }, json: { type: 'boolean' } },
   tick: {}, supervise: {},
 };
 try {
@@ -119,6 +123,9 @@ try {
     } else if (command === 'clean') {
       if (first) throw new Error('Unexpected arguments (name a project with --project)');
       process.exitCode = clean(p, { dryRun: v['dry-run'], json: v.json, project: v.project });
+    } else if (command === 'selection') {
+      if (extra.length) throw new Error('Unexpected arguments');
+      process.exitCode = await selectionExplain(p, first, second, { project: v.project, json: v.json });
     } else if (command === 'ticket') {
       process.exitCode = ticketCommand(p, first, second, extra, { project: v.project, verdict: v.verdict, message: v.message, json: v.json });
     } else if (command === 'tick') {

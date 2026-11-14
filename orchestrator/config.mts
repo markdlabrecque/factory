@@ -1,3 +1,4 @@
+// #137: LEGACY compatibility example only. New projects edit factory.toml; manual migration is reviewed.
 // Project settings shared by main.mts and dispatch.mts. Description declarations select implementation
 // models via modelAliases (#126); verifier and analysis choices remain fixed. Edit when adapting.
 // Reference config for client and Affinity Bridge work: GitLab, Claude Code, and MRs a person merges.

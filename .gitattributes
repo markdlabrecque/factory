@@ -1,0 +1,2 @@
+# Keep the pinned generated parser byte-identical to upstream, including its trailing spaces.
+orchestrator/vendor/smol-toml/*.js whitespace=-blank-at-eol

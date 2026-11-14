@@ -1,3 +1,4 @@
+// #137: new projects use TOML; repairing a legacy scaffold prints manual migration guidance.
 // `factory init`: add the missing minimal Sandcastle workflow files to a Git project, then register it.
 // #126: setup guidance names description model aliases, not tracker model labels.
 // Never overwrites, never contacts a tracker, builds images or installs packages. A failed write leaves a
@@ -44,6 +45,7 @@ export async function init(p: Paths, path: string | undefined, options: InitOpti
   const root = canonicalRoot(path ?? process.cwd());
   readRegistry(p); // a malformed registry stops us before anything is written
   const files = hooks.assets ?? buildAssets(settings, p.state);
+  const legacy = !existsSync(join(root, scaffoldName, 'factory.toml')) && ['config.mts','main.mts','dispatch.mts','dispatch.sh'].some(f => existsSync(join(root, scaffoldName, f)));
   const { created, skipped } = writeScaffold(root, files, { beforeWrite: hooks.beforeWrite });
   const added = addProject(p, root);
   const fresh = WORKFLOW.every(f => created.includes(`${scaffoldName}/${f}`));
@@ -63,15 +65,16 @@ export async function init(p: Paths, path: string | undefined, options: InitOpti
   }
   console.log(`${added ? 'Registered' : 'Already registered:'} ${root}`);
   console.log(`Shared run state: ${p.state} (the Factory board reads it; ${scaffoldName}/factory-dispatch.sh uses it).`);
+  if (legacy) console.log('Legacy mode preserved: factory.toml was NOT created. Review workflow/helper upgrades and manually transcribe settings following orchestrator/ADAPTING.md before opting in.');
   const personal = settings.profile === 'personal';
   console.log([
     'Not ready to run an agent yet. Remaining steps:',
     '  1. In the project: npm install --save-dev @ai-hero/sandcastle tsx',
-    `  2. Review the labels and merge policy in ${scaffoldName}/config.mts${personal ? ' (description model aliases: Sonnet 5.5, Opus 5.5)' : ''}.`,
+    `  2. Review the labels and merge policy in ${scaffoldName}/${legacy ? 'config.mts (legacy)' : 'factory.toml'}${personal ? ' (description model aliases: Sonnet 5.5, Opus 5.5)' : ''}.`,
     personal
       ? '  3. Host login: claude auth login, and install the pi-claude-subscription provider (git clone --depth 1 --branch <tag> https://github.com/markdlabrecque/pi-claude-subscription.git ~/.pi/agent/extensions/pi-claude-subscription, then npm ci --omit=dev --ignore-scripts there; see orchestrator/ADAPTING.md). Then run `claude setup-token` and put the token in .sandcastle/.env.'
       : '  3. Run `claude setup-token` and put the token in .sandcastle/.env; log in with `glab auth login`.',
-    `  4. Provision image "${settings.image}" and the environment commands (sandboxSetup, prompts) with the sandcastle-setup skill.`,
+    `  4. Provision image "${settings.image}" and the environment commands (sandbox.setup in factory.toml, separate scripts/prompts) with the sandcastle-setup skill.`,
     `  5. Check with: ${scaffoldName}/factory-dispatch.sh --dry-run`,
   ].join('\n'));
   console.log(fresh

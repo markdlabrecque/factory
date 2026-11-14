@@ -1,3 +1,4 @@
+// #137: validated TOML metadata is authoritative for tracker kind/host/project before journal writes.
 // `factory ticket comment <ticket> <text...> [--project <name|path>]` (slice 5, #99): save a manual comment on a board
 // ticket in the shared ticket journal (board/journal.mts, `<state>/journal/`, in the run-state folder), then post it to
 // the ticket's tracker. The local save always comes first and is kept whatever the post does, so a comment is never lost
@@ -48,10 +49,14 @@ function actorName(): string {
   try { return userInfo().username || 'unknown'; } catch { return 'unknown'; }
 }
 
+// #137: TOML metadata validates before journal/tracker writes; legacy remains text-only.
+import { tomlIdentity } from '../../../orchestrator/project-config.mts';
 type Tracker = { kind: 'github' | 'gitlab'; host: string };
 
 /** The project's tracker kind and host from `.sandcastle/config.mts`, or why it can't be read. */
 function trackerOf(ctx: ProjectContext): Tracker | string {
+  const toml = tomlIdentity(ctx.scaffold);
+  if (toml) return toml;
   let text: string;
   try { text = readFileSync(join(ctx.scaffold, 'config.mts'), 'utf8'); } catch { return `no readable ${ctx.scaffold}/config.mts`; }
   const kind = text.match(/^\s*kind:\s*"([^"]+)"/m)?.[1] ?? 'gitlab';

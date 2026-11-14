@@ -1,3 +1,4 @@
+// #137: review fixtures include nested parser/runtime files, without executing them.
 // `factory recovery status|reset|review` tests (#62, review #63), plus the recovery summary in `factory status` and repair logs in
 // `factory logs --recovery`. Disposable HOME, Git repo and run-state folder; recovery state is set up through
 // recovery-state.mts and the admission record; no tracker, Docker or service manager. Recovery review also gates
@@ -124,7 +125,8 @@ test('review lists the workflow, refuses an incomplete copy, and --confirm activ
   const sc = (f: string) => join(root, '.sandcastle', f);
   // A hand upgrade in progress: everything but the repair prompt.
   writeFileSync(sc('main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
-  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'prompt.recover.md')) writeFileSync(sc(f), `// ${f}\n`);
+  // #137: reviewed runtime/parser assets include nested paths.
+  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'prompt.recover.md')) { mkdirSync(join(sc(f), '..'), { recursive: true }); writeFileSync(sc(f), `// ${f}\n`); }
   assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 1);
   assert.match(err(), /missing prompt\.recover\.md[^]*Nothing was recorded/);
   assert.equal(readReview(p, root), null);

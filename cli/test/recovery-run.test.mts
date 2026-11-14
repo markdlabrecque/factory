@@ -1,3 +1,4 @@
+// #137: recovery review includes nested runtime/parser assets in its complete-workflow fixture.
 // Recovery workflow fixtures include assessment.mts and journal.mts, mandatory board imports in the reviewed copy.
 // Recovery launcher tests (#60, #74): an attempt's UUID and exact container name are fixed and recorded (recovery state,
 // run record, host-owned attempt record) before the detached repair process starts; it resumes the recorded branch and
@@ -59,7 +60,8 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   writeFileSync(join(evidence, 'before-1.png'), 'old evidence');
   if (o.copy !== false) {
     writeFileSync(join(root, '.sandcastle/main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
-    for (const f of WORKFLOW.filter(f => f !== 'main.mts')) writeFileSync(join(root, '.sandcastle', f), '');
+    // #137: runtime/parser workflow review includes nested assets.
+    for (const f of WORKFLOW.filter(f => f !== 'main.mts')) { mkdirSync(join(root, '.sandcastle', f, '..'), { recursive: true }); writeFileSync(join(root, '.sandcastle', f), ''); }
   }
   const p = paths(home);
   if (o.copy !== false) recordReview(p, root);
@@ -105,7 +107,7 @@ test('an attempt is refused without the recovery workflow copy, claiming nothing
   const f = fixture(t, { copy: false });
   const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, false);
-  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md\)/);
+  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md, project-config\.mts, runtime-config\.mts, selection\.mts, vendor\/smol-toml\/index\.js/);
   assert.equal(f.launched.length, 0);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'no attempt recorded, no budget spent');
   assert.equal(f.run().stage, 'stopped');

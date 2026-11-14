@@ -1,3 +1,4 @@
+// #137: confidential=false filters reliable facts over all pages and fails closed if facts are missing.
 // #135: GitLab readyList reads every page; GitHub rejects capped search results rather than publish false
 // deselection. Recording gh/glab stubs model Search's hard 1000-result cap and later-page failures.
 // All calls stay on fixture-owned PATH boundaries; no tracker is contacted.
@@ -23,7 +24,7 @@ else {
 const ids = Array.from({ length: Math.max(0, Math.min(n, total - from)) }, (_, k) => from + k + 1);
 console.log(JSON.stringify(ids.map((i) => tool === "gh"
   ? { number: i, title: "t" + i, body: "", state: "OPEN", labels: [], assignees: [] }
-  : { iid: i, title: "t" + i, description: "", state: "opened", labels: [] })));
+  : { iid: i, title: "t" + i, description: "", state: "opened", labels: [], ...(process.env.NO_CONFIDENTIAL_FACTS ? {} : {confidential: i % 2 === 0}) })));
 `);
 for (const tool of ["gh", "glab"]) {
   writeFileSync(join(dir, tool), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${dir}/${tool}.log"\nexec "${process.execPath}" "${serve}" ${tool} "$@"\n`, { mode: 0o755 });
@@ -54,6 +55,17 @@ test("GitHub: capped search results fail safely instead of implying deselection"
   reset(999);
   assert.equal(github.readyList({}).length, 999);
   assert.equal(calls("gh").length, 1);
+});
+
+test('GitLab: false confidentiality is not unrestricted and missing facts are unknown', () => {
+  reset(250);
+  const all = gitlab.readyList({confidential:false});
+  assert.equal(all.length,125);
+  assert.ok(all.every(t=>t.iid % 2 === 1));
+  assert.equal(calls('glab').length,3);
+  process.env.NO_CONFIDENTIAL_FACTS = '1';
+  try { assert.throws(()=>gitlab.readyList({confidential:false}),/selection is unknown/); }
+  finally { delete process.env.NO_CONFIDENTIAL_FACTS; }
 });
 
 test("GitLab: a later-page failure never returns partial selection facts", () => {

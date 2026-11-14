@@ -1,3 +1,4 @@
+// #137: TOML/offline parser assets and explicit legacy migration compatibility.
 // #126: personal scaffolds ship description aliases and never require model tracker labels.
 // Init tests: scaffold contents, no-clobber, rerun repair, failure-doesn't-register, wrapper quoting, shared
 // state, uninstall's treatment of projects, and that every module a scaffolded file imports is scaffolded,
@@ -22,9 +23,10 @@ import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
-const EXPECTED = ['.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
+const EXPECTED = ['factory.toml', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
+  ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(f => `vendor/smol-toml/${f}`), '.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
   'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
-  'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'];
+  'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'].sort();
 
 function fixture(t: TestContext, homeName = 'home') {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'factory-init-')));
@@ -112,7 +114,7 @@ test('rerun keeps existing bytes and modes, fills gaps, reports skips, never dup
   assert.deepEqual(readFileSync(s('prompt.md')), keep);
   assert.equal(mode(s('prompt.md')), 0o640);
   assert.ok(existsSync(s('ci.mts')), 'missing file recreated');
-  assert.match(out, /Created 1 file\(s\), skipped 30/);
+  assert.match(out, new RegExp(`Created 1 file\\(s\\), skipped ${EXPECTED.length - 1}`));
   assert.match(out, /skipped .*config\.mts/);
   assert.match(out, /nothing was reconfigured/);
   assert.match(out, /Add: \.env evidence\/ state\/ logs\/ board\.html/);

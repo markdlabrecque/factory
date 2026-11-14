@@ -1,9 +1,10 @@
+// #137: validate authoritative TOML before model/credential preflight.
 // Host preflight for approved description model aliases (#126) and fixed verifier/analysis models.
 // Run by dispatch.sh before a pass. Prints each
 // problem to stderr and exits 1; exits 0 when the configured models need no subscription provider or it is ready.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { AGENT, GRAPH } from "./config.mts";
+import { AGENT, GRAPH } from "./runtime-config.mts"; // #137: validate TOML before credentials
 import { subscriptionPreflight } from "./models.mts";
 
 const run = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 60_000 });

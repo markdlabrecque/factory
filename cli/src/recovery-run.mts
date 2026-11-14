@@ -1,3 +1,4 @@
+// #137: tracker metadata reads TOML first, without executing legacy project configuration.
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
 // settles attempts that ended. The tick's jam confirmation (#61, jam-detect.mts) calls settleRecovery after each completed
 // scheduled pass and launchRecovery for a confirmed jam's ticket, only when the project's copy has the recovery workflow
@@ -73,8 +74,12 @@ export type Launch = { ok: true; attempt: Attempt; pid: number; branch: string; 
 
 const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
 
-/** The project's tracker identity from its .sandcastle/config.mts (kind, host, project), or why it cannot be read. */
+// #137: validate TOML identity without executing legacy project code.
+import { loadTomlConfig, tomlIdentity } from '../../orchestrator/project-config.mts';
+/** The project's tracker identity from TOML, else safe legacy text. */
 export function trackerIdentity(root: string): TrackerIdentity | string {
+  const toml = tomlIdentity(join(root, '.sandcastle'));
+  if (toml) return toml;
   let text: string;
   try { text = readFileSync(join(root, '.sandcastle/config.mts'), 'utf8'); } catch { return `no readable .sandcastle/config.mts in ${root}`; }
   const kind = text.match(/^\s*kind:\s*"([^"]+)"/m)?.[1];
@@ -100,6 +105,7 @@ export const worktreeFor = (root: string, branch: string) => resolve(root, '.san
 
 /** Finish the project's running attempt if its process has ended; see the file comment. */
 export function settleRecovery(p: Paths, o: Common): Settled {
+  loadTomlConfig(join(o.root, '.sandcastle')); // validate before admission writes or Docker, even with an explicit identity
   const dir = o.dir ?? runStateDir(p);
   const at = o.at ?? new Date().toISOString();
   const docker = o.docker ?? realDocker;

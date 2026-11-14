@@ -1,3 +1,4 @@
+// #137: complete review includes TOML runtime/parser helpers, still using only stand-in processes.
 // The complete reviewed workflow fixture includes assessment.mts and journal.mts, board.mts's mandatory imports.
 // Scheduled self-recovery end to end across restarts and failures (#64, the acceptance step of #30's slice four). Every
 // tick is a fresh process (cli/test/fixtures/tick-recovery.mts: `factory tick` as the service runs it, with only the repair
@@ -17,6 +18,7 @@ import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { WORKFLOW } from '../src/recovery-review.mts';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keyFor, readAdmission } from '../../board/admission.mts';
@@ -110,7 +112,8 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   writeFileSync(join(sc, 'config.mts'), 'export const TRACKER = {\n  kind: "github",\n  host: "github.com",\n  project: "site/site",\n};\n');
   // The complete recovery workflow (board.mts keeps what the scheduler's copy check needs), reviewed by a person.
   writeFileSync(join(sc, 'main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
-  for (const f of ['recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'prompt.recover.md', 'prompt.verify.md']) writeFileSync(join(sc, f), '');
+  // #137: stand-in workflows review the complete runtime/offline-parser inventory too.
+  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts')) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
   // The ticket's preserved work: a commit and uncommitted changes in its Factory worktree, and earlier evidence.
   git(root, 'branch', '7-fix-login');
   const worktree = join(sc, 'worktrees/7-fix-login');

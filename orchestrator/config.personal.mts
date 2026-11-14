@@ -1,3 +1,4 @@
+// #137: LEGACY compatibility example only. New projects edit factory.toml; manual migration is reviewed.
 // Project settings shared by main.mts and dispatch.mts. Description declarations select implementation
 // models via modelAliases (#126); tracker model labels are neither required nor created.
 // Reference config for personal projects: GitHub issues and PRs, the Pi agent with Claude subscription

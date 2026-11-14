@@ -1,3 +1,4 @@
+// #137: unsafe --max integers fail before launching the project's shell or preflight.
 // `factory dispatch` tests: it runs the chosen project's own dispatch.sh from the checkout root, with the
 // flags passed through and Factory's run-state folder, and returns its exit code. A stub dispatch.sh stands in
 // for the real one; no tracker, Docker or service manager.
@@ -52,7 +53,9 @@ test('--project picks another project; SANDCASTLE_STATE_DIR from the caller wins
 test('a bad --max or an unregistered folder fails before anything runs', async t => {
   const { home, p, project } = fixture(t);
   const a = project('a');
-  await assert.rejects(dispatch(p, { cwd: a, max: '0' }), /--max needs a positive whole number/);
+  for (const max of ['0', '1.5', '9007199254740992', '999999999999999999999999999999999999999']) {
+    await assert.rejects(dispatch(p, { cwd: a, max }), /--max needs a positive (?:safe integer|whole number)/);
+  }
   await assert.rejects(dispatch(p, { cwd: home }), /not a registered project/);
   assert.throws(() => readFileSync(join(a, 'called')));
 });
