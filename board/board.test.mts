@@ -1,3 +1,5 @@
+// #139: Assessment DOM covers concise red blocker numbers, deduplication, hidden satisfied dependencies,
+// unlinked warnings and stale-row removal without changing refresh, retry or historical messages.
 // #126: Board DOM separates current description resolution/errors from a running attempt's fixed model.
 // Archive coverage exercises project/header gates, active/queued refusal, preservation and idempotence over HTTP,
 // plus delayed-success/error DOM state and corrected-verdict badges. All fixtures are local, never live tracker data.
@@ -202,6 +204,43 @@ test("assessment DOM distinguishes unchecked, fresh, pending and failed checks w
   assert.match(failed, /Open in tracker.*Checked 1m ago.*Last check failed 1m ago: tracker unavailable.*Showing the last good check/);
   assert.ok(card.assess.children.some(n => n.className === 'a-bad' && /Last check failed/.test(n.textContent)));
   assert.equal(render(), 'Current ticket: not checked yet', 'reused cards clear stale facts and errors');
+  const blockers = () => card.assess.children.filter(n => n.className === 'a-bad');
+  const dependencies = [
+    { iid: 780, state: 'unsatisfied', what: 'A long prerequisite description that must not appear in the blocker row' },
+    { iid: 781, state: 'satisfied', what: 'Already done' },
+    { iid: 782, state: 'unknown', what: 'Provider status unavailable' },
+    { iid: 780, state: 'unknown', what: 'Another requirement for the same ticket' },
+    { iid: 781, state: 'unsatisfied', what: 'A later unmet requirement' },
+    { iid: 782, state: 'unsatisfied', what: 'Duplicate provider' },
+    { iid: null, state: 'satisfied' },
+    { iid: null, state: 'unsatisfied', what: 'Credentials' },
+    { state: 'unknown', what: 'A human decision' },
+  ];
+  render({ facts, analysisState: 'current', dependencies });
+  assert.deepEqual(blockers().map(n => n.textContent), ['#780', '#782', '#781', 'Unresolved blocker: no linked ticket']);
+  for (const row of blockers()) {
+    assert.equal(row.tag, 'div', 'blockers are plain text, not links');
+    assert.equal(row.children.length, 0);
+    assert.equal((row as any).title, undefined, 'no extra hover description');
+  }
+  for (const deps of [[], dependencies.filter(d => d.state === 'satisfied')]) {
+    render({ facts, analysisState: 'current', dependencies: deps });
+    assert.deepEqual(blockers(), [], 'empty/satisfied data clears all obsolete blocker rows');
+    assert.equal(card.assess.children.length, 2, 'only the title and facts remain; no dependency rows or placeholders');
+  }
+  for (const state of ['pending', 'error']) {
+    render({ facts, analysisState: 'current', dependencies });
+    const text = render({ facts, analysisState: state, analysisError: 'lookup unavailable', dependencies });
+    assert.doesNotMatch(text, /#780|#781|#782|Unresolved blocker/);
+    assert.match(text, state === 'pending' ? /Pending analysis: dependency conclusions are stale/ : /Dependency analysis failed: lookup unavailable\. Previous conclusions are stale\./);
+  }
+  const retryRequired = 'Blockers satisfied; explicit factory retry required.';
+  const history = render({ facts, analysisState: 'current', dependencies: [], retryRequired, changed: true });
+  assert.match(history, /Requirements changed since the last run was built\. The run result above is unchanged\./);
+  assert.equal(blockers()[0].textContent, retryRequired);
+  render({ facts, analysisState: 'current', dependencies: [{ iid: 900, state: 'unknown' }] });
+  assert.deepEqual(blockers().map(n => n.textContent), ['#900'], 'reused card contains only new blockers');
+  assert.equal(render(), 'Current ticket: not checked yet', 'removing assessment clears blocker rows');
   ctx.renderAssessment(card, { implementationModel: 'old-attempt', assessment: { facts, modelResolution: {
     status: 'resolved', model: 'new-description', declarations: ['Sonnet 5.5'], revision: 'abc',
   } } }, 0);

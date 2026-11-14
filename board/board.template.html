@@ -1,5 +1,7 @@
 <!doctype html>
-<!-- #126: current description model resolution is separate from the attempt's fixed implementation model.
+<!-- #139: Current assessments show distinct red blocker numbers only, hide satisfied dependencies,
+     and warn once for blockers without linked tickets; dispatch and verification semantics are unchanged.
+     #126: current description model resolution is separate from the attempt's fixed implementation model.
      Factory tracker board/evidence shell: per-ticket dots and centered connectors, solid green/red current dots
      with halos and sonar pulses, explicit queue reasons, latest-ten collapsible Shipped and real-history stats.
      Stats return focus to the invoking control, with a fallback for removed/hidden tickets.
@@ -945,9 +947,18 @@
     if (a.pending) rows.push(el('div', null, 'Refresh requested: checking current tracker facts.'));
     if (a.analysisState === 'pending') rows.push(el('div', null, 'Pending analysis: dependency conclusions are stale until read-only analysis completes.'));
     if (a.analysisState === 'error') rows.push(el('div', 'a-bad', 'Dependency analysis failed: ' + a.analysisError + '. Previous conclusions are stale.'));
-    if (a.analysisState === 'current' && a.dependencies) a.dependencies.forEach(function (d) {
-      rows.push(el('div', d.state === 'satisfied' ? null : 'a-bad', 'Dependency ' + (d.iid == null ? 'unresolved / human-only' : '#' + d.iid) + ': ' + d.state + (d.what ? ' (' + d.what + ')' : '')));
-    });
+    if (a.analysisState === 'current' && a.dependencies) {
+      var seenBlockers = new Set(), unlinkedBlocker = false;
+      a.dependencies.forEach(function (d) {
+        if (d.state === 'satisfied') return;
+        if (d.iid == null) { unlinkedBlocker = true; return; }
+        var number = '#' + d.iid;
+        if (seenBlockers.has(number)) return;
+        seenBlockers.add(number);
+        rows.push(el('div', 'a-bad', number));
+      });
+      if (unlinkedBlocker) rows.push(el('div', 'a-bad', 'Unresolved blocker: no linked ticket'));
+    }
     if (a.changed) rows.push(el('div', null, 'Requirements changed since the last run was built. The run result above is unchanged.'));
     if (a.retryRequired) rows.push(el('div', 'a-bad', a.retryRequired));
     if (a.error) rows.push(el('div', 'a-bad', 'Last check failed ' + ago(a.attemptedAt, now) + ' ago: ' + a.error + (f ? ' Showing the last good check.' : '')));
