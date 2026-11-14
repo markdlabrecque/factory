@@ -6,6 +6,8 @@
 // analyst's checkout. Allocate assessment attempts before any tracker reads, including catalogue failures, so older
 // scheduled/manual passes cannot publish over newer facts. The board worker passes its token to its child; neither
 // path takes admission locks. The caller gives the remaining per-pass budget; analyze.mts enforces its own timeout.
+// #149: assessment uses the same fail-closed dependency evaluator as execution.
+import { dependencyState, type DependencyResult } from "./dependencies.mts";
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { readRuns, stateDir } from "./board.mts";
 import { assessed, beginAssessment, pickRefreshes, publishAssessment, readAssessment, readAssessments, refreshCards, writeAssessment, pendingRequests, clearRequest } from "./assessment.mts";
@@ -39,6 +41,7 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
     const parents = selectCandidates(tracker.readyList(select), select, tracker.currentUsername);
     const selected = new Set(expandUnits(parents.map((t) => t.iid), work.childrenOf, o.subtasks ?? SUBTASKS.enabled).units.map((t) => t.iid));
     const catalogueKey = contentHash({ title: JSON.stringify(catalogue.map((t) => [t.iid, t.title, t.description, t.parent]).sort((a, b) => Number(a[0]) - Number(b[0]))) });
+    const dependencyCache = new Map<number, DependencyResult>();
     let worktree: ReturnType<typeof analysisWorktree> | undefined;
     refreshCards(runs.filter((r) => attempts.has(r.key)), {
       dir, attempts, project: TRACKER.project, root: process.cwd(), now: () => new Date().toISOString(),
@@ -69,18 +72,12 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
       },
       historicalBlockers: (iid) => manifests.get(iid),
       dependency: (iid) => {
-        // Never reuse dispatch's fail-open satisfied(): network/auth errors mean unknown here.
-        let state: "satisfied" | "unsatisfied" | "unknown" = "unknown";
-        try {
-          const current = tracker.ticket(iid).state;
-          state = current === "closed" ? "satisfied" : current === "open" || current === "opened" ? "unsatisfied" : "unknown";
-        } catch { return "unknown"; }
-        if (state === "satisfied") return state;
-        const r = allRuns.find((r) => r.project === TRACKER.project && Number(r.iid) === iid);
-        if (r?.branch) {
-          try { if (tracker.mergedInto(r.branch, r.base ?? o.base)) return "satisfied"; } catch { return "unknown"; }
-        }
-        return state;
+        if (!dependencyCache.has(iid)) dependencyCache.set(iid, dependencyState(iid, {
+          ticket: tracker.ticket,
+          run: (id) => allRuns.find((r) => r.project === TRACKER.project && Number(r.iid) === id),
+          mergedInto: tracker.mergedInto, base: o.base,
+        }));
+        return dependencyCache.get(iid)!.state;
       }, log,
     });
   } catch (e) {

@@ -1,3 +1,4 @@
+// #149: legacy upgrades install dependency evaluation without overwriting project customization.
 // #150: executable tracker changes invalidate recovery review; project-owned prompts remain protected.
 // #137: update snapshots cover nested vendor assets and project-owned TOML.
 // `factory update --dry-run` (#91) and `--apply` (#92): classification of a project's .sandcastle copy against a synthetic Factory app with
@@ -103,14 +104,17 @@ test('legacy upgrade creates verification helper but keeps a customized verifier
   const { p, app, root, sc } = fixture(t);
   addProject(p, root);
   rmSync(join(sc, 'verification.mts'));
+  rmSync(join(sc, 'dependencies.mts'));
   writeFileSync(join(sc, 'prompt.verify.md'), '# My legacy verifier\nWrite verdict.md only.\n');
   const c = classes(classifyCopy(p, root, { app }));
   assert.equal(c['verification.mts'], 'missing');
+  assert.equal(c['dependencies.mts'], 'missing');
   assert.equal(c['prompt.verify.md'], 'project');
   const out: string[] = [];
   t.mock.method(console, 'log', (s: string) => out.push(s));
   assert.equal(update(p, { apply: true, cwd: root, app }), 0);
   assert.deepEqual(readFileSync(join(sc, 'verification.mts')), readFileSync(join(app, 'orchestrator/verification.mts')));
+  assert.deepEqual(readFileSync(join(sc, 'dependencies.mts')), readFileSync(join(app, 'orchestrator/dependencies.mts')));
   assert.equal(readFileSync(join(sc, 'prompt.verify.md'), 'utf8'), '# My legacy verifier\nWrite verdict.md only.\n');
   assert.match(out.join('\n'), /recovery review/);
 });

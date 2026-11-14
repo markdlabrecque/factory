@@ -1,3 +1,4 @@
+// #149: prerequisite fixtures use explicit dependency states, with thrown reads still held.
 // #150: every successful handoff fixture supplies a frozen host proof, not legacy verdict prose.
 import { createProof } from './verification.mts';
 import { fixtureProvenance, writeVerification } from './fixtures/verification.mts';
@@ -127,7 +128,7 @@ test("prerequisite holds: an unmet dependency holds, and so does not knowing", (
     implementerBlockers: [{ iid: 13, what: "schema", evidence: "" }] };
   const view = (o: { done?: number[]; active?: Record<number, string>; hash?: string; manifest?: Manifest | null; throws?: boolean }) => ({
     manifest: o.manifest === null ? undefined : (o.manifest ?? m), hash: o.hash ?? "h",
-    satisfied: (i: number) => { if (o.throws) throw new Error("gh failed"); return (o.done ?? []).includes(i); },
+    dependency: (i: number) => { if (o.throws) throw new Error("gh failed"); return { state: (o.done ?? []).includes(i) ? "satisfied" as const : "unsatisfied" as const }; },
     active: (i: number) => o.active?.[i],
   });
   assert.equal(prerequisiteHold(7, view({ done: [12, 13] })), undefined);
@@ -136,4 +137,6 @@ test("prerequisite holds: an unmet dependency holds, and so does not knowing", (
   assert.match(prerequisiteHold(7, view({ manifest: null }))!, /no ticket analysis/);
   assert.match(prerequisiteHold(7, view({ hash: "other" }))!, /out of date/);
   assert.match(prerequisiteHold(7, view({ throws: true }))!, /unknown: gh failed/);
+  assert.match(prerequisiteHold(7, { ...view({}), dependency: () => ({ state: "unknown", reason: "Dependency information unavailable for #12: ticket lookup failed" }) })!, /#7 waits on #12.*information unavailable/);
+  assert.equal(prerequisiteHold(7, view({ done: [12, 13] })), undefined, "a later confirmed read releases the hold");
 });

@@ -73,7 +73,7 @@ test("decide: blockers, conflicts, capacity, analysis", () => {
   const { decisions } = decide({
     candidates: [10, 11, 12, 13, 14, 15, 16].map((iid) => ({ iid, hash: `h${iid}` })),
     manifests,
-    satisfied: () => false,
+    dependency: () => ({ state: "unsatisfied" }),
     queue: new Set([10, 11, 12, 13, 14, 15, 16]),
     live: [{ iid: 9, footprint: ["web/modules/b/x.php"] }],
     room: 2,
@@ -97,7 +97,7 @@ test("decide: satisfied blockers release, real diff replaces the prediction, sta
   const { decisions } = decide({
     candidates: [11, 12, 13].map((iid) => ({ iid, hash: `h${iid}` })),
     manifests,
-    satisfied: (iid) => iid === 10,
+    dependency: (iid) => ({ state: iid === 10 ? "satisfied" : "unsatisfied" }),
     queue: new Set(),
     live: [{ iid: 9, footprint: ["web/a/x.php"] }],
     room: 5,
@@ -105,14 +105,31 @@ test("decide: satisfied blockers release, real diff replaces the prediction, sta
   assert.deepEqual(decisions.map((d) => d.launch), [true, true, false]);
 });
 
+// #149: only confirmed satisfaction releases a dependency; unknown remains waitable.
+test("unknown dependencies preserve order and release on a later successful read", () => {
+  const manifests = new Map([[1, manifest(1, { requires: [needs(7), needs(8)] })], [2, manifest(2)]]);
+  let unknown = true;
+  const pass = () => decide({ candidates: [{ iid: 1, hash: "h1" }, { iid: 2, hash: "h2" }], manifests,
+    dependency: (id) => ({ state: unknown && id === 7 ? "unknown" : "satisfied" }), queue: new Set([1, 2]), live: [], room: 1 });
+  const held = pass().decisions;
+  assert.equal(held[0].launch, false);
+  if (!held[0].launch) { assert.deepEqual(held[0].waitingOn, [7]); assert.match(held[0].reason, /#7.*information unavailable/); }
+  assert.equal(held[1].launch, true);
+  unknown = false;
+  assert.deepEqual(pass().decisions.map((d) => d.launch), [true, false]);
+});
+
 test("blocked outcome", () => {
   const b = (iid: number | null) => ({ iid, what: "", evidence: "" });
-  const open = () => false;
+  const open = () => ({ state: "unsatisfied" as const });
   assert.equal(blockedOutcome(5, [b(7)], open), "wait");
   assert.equal(blockedOutcome(5, [b(7), b(null)], open), "needs-human");
-  assert.equal(blockedOutcome(5, [b(7)], (i) => i === 7), "needs-human", "blocked again after the blocker merged");
+  assert.equal(blockedOutcome(5, [b(7)], () => ({ state: "satisfied" })), "needs-human", "blocked again after the blocker merged");
   assert.equal(blockedOutcome(5, [b(5)], open), "needs-human");
   assert.equal(blockedOutcome(5, [], open), "needs-human");
+  assert.equal(blockedOutcome(5, [b(7)], () => ({ state: "unknown" })), "wait");
+  assert.equal(blockedOutcome(5, [b(7), b(8)], (id) => ({ state: id === 7 ? "unknown" : "unsatisfied" })), "wait");
+  assert.equal(blockedOutcome(5, [b(7), b(8)], (id) => ({ state: id === 7 ? "unknown" : "satisfied" })), "needs-human");
 });
 
 function reason(d: { launch: boolean; reason?: string } | undefined): string {
@@ -164,6 +181,6 @@ test("project jam: stopped ready tickets and the holds behind them, only when no
 
 test("decide names the prerequisites a held ticket waits on", () => {
   const manifests = new Map([[2, manifest(2, { requires: [needs(1)] })]]);
-  const { decisions } = decide({ candidates: [{ iid: 2, hash: "h2" }], manifests, satisfied: () => false, queue: new Set([1, 2]), live: [], room: 3 });
+  const { decisions } = decide({ candidates: [{ iid: 2, hash: "h2" }], manifests, dependency: () => ({ state: "unsatisfied" }), queue: new Set([1, 2]), live: [], room: 3 });
   assert.deepEqual(decisions, [{ iid: 2, launch: false, reason: "waiting on #1: thing from #1", waitingOn: [1] }]);
 });

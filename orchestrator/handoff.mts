@@ -1,3 +1,5 @@
+// #149: recovery holds on shared unknown dependency results and sanitized reasons.
+import type { DependencyResult } from "./dependencies.mts";
 // #150: only host-frozen structured proof can authorize publication, exact-SHA push and merge.
 import { rmSync, writeFileSync } from "node:fs";
 import { readProof, validateEvidence } from './verification.mts';
@@ -285,8 +287,8 @@ export interface PrerequisiteView {
   manifest: Manifest | undefined;
   /** The ticket's current content hash (graph.mts unitHash), to tell an out-of-date analysis. */
   hash: string;
-  /** Is prerequisite `iid` done (closed, or its branch merged into its base)? May throw: unknown. */
-  satisfied(iid: number): boolean;
+  /** Shared dependency evidence. Unknown and thrown reads both hold recovery. */
+  dependency(iid: number): DependencyResult;
   /** Why prerequisite `iid` is still active (a run in flight, an open PR), or undefined. May throw: unknown. */
   active(iid: number): string | undefined;
 }
@@ -297,7 +299,10 @@ export function prerequisiteHold(iid: number, v: PrerequisiteView): string | und
     if (!v.manifest) return `#${iid} has no ticket analysis, so its prerequisites are unknown`;
     if (v.manifest.hash !== v.hash) return `#${iid}'s ticket analysis is out of date, so its prerequisites are unknown`;
     for (const e of edgesOf(v.manifest)) {
-      if (e.to !== iid || v.satisfied(e.from)) continue;
+      if (e.to !== iid) continue;
+      const result = v.dependency(e.from);
+      if (result.state === "satisfied") continue;
+      if (result.state === "unknown") return `#${iid} waits on #${e.from}: ${result.reason ?? "dependency information unavailable"}`;
       const why = v.active(e.from);
       return `#${iid} waits on #${e.from}${why ? ` (${why})` : ""}: ${e.what}`;
     }

@@ -1,3 +1,4 @@
+// #149: recovery prerequisite rechecks consume unknown/satisfied/unsatisfied results.
 // #150: fresh synthetic reports and execution proof bind repaired tips after confirmed cleanup.
 // The recovery attempt lifecycle end to end (#60 acceptance, #74): the real runRecoveryAttempt (recovery.mts) with the
 // real owned-sandbox adapter and Git workspace (recovery-sandbox.mts), the real verifier and delivery (handoff.mts) and
@@ -350,7 +351,7 @@ const prereqs = (state: Partial<Record<"verify" | "deliver", "merged" | "open-pr
   const now = state[st] ?? "merged";
   const view: PrerequisiteView = {
     manifest: now === "no-analysis" ? undefined : needs12, hash: "h7",
-    satisfied: () => { if (now === "unknown") throw new Error("tracker unreachable"); return now === "merged"; },
+    dependency: () => ({ state: now === "unknown" ? "unknown" : now === "merged" ? "satisfied" : "unsatisfied" }),
     active: () => (now === "open-pr" ? "an open PR" : now === "in-flight" ? "a run in flight" : undefined),
   };
   return prerequisiteHold(7, view);

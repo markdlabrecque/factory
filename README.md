@@ -1,3 +1,4 @@
+<!-- #149: unavailable dependency evidence holds work until a successful later read. -->
 <!-- #140: Board shows compact current red blockers only; backend checks/refresh remain without a panel or refresh button. -->
 <!-- Scheduler CI: concurrent stub queries are read-only; browser preflight uses a Node-owned process group instead of host timeout; TAP retains failures. -->
 <!-- #141: recorded blocker episodes show concise summaries only; persisted reasons stay unchanged. -->
@@ -322,6 +323,12 @@ rm ~/.config/systemd/user/sandcastle-dispatch.{service,timer}
 ```
 
 then run `install-dispatch.sh` from each project.
+
+### Dependency read failures
+
+Dispatch, implementer blocker handling, assessment and recovery share `orchestrator/dependencies.mts`. A confirmed closed ticket or an open ticket's recorded branch merged into its base satisfies a prerequisite. Missing tickets, unreadable states and failed ticket or merge reads are unknown, not satisfied. Unknown numbered blockers keep work waiting without adding `needs-human` solely for a lookup error. A later successful pass rechecks them without a ticket edit. Historical stopped runs still require the existing explicit retry policy.
+
+Upgrade `dependencies.mts`, `graph.mts`, `dispatch.mts`, `refresh.mts` and `handoff.mts` together, merge project-owned `main.mts` by hand, then have the operator review recovery again. No installed copies or scheduler settings change automatically.
 
 ### Updating a project's copy of the workflow
 

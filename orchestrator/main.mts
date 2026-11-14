@@ -1,6 +1,8 @@
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
 // #137: authoritative TOML sandbox/CI settings; legacy CONFIG remains unchanged only when absent.
 // #126: resolve description models once at attempt start; refresh never changes that model.
+// #149: unknown dependency reads hold implementer and recovery work without needs-human labels.
+import { dependencyState, type DependencyResult } from "./dependencies.mts";
 import { recordModelResolution } from "./assessment.mts";
 import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -234,11 +236,7 @@ if (recovering) {
     const runOf = (b: number) => readRuns().find((x) => x.project === PROJECT && x.iid === String(b));
     return prerequisiteHold(Number(iid), {
       manifest: readManifest(PROJECT, Number(iid)), hash: ticketHash(now).hash,
-      satisfied: (b) => {
-        if (tracker.ticket(b).state === "closed") return true;
-        const dep = runOf(b);
-        return !!dep?.branch && tracker.mergedInto(dep.branch, dep.base ?? base);
-      },
+      dependency: (b) => dependencyState(b, { ticket: tracker.ticket, run: runOf, mergedInto: tracker.mergedInto, base }),
       active: (b) => {
         const dep = runOf(b);
         if (dep && !TERMINAL.includes(dep.stage) && !PARKED.includes(dep.stage)) return "a run in flight";
@@ -436,19 +434,16 @@ if (tip) {
 
 // ---- implementer reported a missing prerequisite ----------------------------------
 if (blockers) {
-  const satisfied = (b: number) => {
-    const t = tracker.ticket(b);
-    if (t.state === "closed") return true;
-    const run = readRuns().find((r) => r.project === PROJECT && r.iid === String(b));
-    return !!run?.branch && tracker.mergedInto(run.branch, run.base ?? base);
-  };
+  const dependency = (b: number) => dependencyState(b, {
+    ticket: tracker.ticket,
+    run: (id) => readRuns().find((r) => r.project === PROJECT && r.iid === String(id)),
+    mergedInto: tracker.mergedInto, base,
+  });
   const what = blockers.map((b) => `${b.iid != null ? `#${b.iid}` : "no ticket"}: ${b.what}`).join("; ");
+  const dependencyCache = new Map<number, DependencyResult>();
   const outcome = blockedOutcome(Number(iid), blockers, (b) => {
-    try {
-      return satisfied(b);
-    } catch {
-      return true; // no such ticket: nothing to wait for
-    }
+    if (!dependencyCache.has(b)) dependencyCache.set(b, dependency(b));
+    return dependencyCache.get(b)!;
   });
   if (outcome === "needs-human") {
     tracker.addLabel(Number(iid), LABELS.needsHuman);
@@ -468,7 +463,7 @@ if (blockers) {
     fail(`Blocked (${what}), but branch ${branch} could not be deleted (worktree left behind?). Delete it to let the ticket run again.`);
   }
   finished = true;
-  setStage(iid, { stage: "waiting", note: `implementer: needs ${what}` });
+  setStage(iid, { stage: "waiting", note: `implementer: needs ${what}${[...dependencyCache.values()].some((r) => r.state === "unknown") ? "; dependency information unavailable, will retry" : ""}` });
   console.log(`#${iid} waits on ${what}. The dispatcher relaunches it once that is merged.`);
   process.exit(0);
 }

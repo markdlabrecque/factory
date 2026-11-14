@@ -1,3 +1,4 @@
+// #149: fresh and repaired copies include dependency evaluation.
 // #150: fresh and repaired scaffolds include the required verification proof helper.
 // #137: TOML/offline parser assets and explicit legacy migration compatibility.
 // #126: personal scaffolds ship description aliases and never require model tracker labels.
@@ -24,7 +25,8 @@ import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
-const EXPECTED = ['verification.mts', 'factory.toml', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
+// #149: the shared dependency helper is mandatory in fresh and repaired copies.
+const EXPECTED = ['dependencies.mts', 'verification.mts', 'factory.toml', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(f => `vendor/smol-toml/${f}`), '.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
   'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
   'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'].sort();

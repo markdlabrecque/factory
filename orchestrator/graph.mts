@@ -1,4 +1,6 @@
+// #149: unknown dependency evidence holds dispatch and stays waitable for implementers.
 import { createHash } from "node:crypto";
+import type { DependencyResult } from "./dependencies.mts";
 
 // Ticket graph: pure logic, no I/O. Two relations between tickets:
 // - dependency (directed): a ticket can't start until each blocker is merged into its base or closed.
@@ -225,7 +227,7 @@ export function staleReason(m: Manifest | undefined, hash: string, catalogue: Ma
 export interface DecideInput {
   candidates: { iid: number; hash: string }[]; // in dispatch order
   manifests: Map<number, Manifest>;
-  satisfied: (iid: number) => boolean; // blocker merged into the base, or closed
+  dependency: (iid: number) => DependencyResult;
   queue: Set<number>; // tickets Sandcastle will run or is running; blockers outside it need a person
   live: { iid: number; footprint: string[] }[];
   room: number;
@@ -242,9 +244,9 @@ export function decide(input: DecideInput): { decisions: Decision[]; dropped: Ed
   const decisions: Decision[] = input.candidates.map(({ iid, hash }) => {
     const m = input.manifests.get(iid);
     if (!m || m.hash !== hash) return { iid, launch: false, reason: "not analysed yet" };
-    const open = kept.filter((e) => e.to === iid && !input.satisfied(e.from));
+    const open = kept.filter((e) => e.to === iid).map((e) => ({ ...e, result: input.dependency(e.from) })).filter((e) => e.result.state !== "satisfied");
     if (open.length) {
-      const why = open.map((e) => `#${e.from}${input.queue.has(e.from) ? "" : " (outside the agent queue)"}: ${e.what}`);
+      const why = open.map((e) => e.result.state === "unknown" ? `#${e.from}: ${e.result.reason ?? "dependency information unavailable"}` : `#${e.from}${input.queue.has(e.from) ? "" : " (outside the agent queue)"}: ${e.what}`);
       return { iid, launch: false, reason: `waiting on ${why.join("; ")}`, waitingOn: [...new Set(open.map((e) => e.from))] };
     }
     const fp = m.actualFootprint ?? m.footprint;
@@ -302,8 +304,8 @@ export function findJam(input: JamInput): Jam {
 
 // ---- implementer reported a blocker --------------------------------------------
 
-/** "wait" when every blocker names another open, unmerged ticket; otherwise a person has to look. */
-export function blockedOutcome(self: number, blockers: ImplementerBlocker[], satisfied: (iid: number) => boolean): "wait" | "needs-human" {
+/** Wait for numbered unsatisfied or unknown dependencies; invalid reports and satisfied blockers need a person. */
+export function blockedOutcome(self: number, blockers: ImplementerBlocker[], dependency: (iid: number) => DependencyResult): "wait" | "needs-human" {
   if (!blockers.length) return "needs-human";
-  return blockers.every((b) => b.iid != null && b.iid !== self && !satisfied(b.iid)) ? "wait" : "needs-human";
+  return blockers.every((b) => Number.isInteger(b.iid) && b.iid! > 0 && b.iid !== self && dependency(b.iid!).state !== "satisfied") ? "wait" : "needs-human";
 }

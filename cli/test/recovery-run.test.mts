@@ -1,3 +1,4 @@
+// #149: a copy missing dependency evaluation cannot claim recovery work.
 // #150: incomplete proof/delivery workflow copies refuse recovery before claiming work.
 // #137: recovery review includes nested runtime/parser assets in its complete-workflow fixture.
 // Recovery workflow fixtures include assessment.mts and journal.mts, mandatory board imports in the reviewed copy.
@@ -108,7 +109,7 @@ test('an attempt is refused without the recovery workflow copy, claiming nothing
   const f = fixture(t, { copy: false });
   const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, false);
-  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing verification\.mts, tracker\.mts, tracker\.github\.mts, tracker\.gitlab\.mts, ci\.mts, main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md, project-config\.mts, runtime-config\.mts, selection\.mts, vendor\/smol-toml\/index\.js/);
+  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing dependencies\.mts, verification\.mts, tracker\.mts, tracker\.github\.mts, tracker\.gitlab\.mts, ci\.mts, main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md, project-config\.mts, runtime-config\.mts, selection\.mts, vendor\/smol-toml\/index\.js/);
   assert.equal(f.launched.length, 0);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'no attempt recorded, no budget spent');
   assert.equal(f.run().stage, 'stopped');

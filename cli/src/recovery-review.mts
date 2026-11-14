@@ -1,3 +1,4 @@
+// #149: review shared dependency evaluation with its recovery callers.
 // #150: review proof validation and all executable delivery adapters/CI as one workflow.
 // #137: executable runtime/parser helpers join recovery review; TOML data remains project-owned.
 // Recovery workflow gate (slice four, #63). A project's self-recovery is active only when its .sandcastle copy has the
@@ -23,12 +24,12 @@ const CONFIG_WORKFLOW = FROM_ORCHESTRATOR.filter(f => ['runtime-config.mts','pro
 
 /** Every .sandcastle file the repair path runs, as the review covers them. config.mts is project configuration, not workflow. */
 // #150: proof and all executable delivery dependencies must be reviewed as one coherent upgrade.
-export const WORKFLOW = ['verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.mts',
+export const WORKFLOW = ['dependencies.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.mts',
   'prompt.recover.md', 'prompt.verify.md', ...CONFIG_WORKFLOW];
 /** Where Factory's own copy of each workflow file lives, for showing which project files differ. main.mts is templated, so it has none. */
 const SHIPPED: Record<string, string> = {
   ...Object.fromEntries(CONFIG_WORKFLOW.map(f => [f, `orchestrator/${f}`])),
-  ...Object.fromEntries(['verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts'].map(f => [f, `orchestrator/${f}`])),
+  ...Object.fromEntries(['dependencies.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts'].map(f => [f, `orchestrator/${f}`])),
   'recovery.mts': 'orchestrator/recovery.mts', 'recovery-sandbox.mts': 'orchestrator/recovery-sandbox.mts', 'handoff.mts': 'orchestrator/handoff.mts',
   'ownership.mts': 'orchestrator/ownership.mts', 'admission.mts': 'board/admission.mts', 'assessment.mts': 'board/assessment.mts', 'journal.mts': 'board/journal.mts', 'board.mts': 'board/board.mts',
   'prompt.recover.md': 'orchestrator/prompt.recover.md', 'prompt.verify.md': 'cli/templates/project/prompt.verify.md',
