@@ -132,7 +132,10 @@ test('recorder failure cannot change explicit command success, refusal, cleanup 
 
 test('outside merge and changed-requirements observations do not fabricate control actions or legacy execution IDs',t=>{
   const f=fixture(t); f.run('waiting'); setProject('owner/repo');
-  assert.equal(markMergedOutside('1','waiting',{number:3,url:'https://invalid.test/pr/3',mergedAt:at,matchedBy:'branch'},f.p.state),true);
+  const cwd = process.cwd(); process.chdir(f.root);
+  process.env.SANDCASTLE_STATE_DIR = f.p.state;
+  try { assert.equal(markMergedOutside('1','waiting',{number:3,url:'https://invalid.test/pr/3',mergedAt:at,matchedBy:'branch'},f.p.state),true); }
+  finally { process.chdir(cwd); delete process.env.SANDCASTLE_STATE_DIR; }
   writeRecord(f.p.state,'owner_repo--3',{iid:'3',project:'owner/repo',stage:'waiting',pid:process.pid,startedAt:at,stageSince:at,updatedAt:at,queueReasons:[{code:'requirements-changed',text:secret}]});
   const report=exportEvents(f.p.state); assert.equal(f.controls().length,0);
   assert.equal(report.coverage,'observed-only'); assert.ok(report.identityGaps>0);

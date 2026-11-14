@@ -1,7 +1,7 @@
 // Local observational events. Immutable files, per-stream process locks, no state/journal authority.
 // Writers run after admission locks. Export is a read-only snapshot and never promises complete history.
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeSync } from 'node:fs';
+import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAdmission, observationFailure, ownerOf, ownerState, writeDurable } from './admission.mts';
 
@@ -46,7 +46,7 @@ function producer(x: any): ProducerEvent {
   if (!x || typeof x !== 'object' || !id(x.eventId) || !id(x.project) || !validTime(x.observedAt)
     || x.ticket !== undefined && !ticket(x.ticket) || !KINDS.includes(x.eventKind) || !REASONS.includes(x.reasonCode)
     || !['runner','recovery','scheduler','reconciliation','cli','board'].includes(x.origin)
-    || typeof x.identityComplete !== 'boolean' || x.identityComplete && !id(x.executionId) && !id(x.recoveryAttemptId)
+    || typeof x.identityComplete !== 'boolean' || x.identityComplete && !id(x.executionId)
     || ['executionId','recoveryAttemptId','operationId','from','to'].some(k => x[k] !== undefined && !id(x[k]))
     || x.actorIdentity !== undefined && x.actorIdentity !== 'unknown'
     || x.action !== undefined && !ACTIONS.includes(x.action) || x.result !== undefined && !['changed','no-op','refused','failed'].includes(x.result)) throw Error('Invalid telemetry producer payload');
@@ -124,7 +124,7 @@ export function appendEvent(state: string, input: ProducerEvent, hooks: { afterS
     const event: ExecutionEvent = { ...p, version: 1, streamKey: stream, sequence: seqs.length + 1, recordedAt: new Date().toISOString() };
     const name = `${String(event.sequence).padStart(12, '0')}-${event.eventId}.json`;
     const tmp = join(dir, `.${randomUUID()}.tmp`), fd = openSync(tmp, 'wx', 0o600);
-    try { writeSync(fd, JSON.stringify(event) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
+    try { writeFileSync(fd, JSON.stringify(event) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
     try {
       hooks.afterSync?.();
       linkSync(tmp, join(dir, name));
