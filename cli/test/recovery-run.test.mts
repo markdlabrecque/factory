@@ -1,3 +1,4 @@
+// #154: only read-only refusals are ticket-local; explicit settlement, preparation faults and post-commit failures never grant a free attempt.
 // #153: missing observer/checkpoint/dispatch dependencies refuse repair admission before any charge.
 // #149: a copy missing dependency evaluation cannot claim recovery work.
 // #150: incomplete proof/delivery workflow copies refuse recovery before claiming work.
@@ -17,15 +18,16 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readAdmission } from '../../board/admission.mts';
+import { keyFor, readAdmission, withAdmission } from '../../board/admission.mts';
 import { claimRun, readRuns } from '../../board/board.mts';
 import { projectId, readReceipt, receiptFile, recordIntent } from '../../orchestrator/ownership.mts';
 import { containerFor, readAttemptRecord, writeAttemptRecord } from '../../orchestrator/recovery.mts';
 import type { AttemptRecord, Docker } from '../../orchestrator/recovery.mts';
 import { paths } from '../src/paths.mts';
+import { afterPass } from '../src/jam-detect.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import { launchRecovery, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
@@ -211,6 +213,8 @@ test('a crashed attempt waits for its exact container to be confirmed gone, keep
   assert.equal(readAdmission(f.dir).claims['proj--7']?.attempt, IDS[1], 'held while unsettled');
   assert.equal(claimRun({ dir: f.dir, project: 'other', iid: '1', pid: process.pid, cap: 1 }).ok, false, 'its capacity slot');
   assert.match((claimRun({ dir: f.dir, project: 'proj', iid: '9', pid: process.pid, cap: 9 }) as { reason: string }).reason, /held by recovery on #7/);
+  // Settlement is separate from the launcher's read-only validation boundary.
+  assert.equal(settleRecovery(f.p, { ...f.common, at: at(39) }).state, 'settled');
   const third = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(40) });
   assert.equal(third.ok, false);
   assert.match((third as { reason: string }).reason, /used its 2 recovery attempts/);
@@ -314,4 +318,155 @@ test('a remote-only branch that no longer contains the receipt\'s commit is refu
   assert.equal(f.git(f.root, 'branch', '--list', '7-fix-login'), '');
   assert.equal(receiptOf(f)!.branchSha, recorded, 'the recorded commit survives the refusal');
   assert.match((launchRecovery(f.p, { ...f.common, ticket: 7, at: at(11) }) as { reason: string }).reason, /does not contain/, 'and keeps refusing');
+});
+
+function snapshot(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, f.name);
+      if (f.isDirectory()) walk(path);
+      else if (f.isFile()) out[path.slice(root.length)] = readFileSync(path).toString('base64');
+    }
+  };
+  walk(root);
+  return out;
+}
+
+for (const problem of ['branch-missing', 'branch-invalid', 'base-missing', 'base-invalid', 'branches-ambiguous', 'evidence-mismatch', 'worktree-not-owned'] as const) {
+  test(`${problem} is a typed, byte-for-byte read-only refusal`, t => {
+    const f = fixture(t, { worktree: false });
+    const file = join(f.dir, 'proj--7.json');
+    const r = JSON.parse(readFileSync(file, 'utf8'));
+    if (problem === 'branch-missing') f.git(f.root, 'branch', '-D', '7-fix-login');
+    if (problem === 'branch-invalid') r.branch = 'foreign';
+    if (problem === 'base-missing') delete r.base;
+    if (problem === 'base-invalid') r.base = 'missing-base';
+    if (problem === 'branches-ambiguous') f.git(f.root, 'branch', '7-another');
+    if (problem === 'evidence-mismatch') r.evidenceDir = f.home;
+    if (problem === 'worktree-not-owned') f.git(f.root, 'worktree', 'add', '-q', join(f.home, 'someone-elses'), '7-fix-login');
+    writeFileSync(file, JSON.stringify(r));
+    const before = snapshot(f.home);
+    const result = launchRecovery(f.p, { ...f.common, ticket: 7 });
+    assert.equal(result.kind, 'ticket-refused');
+    if (result.kind !== 'ticket-refused') assert.fail(JSON.stringify(result));
+    assert.equal(result.admitted, false);
+    assert.equal(result.code, problem);
+    assert.deepEqual(snapshot(f.home), before, 'Git refs, receipts, evidence, run and recovery stores are unchanged');
+    assert.equal(f.launched.length, 0);
+  });
+}
+
+for (const problem of ['malformed-run', 'unreadable-run', 'malformed-receipt', 'identity', 'workflow', 'git-error', 'capacity'] as const) {
+  test(`${problem} is a read-only project stop even when a ticket branch is missing`, t => {
+    const f = fixture(t, { worktree: false });
+    f.git(f.root, 'branch', '-D', '7-fix-login');
+    if (problem === 'malformed-run') writeFileSync(join(f.dir, 'broken.json'), '{');
+    if (problem === 'unreadable-run') mkdirSync(join(f.dir, 'broken.json'));
+    if (problem === 'malformed-receipt') {
+      const path = receiptFile(f.dir, projectId(f.root, { kind: 'github', host: 'github.com', project: 'proj' }), '7');
+      mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, '{');
+    }
+    if (problem === 'identity') writeFileSync(join(f.root, '.sandcastle/config.mts'), '');
+    if (problem === 'workflow') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed');
+    if (problem === 'git-error') writeFileSync(join(f.root, '.git/config'), 'not a valid Git config\n');
+    if (problem === 'capacity') claimRun({ dir: f.dir, project: 'elsewhere', iid: '8', pid: process.pid, cap: 99 });
+    const before = snapshot(f.home);
+    const r = launchRecovery(f.p, { ...f.common, ticket: 7, cap: problem === 'capacity' ? 1 : 3 });
+    assert.equal(r.kind, 'project-stopped', JSON.stringify(r));
+    assert.equal(r.admitted, false);
+    assert.deepEqual(snapshot(f.home), before);
+    assert.equal(f.launched.length, 0);
+  });
+}
+
+test('intent/adoption and fetch failures stop before charge, not as ticket refusals', t => {
+  const f = fixture(t, { worktree: false });
+  // A file blocks receipt directory creation. Reading the absent receipt is harmless; writing intent fails.
+  writeFileSync(join(f.dir, 'ownership'), 'not a directory');
+  const before = snapshot(f.home);
+  const r = launchRecovery(f.p, { ...f.common, ticket: 7 });
+  assert.equal(r.kind, 'project-stopped');
+  assert.equal(r.admitted, false);
+  assert.deepEqual(snapshot(f.home), before);
+  assert.equal(readRecovery(f.p, f.root).attempts.length, 0);
+
+  const g = fixture(t, { worktree: false });
+  g.git(g.root, 'update-ref', 'refs/remotes/origin/7-fix-login', g.git(g.root, 'rev-parse', '7-fix-login'));
+  g.git(g.root, 'branch', '-D', '7-fix-login');
+  g.git(g.root, 'remote', 'add', 'origin', join(g.home, 'nonexistent-offline-origin'));
+  const failedFetch = launchRecovery(g.p, { ...g.common, ticket: 7 });
+  assert.equal(failedFetch.kind, 'project-stopped');
+  assert.equal(failedFetch.admitted, false);
+  assert.ok(receiptOf(g), 'ownership intent survives failed preparation');
+  assert.equal(readRecovery(g.p, g.root).attempts.length, 0);
+  assert.equal(g.git(g.root, 'branch', '--list', '7-fix-login'), '');
+});
+
+for (const change of ['done', 'generation', 'review', 'capacity'] as const) {
+  test(`admission rechecks ${change} changed after initial read-only checks`, t => {
+    const f = fixture(t);
+    const r = launchRecovery(f.p, { ...f.common, ticket: 7, cap: 1, uuid: () => {
+      if (change === 'done') {
+        const file = join(f.dir, 'proj--7.json');
+        writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stage: 'done' }));
+      }
+      if (change === 'generation') withAdmission(f.dir, tx => { tx.state.generations.proj++; tx.commit(); });
+      if (change === 'review') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed after validation');
+      if (change === 'capacity') claimRun({ dir: f.dir, project: 'elsewhere', iid: '8', pid: process.pid, cap: 99 });
+      return IDS[0];
+    } });
+    assert.equal(r.kind, 'project-stopped', JSON.stringify(r));
+    assert.equal(r.admitted, false);
+    assert.equal(readRecovery(f.p, f.root).attempts.length, 0);
+    assert.equal(f.launched.length, 0);
+    assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
+  });
+}
+
+for (const phase of ['spawn', 'record', 'after-commit'] as const) {
+  test(`${phase} failure remains admitted-failed with the real attempt and exactly one charge`, t => {
+    const f = fixture(t);
+    if (phase === 'record') { mkdirSync(join(f.p.recovery, 'attempts'), { recursive: true }); mkdirSync(f.record(0)); }
+    const r = launchRecovery(f.p, { ...f.common, ticket: 7,
+      ...(phase === 'spawn' ? { spawn: () => { throw new Error('injected spawn failure'); } } : {}),
+      ...(phase === 'after-commit' ? { afterCommit: () => { throw new Error('injected crash after commit'); } } : {}),
+    });
+    assert.equal(r.kind, 'admitted-failed', JSON.stringify(r));
+    if (r.kind !== 'admitted-failed') assert.fail(JSON.stringify(r));
+    assert.equal(r.admitted, true);
+    assert.equal(r.attempt.id, IDS[0]);
+    assert.equal(r.attempt.seq, 1);
+    assert.equal(readRecovery(f.p, f.root).attempts.length, 1);
+    assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
+    assert.equal(readAdmission(f.dir).recovery.proj.admitted, 1);
+    assert.equal(readAdmission(f.dir).recovery.proj.pending.length, 0);
+    assert.equal(f.launched.length, 0);
+    assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
+    assert.equal(readFileSync(join(f.evidence, 'before-1.png'), 'utf8'), 'old evidence');
+  });
+}
+
+test('real afterPass skips three missing branches, then admits one; subsequent passes cannot admit twice', async t => {
+  const f = fixture(t);
+  for (const ticket of [1, 2, 3]) writeFileSync(join(f.dir, `${keyFor(String(ticket), 'proj')}.json`),
+    JSON.stringify({ ...f.run(), iid: String(ticket), branch: `${ticket}-missing`, evidenceDir: undefined }));
+  const report = join(f.home, 'pass.json');
+  const lines: string[] = [];
+  const pass = async (id: string) => {
+    writeFileSync(report, JSON.stringify({ version: 1, pass: id, project: 'proj', at: at(15), tickets: [7, 3, 2, 1], observed: [] }));
+    await afterPass(f.p, { root: f.root, tracker: 'proj', name: 'site', pass: id, report, dir: f.dir,
+      log: l => lines.push(l), mayLaunch: async () => true,
+      settle: (p, o) => settleRecovery(p, { ...o, docker: f.common.docker }),
+      launch: (p, o) => launchRecovery(p, { ...f.common, ...o, uuid: () => IDS[0] }),
+    });
+  };
+  await pass('confirm-1');
+  await pass('confirm-2');
+  assert.equal(lines.filter(l => l.includes('ticket-refused branch-missing')).length, 3);
+  assert.equal(f.launched.length, 1, lines.join('\n'));
+  assert.deepEqual(readRecovery(f.p, f.root).attempts.map(a => a.ticket), [7]);
+  await Promise.all([pass('concurrent-a'), pass('concurrent-b')]);
+  assert.equal(f.launched.length, 1);
+  assert.equal(readAdmission(f.dir).recovery.proj.admitted, 1);
 });

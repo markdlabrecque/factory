@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+// Receipt read errors never masquerade as an absent receipt; only ENOENT permits legacy adoption.
 // #150: preserve the host-recorded implementation baseline with ownership identity.
 // Ownership receipts (slice four, #75): what Factory itself created for a ticket, written before it creates anything, so
 // a later repair can tell its own branch and worktree apart from anyone else's after a crash. One file per ticket,
@@ -50,11 +51,11 @@ export const gitCommonDir = (cwd: string) =>
 const str = (x: unknown) => typeof x === "string" && x.length > 0;
 /** The receipt, `null` when there is none, or an error for an unreadable one (never repaired or replaced). */
 export function readReceipt(file: string): Receipt | null {
-  if (!existsSync(file)) return null;
   let d: any;
   try {
     d = JSON.parse(readFileSync(file, "utf8"));
-  } catch {
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw new Error(`Ownership receipt ${file} is not valid JSON; Factory will not overwrite it.`);
   }
   const ok = d?.version === 1 && [d.projectId, d.projectRoot, d.gitCommonDir, d.ticket, d.branch, d.worktreePath, d.runId, d.createdAt, d.updatedAt].every(str)

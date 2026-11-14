@@ -1,3 +1,4 @@
+// #154: stopped state and recorded work are revalidated under admission; competing recoveries cannot charge twice.
 // Recovery claim tests (#57, admission record since #75): a repair attempt takes a shared-capacity slot, the ticket and
 // its whole project together with its attempt charge, in one admission record replacement, or nothing; a dispatcher claim
 // cannot take a ticket or project a recovery claim holds, which outlives its worker until released; a crash between the
@@ -195,6 +196,46 @@ test('a stale run cannot overwrite a newer claim: board writes and the exit hand
   const r = run(dir, '7')!;
   assert.deepEqual([r.claim, r.note, r.stage], [(second as { run: { claim: string } }).run.claim, 'newer', 'setup'], 'the newer claim\'s record is untouched');
   assert.ok(readAdmission(dir).claims[keyFor('7', 'proj')], 'and its claim was not released by the stale run');
+});
+
+for (const change of ['done', 'active', 'dead-active', 'branch', 'base', 'evidenceDir', 'executionId'] as const) {
+  test(`admission refuses a candidate changed to ${change} after validation`, t => {
+    const { p, dir, pid } = fixture(t);
+    stopped(dir, '7', { branch: '7-fix', base: 'main', evidenceDir: '/ev/7', executionId: 'original' });
+    const expected = run(dir, '7')!;
+    const current = { ...expected };
+    if (change === 'done') current.stage = 'done';
+    else if (change === 'active' || change === 'dead-active') { current.stage = 'implement'; current.pid = change === 'active' ? process.pid : 2 ** 22 + 4321; }
+    else current[change] = 'changed';
+    writeFileSync(join(dir, 'proj--7.json'), JSON.stringify(current));
+    const before = readAdmission(dir);
+    const c = claimRecovery(p, { root, tracker: 'proj', ticket: 7, pid, at: at(10), dir, id: ID(1), branch: '7-fix', expected });
+    assert.equal(c.ok, false);
+    assert.match(reason(c), /no longer stopped|in flight|recorded work changed/);
+    assert.equal(used(p, 7), 0);
+    assert.deepEqual(readAdmission(dir), before);
+  });
+}
+
+test('competing recovery passes admit exactly one project attempt across processes', async t => {
+  const { p, dir, pid } = fixture(t);
+  stopped(dir, '7', { branch: '7-fix' });
+  stopped(dir, '8', { branch: '8-fix' });
+  const source = pathToFileURL(join(import.meta.dirname, '../src/recovery-claim.mts')).href;
+  const pathSource = pathToFileURL(join(import.meta.dirname, '../src/paths.mts')).href;
+  const kids = Array.from({ length: 6 }, (_, i) => {
+    const code = `const {claimRecovery} = await import(${JSON.stringify(source)});
+      const {paths} = await import(${JSON.stringify(pathSource)});
+      const r = claimRecovery(paths(${JSON.stringify(p.home)}), {root:${JSON.stringify(root)},tracker:'proj',
+        ticket:${i % 2 ? 7 : 8},pid:${pid},at:${JSON.stringify(at(10))},dir:${JSON.stringify(dir)},id:${JSON.stringify(ID(i + 1))}});
+      process.stdout.write(r.ok ? 'won' : 'lost');`;
+    return spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'inherit'] });
+  });
+  const outs = await Promise.all(kids.map(async k => { let s = ''; k.stdout!.on('data', d => { s += d; }); await once(k, 'exit'); return s; }));
+  assert.equal(outs.filter(x => x === 'won').length, 1, outs.join(','));
+  assert.equal(readRecovery(p, root).attempts.length, 1);
+  assert.equal(used(p, 7) + used(p, 8), 1);
+  assert.equal(readAdmission(dir).recovery.proj.admitted, 1);
 });
 
 test('claims race across processes: exactly one claimant wins a ticket', async t => {

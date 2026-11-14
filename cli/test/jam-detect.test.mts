@@ -1,3 +1,4 @@
+// #154: bounded numeric scans continue only for typed read-only refusals, never project stops or admitted failures.
 // #153: opened checkpoints never count as repair-budget progress; only confirmed merged completion does.
 // #137: reviewed workflow fixtures include nested offline-parser/runtime assets.
 // Jam confirmation after normal dispatch (#61, cli/src/jam-detect.mts): a pass's report is counted only for its own pass
@@ -55,7 +56,7 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
       observed: jam.map(iid => ({ iid, content: 'h', labels: extra.labels ?? ['bug'] })) }));
     const from = lines.length;
     await afterPass(p, { root, tracker: TRACKER, name: 'site', pass: id, report, dir, log: l => lines.push(l), mayLaunch: async () => true,
-      launch: (_p, x) => { launches.push(x.ticket); return { ok: true, attempt: { seq: launches.length } as any, pid: 1, branch: '', log: 'l' }; },
+      launch: (_p, x) => { launches.push(x.ticket); return { ok: true, kind: 'started', admitted: true, attempt: { seq: launches.length } as any, pid: 1, branch: '', log: 'l' }; },
       ...extra });
     return lines.slice(from);
   };
@@ -112,4 +113,70 @@ test('a spent budget stops repairs until a person changes the ticket', async t =
   const renewed = await f.pass([3], { labels: ['bug', 'model:opus'] });
   assert.match(renewed.join('\n'), /#3 budget renewed \(requirement-change: labels \+model:opus\)/);
   assert.deepEqual(f.launches, [3]);
+});
+
+const refused = (ticket: number) => ({ ok: false as const, kind: 'ticket-refused' as const, admitted: false as const,
+  code: 'branch-missing' as const, reason: `#${ticket}: restore its recorded branch` });
+
+test('three local refusals then one admission in numeric order; no refusal cache or charge', async t => {
+  const f = fixture(t);
+  const order: number[] = [];
+  for (const n of [2, 10, 20, 100]) f.record(n, 'stopped');
+  const launch: AfterPassOptions['launch'] = (_p, o) => {
+    order.push(o.ticket);
+    if (o.ticket !== 100) return refused(o.ticket);
+    return { ok: true, kind: 'started', admitted: true, attempt: { seq: 1 } as any, pid: 1, branch: '100-fix', log: 'l' };
+  };
+  await f.pass([100, 20, 10, 2]);
+  const lines = await f.pass([100, 20, 10, 2], { launch });
+  assert.deepEqual(order, [2, 10, 20, 100]);
+  assert.equal(lines.filter(l => l.includes('ticket-refused branch-missing')).length, 3);
+  assert.match(lines.at(-1)!, /attempt 1 on #100 started/);
+  assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'read-only stub refusals charge nothing');
+  order.length = 0;
+  await f.pass([100, 20, 10, 2], { launch: (_p, o) => { order.push(o.ticket); return refused(o.ticket); } });
+  assert.deepEqual(order, [2, 10, 20, 100], 'all local facts are rechecked on a later pass');
+});
+
+for (const stop of ['project-stopped', 'admitted-failed', 'throw', 'off', 'generation', 'review', 'active', 'changed-run', 'malformed-store'] as const) {
+  test(`a local refusal followed by ${stop} stops before later candidates`, async t => {
+    const f = fixture(t);
+    for (const n of [2, 10, 20]) f.record(n, 'stopped');
+    await f.pass([20, 10, 2]);
+    const order: number[] = [];
+    let allowed = true;
+    const lines = await f.pass([20, 10, 2], {
+      mayLaunch: async () => allowed,
+      launch: (_p, o) => {
+        order.push(o.ticket);
+        if (o.ticket === 2) {
+          if (stop === 'off') allowed = false;
+          if (stop === 'generation') withAdmission(f.dir, tx => { tx.state.generations[TRACKER] = 1; tx.commit(); });
+          if (stop === 'review') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed');
+          if (stop === 'active') beginAttempt(f.p, f.root, { ticket: 2, at: at(10), replay: true });
+          if (stop === 'changed-run') f.record(10, 'done');
+          if (stop === 'malformed-store') writeFileSync(join(f.dir, 'broken.json'), '{');
+          return refused(2);
+        }
+        if (stop === 'throw') throw new Error('unexpected IO');
+        if (stop === 'admitted-failed') return { ok: false, kind: stop, admitted: true, attempt: { seq: 1 } as any, reason: 'spawn failed, charged' };
+        return { ok: false, kind: 'project-stopped', admitted: false, code: 'capacity', reason: 'capacity or readiness unknown' };
+      },
+    });
+    assert.deepEqual(order, ['project-stopped', 'admitted-failed', 'throw'].includes(stop) ? [2, 10] : [2]);
+    assert.ok(lines.length >= 2);
+    assert.equal(order.includes(20), false);
+  });
+}
+
+test('a ticket exhausted under current budget rules is skipped, not renewed', async t => {
+  const f = fixture(t);
+  for (const n of [3, 10]) f.record(n, 'stopped');
+  await f.pass([10, 3]);
+  await f.pass([10, 3], { launch: (_p, o) => refused(o.ticket) });
+  for (const m of [10, 11]) finishAttempt(f.p, f.root, beginAttempt(f.p, f.root, { ticket: 3, at: at(m), replay: true }).seq, { at: at(m), result: 'failed' });
+  const order: number[] = [];
+  await f.pass([10, 3], { launch: (_p, o) => { order.push(o.ticket); return refused(o.ticket); } });
+  assert.deepEqual(order, [10]);
+  assert.equal(readRecovery(f.p, f.root).budgets['3'].used, 2);
 });

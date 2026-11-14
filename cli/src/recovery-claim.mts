@@ -1,3 +1,4 @@
+// Admission rechecks stopped state and the validated work snapshot under the shared lock. Strict recovery reads never reconcile or hide malformed run records.
 // #137: recovery uses the TOML dispatch cap against the shared board; absent TOML keeps the legacy default.
 // Recovery's atomic claim (slice four, #57; admission record since #75). A repair attempt needs three things at once: a
 // slot under the shared run cap (counted across every project in the run-state folder, as dispatcher launches are),
@@ -16,10 +17,12 @@
 // settle step releases (cli/src/recovery-run.mts, after the attempt's exact container is confirmed gone); an error
 // after it is thrown, never refunded. Nothing here launches, signals or reads the tracker.
 import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import type { RunState } from '../../board/board.mts';
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
 import { generationOf, keyFor, withAdmission } from '../../board/admission.mts';
 import type { AdmissionTx } from '../../board/admission.mts';
-import { admitRun, writeRecord } from '../../board/board.mts';
+import { admitRun, readRuns, writeRecord } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
 import { attemptProblem, beginAttempt, readRecovery } from './recovery-state.mts';
 import type { Attempt } from './recovery-state.mts';
@@ -42,10 +45,31 @@ export function replayAdmitted(p: Paths, tx: AdmissionTx, root: string, tracker:
   }
 }
 
+/** Recovery must not reconcile runs or silently skip malformed shared records during candidate validation. */
+export function readRecoveryRuns(dir: string) {
+  let files: string[];
+  try { files = readdirSync(dir).filter(f => f.endsWith('.json')); }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []; throw e; }
+  for (const file of files) {
+    const r = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+    if (!r || typeof r.iid !== 'string' || typeof r.stage !== 'string' || typeof r.startedAt !== 'string') {
+      throw new Error(`malformed shared run record ${file}`);
+    }
+  }
+  const runs = readRuns(dir, false);
+  if (runs.length !== files.length) throw new Error('unreadable or malformed shared run records; recovery held');
+  return runs;
+}
+
+/** Identity of the recorded work validated before preparation. Admission must still see this exact work. */
+export const recoveryWork = (r: RunState) => JSON.stringify([r.iid, r.project, r.branch, r.base, r.evidenceDir,
+  r.startedAt, r.executionId, r.implementationBaseSha, r.claim, r.recovery]);
+
 /** Claim capacity, ticket and project ownership for one repair attempt by process `pid`, or nothing. `tracker` is the
  *  project's TRACKER.project, the name its run records carry; `id` the attempt's UUID. */
 export function claimRecovery(p: Paths, o: { root: string; tracker: string; ticket: number; pid: number; at: string; id: string;
   cap?: number; branch?: string; log?: string; dir?: string; container?: string; record?: string;
+  expected?: RunState; generation?: number; episode?: string; validate?: () => void;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
   afterCommit?: () => void }): RecoveryClaim {
   const toml = loadTomlConfig(join(o.root, '.sandcastle'));
@@ -55,11 +79,26 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
   return withAdmission(dir, tx => {
     replayAdmitted(p, tx, o.root, o.tracker);
     const generation = generationOf(tx.state, o.tracker);
+    const problem = attemptProblem(readRecovery(p, o.root), o.ticket, generation);
+    if (problem) return { ok: false, reason: problem };
+    if (o.episode !== undefined && readRecovery(p, o.root).episode?.id !== o.episode) return { ok: false, reason: 'confirmed episode changed before admission' };
+    // Inspect the stored stage before admitRun's normal dead-process reconciliation can rewrite it.
+    const before = readRecoveryRuns(dir).find(r => r.project === o.tracker && r.iid === String(o.ticket));
+    if (!before || before.stage !== 'stopped') return { ok: false, reason: `#${o.ticket} already has a run in flight or is no longer stopped (${before?.stage ?? 'missing'})` };
+    if (o.expected && recoveryWork(before) !== recoveryWork(o.expected)) return { ok: false, reason: 'candidate recorded work changed before admission' };
     const a = admitRun(tx, dir, {
       iid: String(o.ticket), pid: o.pid, cap, project: o.tracker, kind: 'recovery', attempt: o.id,
-      also: () => {
+      also: current => {
+        const stored = readRecoveryRuns(dir).find(r => r.project === o.tracker && r.iid === String(o.ticket));
+        if (!stored || stored.stage !== 'stopped' || recoveryWork(stored) !== recoveryWork(before)) throw new Error('candidate recorded work changed before admission');
         const problem = attemptProblem(readRecovery(p, o.root), o.ticket, generation);
         if (problem) throw new Error(problem);
+        if (!current || current.stage !== 'stopped') throw new Error('candidate is no longer stopped');
+        if (o.branch && current.branch !== o.branch || o.expected && recoveryWork(current) !== recoveryWork(o.expected)) {
+          throw new Error('candidate recorded work changed before admission');
+        }
+        if (o.generation !== undefined && generation !== o.generation) throw new Error('project generation changed before admission');
+        o.validate?.();
       },
     });
     if (!a.ok) return a;
