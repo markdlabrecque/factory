@@ -1,5 +1,6 @@
 // Exercise the production Node watchdog without any host timeout utility. Poll for delivered SIGKILL before asserting exit,
 // and clean up every recorded descendant even if an assertion fails on a constrained CI runner.
+// Pin fixture Node to the test runner, including CI setups where Node is outside /usr/bin:/bin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
@@ -30,6 +31,12 @@ function fixture(mode: string) {
   });
   return {dir, exec};
 }
+test('isolated probe PATH resolves the test runner Node executable', async () => {
+  const f = fixture('ok');
+  const result = await f.exec('node -p "process.execPath"');
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.trim(), process.execPath);
+});
 for (const mode of ['ok', 'cli', 'module', 'launch', 'dom', 'cleanup']) test(`probe ${mode}`, async () => {
   const f = fixture(mode);
   const result = await browserPreflight(f, f.dir);
