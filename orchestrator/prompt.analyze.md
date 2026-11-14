@@ -26,4 +26,4 @@ These may be worked on before, after, or alongside this one.
 
    Do not list a ticket just because it touches the same area. Same files is not a dependency.
 
-3. **footprint**: every path this ticket is likely to change, found by searching the code. Use exact file paths where you can, a directory ending in `/` where you can't say which file, and a glob such as `config/sync/field.field.node.event.*` for families of config files. Include files the change will need to create. When unsure, include it: a missed path costs more than an extra one.
+3. **footprint**: every path this ticket is likely to change, found by searching the code. Consult the repository documentation rule and include the authoritative documentation paths required by the proposed change, not unrelated guides. Use exact file paths where you can, a directory ending in `/` where you can't say which file, and a glob such as `config/sync/field.field.node.event.*` for families of config files. Include files the change will need to create. When unsure, include it: a missed path costs more than an extra one. File overlap is a conflict, not a hard dependency.

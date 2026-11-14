@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { blockedOutcome, breakCycles, contentHash, decide, expandUnits, findJam, overlap, pathsOverlap, SANDCASTLE_MARK, staleReason, unitHash } from "./graph.mts";
 import type { Edge, Manifest } from "./graph.mts";
 
-// Run: node --test 'orchestrator/*.test.mts'
+// Graph tests cover dependency, cycle and footprint conflict decisions, including documentation paths.
+// Run: node --test orchestrator/graph.test.mts
 
 const manifest = (iid: number, over: Partial<Manifest> = {}): Manifest => ({
   iid, project: "p", hash: `h${iid}`, analyzedAt: "", base: "main", baseSha: "",
@@ -25,6 +26,22 @@ test("path overlap: files, directories, globs", () => {
 test("overlap skips ignored paths", () => {
   assert.deepEqual(overlap(["composer.lock", "web/a.php"], ["composer.lock"], ["composer.lock"]), []);
   assert.deepEqual(overlap(["docs/x.md", "web/a.php"], ["docs/", "web/"], ["docs/"]), ["web/a.php"]);
+});
+
+test("documentation footprints retain ordinary conflict protection", () => {
+  const run = (first: Partial<Manifest>, second: Partial<Manifest>, live: { iid: number; footprint: string[] }[] = []) => decide({
+    candidates: [1, 2].map((iid) => ({ iid, hash: `h${iid}` })),
+    manifests: new Map([[1, manifest(1, first)], [2, manifest(2, second)]]),
+    dependency: () => ({ state: "satisfied" }), queue: new Set([1, 2]), live, room: 2,
+  }).decisions.map((d) => d.launch);
+
+  assert.deepEqual(run({ footprint: ["README.md"] }, { footprint: ["README.md"] }), [true, false]);
+  assert.deepEqual(run({ footprint: ["docs/factory-cli.md"] }, { footprint: ["docs/factory-cli.md"] }), [true, false]);
+  assert.deepEqual(run({ footprint: ["docs/"] }, { footprint: ["docs/project-config.md"] }), [true, false]);
+  assert.deepEqual(run({ footprint: ["docs/factory-cli.md"] }, { footprint: ["docs/project-config.md"] }), [true, true]);
+  assert.deepEqual(run({ footprint: ["docs/factory-cli.md", "src/app.mts"] }, { footprint: ["docs/project-config.md", "src/app.mts"] }), [true, false]);
+  assert.deepEqual(run({ footprint: ["docs/a.md"], actualFootprint: ["README.md"] }, { footprint: ["README.md"] }), [true, false]);
+  assert.deepEqual(run({ footprint: ["README.md"] }, { footprint: ["docs/a.md"] }, [{ iid: 9, footprint: ["README.md"] }]), [false, true]);
 });
 
 test("content hash ignores Sandcastle and system comments, line endings and labels", () => {
