@@ -1,4 +1,4 @@
-# Playwright layer: Chromium only, headless. Node is already in the sandcastle base image.
+# Standard Factory verification prerequisite: Chromium only, headless. Run as root before switching to the agent user; Node is in the base image.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN npm install -g playwright@{{PLAYWRIGHT_VERSION}} \
   && playwright install --with-deps chromium \
