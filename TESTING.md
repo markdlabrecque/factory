@@ -1,4 +1,5 @@
-<!-- #153: existing delivery tests stub trackers and scheduler authorization; no live CI, agents or managers. -->
+<!-- Deferred recovery tests use fixture-only settlement, exact-container Docker stubs and fake service-manager boundaries.
+Existing delivery tests stub trackers and scheduler authorization; no live CI, agents or managers. -->
 <!-- Factory test policy: fixture-owned boundaries and runtimes for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
 <!-- #150: proof/entrypoint tests use synthetic evidence and stub all agent/container/tracker boundaries. -->
 # Testing
@@ -14,6 +15,14 @@ node --test orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
+
+## Deferred recovery regression tests
+
+```sh
+node --test cli/test/recovery-followup.test.mts cli/test/recovery-schedule.test.mts cli/test/jam-detect.test.mts cli/test/recovery-state.test.mts cli/test/recovery-command.test.mts cli/test/scheduler.test.mts
+```
+
+These tests cover local settlement during project pauses, preserved saved branches, later two-pass re-evaluation after competing delivery, unchanged retry budgets, fail-closed ownership/global/cancellation gates, strict backward-compatible snapshots and read-only human/JSON status. The process-level scheduler fixture uses stand-in repair processes and a Docker stub that accepts only exact-container removal/inspection. It proves delivered attempts stay outstanding until authoritative merge, not actual tracker delivery or real Docker behavior. Run the full suite above after integration with the current main branch. Admission race, prerequisite and independent proof/CI/review tests remain mandatory.
 
 ## Systemd is a trusted dependency
 

@@ -1,3 +1,5 @@
+// Follow-up status derives current local ownership, pause, budgets and delivery gates without settlement or writes.
+// Opened PRs and delivered attempts stay outstanding; only authoritative merged records complete follow-up.
 // `factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]` (slice four
 // self-recovery, #62; review #63).
 // status: whether recovery is active in the project (recovery-review.mts recoveryCopyProblem: the copy must have the
@@ -28,6 +30,8 @@ import type { Attempt, Episode, RecoveryState, Renewal } from '../recovery-state
 import { resolveProject, runStateDir } from '../runs.mts';
 import type { ProjectContext } from '../runs.mts';
 import { age } from '../scheduler-health.mts';
+import { currentFollowups } from '../recovery-followup.mts';
+import type { Followup } from '../recovery-state.mts';
 
 const RECENT = 10;
 export type RecoveryOptions = { project?: string; cwd?: string; json?: boolean; confirm?: boolean; now?: number; at?: string };
@@ -37,7 +41,7 @@ export type RecoverySummary = {
   active: boolean; inactiveReason?: string; file: string; problem?: string;
   episode: Episode | null; running: Attempt | null; claim: AdmissionClaim | null;
   budgets: { ticket: number; used: number; remaining: number; renewedAt?: string; renewal?: string }[];
-  attempts: AttemptView[]; renewals: Renewal[]; episodes: Episode[];
+  attempts: AttemptView[]; renewals: Renewal[]; episodes: Episode[]; followups: Record<string, Followup>;
 };
 
 const withFiles = (a: Attempt): AttemptView => ({ ...a, ...(a.log ? { logExists: existsSync(a.log) } : {}), ...(a.report ? { reportExists: existsSync(a.report) } : {}) });
@@ -53,11 +57,15 @@ export function recoverySummary(p: Paths, ctx: ProjectContext): RecoverySummary 
   let s: RecoveryState;
   try { s = readRecovery(p, ctx.root); }
   catch (e) {
-    return { ...base, problem: (e as Error).message, episode: null, running: null, claim, budgets: [], attempts: [], renewals: [], episodes: [] };
+    return { ...base, problem: (e as Error).message, episode: null, running: null, claim, budgets: [], attempts: [], renewals: [], episodes: [], followups: {} };
   }
+  let followups: Record<string, Followup> = {};
+  try { followups = currentFollowups(p, { root: ctx.root, tracker: ctx.tracker, dir: runStateDir(p),
+    paused: !ctx.schedule?.enabled ? 'Project scheduling is paused or not opted in.' : undefined }); }
+  catch (e) { problem = (e as Error).message; }
   const budgets = Object.entries(s.budgets).map(([k, b]) => ({ ticket: Number(k), used: b.used, remaining: remainingAttempts(s, Number(k)),
     ...(b.renewedAt ? { renewedAt: b.renewedAt } : {}), ...(b.renewal ? { renewal: b.renewal } : {}) })).sort((a, b) => a.ticket - b.ticket);
-  return { ...base, ...(problem ? { problem } : {}), episode: s.episode ?? null, running: runningAttempt(s) ?? null, claim, budgets,
+  return { ...base, ...(problem ? { problem } : {}), episode: s.episode ?? null, running: runningAttempt(s) ?? null, claim, budgets, followups,
     attempts: s.attempts.slice(-RECENT).reverse().map(withFiles), renewals: s.renewals.slice(-RECENT).reverse(), episodes: s.episodes.slice(-RECENT).reverse() };
 }
 
@@ -84,7 +92,8 @@ export function recoveryStatusLines(r: RecoverySummary, name: string, now: numbe
   if (last) out.push(`  Last attempt: ${describeAttempt(last, now)}`);
   const spent = r.budgets.filter(b => b.used > 0);
   if (spent.length) out.push(`  Attempts left: ${spent.map(b => `#${b.ticket} ${b.remaining}/${ATTEMPT_LIMIT}`).join(', ')}`);
-  if (r.problem || r.running || last || r.episode) out.push(`  Details: factory recovery status --project ${name}`);
+  for (const [ticket, f] of Object.entries(r.followups)) out.push(`  #${ticket} ${f.state}: ${f.reason} Next: ${f.nextAction}`);
+  if (r.problem || r.running || last || r.episode || Object.keys(r.followups).length) out.push(`  Details: factory recovery status --project ${name}`);
   return out;
 }
 
@@ -98,6 +107,13 @@ function show(ctx: ProjectContext, r: RecoverySummary, now: number) {
   if (r.budgets.length) {
     console.log('Budgets:');
     for (const b of r.budgets) console.log(`  #${b.ticket}  ${b.remaining} of ${ATTEMPT_LIMIT} attempts left${b.renewal ? `  (renewed by ${b.renewal} ${b.renewedAt})` : ''}`);
+  }
+  if (Object.keys(r.followups).length) {
+    console.log('Follow-ups:');
+    for (const [ticket, f] of Object.entries(r.followups)) {
+      console.log(`  #${ticket} ${f.state}: ${f.reason}`);
+      console.log(`      Next: ${f.nextAction}`);
+    }
   }
   if (r.attempts.length) {
     console.log('Attempts, newest first:');
@@ -122,7 +138,7 @@ function show(ctx: ProjectContext, r: RecoverySummary, now: number) {
 /** Why the project's recovery is active now, under the admission lock, or null. */
 function activeProblem(s: RecoveryState, claims: AdmissionClaim[], pending: boolean): string | null {
   const running = runningAttempt(s);
-  if (running) return `recovery attempt ${running.seq} on #${running.ticket} is running or its container is not yet confirmed gone; the next scheduled pass settles it`;
+  if (running) return `recovery attempt ${running.seq} on #${running.ticket} is running or its container is not yet confirmed gone; the next globally enabled tick performs local settlement, even while the project is paused`;
   if (claims.length) return `a recovery claim holds #${claims[0].iid} (process ${claims[0].owner.pid})`;
   if (pending) return 'an admitted recovery attempt is still being recorded';
   return null;

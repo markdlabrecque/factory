@@ -1,4 +1,6 @@
-// Scan stopped candidates once in numeric order; only a typed read-only ticket refusal permits continuation. Recheck cancellation, generation, budget, review and run state for every candidate.
+// Scan stopped candidates once in numeric order; only a typed read-only ticket refusal permits continuation. Recheck
+// cancellation, generation, budget, review and run state for every candidate. Local follow-up observations refresh after
+// settlement and every launch/refusal. Only fresh successful-pass reports, never snapshots, can confirm/admit recovery.
 // Jam confirmation after normal dispatch (slice four self-recovery, #61). The scheduler's tick (commands/tick.mts) gives
 // every scheduled pass its own pass id and report file (FACTORY_PASS_ID, FACTORY_JAM_REPORT); the project's dispatcher
 // writes there what it saw after its normal work (orchestrator/dispatch.mts, graph.mts findJam): the jammed tickets, or
@@ -22,6 +24,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { generationOf, readAdmission } from '../../board/admission.mts';
 import type { Paths } from './paths.mts';
+import { refreshFollowups } from './recovery-followup.mts';
+import type { Settled } from './recovery-run.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
 import { launchRecovery, settleRecovery } from './recovery-run.mts';
 import { readRecoveryRuns } from './recovery-claim.mts';
@@ -47,14 +51,16 @@ export function readJamReport(file: string, pass: string, project: string): JamR
 
 export type AfterPassOptions = { root: string; tracker: string; name: string; pass: string; report: string; dir: string;
   mayLaunch: () => Promise<boolean>; log: (line: string) => void; now?: () => Date;
-  settle?: typeof settleRecovery; launch?: typeof launchRecovery };
+  settle?: typeof settleRecovery; launch?: typeof launchRecovery; pauseReason?: () => string | undefined };
 
 /** Settle, observe, confirm and maybe launch for one completed pass; see the file comment. Never throws. */
 export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
   const say = (line: string) => o.log(`recovery ${o.name}: ${line}`);
   const now = () => (o.now ?? (() => new Date()))().toISOString();
+  let settled: Settled | undefined;
   try {
-    const settled = (o.settle ?? settleRecovery)(p, { root: o.root, tracker: o.tracker, dir: o.dir, at: now() });
+    settled = (o.settle ?? settleRecovery)(p, { root: o.root, tracker: o.tracker, dir: o.dir, at: now() });
+    refreshFollowups(p, { ...o, at: now(), settled, paused: o.pauseReason?.() });
     if (settled.state === 'settled') say(`attempt ${settled.attempt.seq} on #${settled.attempt.ticket} ended: ${settled.attempt.result}`);
     if (settled.state === 'running') return say(`attempt ${settled.attempt.seq} on #${settled.attempt.ticket} is running; pass not counted`);
     if (settled.state === 'unconfirmed') return say(`${settled.reason}; pass not counted`);
@@ -93,6 +99,7 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
       const copy = recoveryCopyProblem(p, o.root);
       if (copy) return say(`jam on ${jam} confirmed; not repairing: ${copy}`);
       const launched = (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now() });
+      refreshFollowups(p, { ...o, at: now(), paused: o.pauseReason?.() });
       switch (launched.kind) {
         case 'ticket-refused':
           say(`#${target} ticket-refused ${launched.code}: ${launched.reason}`);
@@ -112,5 +119,8 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
     say(`jam on ${jam} confirmed; no stopped candidate admitted (${stopped.length} considered)`);
   } catch (e) {
     say(`not evaluated: ${(e as Error).message.split('\n')[0]}`);
+  } finally {
+    try { refreshFollowups(p, { ...o, at: now(), settled, paused: o.pauseReason?.() }); }
+    catch (e) { say(`follow-up not recorded: ${(e as Error).message.split('\n')[0]}`); }
   }
 }

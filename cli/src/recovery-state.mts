@@ -1,5 +1,6 @@
-// Recovery reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent.
-// #153: delivery waits do not renew budgets; confirmed merged checkpoints are progress.
+// Recovery reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent. Delivery waits never
+// renew budgets. Only verified progress or explicit requirement/reset rules do. Optional followups record local
+// observations, never launch authority; identical observations keep their original changedAt.
 // Self-recovery's durable record (slice four, #55): one file per project, `<state>/recovery/<key>.json`, where `key` is
 // derived from the project's canonical root and the file repeats `root`. It holds:
 // - `episode`: the current jam. A jam is identified by its affected tickets (the sorted iids the jam detector reports).
@@ -52,8 +53,11 @@ export type RenewalKind = 'progress' | 'requirement-change' | 'reset';
 export type Renewal = { at: string; kind: RenewalKind; ticket?: number; detail?: string };
 export type Budget = { used: number; renewedAt?: string; renewal?: RenewalKind };
 export type Watch = { seenAt: string; content: string; labels: string[]; delivery?: string };
+export type Followup = { state: 'waiting' | 'paused' | 'operator-required' | 'pending' | 'complete';
+  reason: string; nextAction: string; changedAt: string };
 export type RecoveryState = { version: 1; root: string; nextSeq: number; episode?: Episode; episodes: Episode[];
-  budgets: Record<string, Budget>; attempts: Attempt[]; renewals: Renewal[]; watch?: Record<string, Watch> };
+  budgets: Record<string, Budget>; attempts: Attempt[]; renewals: Renewal[]; watch?: Record<string, Watch>;
+  followups?: Record<string, Followup> };
 
 const RESULTS: AttemptResult[] = ['running', 'delivered', 'unresolved', 'failed', 'timed-out', 'interrupted', 'host-followup',
   'ownership-refused', 'repaired', 'blocked'];
@@ -97,7 +101,13 @@ export function readRecovery(p: Paths, root: string): RecoveryState {
       && (r.ticket === undefined || isIid(r.ticket)) && optStr(r.detail))
     && (d.watch === undefined || (d.watch && typeof d.watch === 'object' && !Array.isArray(d.watch)
       && Object.entries<any>(d.watch).every(([k, w]) => isIid(Number(k)) && isTime(w?.seenAt) && typeof w.content === 'string'
-        && Array.isArray(w.labels) && w.labels.every((l: unknown) => typeof l === 'string') && optStr(w.delivery))));
+        && Array.isArray(w.labels) && w.labels.every((l: unknown) => typeof l === 'string') && optStr(w.delivery))))
+    && (d.followups === undefined || (d.followups && typeof d.followups === 'object' && !Array.isArray(d.followups)
+      && Object.entries<any>(d.followups).every(([k, f]) => /^[1-9]\d*$/.test(k) && Number.isSafeInteger(Number(k)) && f && typeof f === 'object' && !Array.isArray(f)
+        && Object.keys(f).sort().join(',') === 'changedAt,nextAction,reason,state'
+        && ['waiting', 'paused', 'operator-required', 'pending', 'complete'].includes(f.state)
+        && typeof f.reason === 'string' && f.reason.trim().length > 0
+        && typeof f.nextAction === 'string' && f.nextAction.trim().length > 0 && isTime(f.changedAt))));
   if (!ok) throw new Error(`Unsupported recovery state: ${file}. Fix or remove it; Factory will not overwrite it.`);
   return d;
 }

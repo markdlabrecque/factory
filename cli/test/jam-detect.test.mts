@@ -1,5 +1,6 @@
-// #154: bounded numeric scans continue only for typed read-only refusals, never project stops or admitted failures.
-// #153: opened checkpoints never count as repair-budget progress; only confirmed merged completion does.
+// Bounded numeric scans continue only for typed read-only refusals, never project stops or admitted failures.
+// Follow-up refresh after settlement/refusal retains saved work and budgets; snapshots never confirm a fresh pass.
+// Opened checkpoints never count as repair-budget progress; only confirmed merged completion does.
 // #137: reviewed workflow fixtures include nested offline-parser/runtime assets.
 // Jam confirmation after normal dispatch (#61, cli/src/jam-detect.mts): a pass's report is counted only for its own pass
 // and project; the same jam on two completed passes is confirmed and one repair is launched on the stopped ticket, only
@@ -17,7 +18,27 @@ import { afterPass } from '../src/jam-detect.mts';
 import type { AfterPassOptions } from '../src/jam-detect.mts';
 import { paths } from '../src/paths.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
-import { beginAttempt, deliveryMarker, finishAttempt, readRecovery } from '../src/recovery-state.mts';
+import { beginAttempt, deliveryMarker, finishAttempt, readRecovery, mutateRecovery } from '../src/recovery-state.mts';
+
+test('temporary refusal is observed without spending attempts; later successful passes reconsider saved work', async t => {
+  const f = fixture(t);
+  f.record(3, 'stopped');
+  // A stale persistent observation is not a jam report or permission to launch.
+  mutateRecovery(f.p, f.root, s => { s.followups = { '3': { state: 'pending', reason: 'saved', nextAction: 'recheck', changedAt: at(0) } }; return { write: true, value: undefined }; });
+  let calls = 0;
+  const refuse = () => { calls++; return { ok: false as const, kind: 'project-stopped' as const, admitted: false as const,
+    code: 'project-claimed', reason: 'competing admission' }; };
+  await f.pass([3], { launch: refuse });
+  assert.equal(calls, 0, 'snapshot never bypasses two-pass confirmation');
+  await f.pass([3], { launch: refuse });
+  assert.equal(calls, 1);
+  assert.equal(readRecovery(f.p, f.root).budgets['3'], undefined);
+  assert.equal(readRecovery(f.p, f.root).followups?.['3'].state, 'pending');
+  await f.pass([3]);
+  assert.deepEqual(f.launches, [3], 'no manual retry or budget reset after competing work clears');
+  await f.pass([3], { pauseReason: () => 'Project paused', mayLaunch: async () => false });
+  assert.equal(readRecovery(f.p, f.root).followups?.['3'].state, 'paused');
+});
 
 test('opened delivery checkpoints never count as recovery progress', () => {
   const base = { stage: 'done' as const, verdict: 'PASS', mr: 'https://github.com/owner/repo/pull/1' };
