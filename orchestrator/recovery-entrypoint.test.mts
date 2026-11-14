@@ -1,3 +1,4 @@
+// #153: exact-SHA REST merge remains bound to the original recovery verification.
 // #149: unknown dependency reads prevent recovery verification and delivery.
 // #150: entrypoint uses recorded historical baseline and structured synthetic verification.
 // #126: normal runs snapshot the description model; invalid direct starts queue before Git/container work.
@@ -143,8 +144,9 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   assert.equal(record.tip, tip);
   assert.equal(git(origin, "rev-parse", "7-fix-login"), tip, "the exact verified tip was pushed");
   const gh = readFileSync(join(fake, "gh.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).args as string[]);
-  const merge = gh.find((a) => a[0] === "pr" && a[1] === "merge")!;
-  assert.equal(merge[merge.indexOf("--match-head-commit") + 1], tip, "delivery merged only that tip");
+  // #153: the REST merge API preserves the same exact-head guard as initial/continued delivery.
+  const merge = gh.find((a) => a[0] === 'api' && a.includes('repos/owner/repo/pulls/9/merge'))!;
+  assert.ok(merge.includes(`sha=${tip}`), 'delivery merged only that tip');
   assert.equal(gh.filter((a) => a[0] === "pr" && a[1] === "create").length, 1);
   // The repair and verifier ran with AGENT.model, not the ticket's model:sonnet label.
   assert.deepEqual([...new Set(readFileSync(join(fake, "models.log"), "utf8").trim().split("\n"))], ["pi pi-claude-subscription/claude-opus-5-5"]);

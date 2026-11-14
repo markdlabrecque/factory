@@ -1,3 +1,4 @@
+// #153: short-lived delivery ownership uses normal PID/start fencing and advances project activity without repair charges.
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
@@ -24,7 +25,7 @@ import { dirname, join } from "node:path";
 // unknown version fails closed: nothing is claimed and the file is never overwritten. readAdmission never writes.
 // Import-safe and dependency-free apart from Node, so factory init copies it next to board.mts (cli/src/scaffold.mts).
 
-export type ClaimKind = "normal" | "recovery";
+export type ClaimKind = "normal" | "recovery" | "delivery";
 /** A process: its pid and, where the platform tells, when it started (to tell a reused pid apart). */
 export type Owner = { pid: number; start?: string };
 export interface AdmissionClaim {
@@ -127,8 +128,8 @@ export function readAdmission(stateDir: string): AdmissionState {
   }
   const ok = isObj(d) && d.version === 1
     && isObj(d.claims) && Object.entries<any>(d.claims).every(([k, c]) => isObj(c) && str(c.token) && typeof c.project === "string" && str(c.iid)
-      && k === keyFor(c.iid, c.project) && (c.kind === "normal" || c.kind === "recovery") && validOwner(c.owner) && str(c.at)
-      && optStr(c.attempt) && (c.kind === "normal" || str(c.attempt)))
+      && k === keyFor(c.iid, c.project) && (c.kind === "normal" || c.kind === "recovery" || c.kind === "delivery") && validOwner(c.owner) && str(c.at)
+      && optStr(c.attempt) && (c.kind !== "recovery" || str(c.attempt)))
     && isObj(d.generations) && Object.values(d.generations).every((g) => Number.isInteger(g) && (g as number) >= 0)
     && isObj(d.recovery) && Object.values<any>(d.recovery).every((r) => isObj(r) && Number.isInteger(r.admitted) && r.admitted >= 0
       && Array.isArray(r.pending) && r.pending.every((a: any) => isObj(a) && str(a.id) && str(a.iid) && str(a.root) && str(a.at)

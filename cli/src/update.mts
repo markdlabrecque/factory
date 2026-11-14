@@ -1,3 +1,4 @@
+// #153: scaffoldSources inherits the observer/checkpoint module pair; customized workflow stays protected.
 // #137: TOML is project-owned even when absent; shared offline-parser assets remain Factory-owned.
 // Project copy classification for `factory update` (slice 4.5, #91). Compares each file Factory scaffolds into a
 // project's `.sandcastle/` with Factory's own copy and sorts it into one class:

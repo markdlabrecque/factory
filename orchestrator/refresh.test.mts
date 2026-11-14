@@ -1,4 +1,7 @@
+// #153: real copied dispatch observes durable CI waits only on authorized scheduled passes.
 // #149: dispatch retries unknown dependencies for both trackers without labels or launches.
+import { createProof, sha256 } from './verification.mts';
+import { loadTomlConfig } from './project-config.mts';
 // #137: scaffolded fixtures use authoritative TOML for settings, shared-board capacity and CLI overrides.
 // #126: dispatch/refresh resolve description models on both trackers, preserving running attempt models.
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
@@ -75,6 +78,37 @@ function fixture(t: any, kind = "github") {
   const bytes = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "absent";
   return { home, root, dir, fake, env, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
 }
+
+test('scheduled copied dispatch: pending then green uses the same proof/PR; manual and refresh do not observe', t => {
+  const f = fixture(t), sc = join(f.root, '.sandcastle');
+  f.data.tickets[0].description = '**Model:** Sonnet 5.5\nDeliver this behavior';
+  f.data.openBranches = ['7-topic']; f.manifest(7);
+  git(f.root,'branch','7-topic'); git(f.root,'push','-q','origin','7-topic');
+  const tip = git(f.root,'rev-parse','7-topic'), cfg = loadTomlConfig(sc)!;
+  const evidence = join(f.home,'evidence'); mkdirSync(evidence);
+  writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\n'); writeFileSync(join(evidence,'out.txt'),'verified');
+  writeFileSync(join(evidence,'verification.json'),JSON.stringify({version:1,verdict:'PASS',changeKind:'feature',evidenceKind:'command',interactive:false,criteria:[{requirement:'behavior',result:'pass',evidence:['out.txt']}],artifacts:[{path:'out.txt',kind:'command-output',phase:'check'}],limitations:[]}));
+  const names = ['factory.toml','main.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','dispatch.mts','runtime-config.mts','project-config.mts','selection.mts'];
+  const settings = {image:cfg.config.image,model:cfg.AGENT.model,thinking:cfg.AGENT.thinking??null,merge:{auto:cfg.MERGE.auto,method:cfg.MERGE.method,requiredChecks:cfg.MERGE.requiredChecks??[]},ciWaitMinutes:cfg.config.ciWaitMinutes,noPipelineMinutes:cfg.config.noPipelineMinutes};
+  const hash = unitHash(f.data.tickets[0], []);
+  const identity = {project:'owner/repo',ticket:'7',executionId:'execution',branch:'7-topic',base:'main',baseline:tip,tip,requirementsHash:hash};
+  const proof = createProof(f.dir,evidence,identity,{imageId:`sha256:${'a'.repeat(64)}`,nodeVersion:'v22',settings,code:Object.fromEntries(names.map(n=>[n,sha256(readFileSync(join(sc,n)))]))});
+  const at = new Date().toISOString(), path = join(f.dir,`${f.key(7)}.json`);
+  writeFileSync(path,JSON.stringify({iid:'7',project:'owner/repo',stage:'waiting',stageSince:at,startedAt:at,updatedAt:at,pid:process.pid,executionId:'execution',branch:'7-topic',base:'main',implementationBaseSha:tip,verdict:'PASS',verification:{id:proof.id,tip,requirementsHash:hash},delivery:{version:1,kind:'github',host:'github.com',repository:'owner/repo',number:1,url:'https://github.com/owner/repo/pull/1',branch:'7-topic',base:'main',sha:tip,project:'owner/repo',ticket:'7',executionId:'execution',proofId:proof.id,state:'ci-waiting',reasonCode:'opened',observedAt:at}}));
+  f.data.delivery={sha:tip,pending:true};
+  const cli = join(f.home,'trusted-cli.mjs');
+  writeFileSync(cli,`import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(join(f.fake,'status-calls'))},JSON.stringify(process.argv.slice(2))+'\\n'); console.log(JSON.stringify({version:1,scheduler:{serviceEnabled:true,timerActive:true},projects:[{root:${JSON.stringify(f.root)},schedule:{enabled:true,branch:'main'},blocker:null}]}));`);
+  const scheduled={FACTORY_SCHEDULED:'1',FACTORY_CLI_ENTRYPOINT:cli,FACTORY_SCHEDULER_NODE:process.execPath};
+  f.pass(); f.pass(['--refresh-only'],scheduled); f.pass(['--dry-run'],scheduled);
+  assert.equal(f.bytes(join(f.fake,'status-calls')),'absent');
+  f.pass([],scheduled); assert.equal(JSON.parse(f.bytes(path)).delivery.state,'ci-waiting');
+  f.data.delivery.pending=false; f.pass([],scheduled);
+  const done=JSON.parse(f.bytes(path)); assert.equal(done.delivery.state,'merged'); assert.equal(done.stage,'done'); assert.equal(done.verification.id,proof.id); assert.equal(done.verdict,'PASS');
+  const calls=f.bytes(join(f.fake,'tracker.jsonl')).split('\n').filter(Boolean).map(s=>JSON.parse(s));
+  assert.equal(calls.filter(a=>a.includes('repos/owner/repo/pulls/1/merge')).length,1);
+  assert.ok(!calls.some(a=>a.includes('create')||a.includes('comment')||a.includes('--undo'))); assert.equal(f.bytes(join(f.fake,'launches')),'absent');
+  assert.ok(f.bytes(join(f.fake,'status-calls')).split('\n').filter(Boolean).every(s=>JSON.stringify(JSON.parse(s))===JSON.stringify(['schedule','status','--project',f.root,'--json'])));
+});
 
 for (const kind of ["github", "gitlab"]) {
   test(`${kind}: unknown implementer dependencies hold dispatch and recover without ticket edits`, t => {

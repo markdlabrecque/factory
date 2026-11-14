@@ -1,8 +1,11 @@
+// #153: delivery claims retain proof/execution history and fence single-observation checkpoint writes.
+import { validDelivery } from './delivery.mts';
+import type { DeliveryCheckpoint } from './delivery.mts';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { claimLive, keyFor, newToken, ownerOf, releaseClaim, transferClaim, withAdmission } from "./admission.mts";
+import { claimLive, keyFor, newToken, ownerOf, releaseClaim, transferClaim, withAdmission, writeDurable } from "./admission.mts";
 import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
 import { readAssessments, requestRefresh } from "./assessment.mts";
@@ -68,6 +71,7 @@ export interface RunState {
   executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
   implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
+  delivery?: DeliveryCheckpoint; // host-only current pointer; never reconstructed from note prose
   implementationModel?: string; // chosen once by main.mts, never updated by description refresh
   updatedAt: string;
   pid: number;
@@ -180,6 +184,14 @@ export function trackStage(previous: Partial<RunState>, next: RunState, at: stri
 }
 
 export function setStage(iid: string, patch: Partial<RunState>): void {
+  if (patch.delivery !== undefined && !validDelivery(patch.delivery)) throw Error('Invalid host delivery checkpoint');
+  withAdmission(stateDir(), tx => writeStage(tx, iid, patch));
+  renderBoard();
+}
+
+function writeStage(tx: AdmissionTx, iid: string, patch: Partial<RunState>): void {
+  const activeClaim = tx.state.claims[keyFor(iid, project)];
+  if (activeClaim && claimLive(activeClaim) && activeClaim.token !== held) return;
   mkdirSync(stateDir(), { recursive: true });
   const file = resolve(stateDir(), `${keyFor(iid, project)}.json`);
   let cur: Partial<RunState> = {};
@@ -205,16 +217,16 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
     stageSince: stageChanged || !cur.stageSince ? at : cur.stageSince,
     queueReasons: patch.queueReasons ?? (stageChanged || Object.prototype.hasOwnProperty.call(patch, "note") ? undefined : cur.queueReasons),
   } as RunState, at);
-  write(file, JSON.stringify(next, null, 2));
+  if (patch.delivery !== undefined) writeDurable(file, JSON.stringify(next, null, 2));
+  else write(file, JSON.stringify(next, null, 2));
   // A normal run that finished or parked lets go of its claim (a recovery claim is released only by settling).
   if (held && patch.stage && (TERMINAL.includes(patch.stage) || PARKED.includes(patch.stage))) {
     try {
-      releaseClaim(stateDir(), keyFor(iid, project), held, "normal");
+      if (activeClaim?.kind === 'normal' && activeClaim.token === held) { delete tx.state.claims[keyFor(iid, project)]; tx.commit(); }
     } catch {
       /* its owner exiting releases it too */
     }
   }
-  renderBoard();
 }
 
 /** Record a run the dispatcher has just spawned (process `pid`), before the run writes for itself. It counts as
@@ -289,15 +301,19 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
   }
+  if (kind === 'delivery' && (!current || !validDelivery(current.delivery) || current.delivery.state !== 'ci-waiting')) return { ok: false, reason: 'no valid waiting delivery checkpoint' };
   const at = now();
   const token = newToken();
   const claim: AdmissionClaim = { token, project: proj ?? "", iid: o.iid, kind, owner: ownerOf(o.pid), at, ...(o.attempt ? { attempt: o.attempt } : {}) };
   tx.state.claims[key] = claim;
-  if (kind === "normal") tx.state.generations[claim.project] = (tx.state.generations[claim.project] ?? 0) + 1;
+  if (kind !== "recovery") tx.state.generations[claim.project] = (tx.state.generations[claim.project] ?? 0) + 1;
   const { key: _key, evidenceUrl: _url, activity: _a, activityAt: _at, ...cur } = (current ?? {}) as Partial<BoardRun>;
+  if (kind === 'delivery') {
+    return { ok: true, key, token, claim, current, run: { ...current!, claim: token } };
+  }
   const run = trackStage(cur, { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
     queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token,
-    verification: undefined,
+    verification: undefined, delivery: undefined,
     executionId: kind === "normal" ? token : cur.executionId, updatedAt: at, stageSince: at } as RunState, at);
   return { ok: true, key, token, claim, current, run };
 }
@@ -305,7 +321,7 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
 /** Write a claimed run's record (temp file + rename). */
 export function writeRecord(dir: string, key: string, run: RunState): void {
   mkdirSync(dir, { recursive: true });
-  write(resolve(dir, `${key}.json`), JSON.stringify(run, null, 2));
+  writeDurable(resolve(dir, `${key}.json`), JSON.stringify(run, null, 2));
 }
 
 /** Atomically claim a slot under the shared cap and ownership of ticket `iid` for process `pid` (see admitRun). Refused,
@@ -321,6 +337,28 @@ export function claimRun(o: AdmitOptions & { dir?: string }): Claim {
     tx.commit();
     writeRecord(dir, a.key, a.run);
     return { ok: true, run: a.run };
+  });
+}
+
+/** #153: reserve only delivery ownership, without a new execution, stage transition or repair charge. */
+export function claimDelivery(o: Omit<AdmitOptions, 'kind'> & { dir?: string }): Claim {
+  return claimRun({ ...o, kind: 'delivery' });
+}
+
+/** Persist then release only this observer's token. No tracker calls occur under the lock. */
+export function finishDelivery(dir: string, proj: string, iid: string, token: string, checkpoint: DeliveryCheckpoint, note: string): boolean {
+  return withAdmission(dir, tx => {
+    const key = keyFor(iid, proj), c = tx.state.claims[key];
+    if (!c || c.kind !== 'delivery' || c.token !== token || !claimLive(c)) return false;
+    const cur = readRuns(dir, false).find(r => r.key === key);
+    if (!cur || cur.claim !== token || !validDelivery(cur.delivery) || cur.delivery.state !== 'ci-waiting' || !validDelivery(checkpoint)
+      || cur.executionId !== checkpoint.executionId || !['proofId','executionId','project','ticket','kind','host','repository','projectId','number','url','branch','base','sha'].every(k => cur.delivery![k] === checkpoint[k])) return false;
+    const at = now(), merged = checkpoint.state === 'merged';
+    writeRecord(dir, key, trackStage(cur, { ...cur, delivery: checkpoint, stage: merged ? 'done' : 'waiting',
+      stageSince: cur.stage === (merged ? 'done' : 'waiting') ? cur.stageSince : at,
+      updatedAt: at, claim: undefined, note }, at)); // dispatch sets run.mergedAt only after tracker advancement
+    delete tx.state.claims[key]; tx.commit();
+    return true;
   });
 }
 
@@ -353,7 +391,7 @@ export function queueModelProblem(iid: string, patch: Pick<RunState, "title" | "
  *  merge time (`mergedAt`) and `mergedOutside`; the verdict and the rest of the record are kept. Under the admission lock,
  *  so it cannot overwrite a run admitted meanwhile: refused (false, nothing written) when the ticket holds a live claim, or
  *  its record is gone, already merged, or no longer at stage `from`. */
-export function markMergedOutside(iid: string, from: Stage, pr: { number: number; url: string; mergedAt: string; matchedBy: "branch" | "title" },
+export function markMergedOutside(iid: string, from: Stage, pr: { number: number; url: string; mergedAt: string; matchedBy: "branch" | "title"; checkpoint?: DeliveryCheckpoint },
   dir = stateDir()): boolean {
   const key = keyFor(iid, project);
   const done = withAdmission(dir, (tx) => {
@@ -366,9 +404,14 @@ export function markMergedOutside(iid: string, from: Stage, pr: { number: number
       return false;
     }
     if (cur.stage !== from || cur.mergedAt || ![...PARKED, "stopped"].includes(cur.stage)) return false;
+    if (cur.delivery) {
+      const d = pr.checkpoint;
+      if (!validDelivery(cur.delivery) || !validDelivery(d) || d.state !== 'merged' || d.number !== pr.number || d.url !== pr.url
+        || !['proofId','executionId','project','ticket','kind','host','repository','projectId','number','url','branch','base','sha'].every(k => d[k] === cur.delivery![k])) return false;
+    } else if (pr.checkpoint) return false;
     const at = now();
     writeRecord(dir, key, trackStage(cur, { ...cur, stage: "done", stageSince: at, updatedAt: at, queueReasons: undefined, mr: pr.url,
-      mergedAt: pr.mergedAt, mergedOutside: { pr: pr.number, matchedBy: pr.matchedBy }, note: `merged outside Factory (matched by ${pr.matchedBy})` }, at));
+      ...(pr.checkpoint ? { delivery: pr.checkpoint } : {}), mergedAt: pr.mergedAt, mergedOutside: { pr: pr.number, matchedBy: pr.matchedBy }, note: `merged outside Factory (matched by ${pr.matchedBy})` }, at));
     return true;
   });
   if (done) renderBoard();

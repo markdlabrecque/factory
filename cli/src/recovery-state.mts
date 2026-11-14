@@ -1,3 +1,4 @@
+// #153: delivery waits do not renew budgets; confirmed merged checkpoints are progress.
 // Self-recovery's durable record (slice four, #55): one file per project, `<state>/recovery/<key>.json`, where `key` is
 // derived from the project's canonical root and the file repeats `root`. It holds:
 // - `episode`: the current jam. A jam is identified by its affected tickets (the sorted iids the jam detector reports).
@@ -226,8 +227,10 @@ export function resetRecovery(p: Paths, root: string, o: { at: string; detail?: 
 /** The verified delivery a run record shows, or undefined: a finished run whose independent verifier passed and whose
  *  branch was delivered (a PR/MR), marked merged once the dispatcher saw it merge. A stopped, failing, unpushed or
  *  reserved record has none, so the helper's repair work counts only once it has been verified and delivered. */
-export function deliveryMarker(r: Pick<RunState, 'stage' | 'verdict' | 'mr' | 'mergedAt'> | undefined): string | undefined {
+// #153: an open checkpoint never renews repair budget; only confirmed merged completion does.
+export function deliveryMarker(r: Pick<RunState, 'stage' | 'verdict' | 'mr' | 'mergedAt' | 'delivery'> | undefined): string | undefined {
   if (r?.stage !== 'done' || r.verdict !== 'PASS' || !r.mr) return undefined;
+  if (r.delivery) return r.delivery.state === 'merged' && r.delivery.mergedAt ? `merged ${r.mr}` : undefined;
   return `${r.mergedAt ? 'merged' : 'delivered'} ${r.mr}`;
 }
 

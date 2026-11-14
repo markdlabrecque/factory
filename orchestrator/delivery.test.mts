@@ -1,133 +1,102 @@
-// #150: auto-merge adapters require fresh authorization after CI; recording fixtures use no tracker/network.
-// Covers required gates, SHA guards, MR-first CI, manual delivery, and GitHub's failed-CI exception.
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { MERGE } from "./config.mts";
-
-const dir = mkdtempSync(join(tmpdir(), "factory-delivery-"));
-process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
-for (const tool of ["gh", "glab"]) writeFileSync(join(dir, tool), `#!/usr/bin/env node
+// #153: both adapters bind checks to exact heads; continuation has zero create/push/comment/rerun/draft effects.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { MERGE, TRACKER } from './config.mts';
+import type { DeliveryIdentity } from '../board/delivery.mts';
+const dir = mkdtempSync(join(tmpdir(), 'factory-delivery-'));
+process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+const repo = TRACKER.project, host = (TRACKER as any).host ?? 'github.com', labHost = (TRACKER as any).gitlabHost ?? '', id = (TRACKER as any).projectId ?? 0;
+const sha = 'a'.repeat(40);
+const identities: Record<string, DeliveryIdentity> = {
+  github: { kind: 'github', host, repository: repo, number: 1, url: `https://${host}/${repo}/pull/1`, branch: 'topic', base: 'main', sha },
+  gitlab: { kind: 'gitlab', host: labHost, repository: repo, projectId: id, number: 1, url: `https://${labHost}/${repo}/-/merge_requests/1`, branch: 'topic', base: 'main', sha },
+};
+for (const tool of ['gh', 'glab']) writeFileSync(join(dir, tool), `#!/usr/bin/env node
 const fs = require('node:fs');
-const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(join(dir, "calls"))}, JSON.stringify(args)+'\\n');
-const s = JSON.parse(fs.readFileSync(${JSON.stringify(join(dir, "scenario"))}, 'utf8'));
+const args = process.argv.slice(2), tool = ${JSON.stringify(tool)};
+const path = ${JSON.stringify(join(dir, 'scenario'))};
+const s = JSON.parse(fs.readFileSync(path, 'utf8'));
+fs.appendFileSync(${JSON.stringify(join(dir, 'calls'))}, JSON.stringify([tool,...args])+'\\n');
 const out = x => console.log(typeof x === 'string' ? x : JSON.stringify(x));
-if (args[0] === 'pr') {
-  if (args[1] === 'create') out('https://github.test/pull/1');
-  else if (args[1] === 'checks') out(s.checks ?? [{name:'test',bucket:'pass'}]);
-  else if (args[1] === 'merge' && s.refuse) process.exit(1);
-  else if (!['merge','ready','comment'].includes(args[1])) process.exit(9);
-} else if (args.includes('-X') && args.includes('POST') && args.some(x => x.endsWith('/merge_requests'))) {
-  out({iid:1,web_url:'https://gitlab.test/merge_requests/1'});
-} else if (args.some(x => x.endsWith('/merge_requests/1/merge'))) {
-  if (s.refuse) process.exit(1);
-  out({state:'merged'});
-} else if (args.some(x => x.endsWith('/merge_requests/1/notes'))) {
-  out({});
-} else if (args.some(x => x.endsWith('/merge_requests/1'))) {
-  out({sha:s.head ?? 'tip',head_pipeline:s.noPipeline ? null : {id:5,sha:s.pipelineSha ?? 'tip',status:s.status ?? 'success'}});
-} else if (args.some(x => x.includes('/pipelines/5/jobs'))) {
-  out(s.jobs ?? [{name:'test',status:'success'}]);
-} else process.exit(9);
+const sha = ${JSON.stringify(sha)}, repo = ${JSON.stringify(repo)};
+const ghUrl = ${JSON.stringify(identities.github.url)}, glUrl = ${JSON.stringify(identities.gitlab.url)};
+const mr = args.find(x => /merge_requests\\/1$/.test(x));
+const pr = args.find(x => /pulls\\/1$/.test(x));
+if (args[0] === 'pr' && args[1] === 'create') out(ghUrl);
+else if (args[0] === 'pr' && args[1] === 'checks') out(s.checks ?? [{name:'test',bucket:'pass'}]);
+else if (args[0] === 'pr' && args[1] === 'comment') out('');
+else if (args.includes('POST') && args.some(x => x.endsWith('/merge_requests'))) out({iid:1,web_url:glUrl});
+else if (args.some(x => /\\/merge$/.test(x))) {
+  if (s.refuse) out(tool === 'gh' ? {merged:false} : {state:'opened'});
+  else { s.merged = true; fs.writeFileSync(path, JSON.stringify(s)); if(s.lostResponse) process.exit(1); out(tool === 'gh' ? {merged:true} : {state:'merged'}); }
+} else if (args.some(x => x.endsWith('/notes'))) out({});
+else if (pr) {
+  if(s.transport) process.exit(1);
+  out({number:1,state:s.closed?'closed':'open',draft:s.draft??false,merged:s.merged??false,merged_at:s.merged?'2026-01-01T00:00:00Z':null,mergeable:true,mergeable_state:s.restricted?'blocked':'clean',
+    head:{ref:'topic',sha:s.head??sha,repo:{full_name:repo}},base:{ref:s.base??'main',repo:{full_name:repo}}});
+} else if (mr) {
+  if(s.transport) process.exit(1);
+  out({iid:1,project_id:${id},source_project_id:${id},target_project_id:${id},source_branch:'topic',target_branch:s.base??'main',sha:s.head??sha,state:s.merged?'merged':s.closed?'closed':'opened',draft:s.draft??false,merged_at:s.merged?'2026-01-01T00:00:00Z':null,detailed_merge_status:s.restricted?'not_approved':'mergeable',
+    head_pipeline:s.noPipeline?null:{id:5,sha:s.pipelineSha??sha,status:s.status??'success'}});
+} else if (args.some(x => x.includes('/check-runs'))) out([{check_runs:(s.checks??[{name:'test',bucket:'pass'}]).map(c=>({name:c.name,head_sha:s.checkHead??sha,status:c.bucket==='pending'?'in_progress':'completed',conclusion:c.bucket==='pass'?'success':c.bucket==='skipping'?'skipped':'failure'}))}]);
+else if (args.some(x=>x.includes('/statuses'))) out([s.commitStatuses??[]]);
+else if (args.some(x=>x.includes('/pipelines/5/jobs'))) out((s.jobs??[{name:'test',status:'success'}]).map(j=>({...j,commit:{id:s.jobHead??sha}})));
+else process.exit(9);
 `, { mode: 0o755 });
 process.env.PATH = `${dir}:${process.env.PATH}`;
-const github = await import("./tracker.github.mts");
-const gitlab = await import("./tracker.gitlab.mts");
-const setup = (scenario = {}, required: string[] = []) => {
-  writeFileSync(join(dir, "scenario"), JSON.stringify(scenario));
-  writeFileSync(join(dir, "calls"), "");
-  MERGE.requiredChecks = required;
-};
-const calls = () => readFileSync(join(dir, "calls"), "utf8").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as string[]);
-const delivery = { beforeMerge: () => undefined, branch: "topic", base: "main", sha: "tip", title: "title", body: (s: string) => s, onStage: () => {}, waitMinutes: 1, noCiMinutes: 0, autoMerge: true };
-
-// Advance the deadlines without a real 15-second sleep.
-let now = 0;
-Date.now = () => now += 10_000;
-globalThis.setTimeout = ((fn: () => void) => { fn(); return 0; }) as unknown as typeof setTimeout;
-
-test("GitLab opens MR before reading CI and merges with the pushed SHA", async () => {
-  setup({}, ["test"]);
-  assert.equal((await gitlab.deliver(delivery)).merged, true);
-  assert.ok(calls()[0].includes("POST"));
-  assert.ok(calls().at(-1)?.includes("sha=tip"));
-});
-
-test("GitLab blocks missing, skipped, failed, manual, stale and absent CI", async () => {
-  for (const scenario of [
-    { jobs: [{ name: "other", status: "success" }] },
-    { jobs: [{ name: "test", status: "skipped" }] },
-    { jobs: [{ name: "test", status: "manual" }] },
-    { status: "failed" }, { status: "running" }, { noPipeline: true },
-    { pipelineSha: "old" }, { head: "changed" }, { refuse: true },
-  ]) {
-    setup(scenario, ["test"]);
-    const result = await gitlab.deliver(delivery);
-    assert.equal(result.merged, false);
-    assert.ok(result.blocked);
-    assert.ok(calls().some((c) => c.some((a) => a.endsWith("/notes"))));
-    if (!("refuse" in scenario)) assert.ok(!calls().some((c) => c.some((a) => a.endsWith("/merge"))));
-  }
-});
-
-test("GitHub uses required names and preserves SHA guard", async () => {
-  setup({}, ["test"]);
-  assert.equal((await github.deliver(delivery)).merged, true);
-  assert.ok(calls().at(-1)?.includes("--match-head-commit"));
-  assert.ok(calls().at(-1)?.includes("tip"));
-});
-
-test("GitHub parks missing/skipped/no checks but failed CI still drafts and throws", async () => {
-  for (const checks of [[], [{ name: "other", bucket: "pass" }], [{ name: "test", bucket: "skipping" }]]) {
-    setup({ checks }, ["test"]);
-    assert.ok((await github.deliver(delivery)).blocked);
-    assert.ok(!calls().some((c) => c.includes("merge") || c.includes("--undo")));
-    assert.ok(calls().some((c) => c.includes("comment")));
-  }
-  setup({ checks: [{ name: "test", bucket: "fail" }] }, ["test"]);
-  await assert.rejects(github.deliver(delivery), /CI failed/);
-  assert.ok(calls().some((c) => c.includes("--undo")));
-});
-
-test("GitHub rejected SHA-guarded merge comments and parks, without drafting", async () => {
-  setup({ refuse: true }, ["test"]);
-  const result = await github.deliver(delivery);
-  assert.equal(result.merged, false);
-  assert.match(result.blocked ?? "", /SHA-guarded merge/);
-  assert.equal(result.url, "https://github.test/pull/1");
-  assert.ok(calls().some((c) => c.includes("comment")));
-  assert.ok(!calls().some((c) => c.includes("--undo")));
-});
-
-for (const [name, adapter] of [['GitHub', github], ['GitLab', gitlab]] as const) {
-  test(`${name} authorizes only after checks pass; refusal or unknown never merges`, async () => {
-    for (const mode of ['refuse', 'throw', 'missing']) {
-      setup({}, ['test']);
-      let authorized = false;
-      const result = await adapter.deliver({ ...delivery, beforeMerge: mode === 'missing' ? undefined as any : () => {
-        authorized = true;
-        assert.ok(calls().some(a => a.includes('checks') || a.some(x => x.includes('/pipelines/5/jobs'))), 'CI precedes authorization');
-        assert.ok(!calls().some(a => a.includes('merge') || a.some(x => x.endsWith('/merge'))));
-        if (mode === 'throw') throw Error('tracker read failed');
-        return 'requirements changed';
-      } });
-      assert.equal(authorized, mode !== 'missing');
-      assert.equal(result.merged, false);
-      assert.ok(result.blocked);
-      assert.ok(!calls().some(a => a.includes('merge') || a.some(x => x.endsWith('/merge'))));
+const github = await import('./tracker.github.mts'), gitlab = await import('./tracker.gitlab.mts');
+const setup = (s: object = {}, required = ['test']) => { writeFileSync(join(dir, 'scenario'), JSON.stringify(s)); writeFileSync(join(dir, 'calls'), ''); MERGE.auto = true; MERGE.requiredChecks = required; };
+const calls = (): string[][] => readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean).map(s => JSON.parse(s));
+const merges = () => calls().filter(a => a.some(x => x.endsWith('/merge')));
+let now = Date.now(); Date.now = () => now;
+globalThis.setTimeout = ((fn: () => void) => { now += 15000; fn(); return 0; }) as any;
+const delivery = { beforeMerge: () => undefined, branch: 'topic', base: 'main', sha, title: 'title', body: (s: string) => s, onStage: () => {}, waitMinutes: 1, noCiMinutes: 0, autoMerge: true };
+for (const [kind, adapter] of Object.entries({ github, gitlab })) {
+  const identity = identities[kind];
+  test(`${kind}: opened callback precedes CI and crash does not lose PR identity`, async () => {
+    setup(); let captured: DeliveryIdentity | undefined;
+    await assert.rejects(adapter.deliver({ ...delivery, onOpened: d => { captured = d; throw Error('crash after durable save'); } }), /crash after durable save/);
+    assert.deepEqual(captured, identity); assert.equal(calls().length, 1);
+  });
+  test(`${kind}: initial exact-head success, required gates and mandatory authorization`, async () => {
+    setup(); assert.equal((await adapter.deliver(delivery)).merged, true); assert.equal(merges().length, 1);
+    assert.ok(merges()[0].includes(`sha=${sha}`));
+    for (const beforeMerge of [() => 'requirements changed', () => { throw Error('unknown'); }, undefined]) {
+      setup(); assert.equal((await adapter.deliver({ ...delivery, beforeMerge: beforeMerge as any })).merged, false); assert.equal(merges().length, 0);
     }
-    setup({ checks: [], noPipeline: true }, ['test']);
-    let called = false;
-    await adapter.deliver({ ...delivery, beforeMerge: () => { called = true; return undefined; } });
-    assert.equal(called, false);
+  });
+  test(`${kind}: continuation pending then green merges once, no side effects`, async () => {
+    setup(kind === 'github' ? { checks: [{name:'test',bucket:'pending'}] } : { status:'running', jobs:[{name:'test',status:'running'}] });
+    assert.equal(adapter.observeDelivery(identity).state, 'ci-waiting');
+    setup(); assert.equal((await adapter.mergeExistingDelivery(identity, () => undefined)).state, 'merged');
+    assert.equal((await adapter.mergeExistingDelivery(identity, () => undefined)).state, 'merged');
+    assert.equal(merges().length, 1);
+    assert.ok(calls().every(a => a[1] === 'api' && !a.includes('POST') && !a.some(x => /notes|rerun/.test(x))));
+  });
+  test(`${kind}: changed identities, failed/skipped/missing checks and restrictions refuse merge`, async () => {
+    const scenarios = [{head:'b'.repeat(40)}, {base:'other'}, {closed:true}, {draft:true}, {restricted:true},
+      ...(kind === 'github' ? [{checks:[]}, {checks:[{name:'other',bucket:'pass'}]}, {checks:[{name:'test',bucket:'skipping'}]}, {checks:[{name:'test',bucket:'fail'}]}, {checkHead:'b'.repeat(40)}]
+        : [{noPipeline:true}, {pipelineSha:'b'.repeat(40)}, {jobs:[]}, {jobs:[{name:'test',status:'skipped'}]}, {jobs:[{name:'test',status:'failed'}]}, {jobs:[{name:'test',status:'canceled'}]}])];
+    for (const s of scenarios) { setup(s); const r = await adapter.mergeExistingDelivery(identity, () => undefined); assert.notEqual(r.state, 'merged', JSON.stringify(s)); assert.equal(merges().length, 0); }
+  });
+  test(`${kind}: lost merge response is reconciled on same PR, not blindly repeated`, async () => {
+    setup({lostResponse:true}); await assert.rejects(adapter.mergeExistingDelivery(identity, () => undefined));
+    assert.equal(adapter.observeDelivery(identity).state, 'merged'); assert.equal(merges().length, 1);
   });
 }
-
-test("GitHub manual delivery opens only, regardless of required checks", async () => {
-  setup({}, ["missing"]);
-  assert.deepEqual(await github.deliver({ ...delivery, autoMerge: false }), { url: "https://github.test/pull/1", merged: false });
-  assert.equal(calls().length, 1);
+test('GitHub legacy commit statuses are bound by exact-SHA endpoint and newest context result', async () => {
+  setup({checks:[],commitStatuses:[{context:'test',state:'success'},{context:'test',state:'failure'}]});
+  assert.equal(github.observeDelivery(identities.github).state,'ready');
+  setup({checks:[],commitStatuses:[{context:'test',state:'success',sha:'b'.repeat(40)}]});
+  assert.equal(github.observeDelivery(identities.github).state,'operator-required');
+});
+test('GitHub failed initial CI is an operator hold without draft mutation', async () => {
+  setup({checks:[{name:'test',bucket:'fail'}]}); const r = await github.deliver(delivery);
+  assert.equal(r.state, 'operator-required'); assert.equal(r.reasonCode, 'checks-failed'); assert.ok(!calls().some(a => a.includes('--undo')));
+});
+test('GitHub manual mode opens only', async () => {
+  setup(); assert.equal((await github.deliver({...delivery,autoMerge:false})).merged,false); assert.equal(calls().length,1);
 });

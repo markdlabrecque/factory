@@ -1,3 +1,4 @@
+// #153: explicit legacy upgrades ship both continuation helpers without replacing custom prompts.
 // #149: legacy upgrades install dependency evaluation without overwriting project customization.
 // #150: executable tracker changes invalidate recovery review; project-owned prompts remain protected.
 // #137: update snapshots cover nested vendor assets and project-owned TOML.
@@ -100,21 +101,19 @@ test('factory update --dry-run reports by class and writes nothing; without --dr
   assert.deepEqual(snapshot(), before);
 });
 
+// #153: legacy upgrades add the complete continuation pair but retain customized verifier policy.
 test('legacy upgrade creates verification helper but keeps a customized verifier prompt for explicit merge', t => {
   const { p, app, root, sc } = fixture(t);
   addProject(p, root);
-  rmSync(join(sc, 'verification.mts'));
-  rmSync(join(sc, 'dependencies.mts'));
+  for (const f of ['dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts']) rmSync(join(sc, f));
   writeFileSync(join(sc, 'prompt.verify.md'), '# My legacy verifier\nWrite verdict.md only.\n');
   const c = classes(classifyCopy(p, root, { app }));
-  assert.equal(c['verification.mts'], 'missing');
-  assert.equal(c['dependencies.mts'], 'missing');
+  for (const f of ['dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts']) assert.equal(c[f], 'missing');
   assert.equal(c['prompt.verify.md'], 'project');
   const out: string[] = [];
   t.mock.method(console, 'log', (s: string) => out.push(s));
   assert.equal(update(p, { apply: true, cwd: root, app }), 0);
-  assert.deepEqual(readFileSync(join(sc, 'verification.mts')), readFileSync(join(app, 'orchestrator/verification.mts')));
-  assert.deepEqual(readFileSync(join(sc, 'dependencies.mts')), readFileSync(join(app, 'orchestrator/dependencies.mts')));
+  for (const [f, source] of [['dependencies.mts','orchestrator'],['delivery.mts','board'],['delivery-followup.mts','orchestrator'],['verification.mts','orchestrator']]) assert.deepEqual(readFileSync(join(sc,f)),readFileSync(join(app,source,f)));
   assert.equal(readFileSync(join(sc, 'prompt.verify.md'), 'utf8'), '# My legacy verifier\nWrite verdict.md only.\n');
   assert.match(out.join('\n'), /recovery review/);
 });

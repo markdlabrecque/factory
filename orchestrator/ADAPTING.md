@@ -1,3 +1,4 @@
+<!-- #153: delivery checkpoints and claims continue exact-head CI waits only with fresh proof/settings/scheduler authority. -->
 <!-- #149: ship shared dependency evaluation and its callers as one reviewed upgrade. -->
 <!-- #140: compact red current blockers replace the Current ticket panel and manual refresh control; backend checks remain. -->
 <!-- Scheduler stub reads are concurrent-safe; browser preflight owns its group through a Node watchdog, not host timeout. CI retains TAP failures. -->
@@ -14,6 +15,49 @@
 <!-- #122: GitLab MR-first auto delivery, shared required checks, blocked gates wait for a person. -->
 <!-- #150: upgrade structured proof, prompts and executable delivery dependencies together. -->
 # Orchestrator
+
+## Continuing existing delivery
+
+`handoff.mts` durably records a version-1 delivery checkpoint immediately after a
+successful create, before waiting for CI. It binds tracker host/repository/number/URL,
+source/base, verified SHA, execution and proof ID. An ambiguous create is unresolved:
+never replay it or infer identity/state from historical notes. New executions clear
+current pointers; old proof/evidence directories remain.
+
+Only normal `FACTORY_SCHEDULED=1` non-dry passes continue `ci-waiting` checkpoints
+with auto-merge enabled, oldest-observed first, at most ten per pass. Each observer
+uses one 30-second deadline, with 10-second tracker/authorization subprocess bounds,
+no sleep/retry loop, no agents and no creates, pushes, reruns or evidence reposts.
+It rehashes the frozen proof and workflow, compares current verification/merge
+settings and requirements/eligibility, and verifies exact local and remote heads.
+Unknown/changed proof inputs require fresh verification or explicit human review.
+Legacy custom CONFIG values are not guessed: scheduled continuation requires an
+authoritative TOML configuration; legacy manual merging remains supported.
+
+The tick supplies `FACTORY_CLI_ENTRYPOINT` (its own absolute CLI path) and
+`FACTORY_SCHEDULER_NODE` (saved Node). That exact read-only CLI must return version 1
+from `schedule status --project <canonical-root> --json`: globally enabled/active,
+exactly one matching registered enabled project, matching base and `blocker: null`.
+This is checked before observation and immediately before merge. Missing/old CLI,
+pause, cancellation, off/unknown or branch switches refuse automatic merge. There
+is no PATH fallback or scheduler mutation. Manual and refresh-only dispatch never
+continue an open PR; existing exact-identity reconciliation still recognizes a
+person's merge. Legacy branch/title reconciliation applies only without checkpoints.
+
+A short-lived `delivery` admission claim holds ticket ownership and shared capacity,
+advances activity generation and excludes conflicting recovery, without creating an
+execution or repair charge. All result writes are token-fenced before releasing the
+caller's token. Dead/PID-reused owners can be reclaimed. Unknown tracker/merge
+responses stay retryable on the same PR; confirmed merges retain original evidence.
+Pending CI and operator holds have distinct notes. An opened checkpoint never counts
+as recovery-budget progress; a confirmed merged checkpoint does.
+
+Upgrade the CLI, `dispatch.mts`, `delivery-followup.mts`, **`delivery.mts`** (from
+`board/`), main/handoff, board/admission, facade/adapters and proof/runtime modules
+together. Scaffold/update catalogs and recovery review include these dependencies.
+Merge customized project-owned files by hand and have the operator confirm recovery
+review; do not enable schedules or silently adopt partial upgrades. Old records
+without host proof/checkpoints remain unchanged and cannot authorize continuation.
 
 ## Verified delivery upgrade
 
@@ -49,7 +93,7 @@ hash exclusions remain. Work and diagnostic evidence stay local for fresh verifi
 or human review. Exact-SHA nonforced pushes check the local branch and remote tip;
 both adapters call fresh authorization after CI and immediately before SHA-guarded
 merge. Ticket edits and a remote merge cannot be made atomic: an external race remains
-after the final tracker read. No continuation loop or historical-proof migration is added.
+after the final tracker read. There is no historical-proof migration. Scheduled continuation below observes existing host checkpoints without restarting implementation or verification.
 
 The Factory checkout's `.pi/settings.json` defaults interactive Pi sessions to `openai`; it does not change project orchestrator model configuration.
 
@@ -153,7 +197,7 @@ Dispatch, refresh and direct runs share `models.mts`'s resolver. Factory persist
 
 GitHub opens the PR and polls checks. GitLab opens the MR first so MR-only pipelines can start, then polls its head pipeline and paginated jobs, excluding superseded retries. The pipeline must succeed on the pushed SHA as well as pass the job gate. GitHub uses `--match-head-commit`; GitLab verifies the head and submits `sha` to the merge API. GitLab's project merge strategy controls merge versus rebase; `MERGE.method: "squash"` requests squash, other methods request no squash.
 
-Unmet gates leave the PR/MR open with a comment naming the reason and a `waiting` run for a person. This includes missing required names, no CI within `CONFIG.noPipelineMinutes`, and pending checks at `CONFIG.ciWaitMinutes`. GitLab failed, cancelled, skipped or manual pipelines also wait for a person. GitHub failed or cancelled checks keep the old behaviour: draft the PR and fail the run. CI must run on each PR/MR to permit automatic merging. Factory adds no label or approval requirement and does not enable tracker auto-merge; tracker-side restrictions can still reject a merge.
+Missing checks/pipelines or pending CI leave the PR/MR open with a host `ci-waiting` checkpoint. Failed/cancelled checks, drafts, changed heads/bases, conflicts and approval/repository restrictions leave `operator-required` holds. Neither tracker reruns CI or changes draft state to make a gate pass. CI must run on each PR/MR to permit automatic merging. Factory adds no label or approval requirement and does not enable tracker auto-merge; tracker-side restrictions can still reject a merge.
 
 When upgrading, copy `tracker.mts`, both tracker adapters, `ci.mts`, `handoff.mts` and `dispatch.mts` together. In project-owned `main.mts`, include any open PR/MR branch in the host's `live` predicate, not only `done` runs, so parked merges still reserve their conflicts. Remove the old GitHub-only `MERGE.auto` guard from the project-owned `main.mts` by hand. Add `requiredChecks` to your project-owned config only if needed. There is no init prompt or CLI flag.
 

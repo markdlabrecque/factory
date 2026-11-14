@@ -1,3 +1,4 @@
+// #153: continuation never creates/posts/reruns; REST checks are bound to the recorded commit, reread before SHA merge.
 // #137: TOML identity and labels are authoritative; legacy adapter exports are preserved.
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename, resolve } from "node:path";
@@ -6,13 +7,13 @@ import { ciGate, missingChecks } from "./ci.mts";
 import type { Gate } from "./ci.mts";
 import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
 import type { Child, Note } from "./graph.mts";
-import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
+import type { Delivered, Delivery, DeliveryIdentity, DeliveryObservation, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
 // GitHub adapter for tracker.mts, via `gh` on the host (TRACKER.kind "github", TRACKER.project
 // "owner/repo"). Units of work can be sub-issues. Verification media is attached to one issue
 // comment with native `gh --attach` support. Upload failure stops delivery; no evidence branch is pushed.
 // Delivery: open a PR, and with MERGE.auto merge it only when ciGate (ci.mts) says "pass" for the
-// pushed commit. Failed or missing CI leaves the PR open as a draft and the run stopped.
+// pushed commit. Missing/pending CI is a durable wait; failure is an operator hold without draft mutation.
 // mergedPr: the newest merged PR into the base from the run's branch, else one titled `#N: ...`.
 // readyList rejects GitHub Search's 1000-result boundary rather than infer deselection from a partial list (#135).
 
@@ -20,8 +21,15 @@ const REPO = TRACKER.project;
 const HOST = (TRACKER as { host?: string }).host ?? "github.com";
 const [OWNER, NAME] = REPO.split("/");
 
+let deliveryDeadline: number | undefined;
+export function setDeliveryDeadline(deadline: number | undefined): void { deliveryDeadline = deadline; }
+function deliveryTimeout(): number | undefined {
+  if (deliveryDeadline === undefined) return undefined;
+  const left = deliveryDeadline - Date.now(); if (left <= 0) throw Error('delivery deadline');
+  return Math.min(10000, left);
+}
 function gh(args: string[], input?: string): string {
-  return execFileSync("gh", args, { encoding: "utf8", env: { ...process.env, GH_HOST: HOST }, input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
+  return execFileSync("gh", args, { encoding: "utf8", timeout: deliveryTimeout(), killSignal: 'SIGKILL', env: { ...process.env, GH_HOST: HOST }, input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
 }
 const json = <T,>(args: string[]): T => JSON.parse(gh(args));
 const git = (args: string[], env?: NodeJS.ProcessEnv) => execFileSync("git", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "inherit"] }).trim();
@@ -40,7 +48,7 @@ export function catalogue(milestone = TRACKER.milestone): Ticket[] {
 
 /** GraphQL; a missing issue (NOT_FOUND, e.g. a PR number) comes back as null rather than an error. */
 function gql<T>(query: string): T {
-  const res = spawnSync("gh", ["api", "graphql", "-f", `query=${query}`], { encoding: "utf8", env: { ...process.env, GH_HOST: HOST }, maxBuffer: 64 * 1024 * 1024 });
+  const res = spawnSync("gh", ["api", "graphql", "-f", `query=${query}`], { encoding: "utf8", timeout: deliveryTimeout(), killSignal: 'SIGKILL', env: { ...process.env, GH_HOST: HOST }, maxBuffer: 64 * 1024 * 1024 });
   let out: { data?: T; errors?: { type?: string; message: string }[] };
   try {
     out = JSON.parse(res.stdout);
@@ -238,7 +246,7 @@ function checks(pr: string): { name: string; bucket: string }[] {
  * Open a PR into the base. Without `autoMerge`, stop there (you merge it). With it, poll the checks
  * until ciGate decides: "pass" merges (only while the head is still the pushed commit); "fail", no
  * checks within `noCiMinutes`, or still pending at `waitMinutes` parks it for a person. Failed CI
- * retains the existing draft-and-fail behaviour. Required checks must pass, not skip.
+ * becomes an operator hold, without reruns or draft mutation. Required checks must pass, not skip.
  */
 // #150: fresh host authorization after CI, immediately before the SHA-guarded merge.
 export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered> {
@@ -247,6 +255,9 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
     : "CI runs on this PR.";
   const url = gh(["pr", "create", "-R", REPO, "--base", d.base, "--head", d.branch, "--title", d.title, "--body-file", "-"], d.body(note)).split(/\s+/).find((w) => w.startsWith("http")) ?? "";
   console.log(url);
+  const opened = openedIdentity(url, d);
+  if (opened) d.onOpened?.(opened);
+  else if (d.onOpened) throw new Error('PR creation returned an unresolved identity; do not replay creation');
   if (!d.autoMerge) return { url, merged: false };
 
   d.onStage("ci");
@@ -268,25 +279,69 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
       const missing = missingChecks(observed, required);
       const blocked = `${why}${missing.length ? `; required checks not passed: ${missing.join(", ")}` : ""}`;
       gh(["pr", "comment", url, "--body", `Sandcastle did not merge this PR: ${blocked}. Waiting for a person.`]);
-      return { url, merged: false, blocked };
+      return { url, merged: false, blocked, state: 'ci-waiting', reasonCode: gate === 'none' ? 'checks-missing' : 'checks-pending' };
     }
-    spawnSync("gh", ["pr", "ready", url, "--undo"], { stdio: "ignore" });
-    spawnSync("gh", ["pr", "comment", url, "--body", `Sandcastle did not merge this PR: ${why}. Marked as a draft.`], { stdio: "ignore" });
-    throw new Error(`Not merged: ${why} on ${d.branch}. PR left open as a draft: ${url}`);
+    return { url, merged: false, blocked: why, state: 'operator-required', reasonCode: 'checks-failed' };
   }
+  if (!opened) return { url, merged: false, blocked: 'Unknown PR identity', state: 'operator-required', reasonCode: 'identity-changed' };
+  const result = await mergeExistingDelivery(opened, d.beforeMerge);
+  return { url, merged: result.state === 'merged', mergedAt: result.mergedAt, blocked: result.state === 'merged' ? undefined : result.reason, state: result.state, reasonCode: result.reasonCode };
+}
+
+/* Host-only existing delivery API. All commands are bounded; no shell, create, comment or CI mutation. */
+function openedIdentity(url: string, d: Pick<Delivery, 'branch' | 'base' | 'sha'>): DeliveryIdentity | undefined {
+  const match = url.match(/\/pull\/(\d+)$/);
+  if (!match || url !== `https://${HOST}/${REPO}/pull/${match[1]}`) return undefined;
+  return { kind: 'github', host: HOST, repository: REPO, number: Number(match[1]), url, branch: d.branch, base: d.base, sha: d.sha };
+}
+function existing(args: string[], deadline: number): any {
+  const left = deadline - Date.now(); if (left <= 0) throw Error('delivery deadline');
+  return JSON.parse(execFileSync('gh', args, { encoding: 'utf8', env: { ...process.env, GH_HOST: HOST }, timeout: Math.min(10000, left), killSignal: 'SIGKILL', maxBuffer: 8 << 20, stdio: ['ignore', 'pipe', 'pipe'] }));
+}
+const hold = (reasonCode: DeliveryObservation['reasonCode'], reason: string): DeliveryObservation => ({ state: 'operator-required', reasonCode, reason });
+export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 30000): DeliveryObservation {
+  if (!/^[0-9a-f]{40,64}$/.test(d.sha) || !d.branch || !d.base || d.kind !== 'github' || d.host !== HOST || d.repository !== REPO || !Number.isSafeInteger(d.number) || d.number < 1 || d.url !== `https://${HOST}/${REPO}/pull/${d.number}`) return hold('identity-changed', 'Unknown tracker identity');
+  const pr = existing(['api', `repos/${REPO}/pulls/${d.number}`], deadline);
+  if (pr.number !== d.number || pr.base?.repo?.full_name !== REPO || pr.head?.repo?.full_name !== REPO || pr.head?.ref !== d.branch || pr.base?.ref !== d.base || pr.head?.sha !== d.sha) return hold('identity-changed', 'PR repository, branch, base or head changed');
+  if (pr.merged === true && typeof pr.merged_at === 'string' && Number.isFinite(Date.parse(pr.merged_at))) return { state: 'merged', reasonCode: 'merged', reason: 'Confirmed exact-head merge', mergedAt: pr.merged_at };
+  if (pr.state === 'closed') return hold('closed', 'PR closed without merge');
+  if (pr.state !== 'open' || typeof pr.draft !== 'boolean') return hold('identity-changed', 'Unknown PR status');
+  if (pr.draft) return hold('draft', 'PR is draft');
+  if (pr.mergeable === false || ['dirty', 'behind'].includes(pr.mergeable_state)) return hold('merge-restricted', 'PR conflicts or repository/approval restriction');
+  if (pr.mergeable !== true || !['clean', 'unstable', 'has_hooks', 'blocked'].includes(pr.mergeable_state)) return { state: 'ci-waiting', reasonCode: 'transport-unknown', reason: 'PR mergeability unknown' };
+  const pages = existing(['api', '--paginate', '--slurp', `repos/${REPO}/commits/${d.sha}/check-runs?per_page=100`], deadline);
+  const statuses = existing(['api', '--paginate', '--slurp', `repos/${REPO}/commits/${d.sha}/statuses?per_page=100`], deadline);
+  if (!Array.isArray(pages) || !Array.isArray(statuses) || pages.some(p => !Array.isArray(p.check_runs)) || statuses.some(p => !Array.isArray(p))) throw Error('Malformed checks');
+  const runs = pages.flatMap(p => p.check_runs);
+  if (runs.some(c => c.head_sha !== d.sha || typeof c.name !== 'string' || typeof c.status !== 'string')) return hold('identity-changed', 'Check head or identity unknown');
+  // Statuses are newest first; only the latest result for each context is current.
+  const latest = new Map<string, any>();
+  for (const s of statuses.flat()) {
+    if ((s.sha !== undefined && s.sha !== d.sha) || typeof s.context !== 'string') return hold('identity-changed', 'Status head unknown');
+    if (!latest.has(s.context)) latest.set(s.context, s);
+  }
+  const checks = [...runs.map(c => ({ name: c.name, bucket: c.status !== 'completed' ? 'pending' : c.conclusion === 'success' ? 'pass' : ['skipped', 'neutral'].includes(c.conclusion) ? 'skipping' : 'fail' })),
+    ...[...latest.values()].map(s => ({ name: s.context, bucket: s.state === 'success' ? 'pass' : ['failure', 'error'].includes(s.state) ? 'fail' : 'pending' }))];
+  const gate = ciGate(checks, MERGE.requiredChecks ?? []);
+  if (gate === 'pass' && pr.mergeable_state === 'blocked') return hold('merge-restricted', 'PR approval or repository restriction');
+  return gate === 'pass' ? { state: 'ready', reasonCode: 'checks-pending', reason: 'Exact-head checks passed' }
+    : gate === 'fail' ? hold('checks-failed', 'CI failed or cancelled')
+    : { state: 'ci-waiting', reasonCode: gate === 'none' ? 'checks-missing' : 'checks-pending', reason: `CI ${gate}; required checks: ${missingChecks(checks, MERGE.requiredChecks ?? []).join(', ')}` };
+}
+export async function mergeExistingDelivery(d: DeliveryIdentity, beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
+  const observed = observeDelivery(d, deadline);
+  if (observed.state !== 'ready') return observed;
+  if (!MERGE.auto) return hold('authorization', 'Manual merge policy');
   let blocked: string | undefined;
-  try { blocked = typeof d.beforeMerge === 'function' ? await d.beforeMerge() : 'host authorization missing'; }
-  catch (e) { blocked = `host authorization unknown: ${(e as Error).message}`; }
-  if (blocked !== undefined) {
-    gh(['pr', 'comment', url, '--body', `Sandcastle did not merge this PR: ${blocked}. Waiting for a person.`]);
-    return { url, merged: false, blocked };
+  try { blocked = typeof beforeMerge === 'function' ? await beforeMerge() : 'host authorization missing'; }
+  catch (e) {
+    if ((e as any).code === 'DELIVERY_READ_UNKNOWN') return { state: 'ci-waiting', reasonCode: 'transport-unknown', reason: (e as Error).message };
+    blocked = `host authorization unknown: ${(e as Error).message}`;
   }
-  try {
-    gh(["pr", "merge", url, `--${MERGE.method}`, "--match-head-commit", d.sha]);
-    return { url, merged: true };
-  } catch {
-    const blocked = "GitHub refused the SHA-guarded merge; check the PR head, conflicts and repository merge settings";
-    gh(["pr", "comment", url, "--body", `Sandcastle did not merge this PR: ${blocked}. Waiting for a person.`]);
-    return { url, merged: false, blocked };
-  }
+  if (blocked !== undefined) return hold('authorization', blocked);
+  const head = existing(['api', `repos/${REPO}/pulls/${d.number}`], deadline);
+  if (head.head?.sha !== d.sha || head.base?.ref !== d.base || head.head?.ref !== d.branch || head.state !== 'open' || head.draft !== false) return hold('identity-changed', 'PR changed immediately before merge');
+  const result = existing(['api', '-X', 'PUT', `repos/${REPO}/pulls/${d.number}/merge`, '-f', `sha=${d.sha}`, '-f', `merge_method=${MERGE.method}`], deadline);
+  if (result.merged !== true) return hold('merge-restricted', 'GitHub refused SHA-guarded merge');
+  return observeDelivery(d, deadline);
 }

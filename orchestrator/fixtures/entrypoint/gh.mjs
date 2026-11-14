@@ -1,9 +1,11 @@
+// #153: exact-head REST PR/check/merge state is fixture-owned and rejects unexpected calls.
 // #149: dependency failure is injected only for the named provider, never the work ticket.
+import { execFileSync } from 'node:child_process';
 // Test-only `gh` for the recovery entrypoint smoke test (#74). Answers exactly the calls main.mts --recover and the
 // GitHub tracker adapter fixture for one open ticket (#7, description model), records every call to
 // $FAKE_STATE/gh.jsonl (with stdin for comments and PR bodies), and exits 2 on anything else.
 // $FAKE_MERGED_PR (a JSON PR) is the answer to merged-PR lookups (#87); label writes (tracker.advance) succeed.
-import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
 const state = process.env.FAKE_STATE;
@@ -30,11 +32,27 @@ if (a === "api" && b === "graphql") {
   for (const m of q.matchAll(/i(\d+): issue/g)) repo[`i${m[1]}`] = { parent: null, subIssues: { nodes: [] } };
   out({ data: { repository: repo } });
 }
+const prFile = join(state, 'opened-pr.json');
+if (a === 'api' && args.some(x => x === 'repos/owner/repo/pulls/9')) out(JSON.parse(readFileSync(prFile, 'utf8')));
+if (a === 'api' && args.some(x => x.endsWith('/check-runs?per_page=100'))) {
+  const pr = JSON.parse(readFileSync(prFile, 'utf8'));
+  out([{check_runs:[{name:'ci',head_sha:pr.head.sha,status:'completed',conclusion:'success'}]}]);
+}
+if (a === 'api' && args.includes('repos/owner/repo/pulls/9/merge')) {
+  const pr = JSON.parse(readFileSync(prFile, 'utf8'));
+  if (!args.includes(`sha=${pr.head.sha}`)) process.exit(9);
+  pr.merged = true; pr.merged_at = new Date().toISOString(); writeFileSync(prFile,JSON.stringify(pr)); out({merged:true});
+}
 if (a === "api" && args.includes("--paginate")) out([[]]);
 if (a === "pr" && b === "list" && args.includes("merged") && process.env.FAKE_MERGED_PR) out([JSON.parse(process.env.FAKE_MERGED_PR)]);
 if (a === "pr" && b === "list") out([]);
 if (a === "api" && b === "-X" && /\/issues\/\d+\/labels/.test(args[3] ?? "")) out("[]");
-if (a === "pr" && b === "create") out("https://github.com/owner/repo/pull/9\n");
+if (a === 'pr' && b === 'create') {
+  const branch = args[args.indexOf('--head')+1], base = args[args.indexOf('--base')+1];
+  const sha = execFileSync('git',['rev-parse',`refs/heads/${branch}`],{encoding:'utf8'}).trim();
+  writeFileSync(prFile,JSON.stringify({number:9,state:'open',draft:false,merged:false,mergeable:true,mergeable_state:'clean',head:{sha,ref:branch,repo:{full_name:'owner/repo'}},base:{ref:base,repo:{full_name:'owner/repo'}}}));
+  out('https://github.com/owner/repo/pull/9\n');
+}
 if (a === "pr" && b === "checks") out([{ name: "ci", bucket: "pass" }]);
 if (a === "pr" && b === "merge") out("");
 process.stderr.write(`fake gh: unexpected call: ${args.join(" ")}\n`);

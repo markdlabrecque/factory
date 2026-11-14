@@ -1,3 +1,4 @@
+// #153: optional exact-head delivery fixtures permit only SHA-guarded merge, never creation or evidence posts.
 // #149: text views and sanitized dependency-error scenarios cover normal blocked entrypoints.
 // Read-only gh/glab boundary for #78 refresh/dispatch and #122 open-MR conflict tests.
 // All data and exact call logs are fixture-owned. #135: write large capped-selection responses synchronously
@@ -41,6 +42,15 @@ if (args[0] === "api" && args[1] === "graphql") {
   const ids = [...q.matchAll(/"(\d+)"/g)].map((m) => m[1]);
   out({ data: { project: { workItems: { nodes: ids.map((id) => ({ iid: id, workItemType: { name: data.parents?.[id] ? "Task" : "Issue" },
     widgets: [{ parent: data.parents?.[id] ? { iid: String(data.parents[id]) } : null, children: { nodes: [] } }] })) } } } });
+}
+if (isGh && data.delivery && args[0] === 'api') {
+  const d = data.delivery, path = args.find(a => a.startsWith('repos/'));
+  if (path === 'repos/owner/repo/pulls/1') out({ number:1, state:'open', draft:false, merged:!!d.merged, merged_at:d.merged?'2026-01-01T00:00:00Z':null, mergeable:true, mergeable_state:'clean', head:{ref:'7-topic',sha:d.sha,repo:{full_name:'owner/repo'}},base:{ref:'main',repo:{full_name:'owner/repo'}} });
+  if (path === `repos/owner/repo/commits/${d.sha}/check-runs?per_page=100`) out([{check_runs:[{name:'ci',head_sha:d.sha,status:d.pending?'in_progress':'completed',conclusion:d.pending?null:'success'}]}]);
+  if (path === `repos/owner/repo/commits/${d.sha}/statuses?per_page=100`) out([[]]);
+  if (path === 'repos/owner/repo/pulls/1/merge' && args.includes('PUT') && args.includes(`sha=${d.sha}`)) {
+    data.delivery.merged=true; writeFileSync(join(dir,'tracker.json'),JSON.stringify(data)); out({merged:true});
+  }
 }
 if (isGh && args[0] === "api" && args.includes("--paginate")) {
   const path = args.find((a) => a.startsWith("repos/")), id = path.match(/issues\/(\d+)/)[1];

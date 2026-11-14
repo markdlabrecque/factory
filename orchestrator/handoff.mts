@@ -1,3 +1,5 @@
+// #153: persist exact opened PR identity before CI; later delivery results retain the original host proof.
+import type { DeliveryCheckpoint } from './delivery.mts';
 // #149: recovery holds on shared unknown dependency results and sanitized reasons.
 import type { DependencyResult } from "./dependencies.mts";
 // #150: only host-frozen structured proof can authorize publication, exact-SHA push and merge.
@@ -63,7 +65,7 @@ export const VERIFY_PROMPT = "./.sandcastle/prompt.verify.md";
 /** Clear what an earlier run of this ticket left that could pass for this run's verdict, then mark the record verifying. */
 export function beginVerification(host: Pick<Host, "setStage">, iid: string, evidenceHost: string): void {
   for (const name of ['verdict.md', 'verification.json']) rmSync(resolve(evidenceHost, name), { force: true });
-  host.setStage(iid, { stage: "verifying", verdict: undefined, verification: undefined, mr: undefined, mergedAt: undefined });
+  host.setStage(iid, { stage: "verifying", verdict: undefined, verification: undefined, delivery: undefined, mr: undefined, mergedAt: undefined });
 }
 
 // Fixed stage names avoid recording environment variables or arbitrary browser error messages in evidence.
@@ -260,8 +262,14 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   ].filter(Boolean).join("\n\n");
 
   let delivered: Delivered;
+  let checkpoint: DeliveryCheckpoint | undefined;
   try {
     delivered = await host.tracker.deliver({
+      onOpened: identity => {
+        checkpoint = { ...identity, version: 1, proofId: h.proofId, project: h.project, ticket: iid, executionId: h.identity.executionId,
+          state: h.autoMerge ? 'ci-waiting' : 'operator-required', reasonCode: h.autoMerge ? 'opened' : 'authorization', observedAt: new Date().toISOString() };
+        host.setStage(iid, { delivery: checkpoint, mr: identity.url });
+      },
       branch, base, sha, title: `#${iid}: ${h.title}`, body, onStage: (stage) => host.setStage(iid, { stage }),
       beforeMerge: () => {
         const refused = authorize();
@@ -274,9 +282,15 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   } catch (e) {
     return { ok: false, verdict, reason: (e as Error).message };
   }
+  if (checkpoint) {
+    const mergedAt = delivered.merged ? delivered.mergedAt ?? new Date().toISOString() : undefined;
+    checkpoint = { ...checkpoint, state: delivered.merged ? 'merged' : delivered.state === 'ci-waiting' ? 'ci-waiting' : 'operator-required',
+      reasonCode: delivered.merged ? 'merged' : delivered.reasonCode ?? 'merge-restricted', observedAt: new Date().toISOString(), ...(mergedAt ? { mergedAt } : {}) };
+  }
   host.setStage(iid, {
+    ...(checkpoint ? { delivery: checkpoint } : {}),
     stage: delivered.blocked ? "waiting" : "done", mr: delivered.url,
-    note: delivered.blocked ? `Waiting for a person: ${delivered.blocked}` : delivered.merged ? "merged after CI passed" : "",
+    note: delivered.blocked ? `${delivered.state === 'ci-waiting' ? 'Pending CI' : 'Waiting for a person'}: ${delivered.blocked}` : delivered.merged ? "merged after CI passed" : "",
   });
   return { ok: true, verdict, pushed: true, url: delivered.url, merged: delivered.merged };
 }

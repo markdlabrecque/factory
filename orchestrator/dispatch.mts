@@ -1,3 +1,7 @@
+// #153: only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
+import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthorization } from './delivery-followup.mts';
+import { validDelivery } from './delivery.mts';
+import { readAdmission } from './admission.mts';
 // #149: cache full three-state dependency results per pass; unknown reads hold dispatch.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
 // #137: TOML completely replaces legacy SELECT; shared selection preserves exhaustive-read semantics.
@@ -9,9 +13,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
-import { claimRun, markMergedOutside, PARKED, queueModelProblem, readRuns, removeRun, reserveRun, setProject, setStage, stateDir, keyFor, TERMINAL } from "./board.mts";
+import { claimDelivery, finishDelivery, claimRun, markMergedOutside, PARKED, queueModelProblem, readRuns, removeRun, reserveRun, setProject, setStage, stateDir, keyFor, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
-import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./runtime-config.mts";
+import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
 import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
@@ -145,13 +149,19 @@ log(`${active} active run(s), cap ${cap} (source: ${opts.max !== undefined ? '--
 const openMrs = tracker.openMrBranches();
 for (const r of allRuns) {
   if (r.project !== PROJECT || r.stage !== "done" || !r.branch || r.mergedAt || openMrs.has(r.branch)) continue;
-  if (!tracker.mergedInto(r.branch, r.base ?? base)) continue;
+  let checkpoint = r.delivery;
+  if (checkpoint) {
+    if (!validDelivery(checkpoint)) continue;
+    const observed = tracker.observeDelivery(checkpoint);
+    if (observed.state !== 'merged' || !observed.mergedAt) continue;
+    checkpoint = { ...checkpoint, state: 'merged', reasonCode: 'merged', observedAt: new Date().toISOString(), mergedAt: observed.mergedAt };
+  } else if (!tracker.mergedInto(r.branch, r.base ?? base)) continue;
   const what = r.parentIid ? "Task closed" : `moved to ${LABELS.done}`;
   log(`#${r.iid} merged into ${r.base ?? base}: ${dry ? `would be ${what.toLowerCase()} (dry run)` : what}`);
   if (dry) continue;
   if (r.parentIid) tracker.close(Number(r.iid));
   else tracker.advance(Number(r.iid));
-  setStage(r.iid, { mergedAt: new Date().toISOString(), note: `merged; ${what}` });
+  setStage(r.iid, { ...(checkpoint ? { delivery: checkpoint } : {}), mergedAt: checkpoint?.mergedAt ?? new Date().toISOString(), note: `merged; ${what}` });
 }
 
 // ---- candidates --------------------------------------------------------------
@@ -171,9 +181,15 @@ const taskIids = new Set([...work.childrenOf.values()].flat().map((k) => k.iid))
 for (const r of allRuns) {
   if (r.project !== PROJECT || r.mergedAt || !(r.stage === "stopped" || PARKED.includes(r.stage))) continue;
   const into = r.base ?? base;
-  let pr: tracker.MergedPr | undefined;
+  let pr: (tracker.MergedPr & { checkpoint?: NonNullable<typeof r.delivery> }) | undefined;
   try {
-    pr = tracker.mergedPr(Number(r.iid), r.branch, into);
+    if (r.delivery) {
+      if (!validDelivery(r.delivery) || r.branch && openMrs.has(r.branch)) continue;
+      const observed = tracker.observeDelivery(r.delivery);
+      if (observed.state !== 'merged' || !observed.mergedAt) continue;
+      pr = { number: r.delivery.number, title: r.title ?? '', url: r.delivery.url, mergedAt: observed.mergedAt, matchedBy: 'branch',
+        checkpoint: { ...r.delivery, state: 'merged', reasonCode: 'merged', observedAt: new Date().toISOString(), mergedAt: observed.mergedAt } };
+    } else pr = tracker.mergedPr(Number(r.iid), r.branch, into);
   } catch (e) {
     log(`#${r.iid}: could not check for a merge outside Factory: ${(e as Error).message}`);
     continue;
@@ -193,6 +209,47 @@ for (const r of allRuns) {
     else tracker.advance(Number(r.iid));
   } catch (e) {
     log(`#${r.iid}: card is done, but the tracker update failed: ${(e as Error).message}`);
+  }
+}
+
+// Host checkpoints are never adopted by the broad branch/title reconciliation above.
+if (!dry && process.env.FACTORY_SCHEDULED === '1' && MERGE.auto) {
+  const waits = readRuns().filter(r => r.project === PROJECT && validDelivery(r.delivery) && r.delivery.state === 'ci-waiting')
+    .sort((a, b) => a.delivery!.observedAt.localeCompare(b.delivery!.observedAt)).slice(0, 10);
+  for (const r of waits) {
+    try {
+      const message = await observeWaitingDelivery(r, {
+        state: stateDir(), workflow: here,
+        settings: { image: effectiveConfig?.config.image ?? null, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: effectiveConfig?.config.ciWaitMinutes ?? null, noPipelineMinutes: effectiveConfig?.config.noPipelineMinutes ?? null },
+        claim: run => claimDelivery({ iid: run.iid, project: PROJECT, pid: process.pid, cap }),
+        finish: (run, token, checkpoint, note) => finishDelivery(stateDir(), PROJECT, run.iid, token, checkpoint, note),
+        merge: tracker.mergeExistingDelivery,
+        authorize: (run, deadline) => {
+          tracker.setDeliveryDeadline(deadline);
+          const d = run.delivery!;
+          if (d.base !== base || bounded('git', ['symbolic-ref', '--short', 'HEAD'], deadline) !== d.base) return 'Current base branch changed';
+          const current = readRuns(stateDir(), false).find(x => x.project === PROJECT && x.iid === run.iid);
+          const c = readAdmission(stateDir()).claims[keyFor(run.iid, PROJECT)];
+          if (current?.claim !== run.claim || current.executionId !== run.executionId || c?.token !== run.claim || c.kind !== 'delivery'
+            || current.branch !== run.branch || current.base !== run.base || JSON.stringify(current.delivery) !== JSON.stringify(run.delivery)
+            || JSON.stringify(current.verification) !== JSON.stringify(run.verification)) return 'Delivery ownership or checkpoint changed';
+          if (bounded('git', ['rev-parse', `refs/heads/${d.branch}`], deadline) !== d.sha || bounded('git', ['ls-remote', '--heads', 'origin', `refs/heads/${d.branch}`], deadline).split(/\s+/)[0] !== d.sha) return 'Local/remote branch changed';
+          try {
+            const t = tracker.ticket(Number(run.iid));
+            if (!['open', 'opened'].includes(t.state ?? '') || (t.labels ?? []).some(l => LABELS.exclude.includes(l) || l === LABELS.needsHuman)) return 'Ticket closed, excluded or needs human review';
+            const parent = tracker.parentOf(t.iid);
+            if (String(parent ?? '') !== (run.parentIid ?? '')) return 'Ticket parent changed';
+            if (parent !== undefined) { const p = tracker.ticket(parent); t.parent = { iid: p.iid, title: p.title, description: p.description }; }
+            if (unitHash(t, tracker.notes(t.iid)) !== run.verification?.requirementsHash) return 'Requirements changed; fresh verification or human review required';
+            const selected = selectCandidates(tracker.readyList(SELECT), SELECT, tracker.currentUsername);
+            if (!selected.some(x => x.iid === (parent ?? t.iid))) return 'Ticket no longer selected';
+            return schedulerAuthorization(process.cwd(), d.base, deadline);
+          } catch (e) { throw new RetryableDeliveryRead(`Current requirements/eligibility unknown: ${(e as Error).message}`); }
+        },
+      });
+      log(`#${r.iid} delivery: ${message}`);
+    } catch (e) { log(`#${r.iid} delivery hold: ${(e as Error).message}`); }
+    finally { tracker.setDeliveryDeadline(undefined); }
   }
 }
 
