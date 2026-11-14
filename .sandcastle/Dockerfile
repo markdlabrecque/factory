@@ -1,3 +1,4 @@
+# Factory verification includes global Playwright and shared, non-root Chromium.
 FROM node:22-bookworm
 
 # Install system dependencies
@@ -13,6 +14,13 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
   | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
   && apt-get update && apt-get install -y gh \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install the browser while root; the agent uses this same shared runtime.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright@1.65.1 \
+  && playwright install --with-deps chromium \
+  && chmod -R a+rX /opt/ms-playwright \
   && rm -rf /var/lib/apt/lists/*
 
 # Build-args for UID/GID alignment: sandcastle docker build-image
