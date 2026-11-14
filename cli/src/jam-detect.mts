@@ -21,13 +21,16 @@
 // A missing report (a dispatcher copy older than #61; nothing is logged), one for another pass or project, or a malformed
 // one is not counted.
 // Errors are logged and never fail the pass. The report file is the caller's to remove.
-import { existsSync, readFileSync } from 'node:fs';
+import {join} from 'node:path';
+import {prepareRecovery} from './recovery-prepare.mts';
+import {mutateRecovery} from './recovery-state.mts';
+import { appendFileSync,mkdirSync,existsSync, readFileSync } from 'node:fs';
 import { generationOf, readAdmission } from '../../board/admission.mts';
 import type { Paths } from './paths.mts';
 import { refreshFollowups } from './recovery-followup.mts';
 import type { Settled } from './recovery-run.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
-import { launchRecovery, settleRecovery } from './recovery-run.mts';
+import { inspectRecoveryCandidate, launchRecovery, settleRecovery } from './recovery-run.mts';
 import { readRecoveryRuns } from './recovery-claim.mts';
 import { attemptProblem, deliveryMarker, observePass, observeTicket, readRecovery, remainingAttempts, runningAttempt } from './recovery-state.mts';
 
@@ -51,6 +54,8 @@ export function readJamReport(file: string, pass: string, project: string): JamR
 
 export type AfterPassOptions = { root: string; tracker: string; name: string; pass: string; report: string; dir: string;
   mayLaunch: () => Promise<boolean>; log: (line: string) => void; now?: () => Date;
+  signal?:AbortSignal;node?:string;path?:string;
+  inspect?:typeof inspectRecoveryCandidate;prepare?:typeof prepareRecovery;
   settle?: typeof settleRecovery; launch?: typeof launchRecovery; pauseReason?: () => string | undefined };
 
 /** Settle, observe, confirm and maybe launch for one completed pass; see the file comment. Never throws. */
@@ -98,12 +103,25 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
       }
       const copy = recoveryCopyProblem(p, o.root);
       if (copy) return say(`jam on ${jam} confirmed; not repairing: ${copy}`);
-      const launched = (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now() });
+      const inspected=(o.inspect??inspectRecoveryCandidate)(p,{root:o.root,tracker:o.tracker,ticket:target,dir:o.dir});
+      if(!inspected.ok){
+        if(inspected.kind==='ticket-refused'){say(`#${target} ticket-refused ${inspected.code}: ${inspected.reason}`);continue;}
+        return say(`project-stopped ${inspected.code}: #${target}: ${inspected.reason}`);
+      }
+      const prepared=await (o.prepare??prepareRecovery)(p,{root:o.root,tracker:o.tracker,ticket:target,base:current.base??'',dir:o.dir,signal:o.signal,node:o.node,path:o.path});
+      mutateRecovery(p,o.root,s=>{s.preparation={at:now(),ticket:target,state:prepared.state,code:prepared.code,reason:prepared.reason,scope:prepared.scope};return {write:true,value:undefined};});
+      if(prepared.state!=='ready'){
+        mkdirSync(join(o.root,'.sandcastle/logs'),{recursive:true});
+        appendFileSync(join(o.root,'.sandcastle/logs',`recover-${target}.log`),`${now()} preparation ${prepared.code}: ${prepared.reason}\n`);
+        return say(`jam on ${jam} confirmed; preparation ${prepared.code} (${prepared.scope} hold): ${prepared.reason}; no attempt charged`);
+      }
+      if(!(await o.mayLaunch()))return say(`jam on ${jam} confirmed; preparation complete but scheduled work was stopped; no attempt charged`);
+      const launched = (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now(),preparation:prepared });
       refreshFollowups(p, { ...o, at: now(), paused: o.pauseReason?.() });
       switch (launched.kind) {
         case 'ticket-refused':
           say(`#${target} ticket-refused ${launched.code}: ${launched.reason}`);
-          continue;
+          return; // analysis has run for this selected target; never scan after preparation
         case 'started':
           return say(`jam on ${jam} confirmed; attempt ${launched.attempt.seq} on #${target} started (pid ${launched.pid}, log ${launched.log})`);
         case 'admitted-failed':

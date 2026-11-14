@@ -17,6 +17,7 @@ import { keyFor, withAdmission } from '../../board/admission.mts';
 import { afterPass } from '../src/jam-detect.mts';
 import type { AfterPassOptions } from '../src/jam-detect.mts';
 import { paths } from '../src/paths.mts';
+import {preparedFixture} from './prepared-fixture.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import { beginAttempt, deliveryMarker, finishAttempt, readRecovery, mutateRecovery } from '../src/recovery-state.mts';
 
@@ -77,6 +78,7 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
       observed: jam.map(iid => ({ iid, content: 'h', labels: extra.labels ?? ['bug'] })) }));
     const from = lines.length;
     await afterPass(p, { root, tracker: TRACKER, name: 'site', pass: id, report, dir, log: l => lines.push(l), mayLaunch: async () => true,
+      inspect:()=>({ok:true}),prepare:async (_p,x)=>preparedFixture(x),
       launch: (_p, x) => { launches.push(x.ticket); return { ok: true, kind: 'started', admitted: true, attempt: { seq: launches.length } as any, pid: 1, branch: '', log: 'l' }; },
       ...extra });
     return lines.slice(from);
@@ -121,6 +123,15 @@ test('a running attempt, another pass\'s report or a normal admission between pa
   assert.equal(readRecovery(f.p, f.root).episode, undefined, 'a pass with no jam ends the episode');
 });
 
+test('preparation holds cost zero and stop scanning; ready rechecks scheduling authorization',async t=>{
+  const f=fixture(t);f.record(3,'stopped');f.record(5,'stopped');await f.pass([3,5]);const inspected:number[]=[];
+  const lines=await f.pass([3,5],{inspect:(_p,o)=>{inspected.push(o.ticket);return {ok:true};},
+    prepare:async()=>({version:1,state:'held',code:'unknown-dependency',scope:'ticket',reason:'Dependency information unavailable'})});
+  assert.match(lines.join('\n'),/no attempt charged/);assert.deepEqual(inspected,[3]);assert.deepEqual(f.launches,[]);
+  const s=readRecovery(f.p,f.root);assert.equal(s.attempts.length,0);assert.equal(s.budgets['3']?.used??0,0);assert.equal(s.preparation?.code,'unknown-dependency');
+  let checks=0;await f.pass([3,5],{mayLaunch:async()=>++checks===1});assert.equal(checks,2);assert.deepEqual(f.launches,[]);
+});
+
 test('a spent budget stops repairs until a person changes the ticket', async t => {
   const f = fixture(t);
   f.record(3, 'stopped');
@@ -143,19 +154,18 @@ test('three local refusals then one admission in numeric order; no refusal cache
   const f = fixture(t);
   const order: number[] = [];
   for (const n of [2, 10, 20, 100]) f.record(n, 'stopped');
-  const launch: AfterPassOptions['launch'] = (_p, o) => {
+  const inspect: AfterPassOptions['inspect'] = (_p, o) => {
     order.push(o.ticket);
-    if (o.ticket !== 100) return refused(o.ticket);
-    return { ok: true, kind: 'started', admitted: true, attempt: { seq: 1 } as any, pid: 1, branch: '100-fix', log: 'l' };
+    return o.ticket !== 100 ? refused(o.ticket) : {ok:true};
   };
   await f.pass([100, 20, 10, 2]);
-  const lines = await f.pass([100, 20, 10, 2], { launch });
+  const lines = await f.pass([100, 20, 10, 2], { inspect });
   assert.deepEqual(order, [2, 10, 20, 100]);
   assert.equal(lines.filter(l => l.includes('ticket-refused branch-missing')).length, 3);
   assert.match(lines.at(-1)!, /attempt 1 on #100 started/);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'read-only stub refusals charge nothing');
   order.length = 0;
-  await f.pass([100, 20, 10, 2], { launch: (_p, o) => { order.push(o.ticket); return refused(o.ticket); } });
+  await f.pass([100, 20, 10, 2], { inspect: (_p, o) => { order.push(o.ticket); return refused(o.ticket); } });
   assert.deepEqual(order, [2, 10, 20, 100], 'all local facts are rechecked on a later pass');
 });
 
@@ -168,7 +178,7 @@ for (const stop of ['project-stopped', 'admitted-failed', 'throw', 'off', 'gener
     let allowed = true;
     const lines = await f.pass([20, 10, 2], {
       mayLaunch: async () => allowed,
-      launch: (_p, o) => {
+      inspect: (_p, o) => {
         order.push(o.ticket);
         if (o.ticket === 2) {
           if (stop === 'off') allowed = false;
@@ -180,9 +190,10 @@ for (const stop of ['project-stopped', 'admitted-failed', 'throw', 'off', 'gener
           return refused(2);
         }
         if (stop === 'throw') throw new Error('unexpected IO');
-        if (stop === 'admitted-failed') return { ok: false, kind: stop, admitted: true, attempt: { seq: 1 } as any, reason: 'spawn failed, charged' };
+        if (stop === 'admitted-failed') return {ok:true};
         return { ok: false, kind: 'project-stopped', admitted: false, code: 'capacity', reason: 'capacity or readiness unknown' };
       },
+      launch:()=>({ok:false,kind:'admitted-failed',admitted:true,attempt:{seq:1} as any,reason:'spawn failed, charged'}),
     });
     assert.deepEqual(order, ['project-stopped', 'admitted-failed', 'throw'].includes(stop) ? [2, 10] : [2]);
     assert.ok(lines.length >= 2);
@@ -194,10 +205,10 @@ test('a ticket exhausted under current budget rules is skipped, not renewed', as
   const f = fixture(t);
   for (const n of [3, 10]) f.record(n, 'stopped');
   await f.pass([10, 3]);
-  await f.pass([10, 3], { launch: (_p, o) => refused(o.ticket) });
+  await f.pass([10, 3], { inspect: (_p, o) => refused(o.ticket) });
   for (const m of [10, 11]) finishAttempt(f.p, f.root, beginAttempt(f.p, f.root, { ticket: 3, at: at(m), replay: true }).seq, { at: at(m), result: 'failed' });
   const order: number[] = [];
-  await f.pass([10, 3], { launch: (_p, o) => { order.push(o.ticket); return refused(o.ticket); } });
+  await f.pass([10, 3], { inspect: (_p, o) => { order.push(o.ticket); return refused(o.ticket); } });
   assert.deepEqual(order, [10]);
   assert.equal(readRecovery(f.p, f.root).budgets['3'].used, 2);
 });

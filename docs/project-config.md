@@ -207,6 +207,14 @@ protected from automatic replacement.
 | `CONFIG.image`, `.ciWaitMinutes`, `.noPipelineMinutes` | `sandbox.image`, `ci.wait_minutes`, `.no_pipeline_minutes` |
 | `CONFIG.sandboxSetup` | ordered `[[sandbox.setup]]`: `command`, `sudo`, `timeoutMs` → `timeout_ms` |
 
+The existing `graph.analysis_timeout_minutes` also bounds recovery's read-only
+execution-analysis preparation. The host reads only that scalar through
+`config-read.mts <absolute-scaffold-dir> analysisTimeoutMinutes`, then adds 60 seconds
+for setup and tracker/Git reads. A reviewed legacy copy without TOML reads the same
+non-secret `GRAPH.analysisTimeoutMinutes` through its runtime facade. There is no
+new setting and no secret/configuration dump. See the
+[preparation lifecycle](factory-cli.md#recovery-execution-analysis-preparation).
+
 4. Validate with isolated read-only fixtures or `node .sandcastle/config-read.mts
    <absolute-scaffold-dir> validate`, then `factory selection explain <ticket>
    --project <name>`. Explain contacts only the configured tracker with read-only
