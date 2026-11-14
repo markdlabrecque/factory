@@ -7,10 +7,11 @@ import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
 import type { Manifest } from "./graph.mts";
 import type { Handoff, Host, VerifierSandbox } from "./handoff.mts";
 
+// Hand-off tests fake the Node-watchdog preflight; its real process lifecycle is tested separately.
 // Run: node --test 'orchestrator/*.test.mts'
 // The verify/post/deliver hand-off shared by main.mts and recovery runs, and the prerequisite recheck recovery runs make
 // (#75), against a fake host (no tracker, git or Docker). Posting failures stop every verdict before delivery.
-// Blocked merge gates park as waiting.
+// Blocked merge gates park as waiting. The sandbox fake explicitly provisions the browser probe.
 
 type Rec = Record<string, unknown>;
 function fakeHost(record: Rec = {}) {
@@ -32,7 +33,7 @@ function fakeHost(record: Rec = {}) {
 }
 const sandbox = (o: { writes?: string; commits?: number; dir: string }): VerifierSandbox => ({
   run: async () => { if (o.writes) writeFileSync(join(o.dir, "verdict.md"), o.writes); return { commits: Array(o.commits ?? 0).fill("c") }; },
-  exec: async (cmd) => ({ stdout: cmd.startsWith("git rev-parse") ? "tip0000001\n" : "" }),
+  exec: async (cmd) => ({ stdout: cmd.startsWith("git rev-parse") ? "tip0000001\n" : cmd.startsWith("command -v playwright ") ? "browser preflight OK\n" : "" }),
 });
 const handoff = (dir: string, extra: Partial<Handoff> = {}): Handoff => ({
   iid: "7", project: "o/r", branch: "7-fix", base: "main", baseSha: "base000001", tip: "tip0000001", title: "Fix", evidenceHost: dir,

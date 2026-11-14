@@ -2,6 +2,7 @@
 // Test-owned `systemctl` stub for Factory's scheduler tests. It is a command-boundary stub, NOT systemd: it models only the
 // states Factory reads (unit file on disk, enabled, active; the timer's enablement and activity are separate from the tick
 // service's activity) and never fires a timer, runs a unit or signals a process. All of its state lives in $STUB_DIR.
+// Read-only queries never rewrite state, so parallel Board queries cannot truncate or overwrite each other's reads.
 // Env: STUB_DIR (calls.jsonl, state.json, fail), STUB_UNIT_DIR (the fixture's ~/.config/systemd/user).
 // Every call is appended to calls.jsonl as its exact argv. Anything but the shapes Factory is expected to send is REJECTED
 // (exit 64, logged as `rejected`), so a call that would have reached a real manager is visible. A line in $STUB_DIR/fail is an
@@ -99,4 +100,4 @@ switch (verb) {
   default: reject(`unknown verb ${verb}`);
 }
 log({ ok: true });
-save();
+if (!['show', 'list-timers', 'show-environment'].includes(verb)) save();

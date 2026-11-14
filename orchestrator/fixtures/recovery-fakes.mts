@@ -5,6 +5,7 @@
 // mounts: in the worktree, with GIT_DIR set to the private Git metadata mounted at /home/agent/.factory-git (so the
 // project's other refs are invisible, as in the container) and $EVIDENCE set to the evidence mount. Commands named in
 // `hooks` are answered by the test instead. Aborting an exec kills that process and rejects only after it has exited.
+// The Node-watchdog browser preflight is explicitly provisioned by the fake; probe behavior has separate fixture tests.
 // Any other command throws. Not part of the scaffold; imported only by tests.
 import { realProc } from "../recovery-sandbox.mts";
 import type { Proc } from "../recovery-sandbox.mts";
@@ -55,6 +56,7 @@ export function dockerWorld(o: { existing?: string[]; stuck?: Set<string>; down?
       execs.push({ name, command, ...(args.includes("--user") ? { user: args[args.indexOf("--user") + 1] } : {}) });
       if (!live.has(name)) return { status: 1, stdout: "", stderr: `Error: No such container: ${name}` };
       if (hooks[command]) return { stdout: "", stderr: "", ...(await hooks[command]({ signal: po.signal, env: po.env })) };
+      if (command.startsWith("command -v playwright ")) return { stdout: "browser preflight OK\n", stderr: "", status: 0 };
       const run = runs.find((r) => r.name === name)!;
       const at = (box: string) => run.mounts.find((m) => m.box === box)!.host;
       const evidence = run.mounts.find((m) => m.box.startsWith("/home/agent/evidence/") && !m.ro)!.host;

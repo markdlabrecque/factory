@@ -1,3 +1,4 @@
+// Read-only manager queries leave fixture state byte-identical, including concurrent timer-strip queries.
 // Scheduled passes pass no --max override, so the project's dispatcher config sets the cap (#117).
 // The Linux scheduler slice (#33) across the stubbed systemd boundary. Factory's real CLI (cli/bin/factory.mts run as a
 // subprocess), its production adapter (platform/scheduler-systemd.mts) and its generated units run against
@@ -175,6 +176,22 @@ test('adapter: timers() lists every factory-tick timer with its next run, always
   });
   assert.deepEqual(w.stub.rejected(), [], 'only the fixed list-timers and show shapes were sent');
   assert.equal(w.stub.lines().some(l => l.includes('sandcastle-dispatch')), false);
+});
+
+test('stub: concurrent read-only timer queries never rewrite shared manager state', async t => {
+  const w = world(t);
+  const backend = new SystemdSchedule(w.p);
+  await w.stub.using(async () => {
+    await backend.install({ node: process.execPath, app: w.p.app, state: w.p.state, path: w.stub.env.PATH }, () => {});
+    w.stub.set('factory-tick.timer', { enabled: true, active: true, nextUsec: 1_800_000_000_000_000 });
+    // Deliberately noncanonical formatting makes an unnecessary rewrite a deterministic failure.
+    const before = JSON.stringify(w.stub.state()) + '\n';
+    writeFileSync(w.stub.stateFile, before);
+    const reports = await Promise.all(Array.from({ length: 8 }, () => backend.timers()));
+    for (const report of reports) assert.deepEqual(report, [{ id: 'factory-tick.timer', status: { timer: 'active', enabled: true, tick: 'inactive' }, nextAt: 1_800_000_000_000 }]);
+    assert.equal(readFileSync(w.stub.stateFile, 'utf8'), before, 'read-only commands must not write shared state');
+  });
+  assert.deepEqual(w.stub.rejected(), []);
 });
 
 test('adapter: disable disables and stops the timer first, then stops the tick service; either failure throws and nothing later runs', async t => {

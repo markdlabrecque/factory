@@ -1,5 +1,6 @@
 <!doctype html>
 <!-- #140: cards show only compact current blockers; assessment facts and refresh controls stay off the Board.
+     #141: recorded blocker episodes show bounded summaries only; persisted reasons are unchanged.
      Factory tracker board/evidence shell: per-ticket dots and centered connectors, solid green/red current dots
      with halos and sonar pulses, explicit queue reasons, latest-ten collapsible Shipped and real-history stats.
      Stats return focus to the invoking control, with a fallback for removed/hidden tickets.
@@ -373,7 +374,7 @@
   var fileMode = location.protocol === 'file:';
 
   // model:start
-  // Pure tracker model: real stages, visible Shipped limit, queue reasons, recorded stats and safe links.
+  // Pure tracker model: real stages, visible Shipped limit, queue reasons, concise recorded-episode summaries, stats and safe links.
   var PATH = ['queued', 'setup', 'implementing', 'verifying', 'posting', 'pushing', 'ci', 'done'];
   var PATH_LABELS = ['Queue', 'Setup', 'Build', 'Verify', 'Post', 'Push', 'CI', 'Shipped'];
   var STAGES = {
@@ -424,6 +425,46 @@
     return (other.length ? other : reasons.length ? reasons : [{ code: 'unknown', text: 'Queue reason unavailable' }]).map(function (r) {
       return { code: r.code, text: r.code === 'docket_full' ? 'Docket is full' : r.text };
     });
+  }
+  function blockerEpisodeSummary(episode) {
+    var reasons = [], seen = new Set();
+    (episode && Array.isArray(episode.reasons) ? episode.reasons : []).forEach(function (r) {
+      if (!r || typeof r.code !== 'string' || !r.code.trim() || typeof r.text !== 'string' || !r.text.trim()) return;
+      var text = r.text.trim(), key = JSON.stringify([r.code, text]);
+      if (!seen.has(key)) { seen.add(key); reasons.push({ code: r.code, text: text }); }
+    });
+    if (!reasons.length) return 'Reason unavailable';
+    var first = reasons[0], text = first.text.replace(/\s+/g, ' '), phrase;
+    switch (first.code) {
+      case 'docket_full': phrase = 'Docket full'; break;
+      case 'dependency': phrase = 'Waiting on dependency'; break;
+      case 'verification_failed': phrase = 'Verification failed'; break;
+      case 'unknown': phrase = 'Reason unavailable'; break;
+      case 'note':
+        if (/^(waiting for a free slot|Docket is full)\b/i.test(text)) phrase = 'Docket full';
+        else if (/^(waiting on dependency\b|waiting for dependency\b|Dependency #\d+:)/i.test(text)) phrase = 'Waiting on dependency';
+        else if (/^verification failed\b/i.test(text)) phrase = 'Verification failed';
+        break;
+    }
+    if (!phrase) {
+      // Sentence punctuation must precede whitespace/end, so decimal points remain intact.
+      var ending = text.search(/[.!?](?=\s|$)/);
+      phrase = (ending < 0 ? text : text.slice(0, ending)).replace(/[.!?]+$/, '').trim();
+      if (!phrase) phrase = 'Reason unavailable';
+    }
+    var suffix = reasons.length > 1 ? ' +' + (reasons.length - 1) + ' more' : '';
+    var budget = 80 - Array.from(suffix).length;
+    var words = phrase.split(' '), clipped = words.length > 12;
+    phrase = words.slice(0, 12).join(' ');
+    var points = Array.from(phrase);
+    if (points.length > budget || (clipped && points.length + 1 > budget)) {
+      // Reserve the ellipsis, prefer a whole word, but allow a single long Unicode token.
+      phrase = points.slice(0, budget - 1).join('');
+      var boundary = phrase.lastIndexOf(' ');
+      if (boundary >= 0 && points[budget - 1] !== ' ') phrase = phrase.slice(0, boundary);
+      clipped = true;
+    }
+    return phrase.trimEnd().replace(/[.!?]+$/, '') + (clipped ? '…' : '') + suffix;
   }
   function duration(ms) {
     if (ms === null || !Number.isFinite(ms)) return 'Unavailable';
@@ -997,6 +1038,7 @@
     else document.querySelector('#sec-history > summary').focus({ preventScroll: true });
   });
   // stats-focus:end
+  // stats-render:start
   function renderStats() {
     if (!board.selectedKey) return;
     var current = board.runs.find(function (r) { return r.key === board.selectedKey; });
@@ -1029,7 +1071,7 @@
     content.appendChild(el('h3', null, 'Recorded blocker episodes · ' + stats.blockers.length));
     var blockers = el('ul', 'stats-history');
     stats.blockers.forEach(function (episode) {
-      var item = el('li', null, episode.reasons.map(function (r) { return r.text; }).join('; '));
+      var item = el('li', null, blockerEpisodeSummary(episode));
       item.appendChild(el('small', 'mono', new Date(episode.at).toLocaleString() + ' · ' + duration(episode.ms))); blockers.appendChild(item);
     });
     if (!stats.blockers.length) blockers.appendChild(el('li', null, stats.complete ? 'No blockers recorded.' : 'No blocker history available.'));
@@ -1045,6 +1087,7 @@
     content.appendChild(el('p', 'stats-note', 'Measurements as of ' + new Date(board.selectedAt).toLocaleString() + '. Concurrent queue reasons share one interval.'));
     document.getElementById('stats-body').replaceChildren(content);
   }
+  // stats-render:end
 
   function updateCounts(animate) {
     var counts = summarize(board.runs, board.now);

@@ -1,10 +1,13 @@
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { Buffer } from "node:buffer";
 import { resolve } from "node:path";
 import type { RunState } from "./board.mts";
 import { edgesOf, SANDCASTLE_MARK } from "./graph.mts";
 import type { Manifest } from "./graph.mts";
 import type { Delivered, Delivery } from "./tracker.mts";
 
+// Browser preflight owns its process group with a Node watchdog, independent of host timeout implementations.
+// It kills descendants on deadline and leader exit, and records success only after browser cleanup.
 // The hand-off every branch goes through before it leaves the host: the independent verifier, then evidence posted to
 // the ticket, then on PASS push and normal delivery (tracker.deliver: an MR on GitLab, a PR merged after CI on GitHub
 // with MERGE.auto). Blocked merge gates leave the run waiting for a person. main.mts calls it after its implementer; a recovery run (slice four) calls the same functions after
@@ -20,7 +23,8 @@ import type { Delivered, Delivery } from "./tracker.mts";
 // that fails, is unknown and holds it too. Host calls are passed in (Host), so this file imports no tracker, config or
 // board module (only graph.mts's marker and edges) and is tested with fakes (handoff.test.mts).
 // Posting is one adapter operation: GitHub attaches native media, GitLab uploads then comments.
-// A posting error retains local evidence and stops before the PASS/no-push and delivery gates.
+// A posting error retains local evidence and stops before the PASS/no-push and delivery gates. Both verifier paths
+// first launch the globally installed browser as the sandbox user and retain a bounded provisioning log.
 
 /** What the hand-off needs from the host: board, tracker and git. main.mts passes the real ones. */
 export interface Host {
@@ -42,7 +46,7 @@ export interface Host {
 /** The bit of a Sandcastle sandbox the verifier needs. */
 export interface VerifierSandbox {
   run(o: { agent: unknown; promptFile: string; promptArgs: Record<string, string>; maxIterations: number; completionSignal: string; name: string }): Promise<{ commits: unknown[] }>;
-  exec(cmd: string): Promise<{ stdout: string }>;
+  exec(cmd: string): Promise<{ stdout: string; stderr?: string; exitCode?: number }>;
   worktreePath?: string;
 }
 
@@ -57,10 +61,62 @@ export function beginVerification(host: Pick<Host, "setStage">, iid: string, evi
   host.setStage(iid, { stage: "verifying", verdict: undefined, mr: undefined, mergedAt: undefined });
 }
 
+// Fixed stage names avoid recording environment variables or arbitrary browser error messages in evidence.
+export const BROWSER_PROBE = `
+const { execFileSync } = require('node:child_process');
+let stage = 'global module resolution';
+(async () => {
+  let browser;
+  try {
+    const root = execFileSync('npm', ['root', '-g'], {encoding:'utf8', timeout:10000}).trim();
+    const { chromium } = require(require('node:path').join(root, 'playwright'));
+    stage = 'Chromium launch';
+    browser = await chromium.launch({headless:true, timeout:15000});
+    stage = 'DOM marker';
+    const page = await browser.newPage();
+    await page.setContent('<div id="factory-probe">ready</div>');
+    if (await page.locator('#factory-probe').textContent() !== 'ready') throw Error('marker mismatch');
+  } catch (_) { console.error('browser preflight failed: ' + stage); process.exitCode = 1; }
+  finally { if (browser) await browser.close(); }
+  if (!process.exitCode) console.log('browser preflight OK');
+})().catch(() => { console.error('browser preflight failed: cleanup'); process.exitCode = 1; });`;
+
+/** Probe the installed runtime without downloads, retaining only bounded, non-secret stage diagnostics. */
+export async function browserPreflight(sandbox: Pick<VerifierSandbox, "exec">, evidenceHost: string, timeoutMs = 30000): Promise<string | undefined> {
+  const path = resolve(evidenceHost, "browser-preflight.log");
+  let diagnostic = "probe failed";
+  let ok = false;
+  try {
+    rmSync(path, { force: true });
+    // Own the group directly: host `timeout` implementations differ in descendant handling.
+    // Kill again after leader exit to catch a descendant forked while the deadline signal was delivered.
+    const watchdog = `
+const { spawn } = require('node:child_process');
+const child = spawn(process.execPath, ['-e', ${JSON.stringify(BROWSER_PROBE)}], { detached: true, stdio: 'inherit' });
+let expired = false;
+const kill = () => { if (child.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; } } };
+const timer = setTimeout(() => { expired = true; kill(); }, ${Math.max(1, timeoutMs)});
+child.on('error', () => { clearTimeout(timer); kill(); process.exitCode = 1; });
+child.on('exit', code => { clearTimeout(timer); kill(); process.exitCode = expired ? 124 : (code ?? 1); });`;
+    const encoded = Buffer.from(watchdog).toString("base64");
+    const result = await sandbox.exec(`command -v playwright >/dev/null || { echo "browser preflight failed: CLI missing"; exit 1; }; exec node -e "eval(Buffer.from('${encoded}','base64').toString())"`);
+    const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+    const failure = text.match(/browser preflight failed: (?:CLI missing|global module resolution|Chromium launch|DOM marker|cleanup)/);
+    diagnostic = failure?.[0] ?? (text.includes("browser preflight OK") ? "browser preflight OK" : "browser preflight failed: probe execution or timeout");
+    ok = (result.exitCode ?? 0) === 0 && diagnostic === "browser preflight OK";
+  } catch { diagnostic = "browser preflight failed: probe or timeout"; }
+  try { writeFileSync(path, diagnostic.slice(0, 256) + "\n"); }
+  catch { ok = false; diagnostic = "browser preflight evidence could not be recorded"; }
+  if (!ok) return `Playwright/Chromium provisioning failure: ${diagnostic}. Add the documented browser layer and explicitly rebuild the configured image; custom images remain operator-owned.`;
+  return undefined;
+}
+
 /** Run the independent verifier on `tip` in the run's sandbox. Returns why the result can't be used, or undefined. */
 export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "setStage">,
   o: { iid: string; evidenceHost: string; agent: unknown; promptArgs: Record<string, string>; tip: string; promptFile?: string }): Promise<string | undefined> {
   beginVerification(host, o.iid, o.evidenceHost);
+  const preflight = await browserPreflight(sandbox, o.evidenceHost);
+  if (preflight) return preflight;
   const ver = await sandbox.run({
     agent: o.agent,
     promptFile: o.promptFile ?? VERIFY_PROMPT,

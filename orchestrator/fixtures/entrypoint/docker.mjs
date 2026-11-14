@@ -1,7 +1,8 @@
 // Test-only `docker` for the recovery entrypoint smoke test (#74). Containers are JSON files in $FAKE_STATE/containers.
 // `run -d --name N ... IMAGE` records the exact arguments and mounts; `exec ... N sh -c CMD` runs CMD on the host the way
 // the container sees its mounts (cwd = the worktree mount, GIT_DIR = the private Git mount, $EVIDENCE = the writable
-// evidence mount), forwarding SIGTERM; `container inspect N` and `rm -f N` use the exact name. Everything else exits 2.
+// evidence mount), forwarding SIGTERM; the Node-watchdog browser preflight is explicitly faked as provisioned. `container inspect N`
+// and `rm -f N` use the exact name. Everything else exits 2.
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ if (args[0] === "run") {
   const sh = args.lastIndexOf("sh");
   const name = args[sh - 1];
   if (!existsSync(file(name))) fail(`Error: No such container: ${name}`, 1);
+  if (args[sh + 2].startsWith("command -v playwright ")) { process.stdout.write("browser preflight OK\n"); process.exit(0); }
   const { mounts } = JSON.parse(readFileSync(file(name), "utf8"));
   const at = (box) => mounts.find((m) => m.box === box).host;
   const evidence = mounts.find((m) => m.box.startsWith("/home/agent/evidence/") && !m.ro).host;
