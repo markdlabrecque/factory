@@ -181,7 +181,21 @@ A repair continues the affected ticket's own work (#59, `cli/src/recovery-worksp
 - **Remote-only branch** (#75, `fetchRecordedBranch`). When the recorded branch exists only on origin and no claim protects the ticket, the launcher records the intent, then asks origin for exactly `refs/heads/<branch>` (refusing when none or several refs match, since `ls-remote` matches by tail), fetches it into `refs/remotes/origin/<branch>` without `+` (a non-fast-forward update is refused, not forced), checks the fetched commit is the one advertised and contains the receipt's recorded commit, and creates the local branch with `git update-ref refs/heads/<branch> <sha> ""` (only if it does not exist). Then `resumeTarget` runs again.
 - Tests: `cli/test/recovery-workspace.test.mts`, against disposable Git repos.
 
+<!-- #150: normal and repaired delivery require fresh immutable host proof and unchanged requirements. -->
 # Slice four: shared verification and delivery
+
+Policy-1 delivery now requires the verifier's structured criterion report and a
+host-only frozen proof (`orchestrator/verification.mts`). Both entrypoints bind the
+execution, recovery UUID if applicable, recorded historical baseline, verified tip,
+starting `unitHash`, artifact hashes and runtime/workflow provenance after teardown.
+Legacy PASS is never proof. Missing baseline or execution identity requires explicit
+human review or newly established verification, not today's fetched base as a fallback.
+Requirements/eligibility/claim changes refuse delivery; exact-SHA nonforced push and
+remote confirmation precede delivery. Both adapters reauthorize after CI, immediately
+before SHA-guarded auto merge; manual merge remains manual. An external edit can still
+race after the last tracker read. See [the coherent upgrade contract](../orchestrator/ADAPTING.md#verified-delivery-upgrade)
+for operator-merged custom prompts/helpers and renewed recovery review. No continuation
+loop, scheduler change or historical record migration is included.
 
 A repaired branch goes through the same hand-off as an implemented one (#58, `orchestrator/handoff.mts`, copied into projects by `factory init`). `main.mts` calls it after its implementer, and `main.mts --recover` (#60) after its repair agent.
 

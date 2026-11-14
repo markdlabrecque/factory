@@ -186,7 +186,7 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
   return { url: out.split(/\s+/).find((w) => w.startsWith("http")) ?? "", merged: false };
 }
 
-/** Open first so MR-only pipelines can run. Never merge an old pipeline or a changed head. */
+/** #150: open first; same-SHA CI and fresh host authorization precede the SHA-guarded merge. */
 async function autoDeliver(d: Delivery & { waitMinutes: number; noCiMinutes: number }): Promise<Delivered> {
   const path = `projects/${ID}/merge_requests`;
   const mr = JSON.parse(glab(["api", "-X", "POST", path, "--hostname", HOST,
@@ -218,6 +218,10 @@ async function autoDeliver(d: Delivery & { waitMinutes: number; noCiMinutes: num
       if (["failed", "canceled", "skipped", "manual"].includes(pipeline.status) || gate === "fail") return block(reason);
       if (pipeline.status === "success" && gate === "pass") {
         // GitLab's project setting controls merge vs rebase; squash is selectable per MR.
+        let refused: string | undefined;
+        try { refused = typeof d.beforeMerge === 'function' ? await d.beforeMerge() : 'host authorization missing'; }
+        catch (e) { refused = `host authorization unknown: ${(e as Error).message}`; }
+        if (refused !== undefined) return block(refused);
         try {
           const merged = JSON.parse(glab(["api", "-X", "PUT", `${path}/${mr.iid}/merge`, "--hostname", HOST,
             "-f", `sha=${d.sha}`, "-F", `squash=${MERGE.method === "squash"}`])) as { state: string };

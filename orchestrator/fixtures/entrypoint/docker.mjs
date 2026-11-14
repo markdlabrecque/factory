@@ -1,3 +1,4 @@
+// #150: image inspection returns a fixed immutable synthetic image identity.
 // Test-only `docker` for the recovery entrypoint smoke test (#74). Containers are JSON files in $FAKE_STATE/containers.
 // `run -d --name N ... IMAGE` records the exact arguments and mounts; `exec ... N sh -c CMD` runs CMD on the host the way
 // the container sees its mounts (cwd = the worktree mount, GIT_DIR = the private Git mount, $EVIDENCE = the writable
@@ -34,7 +35,7 @@ if (args[0] === "run") {
 } else if (args[0] === "container" && args[1] === "inspect") {
   const name = args.at(-1);
   if (!existsSync(file(name))) fail(`Error: No such container: ${name}`, 1);
-  process.stdout.write(`/${name}\n`);
+  process.stdout.write(args.includes('{{.Image}}') ? `sha256:${'d'.repeat(64)}\n` : `/${name}\n`);
 } else if (args[0] === "rm" && args[1] === "-f") {
   rmSync(file(args.at(-1)), { force: true });
 } else fail(`fake docker: unexpected call: ${args.join(" ")}`);

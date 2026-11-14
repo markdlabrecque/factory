@@ -1,4 +1,7 @@
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+// #150: only host-frozen structured proof can authorize publication, exact-SHA push and merge.
+import { rmSync, writeFileSync } from "node:fs";
+import { readProof, validateEvidence } from './verification.mts';
+import type { Identity } from './verification.mts';
 import { Buffer } from "node:buffer";
 import { resolve } from "node:path";
 import type { RunState } from "./board.mts";
@@ -57,8 +60,8 @@ export const VERIFY_PROMPT = "./.sandcastle/prompt.verify.md";
 
 /** Clear what an earlier run of this ticket left that could pass for this run's verdict, then mark the record verifying. */
 export function beginVerification(host: Pick<Host, "setStage">, iid: string, evidenceHost: string): void {
-  rmSync(resolve(evidenceHost, "verdict.md"), { force: true });
-  host.setStage(iid, { stage: "verifying", verdict: undefined, mr: undefined, mergedAt: undefined });
+  for (const name of ['verdict.md', 'verification.json']) rmSync(resolve(evidenceHost, name), { force: true });
+  host.setStage(iid, { stage: "verifying", verdict: undefined, verification: undefined, mr: undefined, mergedAt: undefined });
 }
 
 // Fixed stage names avoid recording environment variables or arbitrary browser error messages in evidence.
@@ -125,17 +128,28 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
     completionSignal: "<promise>COMPLETE</promise>",
     name: "verifier",
   });
-  const after = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
-  const dirty = (await sandbox.exec("git status --porcelain")).stdout.trim();
+  const headResult = await sandbox.exec('git rev-parse HEAD');
+  const dirtyResult = await sandbox.exec('git status --porcelain');
+  if ((headResult.exitCode ?? 0) !== 0 || (dirtyResult.exitCode ?? 0) !== 0) return 'Verifier immutability checks could not be completed; not posting or pushing';
+  const after = headResult.stdout.trim();
+  const dirty = dirtyResult.stdout.trim();
   if (ver.commits.length || after !== o.tip || dirty) {
     return `Verifier changed the branch (commits=${ver.commits.length}, head=${after.slice(0, 8)}, dirty=${!!dirty}). Not posting or pushing; inspect ${sandbox.worktreePath ?? "the worktree"}.`;
   }
+  try { validateEvidence(o.evidenceHost); }
+  catch (e) { return `${(e as Error).message}. Retain evidence in ${o.evidenceHost}; custom verifier prompts must be explicitly upgraded to write verification.json (policy 1).`; }
   return undefined;
 }
 
 export interface Handoff {
   iid: string;
   project: string;
+  /** Host-owned identity and proof, never obtained from agent reports. */
+  identity: Identity;
+  proofId: string;
+  state: string;
+  /** Fail closed: undefined means authorized; a reason or exception refuses the operation. */
+  recheck: () => string | undefined;
   branch: string;
   base: string;
   baseSha: string;
@@ -162,17 +176,24 @@ export type Outcome =
 export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   const { iid, branch, base, tip } = h;
   host.setStage(iid, { stage: "posting" });
-  const verdictFile = resolve(h.evidenceHost, "verdict.md");
-  if (!existsSync(verdictFile)) return { ok: false, reason: `Verifier wrote no verdict.md in ${h.evidenceHost}. Nothing posted or pushed.` };
-  const verdictText = readFileSync(verdictFile, "utf8").trim();
-  const verdict = /^VERDICT:\s*(PASS|FAIL|INCONCLUSIVE)/.exec(verdictText)?.[1] ?? "INCONCLUSIVE";
+  const authorize = (): string | undefined => {
+    try {
+      if (h.identity.project !== h.project || h.identity.ticket !== iid || h.identity.tip !== tip || h.identity.baseline !== h.baseSha || h.identity.branch !== branch || h.identity.base !== base) return 'handoff identity mismatch';
+      readProof(h.state, h.identity, h.proofId);
+      return h.recheck();
+    } catch (e) { return `Verification authorization failed: ${(e as Error).message}`; }
+  };
+  const refusal = authorize();
+  if (refusal) return { ok: false, reason: refusal };
+  const frozen = readProof(h.state, h.identity, h.proofId);
+  const { verdictText } = frozen;
+  const verdict = frozen.report.verdict;
   const repaired = h.origin.kind === "repaired" ? `Repaired by Factory recovery attempt ${h.origin.attempt}, then verified independently.` : "";
 
-  const files = readdirSync(h.evidenceHost).sort();
-  const media = (label: string) => files.filter((f) => (f.startsWith(`${label}-`) && f.endsWith(".png")) || [`${label}.webm`, `${label}.mp4`].includes(f));
-  const shown = [...media("before"), ...media("after")];
+  const media = (label: string) => frozen.artifacts.filter(a => a.phase === label && a.kind !== 'command-output').map(a => a.path);
+  const shown = [...media('before'), ...media('after'), ...media('check')];
   try {
-    host.tracker.postVerification(iid, tip, shown.map((f) => resolve(h.evidenceHost, f)), (markdown) => {
+    host.tracker.postVerification(iid, tip, shown.map((f) => resolve(frozen.root, f)), (markdown) => {
       const uploaded = new Map(markdown.map((md, i) => [shown[i], md]));
       const section = (label: string, title: string) => {
         const items = media(label).map((f) => `**${f}**\n\n${uploaded.get(f)}`);
@@ -185,6 +206,7 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
         verdictText.replace(/^VERDICT:.*\n?/, ""),
         section("before", "Before"),
         section("after", "After"),
+        section("check", "Checks"),
         SANDCASTLE_MARK,
       ].filter(Boolean).join("\n\n");
     });
@@ -203,11 +225,16 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
 
   host.setStage(iid, { stage: "pushing" });
   try {
-    host.git(["push", "-u", "origin", branch]);
+    const refused = authorize();
+    if (refused) return { ok: false, verdict, reason: refused };
+    if (host.git(['rev-parse', `refs/heads/${branch}`]).trim() !== tip) return { ok: false, verdict, reason: `Local branch ${branch} moved from verified tip; nothing pushed.` };
+    host.git(["push", "origin", `${tip}:refs/heads/${branch}`]);
+    const remote = host.git(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]).trim().split(/\s+/)[0];
+    if (remote !== tip) return { ok: false, verdict, reason: 'Remote branch does not match verified tip; not delivering.' };
   } catch (e) {
     return { ok: false, verdict, reason: `Push of ${branch} failed: ${(e as Error).message}` };
   }
-  const sha = host.git(["rev-parse", branch]);
+  const sha = tip;
 
   // Exact conflicts with the other live Sandcastle branches, so you know which MR to merge first.
   const openMrs = host.tracker.openMrBranches();
@@ -234,6 +261,12 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   try {
     delivered = await host.tracker.deliver({
       branch, base, sha, title: `#${iid}: ${h.title}`, body, onStage: (stage) => host.setStage(iid, { stage }),
+      beforeMerge: () => {
+        const refused = authorize();
+        if (refused) return refused;
+        const remote = host.git(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]).trim().split(/\s+/)[0];
+        return remote === tip ? undefined : 'Remote branch moved from verified tip';
+      },
       waitMinutes: h.ciWaitMinutes, noCiMinutes: h.noCiMinutes, autoMerge: h.autoMerge,
     });
   } catch (e) {

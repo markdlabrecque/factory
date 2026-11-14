@@ -1,3 +1,4 @@
+// #150: fresh synthetic reports and execution proof bind repaired tips after confirmed cleanup.
 // The recovery attempt lifecycle end to end (#60 acceptance, #74): the real runRecoveryAttempt (recovery.mts) with the
 // real owned-sandbox adapter and Git workspace (recovery-sandbox.mts), the real verifier and delivery (handoff.mts) and
 // real Git on a synthetic project: committed ticket work, staged/unstaged/untracked input, an unrelated branch and
@@ -5,6 +6,7 @@
 // commands on the host with its mounts), the agent (a shell script per scenario), the tracker/push, and a fake clock
 // for the 900000 ms deadline. Unknown docker or host git calls throw. Prerequisite holds (#75) use the real
 // handoff.mts prerequisiteHold over a synthetic ticket analysis. The tracker boundary also covers posting failures.
+import { fixtureProvenance, verificationCommand, writeVerification } from './fixtures/verification.mts';
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -51,7 +53,7 @@ const REPORT = (o: Record<string, unknown> = {}) => JSON.stringify({ cause: "fla
   tests: [{ command: "npm test", result: "pass" }], canProceed: true, remainingBlockers: [], requiresHostUpdate: false, ...o });
 const writeReport = (o?: Record<string, unknown>) => `printf '%s' '${REPORT(o)}' > "$EVIDENCE/recovery-report.json" && echo report > "$EVIDENCE/recovery-report.md"`;
 const COMMIT = `printf 'fixed\\n' > fix.txt && git add -A && git -c user.name=r -c user.email=r@r commit -qm repair`;
-const PASS = `printf 'VERDICT: PASS\\nlooks right\\n' > "$EVIDENCE/verdict.md"`;
+const PASS = `printf 'VERDICT: PASS\\nlooks right\\n' > "$EVIDENCE/verdict.md" && ${verificationCommand()}`;
 
 type Scenario = {
   repair?: string; verify?: string; clean?: boolean; setup?: { command: string; timeoutMs?: number }[]; hooks?: Record<string, Hook>;
@@ -125,6 +127,7 @@ function fixture(t: TestContext, s: Scenario = {}) {
     live: () => false,
     git: (args) => {
       if (args[0] === "push") { pushes.push(args); return ""; }
+      if (args[0] === 'ls-remote') return git(root, 'rev-parse', '7-fix-login');
       if (args[0] === "rev-parse") return git(root, ...args);
       throw new Error(`unexpected host git: ${args.join(" ")}`);
     },
@@ -148,7 +151,9 @@ function fixture(t: TestContext, s: Scenario = {}) {
     run: () => runRecoveryAttempt(ctx, deps),
   };
   const ctx: RecoveryContext = {
-    root, record, model: REPAIR_MODEL, title: "Fix login", baseSha, promptArgs: {
+    root, record, model: REPAIR_MODEL, title: "Fix login", baseSha,
+    proof: { state: join(home, 'state'), executionId: 'execution', requirementsHash: 'c'.repeat(64) },
+    provenance: async () => fixtureProvenance, promptArgs: {
       ISSUE_IID: "7", ISSUE_TITLE: "Fix login", TICKET: "ticket text", BASE_BRANCH: "main", BASE_SHA: baseSha, BRANCH: "7-fix-login",
       EVIDENCE_DIR: "/home/agent/evidence/7", CATALOGUE: "(none)", ATTEMPT: "1", ATTEMPT_ID: ID, REPAIR_MINUTES: "15",
     },
@@ -202,7 +207,7 @@ test("a committed repair is verified separately and the exact tip delivered; att
   assert.equal(git(f.root, "merge-base", "--is-ancestor", f.startSha, tip), "");
   assert.equal(rec.tip, tip);
   assert.deepEqual(f.delivered, [{ sha: tip, branch: "7-fix-login" }]);
-  assert.deepEqual(f.pushes, [["push", "-u", "origin", "7-fix-login"]]);
+  assert.deepEqual(f.pushes, [['push', 'origin', `${tip}:refs/heads/7-fix-login`]]);
   assert.deepEqual(rec.delivery, { tip, ok: true, url: "https://example.test/pr/9" });
   assert.match(f.comments[0], /Repaired by Factory recovery attempt 1/);
   assert.equal(git(f.root, "rev-parse", "8-other"), otherRef, "unrelated branch untouched");
@@ -249,6 +254,7 @@ test("setup longer than 15 minutes and a slow verifier never time the repair out
     FAKE_SLOW_VERIFY: async () => {
       f.clock.advance(40 * 60_000);
       writeFileSync(join(f.rec().evidence, "verdict.md"), "VERDICT: PASS\nslow but fine\n");
+      writeVerification(f.rec().evidence);
       return { status: 0 };
     },
   } });
@@ -293,6 +299,16 @@ test("cancellation (SIGTERM) during repair or setup interrupts the attempt and p
   assert.deepEqual(g.agentRuns, [], "no repair after a signal during setup");
   assert.ok(!g.world.live.has(containerFor(ID)));
   assertPreserved(g);
+});
+
+test('even a valid verifier cannot publish proof before confirmed teardown', async t => {
+  const f = fixture(t, { stuck: true });
+  const result = await f.run();
+  assert.equal(result.cleanupPending, true);
+  assert.equal(f.agentRuns.includes('verifier'), true);
+  assert.equal(existsSync(join(f.home, 'state/verification')), false, 'no host proof while a verifier may still run');
+  assert.deepEqual(f.pushes, []);
+  assert.deepEqual(f.delivered, []);
 });
 
 test("cleanup that cannot be confirmed keeps the attempt cleanup-pending and returns failure", async (t) => {

@@ -1,3 +1,4 @@
+// #150: executable tracker changes invalidate recovery review; project-owned prompts remain protected.
 // #137: update snapshots cover nested vendor assets and project-owned TOML.
 // `factory update --dry-run` (#91) and `--apply` (#92): classification of a project's .sandcastle copy against a synthetic Factory app with
 // two committed versions, from its Git history, from an install catalog, and with no history; and that the dry run
@@ -98,6 +99,22 @@ test('factory update --dry-run reports by class and writes nothing; without --dr
   assert.deepEqual(snapshot(), before);
 });
 
+test('legacy upgrade creates verification helper but keeps a customized verifier prompt for explicit merge', t => {
+  const { p, app, root, sc } = fixture(t);
+  addProject(p, root);
+  rmSync(join(sc, 'verification.mts'));
+  writeFileSync(join(sc, 'prompt.verify.md'), '# My legacy verifier\nWrite verdict.md only.\n');
+  const c = classes(classifyCopy(p, root, { app }));
+  assert.equal(c['verification.mts'], 'missing');
+  assert.equal(c['prompt.verify.md'], 'project');
+  const out: string[] = [];
+  t.mock.method(console, 'log', (s: string) => out.push(s));
+  assert.equal(update(p, { apply: true, cwd: root, app }), 0);
+  assert.deepEqual(readFileSync(join(sc, 'verification.mts')), readFileSync(join(app, 'orchestrator/verification.mts')));
+  assert.equal(readFileSync(join(sc, 'prompt.verify.md'), 'utf8'), '# My legacy verifier\nWrite verdict.md only.\n');
+  assert.match(out.join('\n'), /recovery review/);
+});
+
 test('factory update --apply creates missing and replaces outdated files, keeping edited and project-owned ones', t => {
   const { p, app, root, sc } = fixture(t);
   addProject(p, root);
@@ -108,7 +125,8 @@ test('factory update --apply creates missing and replaces outdated files, keepin
   const text = out.join('\n');
   assert.match(text, /1 created, 3 replaced/);
   assert.match(text, /Edited locally \(kept; merge by hand\): 1\n  ci\.mts/);
-  assert.doesNotMatch(text, /recovery review/); // none of the written files is in the recovery workflow
+  // #150: tracker.mts is executable delivery authority and now requires coherent workflow review.
+  assert.match(text, /recovery review/);
   for (const f of ['tracker.mts', 'graph.mts']) assert.deepEqual(readFileSync(join(sc, f)), readFileSync(join(app, 'orchestrator', f)), f);
   assert.equal(readFileSync(join(sc, 'factory-dispatch.sh'), 'utf8'),
     readFileSync(join(app, 'cli/templates/project/factory-dispatch.sh'), 'utf8').replace('{{STATE_DIR_QUOTED}}', `'${p.state}'`));

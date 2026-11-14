@@ -1,3 +1,4 @@
+// #150: verification.mts is shipped and included automatically in update scaffoldSources.
 // #137: new scaffolds ship versioned TOML and offline parser; legacy reruns never opt in implicitly.
 // Scaffold writer: builds the allowlisted `.sandcastle/` assets from the installed app (never from cwd) and
 // creates only the files that are missing. Existing files are never touched; symlinked or mistyped
@@ -26,6 +27,7 @@ export type Settings = { profile: Profile; repo: string; image: string; host?: s
 export type PlannedFile = { path: string; content: string | Buffer; mode: number };
 
 export const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
+  'verification.mts', // #150: structured proof is a required runtime dependency.
   'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];

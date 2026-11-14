@@ -39,8 +39,9 @@ export interface Select {
 
 export type ReadyTicket = Ticket & { assignees?: { username: string }[] };
 
-/** What main.mts hands the adapter once the branch is pushed. */
+/** #150: adapters require fresh host proof/requirements authorization immediately before auto merge. */
 export interface Delivery {
+  beforeMerge: () => string | undefined | Promise<string | undefined>;
   branch: string;
   base: string;
   sha: string; // the pushed tip; a PR is only merged while its head is still this commit

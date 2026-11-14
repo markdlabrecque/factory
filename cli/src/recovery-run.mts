@@ -1,3 +1,4 @@
+// #150: carry host-recorded execution and historical implementation baseline into attempt/ownership metadata.
 // #137: tracker metadata reads TOML first, without executing legacy project configuration.
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
 // settles attempts that ended. The tick's jam confirmation (#61, jam-detect.mts) calls settleRecovery after each completed
@@ -182,6 +183,7 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
     if (held && claimLive(held)) return { ok: false, reason: `#${o.ticket} is claimed (${held.kind}, process ${held.owner.pid}); not fetching its branch` };
     const contains = receipt?.branchSha;
     recordIntent(dir, { root: o.root, tracker: identity, ticket: String(o.ticket), branch: run.branch, base: run.base, runId: id, at,
+      implementationBaseSha: run.implementationBaseSha,
       branchToCreate: true, worktreeToCreate: false, ...(contains ? { branchSha: contains } : {}) });
     const fetched = fetchRecordedBranch(o.root, run.branch, { contains });
     if (!fetched.ok) return { ok: false, reason: `#${o.ticket}: ${fetched.reason}` };
@@ -195,6 +197,7 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
   // A pre-upgrade run's exact branch is adopted; identities a crash left unrecorded are filled from what Git shows.
   if (target.adopt) {
     recordIntent(dir, { root: o.root, tracker: identity, ticket: String(o.ticket), branch: target.branch, base: target.base, runId: id, at,
+      implementationBaseSha: run.implementationBaseSha,
       branchToCreate: false, worktreeToCreate: false, branchSha: target.tip, ...(target.worktree ? { worktreeAt: at } : {}) });
   } else if (target.reconcile) {
     fillReceipt(receiptPath, { ...(target.reconcile.branchSha ? { branchSha: target.reconcile.branchSha } : {}), ...(target.reconcile.worktreeAt ? { worktreeAt: at } : {}) });
@@ -218,11 +221,13 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
     if (!target.worktree) {
       const cur = readReceipt(receiptPath);
       recordIntent(dir, { root: o.root, tracker: identity, ticket: String(o.ticket), branch: target.branch, base: target.base, runId: id, at,
+        implementationBaseSha: run.implementationBaseSha,
         branchToCreate: false, worktreeToCreate: true, branchSha: cur?.branchSha ?? target.tip });
       execFileSync('git', ['worktree', 'add', '--quiet', worktree, target.branch], { cwd: o.root, stdio: ['ignore', 'ignore', 'pipe'] });
       fillReceipt(receiptPath, { worktreeAt: at });
     }
     const rec: AttemptRecord = { version: 1, id, seq, project: o.tracker, iid: String(o.ticket), branch: target.branch, base: target.base,
+      implementationBaseSha: run.implementationBaseSha, executionId: run.executionId,
       startSha: target.tip, worktree, container, evidence: attemptEvidence(o.root, String(o.ticket), id), gitDir: attemptGitDir(o.root, id),
       phase: 'claimed', createdAt: at, updatedAt: at, events: [{ at, phase: 'claimed' }] };
     writeAttemptRecord(record, rec);

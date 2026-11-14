@@ -13,6 +13,7 @@ import { projectTicket, readJournal } from "./journal.mts";
 // #126: implementationModel is an attempt snapshot; assessment.modelResolution is the current description choice.
 // Invalid-model queuing and parent launch handoff are admission-locked and token-fenced.
 // Presentation alone reads the journal: hidden archived cards and effective verdicts never affect readRuns or evidence.
+// #150: execution admission clears proof pointers; historical proof directories remain untouched.
 // Normal admission assigns executionId so retries cannot inherit manual metadata even when startedAt is retained.
 // Stage visits persist for real timing, blockers and bounce stats; legacy history stays explicitly incomplete.
 // Completed tickets appear in the template's latest-ten Shipped section; stopped runs remain unfinished.
@@ -64,7 +65,9 @@ export interface RunState {
   stage: Stage;
   stageSince: string;
   startedAt: string;
-  executionId?: string; // unique normal admission; older/manual runs use startedAt
+  executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
+  implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
+  verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
   implementationModel?: string; // chosen once by main.mts, never updated by description refresh
   updatedAt: string;
   pid: number;
@@ -194,7 +197,7 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
     startedAt: at,
     ...cur,
     ...patch,
-    executionId: !held && patch.startedAt && patch.startedAt !== cur.startedAt ? newToken() : patch.executionId ?? cur.executionId,
+    executionId: patch.executionId ?? (!held && patch.startedAt && patch.startedAt !== cur.startedAt ? newToken() : cur.executionId),
     iid,
     project,
     pid: patch.pid ?? process.pid,
@@ -294,6 +297,7 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   const { key: _key, evidenceUrl: _url, activity: _a, activityAt: _at, ...cur } = (current ?? {}) as Partial<BoardRun>;
   const run = trackStage(cur, { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
     queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token,
+    verification: undefined,
     executionId: kind === "normal" ? token : cur.executionId, updatedAt: at, stageSince: at } as RunState, at);
   return { ok: true, key, token, claim, current, run };
 }
@@ -388,6 +392,8 @@ export function readRuns(dir = stateDir(), reconcile = true): BoardRun[] {
     try {
       const file = resolve(dir, f);
       let s: RunState = JSON.parse(readFileSync(file, "utf8"));
+      if (s.implementationBaseSha !== undefined && !/^[0-9a-f]{40,64}$/.test(s.implementationBaseSha)) throw Error('invalid implementation baseline');
+      if (s.verification !== undefined && (!s.verification || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s.verification.id) || !/^[0-9a-f]{40,64}$/.test(s.verification.tip) || !/^(?:[0-9a-f]{16}|[0-9a-f]{64})$/.test(s.verification.requirementsHash))) throw Error('invalid verification pointer');
       if (reconcile && !TERMINAL.includes(s.stage) && !PARKED.includes(s.stage) && s.pid !== process.pid && !alive(s.pid)) {
         if (s.starting) {
           rmSync(file, { force: true });
