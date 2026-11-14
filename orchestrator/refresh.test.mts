@@ -1,3 +1,4 @@
+// #149: dispatch retries unknown dependencies for both trackers without labels or launches.
 // #137: scaffolded fixtures use authoritative TOML for settings, shared-board capacity and CLI overrides.
 // #126: dispatch/refresh resolve description models on both trackers, preserving running attempt models.
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
@@ -76,6 +77,88 @@ function fixture(t: any, kind = "github") {
 }
 
 for (const kind of ["github", "gitlab"]) {
+  test(`${kind}: unknown implementer dependencies hold dispatch and recover without ticket edits`, t => {
+    const f = fixture(t, kind);
+    f.data.tickets[0].description = "Model: sonnet\nRequirement DEP:20";
+    f.record(7, "queued");
+    // A provider outside the open catalogue must be read, never presumed satisfied.
+    f.data.tickets[1].contextOnly = true;
+    f.data.errors = [20];
+    f.manifest(7);
+    const path = join(f.dir, "graph", `${f.key(7)}.json`);
+    const manifest = JSON.parse(f.bytes(path));
+    manifest.implementerBlockers = [{ iid: 20, what: "provider", evidence: "implementer report" }];
+    writeFileSync(path, JSON.stringify(manifest));
+    const held = f.pass();
+    assert.match(held.stdout, /#20.*information unavailable/);
+    assert.equal(existsSync(join(f.fake, "launches")), false);
+    assert.equal(JSON.parse(f.bytes(join(f.dir, `${f.key(7)}.json`))).stage, "queued");
+    assert.equal(f.assessment().dependencies?.find(d => d.iid === 20)?.state, "unknown");
+    f.data.errors = [];
+    f.data.tickets[1].state = "closed";
+    f.pass();
+    assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);
+    assert.equal(f.assessment().dependencies?.find(d => d.iid === 20)?.state, "satisfied");
+    const calls = f.bytes(join(f.fake, "tracker.jsonl"));
+    assert.doesNotMatch(calls, /"(?:edit|comment|close|create)"/);
+  });
+
+  test(`${kind}: failed merge reads hold an open dependency until a later qualifying merge`, t => {
+    const f = fixture(t, kind);
+    f.data.tickets[0].description = "Model: sonnet\nRequirement DEP:20";
+    f.record(7, "queued"); f.record(20, "waiting"); f.manifest(7);
+    const path = join(f.dir, "graph", `${f.key(7)}.json`), manifest = JSON.parse(f.bytes(path));
+    manifest.implementerBlockers = [{ iid: 20, what: "provider", evidence: "missing" }];
+    writeFileSync(path, JSON.stringify(manifest));
+    f.data.mergeErrors = ["20-topic"];
+    assert.match(f.pass().stdout, /#20.*information unavailable/);
+    assert.equal(existsSync(join(f.fake, "launches")), false);
+    assert.equal(f.assessment().dependencies?.find(d => d.iid === 20)?.state, "unknown");
+    f.data.mergeErrors = []; f.data.merged = ["20-topic"];
+    f.pass();
+    assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);
+  });
+
+  test(`${kind}: implementer lookup errors persist waitable blockers without needs-human`, t => {
+    const f = fixture(t, kind);
+    f.data.tickets[0].description = "Model: sonnet\nRequirement DEP:20";
+    f.data.tickets[1].contextOnly = true;
+    f.data.errors = [20];
+    f.save();
+    const module = join(f.root, "node_modules/@ai-hero/sandcastle");
+    mkdirSync(join(module, "sandboxes"), { recursive: true });
+    writeFileSync(join(module, "package.json"), JSON.stringify({ type: "module", exports: { ".": "./index.mjs", "./sandboxes/docker": "./sandboxes/docker.mjs" } }));
+    writeFileSync(join(module, "sandboxes/docker.mjs"), "export const docker = (options) => options;\n");
+    writeFileSync(join(module, "index.mjs"), `
+      import { execFileSync } from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      export const pi = () => ({}), claudeCode = pi;
+      export const createSandbox = async ({branch, baseBranch, sandbox}) => {
+        execFileSync('git', ['branch', branch, baseBranch]);
+        return { close: async () => {}, run: async () => {
+          writeFileSync(sandbox.mounts[0].hostPath + '/blocked.json', JSON.stringify({blockers: [{iid:20, what:'provider', evidence:'missing API'}]}));
+          return {commits: []};
+        }};
+      };
+    `);
+    for (const errorMessage of ["authentication failed secret-token", "rate limit exceeded secret-token", "transport timeout secret-token"]) {
+      f.data.errorMessage = errorMessage; f.save();
+      const r = spawnSync(f.node, [".sandcastle/main.mts", "--issue", "7", "--base", "main"], { cwd: f.root, env: f.env, encoding: "utf8", timeout: 20_000 });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      const record = JSON.parse(f.bytes(join(f.dir, `${f.key(7)}.json`)));
+      assert.equal(record.stage, "waiting");
+      assert.match(record.note, /dependency information unavailable/);
+      assert.doesNotMatch(record.note, /secret-token/);
+      const manifest = JSON.parse(f.bytes(join(f.dir, "graph", `${f.key(7)}.json`)));
+      assert.equal(manifest.implementerBlockers[0].iid, 20);
+      assert.equal(git(f.root, "branch", "--list", "7-*"), "");
+    }
+    assert.doesNotMatch(f.bytes(join(f.fake, "tracker.jsonl")), /"(?:edit|comment|close|create)"/);
+    f.data.errors = []; f.data.tickets[1].state = "closed";
+    f.pass();
+    assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);
+  });
+
   test(`${kind}: TOML cap counts other projects and CLI cap/work overrides report their sources`, t => {
     const f = fixture(t, kind);
     f.data.tickets[0].description = 'Model: sonnet';

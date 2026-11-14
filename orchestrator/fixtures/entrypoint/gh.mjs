@@ -1,3 +1,4 @@
+// #149: dependency failure is injected only for the named provider, never the work ticket.
 // Test-only `gh` for the recovery entrypoint smoke test (#74). Answers exactly the calls main.mts --recover and the
 // GitHub tracker adapter fixture for one open ticket (#7, description model), records every call to
 // $FAKE_STATE/gh.jsonl (with stdin for comments and PR bodies), and exits 2 on anything else.
@@ -17,6 +18,9 @@ const out = (v) => { process.stdout.write(typeof v === "string" ? v : JSON.strin
 const [a, b] = args;
 if (a === "label" && b === "list") out(["ready-for-agent", "blocked", "needs-human", "wontfix", "merged", "model:sonnet", "model:opus"].map((name) => ({ name })));
 if (a === "issue" && b === "list") out([ticket]);
+if (a === "issue" && b === "view" && args[2] === "12" && process.env.FAKE_DEPENDENCY_ERROR) {
+  process.stderr.write("authentication failed secret-token"); process.exit(2);
+}
 if (a === "issue" && b === "view" && args.includes("--json")) out(ticket);
 if (a === "issue" && b === "view" && args.includes("--comments")) out(`title:\t${ticket.title}\n--\n${ticket.body}\n`);
 if (a === "issue" && b === "comment") out("");

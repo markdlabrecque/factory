@@ -1,3 +1,4 @@
+<!-- #149: ship shared dependency evaluation and its callers as one reviewed upgrade. -->
 <!-- #140: compact red current blockers replace the Current ticket panel and manual refresh control; backend checks remain. -->
 <!-- Scheduler stub reads are concurrent-safe; browser preflight owns its group through a Node watchdog, not host timeout. CI retains TAP failures. -->
 <!-- #141: recorded blocker episodes show concise summaries without full details; current blockers and stored reasons are unchanged. -->
@@ -28,7 +29,7 @@ Upgrade `main.mts`, `handoff.mts`, **`verification.mts`**, `recovery.mts`,
 `recovery-sandbox.mts`, `ownership.mts`, `board.mts`, `tracker.mts`, both tracker
 adapters, `ci.mts` and verifier prompts as one reviewed set. `factory update` protects
 project-owned/customized files; operators merge those explicitly, then run
-`factory recovery review --confirm`. Missing helpers or changed delivery dependencies
+`factory recovery review --confirm`. Dependency checks share `dependencies.mts` across dispatch, implementer blockers, assessment and recovery. Ticket-not-found, failed reads and unreadable states remain unknown retryable holds, never proof of satisfaction or grounds alone for `needs-human`. Later passes read again without a ticket edit. Copy `dependencies.mts`, `graph.mts`, `dispatch.mts`, `refresh.mts` and `handoff.mts` together and merge project-owned `main.mts` by hand before the operator confirms review. Existing closed-ticket and qualifying-merge rules stay unchanged. Missing helpers or changed delivery dependencies
 invalidate recovery review. Do not adopt a partial upgrade or overwrite custom prompts.
 
 Proof storage is host-only under `<state>/verification/<project-hash>--<ticket>/<uuid>/`,

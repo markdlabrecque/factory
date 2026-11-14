@@ -1,3 +1,5 @@
+// #149: cache full three-state dependency results per pass; unknown reads hold dispatch.
+import { dependencyState, type DependencyResult } from "./dependencies.mts";
 // #137: TOML completely replaces legacy SELECT; shared selection preserves exhaustive-read semantics.
 // #126: description model resolutions are persisted independently of immutable running attempt choices.
 import { recordModelResolution } from "./assessment.mts";
@@ -276,27 +278,19 @@ if (batch.length) {
   }
 }
 
-// A blocker is satisfied when its ticket is closed, or its Sandcastle branch is merged into its base.
-const satisfiedCache = new Map<number, boolean>();
-const satisfied = (iid: number): boolean => {
-  if (!satisfiedCache.has(iid)) {
-    let ok = false;
-    try {
-      ok = !catalogueById.has(iid) && tracker.ticket(iid).state === "closed";
-    } catch {
-      ok = true; // ticket doesn't exist: nothing to wait for; the implementer reports it if it matters
-    }
-    const r = runOf.get(iid);
-    if (!ok && r?.branch) ok = tracker.mergedInto(r.branch, r.base ?? base);
-    satisfiedCache.set(iid, ok);
-  }
-  return satisfiedCache.get(iid)!;
+const dependencyCache = new Map<number, DependencyResult>();
+const dependency = (iid: number): DependencyResult => {
+  if (!dependencyCache.has(iid)) dependencyCache.set(iid, dependencyState(iid, {
+    ticket: (id) => catalogueById.get(id) ?? tracker.ticket(id),
+    run: (id) => runOf.get(id), mergedInto: tracker.mergedInto, base,
+  }));
+  return dependencyCache.get(iid)!;
 };
 
 const { decisions, dropped } = decide({
   candidates: candidates.map((c) => ({ iid: c.iid, hash: hashOf.get(c.iid)! })),
   manifests,
-  satisfied,
+  dependency,
   queue: new Set([...candidates.map((c) => c.iid), ...runs.filter((r) => r.stage !== "stopped").map((r) => Number(r.iid))]),
   live: live.map((r) => {
     const m = manifests.get(Number(r.iid));

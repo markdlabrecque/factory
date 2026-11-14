@@ -1,3 +1,4 @@
+// #149: text views and sanitized dependency-error scenarios cover normal blocked entrypoints.
 // Read-only gh/glab boundary for #78 refresh/dispatch and #122 open-MR conflict tests.
 // All data and exact call logs are fixture-owned. #135: write large capped-selection responses synchronously
 // so process.exit cannot truncate JSON still buffered on stdout.
@@ -12,7 +13,7 @@ const fail = (s) => { process.stderr.write(s); process.exit(2); };
 const isGh = process.env.FAKE_TRACKER === "github";
 const ghTicket = (t) => ({ number: t.iid, title: t.title, body: t.description, state: t.state.toUpperCase(), labels: t.labels.map((name) => ({ name })), assignees: [] });
 const ticket = (id) => {
-  if ((data.errors ?? []).includes(Number(id))) fail("tracker auth/network error");
+  if ((data.errors ?? []).includes(Number(id))) fail(data.errorMessage ?? "tracker auth/network error");
   const t = data.tickets.find((t) => t.iid === Number(id));
   if (!t) fail("ticket missing");
   return t;
@@ -23,8 +24,10 @@ if (args[0] === "issue" && args[1] === "list") {
   const ready = data.ready.map(ticket);
   out(isGh ? (args.includes("--search") ? ready : catalogue).map(ghTicket) : ready);
 }
+if (args[0] === "issue" && args[1] === "view" && !args.includes("--json")) out(ticket(args[2]).description);
 if (isGh && args[0] === "issue" && args[1] === "view" && args.includes("--json")) out(ghTicket(ticket(args[2])));
 if (isGh && args[0] === "pr" && args[1] === "list") {
+  if (args.includes("merged") && (data.mergeErrors ?? []).includes(args[args.indexOf("--head") + 1])) fail("merge lookup transport failure");
   if (args.includes("open")) out((data.openBranches ?? []).map((headRefName) => ({ headRefName })));
   out(args.includes("merged") && (data.merged ?? []).includes(args[args.indexOf("--head") + 1]) ? [{ number: 1 }] : []);
 }
@@ -51,6 +54,7 @@ if (!isGh && args[0] === "api") {
   if (n) out(n[2] ? data.notes?.[n[1]] ?? [] : ticket(n[1]));
   if (/\/merge_requests\?/.test(path)) {
     const q = new URLSearchParams(path.split("?")[1]);
+    if (q.get("state") === "merged" && (data.mergeErrors ?? []).includes(q.get("source_branch"))) fail("merge lookup transport failure");
     if (q.get("state") === "opened") out((data.openBranches ?? []).map((source_branch) => ({ source_branch })));
     out(q.get("state") === "merged" && (data.merged ?? []).includes(q.get("source_branch")) ? [{ iid: 1 }] : []);
   }

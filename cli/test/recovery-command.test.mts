@@ -1,3 +1,4 @@
+// #149: missing or edited shared dependency evaluation invalidates recovery review.
 // #150: proof and delivery dependency omissions/edits invalidate recovery review.
 // #137: review fixtures include nested parser/runtime files, without executing them.
 // `factory recovery status|reset|review` tests (#62, review #63), plus the recovery summary in `factory status` and repair logs in
@@ -166,7 +167,7 @@ test('review lists the workflow, refuses an incomplete copy, and --confirm activ
   assert.equal(recoveryCopyProblem(p, root), null);
   writeFileSync(sc('assessment.mts'), '// edited after review\n');
   assert.match(recoveryCopyProblem(p, root) ?? '', /assessment\.mts changed since/);
-  for (const name of ['verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts']) {
+  for (const name of ['dependencies.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts']) {
     assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 0);
     const previous = readFileSync(sc(name));
     rmSync(sc(name));

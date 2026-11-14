@@ -1,3 +1,4 @@
+// #149: unknown dependency reads prevent recovery verification and delivery.
 // #150: entrypoint uses recorded historical baseline and structured synthetic verification.
 // #126: normal runs snapshot the description model; invalid direct starts queue before Git/container work.
 // Guarded entrypoint smoke test (#74): a claimed, stopped ticket goes from Factory's real launcher (cli/src/recovery-run.mts)
@@ -34,7 +35,7 @@ const ID = "5b1f3c2a-9d8e-4f70-8a6b-0c1d2e3f4a5b";
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 
-for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'dirty', 'legacy-prompt']) {
+for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'dirty', 'legacy-prompt', 'dependency-unknown']) {
  test(`real recovery entrypoint: ${scenario}`, async (t) => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-entry-")));
   const children: ChildProcess[] = [];
@@ -82,6 +83,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   mkdirSync(fake);
   const env = {
     PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake,
+    FAKE_DEPENDENCY_ERROR: scenario === 'dependency-unknown' ? 'yes' : '',
     FAKE_MUTATION: scenario === 'closed-before' ? 'closed' : scenario === 'title' ? 'title' : '',
     FAKE_REPAIR: `printf 'fixed\\n' > fix.txt && git add -A && git commit -qm repair && printf '%s' '${JSON.stringify({ cause: "missing fix", filesChanged: ["fix.txt", "untracked.txt"], tests: [{ command: "true", result: "pass" }], canProceed: true, remainingBlockers: [], requiresHostUpdate: false })}' > "$EVIDENCE/recovery-report.json" && echo ok > "$EVIDENCE/recovery-report.md"`,
     FAKE_VERIFY: `printf 'VERDICT: PASS\\nverified\\n' > "$EVIDENCE/verdict.md" && ${verificationCommand()}`,
@@ -109,7 +111,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   mkdirSync(join(state, "graph"), { recursive: true });
   writeFileSync(join(state, "graph", "owner_repo--7.json"), JSON.stringify({ iid: 7, project: "owner/repo", hash, analyzedAt: at(1), base: "main", baseSha: "",
-    provides: [], requires: [], footprint: ["app.txt"], catalogueIids: [], blockerHashes: {} }));
+    provides: [], requires: scenario === 'dependency-unknown' ? [{ providedBy: 12, what: 'provider', evidence: 'ticket', confidence: 1 }] : [], footprint: ["app.txt"], catalogueIids: [], blockerHashes: {} }));
 
   // The launcher's own spawn, minus npx/tsx: node runs the scaffolded main.mts directly.
   let child!: ChildProcess;
@@ -127,7 +129,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   if (scenario !== 'pass') {
     assert.notEqual(code, 0, log);
     assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
-    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
+    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/} as Record<string, RegExp>)[scenario];
     assert.match(log, expected);
     const calls = existsSync(join(fake, 'docker.jsonl')) ? readFileSync(join(fake, 'docker.jsonl'), 'utf8') : '';
     if (scenario === 'missing-baseline') assert.ok(!calls.includes('"run"'), log);
