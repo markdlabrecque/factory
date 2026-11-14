@@ -1,5 +1,5 @@
 <!-- #139: Current assessments show red blocker numbers, hide satisfied dependencies and warn for unlinked blockers; presentation only. -->
-<!-- Shared normal/recovery verification requires a non-root Playwright/Chromium preflight; image and workflow upgrades are explicit. -->
+<!-- Shared normal/recovery verification requires a non-root Playwright/Chromium preflight; probe tests pin Node to the test runner. -->
 <!-- #137: versioned factory.toml owns ordinary settings for new/opted-in projects; legacy copies migrate explicitly. -->
 <!-- #117: scheduled passes send no --max override; each project's .sandcastle/dispatch.mts SELECT.maxConcurrent sets the cap, counted across the shared board. -->
 <!-- #97: after each completed scheduled pass (exit 0, not cancelled) the tick runs `factory clean` for that project (cli/src/commands/tick.mts cleanAfterPass, before jam confirmation), reading run records from Factory's state folder; removals, kept branches and failures go to the tick's log, a failure never fails the pass or tick, and a failed or cancelled pass or a read-only refresh gets none. -->
@@ -26,7 +26,7 @@ An unsupported CLI or failed upload stops the run before implementation push or 
 
 Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups. Terms used here are defined in [docs/GLOSSARY.md](docs/GLOSSARY.md).
 
-For tests and verification verdicts, follow [TESTING.md](TESTING.md). Test Factory's systemd integration against a stubbed command boundary; real service-manager trials are optional deployment checks. Refresh integration tests supply a fixture-owned `FACTORY_PI_SUBSCRIPTION_EXTENSION` as well as a stub `pi` command. They need no installed provider extension or agent login, and must not inherit those dependencies from a developer's home.
+For tests and verification verdicts, follow [TESTING.md](TESTING.md). Test Factory's systemd integration against a stubbed command boundary; real service-manager trials are optional deployment checks. Refresh integration tests supply a fixture-owned `FACTORY_PI_SUBSCRIPTION_EXTENSION` as well as a stub `pi` command. They need no installed provider extension or agent login, and must not inherit those dependencies from a developer's home. Browser-probe fixtures pin `node` to the test runner's executable in their isolated PATH, so CI does not depend on a system Node installation.
 
 Factory verification requires global Playwright and non-root headless Chromium in every image, including static and Node-only projects; web and CMS layers are optional. Normal and recovery verification run a launch/DOM preflight first, retaining `browser-preflight.log` and refusing to start the verifier if provisioning fails. The probe process group is force-killed at its 30-second deadline, and success is recorded only after browser cleanup. Custom images remain operator-owned. See [browser provisioning and upgrades](orchestrator/ADAPTING.md#browser-provisioning-and-upgrades).
 

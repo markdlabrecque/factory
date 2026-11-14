@@ -1,7 +1,8 @@
 // Exercise the production browser probe, forced process-group timeout and cleanup diagnostics with fixture-owned runtimes.
+// Pin fixture Node to the test runner, including CI setups where Node is outside /usr/bin:/bin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -11,6 +12,7 @@ function fixture(mode: string) {
   const dir = mkdtempSync(join(tmpdir(), 'browser-probe-'));
   const bin = join(dir, 'bin'), modules = join(dir, 'modules');
   mkdirSync(bin); mkdirSync(modules);
+  symlinkSync(process.execPath, join(bin, 'node'));
   writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho '${modules}'\n`, {mode:0o755});
   if (mode !== 'cli') writeFileSync(join(bin, 'playwright'), '#!/bin/sh\nexit 0\n', {mode:0o755});
   if (mode !== 'module') {
@@ -27,6 +29,12 @@ function fixture(mode: string) {
   });
   return {dir, exec};
 }
+test('isolated probe PATH resolves the test runner Node executable', async () => {
+  const f = fixture('ok');
+  const result = await f.exec('node -p "process.execPath"');
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.trim(), process.execPath);
+});
 for (const mode of ['ok', 'cli', 'module', 'launch', 'dom', 'cleanup']) test(`probe ${mode}`, async () => {
   const f = fixture(mode);
   const result = await browserPreflight(f, f.dir);
