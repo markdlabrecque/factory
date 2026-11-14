@@ -1,3 +1,4 @@
+<!-- #137: versioned factory.toml owns ordinary settings for new/opted-in projects; legacy copies migrate explicitly. -->
 <!-- #117: scheduled passes send no --max override; each project's .sandcastle/dispatch.mts SELECT.maxConcurrent sets the cap, counted across the shared board. -->
 <!-- #97: after each completed scheduled pass (exit 0, not cancelled) the tick runs `factory clean` for that project (cli/src/commands/tick.mts cleanAfterPass, before jam confirmation), reading run records from Factory's state folder; removals, kept branches and failures go to the tick's log, a failure never fails the pass or tick, and a failed or cancelled pass or a read-only refresh gets none. -->
 <!-- #126: explicit description model declarations replace tracker model labels, persisted in assessment.modelResolution with fixed per-attempt implementationModel. -->
@@ -70,9 +71,43 @@ Then open <http://127.0.0.1:4455/board-prototype.html>; opening the file directl
 
 Seven unfinished fixtures and twelve earlier completions use one deterministic 120-second demo loop. Nothing is live telemetry. Pause freezes time; Restart restores the fixture without changing the pause state. The time slider pauses and seeks to an exact second, and speed choices are 1× and 2×. Reduced motion starts paused; hidden pages suspend time without catching up. The approved design now also powers `board.template.html`, backed by real stage visits in `board.mts`; `board-server.mts` keeps its existing API and evidence routes. Factory never installs or copies the prototype itself. Both the preview and its promotion were updated directly with the user's approval, without Factory. The decision record and verification commands are in [docs/board-design-prototype.md](docs/board-design-prototype.md).
 
+## Project configuration
+
+New projects receive a commented **`.sandcastle/factory.toml`**. Configure tracker,
+agent/approved model aliases, AND selection filters, work units, dispatch limits,
+merge policy, labels, graph, CI and sandbox startup steps there—not in Factory code.
+When present it is authoritative with documented defaults and no per-field fallback.
+Without it, legacy config/SELECT/CONFIG behavior is preserved. Invalid TOML fails
+before credentials, Docker/npm, tracker mutations or launch. Credentials, prompts,
+script bodies and machine registry/scheduler files stay separate.
+
+See [the complete schema, profiles and manual migration mapping](docs/project-config.md).
+`factory init` repairs legacy scaffolds without creating TOML; `factory update`
+never creates or overwrites it. Existing customized workflow code needs a reviewed
+upgrade with all runtime/parser helpers; adding TOML alone is not a migration.
+The offline parser is pinned smol-toml 1.9.1 (BSD-3-Clause), shipped with the app and scaffold.
+Its generated JS stays byte-identical to upstream, with a scoped trailing-space check exemption.
+
+```sh
+factory selection explain 137 --project my-project --json
+```
+
+Explain is read-only: effective selection/work/dispatch values with explicit/default
+sources, eligibility and reliable reasons, separate historical execution holds with
+missing/stale facts marked unknown. It starts no work or analysis and writes no state.
+Exit 0: evaluated eligible or excluded; exit 1: invalid config, failed read or unknown.
+JSON fields: `source`, `settings`, `eligibility`, `reasons`, `executionHolds`.
+Legacy customized SELECT cannot be safely inferred and reports unsupported/unknown.
+
+Concurrency still counts active runs across the **shared board** using atomic launch
+reservations. `--max` and `--whole-issues` retain their override behavior and report
+sources; unsafe integer caps are rejected before the CLI starts shell preflight.
+Manual-start exceptions are unchanged. Selection is distinct from capacity,
+conflicts, model-resolution requirements and other execution holds.
+
 ## Automatic merging
 
-Edit the project's `.sandcastle/config.mts` to opt in. `MERGE.auto: true` supports GitHub and GitLab; `false` keeps manual merging. The optional `MERGE.requiredChecks: ["test", "build"]` lists exact check or job names that must be present and passed, not skipped. An empty or omitted list keeps the all-checks gate.
+Set `[merge] auto = true` in `.sandcastle/factory.toml` (legacy: `MERGE.auto` in `config.mts`) to opt in. `MERGE.auto: true` supports GitHub and GitLab; `false` keeps manual merging. The optional `MERGE.requiredChecks: ["test", "build"]` lists exact check or job names that must be present and passed, not skipped. An empty or omitted list keeps the all-checks gate.
 
 GitLab opens the MR first, waits for its head pipeline and jobs on the pushed SHA, then requests a SHA-guarded API merge. GitHub also guards the pushed SHA. Missing, pending or otherwise unmet gates leave the PR/MR open, comment the reason and put the run in `waiting` for a person. GitHub failed or cancelled CI retains its existing draft-and-fail behaviour. GitLab uses the project's merge strategy, with `MERGE.method: "squash"` requesting squash. No label or approval gate is added by Factory; tracker-side restrictions still apply. See [the CI gate](orchestrator/ADAPTING.md#two-reference-configs) for setup and upgrade details.
 
@@ -104,7 +139,7 @@ factory init [path] --profile personal --repo owner/repo --image sandcastle-mypr
 factory init [path] --profile client --repo group/sub/project --image sandcastle-client --host git.example.com --project-id 42
 ```
 
-The registry is `~/.config/factory/projects.json` (`{version:1, projects:[{name,root,schedule?}]}`), keyed by the canonical checkout root, written atomically under a lock. `init` adds only the **missing** minimal workflow files to `.sandcastle/` (orchestrator, dispatcher, ticket graph, board module, neutral prompts, `.env.example`, empty `.env` mode 0600, `.gitignore`, and `factory-dispatch.sh`, which runs `dispatch.sh` against Factory's shared state folder), never overwrites, lists what it skipped, and registers the project only after every write succeeded. An existing `config.mts` or `main.mts` stays authoritative; the flags configure new files only. Rerun to repair a partial scaffold. It does not install packages, build images, contact a tracker or provision an environment: Docker, CMS, web-runtime, ddev and Playwright layers remain in the `sandcastle-setup` skill. `.sandcastle` stays the folder name; a move to `.factory` is a later slice. `factory uninstall` lists each registered project's `.sandcastle` with a removal command it never runs.
+The registry is `~/.config/factory/projects.json` (`{version:1, projects:[{name,root,schedule?}]}`), keyed by the canonical checkout root, written atomically under a lock. `init` adds only the **missing** minimal workflow files to `.sandcastle/` (orchestrator, dispatcher, ticket graph, board module, neutral prompts, `.env.example`, empty `.env` mode 0600, `.gitignore`, and `factory-dispatch.sh`, which runs `dispatch.sh` against Factory's shared state folder), never overwrites, lists what it skipped, and registers the project only after every write succeeded. Existing files are never overwritten. New projects use `factory.toml`; an existing workflow without it stays legacy, with manual migration guidance. When TOML exists it—not stale legacy settings—is authoritative; flags configure new files only. Rerun to repair a partial scaffold. It does not install packages, build images, contact a tracker or provision an environment: Docker, CMS, web-runtime, ddev and Playwright layers remain in the `sandcastle-setup` skill. `.sandcastle` stays the folder name; a move to `.factory` is a later slice. `factory uninstall` lists each registered project's `.sandcastle` with a removal command it never runs.
 
 Scheduling (slice four, in progress) keeps global and project state in different places. The service manager owns the global state: scheduling is on when `factory-tick.timer` is enabled and active (Linux), or when the `com.factory.tick` launch agent is enabled and running (macOS), and Factory stores no on/off flag of its own. Each project's opt-in is the `schedule: {enabled, branch, since}` field of its registry entry. A newly added (or removed and re-added) project is not scheduled. Opting a project in saves the branch its checkout has at that moment and refuses a detached HEAD, a branch that `origin` does not have (as of your last fetch; Factory does not contact the remote), and a `dispatch.sh` that is missing or not executable. Scheduled passes use only that branch and never switch branches, so a checkout on another branch is skipped with the reason. Switching a project off keeps the saved branch; switching it on again saves the branch checked out then. `factory project ls` shows `[scheduled: <branch>]` or `[schedule paused]`. `~/.config/factory/schedule.json` (`{version:1, path, node}`, mode 0600) holds only the PATH and Node that scheduled passes use. A `scheduler.json` left by earlier builds is ignored.
 
@@ -172,7 +207,7 @@ factory ticket restore <ticket>                            # return an archived 
 - **`ticket sync [ticket]`** (#100) delivers every comment and verdict correction still undelivered in the project's ticket journals (or one ticket's). Anything that may already have reached the tracker (a post marked uncertain, or a poster that died mid-post) is first looked for by its hidden marker in the ticket's comments (`gh api --paginate` / `glab api --paginate`); if found, the journal records that comment and nothing is posted again, and if the search fails nothing is posted. Pending items are posted directly. Exit 0 when nothing is left undelivered, 1 otherwise; run it again later.
 - **Scheduled recovery across restart and failure** (#64). A running repair is detached: it outlives the tick that started it and `factory schedule off`, and keeps its claim. A repair that crashes is settled by a later tick only once docker confirms its exact container gone; until then the project stays held. Two attempts per jam, then nothing until verified progress, a person's change or `recovery reset`. See [Slice four: scheduled recovery across restart and failure](docs/factory-cli.md#slice-four-scheduled-recovery-across-restart-and-failure).
 
-The project needs `.sandcastle/config.mts`; its `TRACKER.project` is the name its run records carry. Not yet: journal output in `logs` (`logs` reads no journalctl; the scheduler's log is `journalctl --user -u factory-tick`, on macOS `<state>/scheduler/tick.log`, a legacy dispatcher timer's `journalctl --user -u sandcastle-dispatch@<name>`), running every registered project in one command, and refreshing `.sandcastle` copies. The [CLI plan](docs/factory-cli.md#roadmap) tracks the remaining slices. `.sandcastle` stays the folder name; migration to `.factory` is deferred to a future slice.
+The project needs `.sandcastle/factory.toml` (or legacy `config.mts`); `tracker.project` (legacy `TRACKER.project`) is the name its run records carry. Not yet: journal output in `logs` (`logs` reads no journalctl; the scheduler's log is `journalctl --user -u factory-tick`, on macOS `<state>/scheduler/tick.log`, a legacy dispatcher timer's `journalctl --user -u sandcastle-dispatch@<name>`), running every registered project in one command, and refreshing `.sandcastle` copies. The [CLI plan](docs/factory-cli.md#roadmap) tracks the remaining slices. `.sandcastle` stays the folder name; migration to `.factory` is deferred to a future slice.
 
 ## Setting up a project
 
@@ -186,12 +221,12 @@ following <sandcastle-helper>/orchestrator/ADAPTING.md ("Install into a project"
 tracker layer exist.
 
 - Copy the files ADAPTING.md lists, including `board.mts`, `admission.mts`, `assessment.mts` and `board.template.html` from `board/`.
-- Fill in config.mts for this project: GitLab host, project path and numeric id (look it up with
-  glab), labels (including the done stage, default "Internal QA"), and milestone "<MILESTONE>" (or leave it unset to use every open ticket).
+- Follow docs/project-config.md for a reviewed upgrade of this existing scaffold; do not silently
+  opt it into TOML. Transcribe all legacy settings into factory.toml only after reviewing the workflow.
+  Configure tracker host/project/id, labels and selection.milestone = "<MILESTONE>" there.
 - The workflow's main.mts and prompt.md replace the ones `sandcastle init` created. Move the
-  start-web.sh hook that sandcastle-setup added to the old main.mts into CONFIG.sandboxSetup
-  in the new one. Set CONFIG.image to this project's image name. Labels come only from
-  config.mts; ignore the label in the old prompt.md.
+  start-web.sh hook into [[sandbox.setup]] in factory.toml after the reviewed migration.
+  Set sandbox.image there. Configure selection labels in selection.labels, not the old prompt.md.
 - Adapt sandbox/bootstrap-site.sh, the Environment section of prompt.md, and prompt.verify.md
   to this project's stack.
 - Make sure the Dockerfile's Drupal layer matches
@@ -254,7 +289,7 @@ then run `install-dispatch.sh` from each project.
 
 ### Updating a project's copy of the workflow
 
-Projects run their own copy of the files in `.sandcastle/`, so changes here don't reach them on their own. To see where a copy stands, run `factory update --dry-run` inside the project (or `--project <name|path>`; `--json` for the raw list). It writes nothing and sorts every scaffolded file except `.env`: **missing** (would be created), **outdated** (exactly an earlier Factory version, so unedited; would be replaced), **edited locally** (matches no Factory version; kept, merge by hand), **project-owned** (`config.mts`, `main.mts`, `dispatch.sh`, `prompt.md` and `prompt.verify.md` when they differ from Factory's copy, are templated or are missing; never written by update, merge by hand) and **current**. Earlier versions come from the Git history of the Factory checkout it runs from, or, for a copied install, from `scaffold-history.json`, which `factory install` writes into the app from the checkout's history; without either, every differing file counts as edited. To make the changes, pull this repo, reinstall with `factory install`, and run `factory update --apply` in the project (one of `--dry-run` or `--apply` is required). It creates the missing files and replaces the outdated ones, and nothing else; it lists the edited and project-owned files again for you to merge by hand, together with the files you adapted outside the scaffold (`sandbox/bootstrap-site.sh`). A file that changes between the check and the write is left alone. Then check new settings in `config.mts` against the shipped one, and run `.sandcastle/dispatch.sh --dry-run`. Updating the recovery workflow files makes self-recovery inactive until `factory recovery review --confirm`; `--apply` says when that applies but never records a review for you.
+Projects run their own copy of the files in `.sandcastle/`, so changes here don't reach them on their own. To see where a copy stands, run `factory update --dry-run` inside the project (or `--project <name|path>`; `--json` for the raw list). It writes nothing and sorts every scaffolded file except `.env`: **missing** (would be created), **outdated** (exactly an earlier Factory version, so unedited; would be replaced), **edited locally** (matches no Factory version; kept, merge by hand), **project-owned** (`factory.toml` always, including when missing; `config.mts`, `main.mts`, `dispatch.sh`, `prompt.md` and `prompt.verify.md` when they differ from Factory's copy, are templated or are missing; never written by update, merge by hand) and **current**. Earlier versions come from the Git history of the Factory checkout it runs from, or, for a copied install, from `scaffold-history.json`, which `factory install` writes into the app from the checkout's history; without either, every differing file counts as edited. To make the changes, pull this repo, reinstall with `factory install`, and run `factory update --apply` in the project (one of `--dry-run` or `--apply` is required). It creates the missing files and replaces the outdated ones, and nothing else; it lists the edited and project-owned files again for you to merge by hand, together with the files you adapted outside the scaffold (`sandbox/bootstrap-site.sh`). A file that changes between the check and the write is left alone. Then review settings in `factory.toml` (legacy: `config.mts`/SELECT/CONFIG) against the documented schema without automatically migrating, and run `.sandcastle/dispatch.sh --dry-run`. Updating the recovery workflow files makes self-recovery inactive until `factory recovery review --confirm`; `--apply` says when that applies but never records a review for you.
 
 ### On a new machine
 

@@ -1,3 +1,4 @@
+// #137: authoritative TOML sandbox/CI settings; legacy CONFIG remains unchanged only when absent.
 // #126: resolve description models once at attempt start; refresh never changes that model.
 import { recordModelResolution } from "./assessment.mts";
 import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
@@ -12,7 +13,7 @@ import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, se
 import { readAdmission } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { parentText } from "./analyze.mts";
-import { AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./config.mts";
+import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { disallowedModels, piEnvFor, ticketModel } from "./models.mts";
 import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
@@ -53,10 +54,10 @@ import * as tracker from "./tracker.mts";
 // superseded. Before Sandcastle creates the branch and worktree it writes the ticket's ownership receipt
 // (ownership.mts) and fills in the branch's commit once they exist. The normal path keeps its branch-exists protection.
 
-// ---- Project config: the block to edit when adapting this to another project ----------
-// Tracker, agent, merge policy, milestone and labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
+// ---- Legacy CONFIG fallback: used ONLY when factory.toml is absent --------------------
+// TOML projects edit sandbox/ci tables, never this block. Legacy tracker/agent/labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
 // Environment section of prompt.md, and the fixture advice in prompt.verify.md. See ADAPTING.md.)
-const CONFIG = {
+const CONFIG = effectiveConfig ? effectiveConfig.config : {
   image: "sandcastle-islandhealth", // factory:image - `factory init --image` replaces the value
   ciWaitMinutes: 30, // give up waiting for CI after this long
   // No CI seen in this time: GitLab opens the MR anyway; with MERGE.auto the PR is not merged.

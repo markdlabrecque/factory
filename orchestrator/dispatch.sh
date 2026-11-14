@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# #137: validate authoritative TOML before credentials/Docker/npm; scalar argv/stdout bridge, no eval.
 # One dispatcher pass with the defaults, against the branch checked out in the current directory.
 #   .sandcastle/dispatch.sh [--dry-run] [--max N] [--whole-issues]
 #   .sandcastle/dispatch.sh --issue N [--no-push]
@@ -38,6 +39,12 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "not inside a git re
 cd "$root"
 [ -f .sandcastle/dispatch.mts ] || fail "no .sandcastle/dispatch.mts in $root."
 
+toml=0
+if [ -e .sandcastle/factory.toml ] || [ -L .sandcastle/factory.toml ]; then
+  node .sandcastle/config-read.mts "$root/.sandcastle" validate || exit 1
+  toml=1
+fi
+
 base="$(git branch --show-current)"
 [ -n "$base" ] || fail "detached HEAD. Check out the integration branch first."
 git ls-remote --exit-code --heads origin "$base" >/dev/null || fail "branch $base isn't on origin. Push it, or check out the integration branch."
@@ -45,9 +52,20 @@ git ls-remote --exit-code --heads origin "$base" >/dev/null || fail "branch $bas
 # Read from the project's own config so the checks match what the runs use. A config without these
 # fields is the GitLab + Claude Code one.
 cfg_value() { sed -nE "s/^[[:space:]]*$1:[[:space:]]*\"([^\"]+)\".*/\\1/p" .sandcastle/config.mts | head -n 1; }
-kind="$(cfg_value kind)"; kind="${kind:-gitlab}"
-agent="$(cfg_value provider)"; agent="${agent:-claude}"
-image="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*"([^"]+)".*/\1/p' .sandcastle/main.mts | head -n 1)"
+if [ "$toml" = 1 ]; then
+  toml_value() { node .sandcastle/config-read.mts "$root/.sandcastle" "$1"; }
+  kind="$(toml_value kind)"
+  agent="$(toml_value agent)"
+  image="$(toml_value image)"
+  host="$(toml_value host)"
+  uses_subscription="$(toml_value subscription)"
+else
+  kind="$(cfg_value kind)"; kind="${kind:-gitlab}"
+  agent="$(cfg_value provider)"; agent="${agent:-claude}"
+  image="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*"([^"]+)".*/\1/p' .sandcastle/main.mts | head -n 1)"
+  uses_subscription=false
+  if grep -q '"pi-claude-subscription/' .sandcastle/config.mts; then uses_subscription=true; fi
+fi
 [ -n "$image" ] || fail "couldn't read CONFIG.image from .sandcastle/main.mts."
 case "$kind" in gitlab) tracker_cli=glab ;; github) tracker_cli=gh ;; *) fail "unknown TRACKER.kind \"$kind\" in .sandcastle/config.mts." ;; esac
 case "$agent" in claude | pi) ;; *) fail "unknown AGENT.provider \"$agent\" in .sandcastle/config.mts." ;; esac
@@ -57,11 +75,11 @@ for tool in node npm npx git "$tracker_cli" "$agent" docker curl; do
 done
 
 if [ "$kind" = gitlab ]; then
-  host="$(cfg_value gitlabHost)"
+  if [ "$toml" = 0 ]; then host="$(cfg_value gitlabHost)"; fi
   [ -n "$host" ] || fail "couldn't read TRACKER.gitlabHost from .sandcastle/config.mts."
   glab auth status --hostname "$host" >/dev/null 2>&1 || fail "glab isn't logged in to $host. Run: glab auth login --hostname $host"
 else
-  host="$(cfg_value host)"; host="${host:-github.com}"
+  if [ "$toml" = 0 ]; then host="$(cfg_value host)"; host="${host:-github.com}"; fi
   gh auth status --hostname "$host" >/dev/null 2>&1 || fail "gh isn't logged in to $host. Run: gh auth login --hostname $host"
 fi
 # The ticket analysis runs this agent on the host with its own login. With pi and the pi-claude-subscription
@@ -69,7 +87,7 @@ fi
 subscription=0
 if [ "$agent" = claude ]; then
   claude auth status 2>/dev/null | grep -q '"loggedIn": *true' || fail "claude isn't logged in. Run: claude auth login"
-elif grep -q '"pi-claude-subscription/' .sandcastle/config.mts; then
+elif [ "$uses_subscription" = true ]; then
   subscription=1
   [ -f .sandcastle/preflight.mts ] || fail "no .sandcastle/preflight.mts in $root."
   node .sandcastle/preflight.mts >&2 || exit 1
@@ -120,7 +138,7 @@ if [ -n "$problem" ]; then
   build="npx sandcastle docker build-image --image-name $image"
   [ -t 0 ] || fail "$problem. Build it from a terminal in $root: $build"
   echo "$problem; building it (takes a few minutes)."
-  $build
+  npx sandcastle docker build-image --image-name "$image"
 fi
 
 # The pass imports @ai-hero/sandcastle from the project's node_modules. Install when it's missing or

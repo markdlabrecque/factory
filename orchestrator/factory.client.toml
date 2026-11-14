@@ -1,0 +1,60 @@
+# Factory client profile, schema v1. Authoritative when present; no legacy fallback.
+# Keep credentials in .env and scripts/prompts separate. Legacy projects migrate by reviewed hand edit.
+version = 1
+[tracker]
+kind = "gitlab"
+project = "islandhealth/public-site" # factory:project
+host = "git.affinitybridge.com" # factory:host
+project_id = 699 # factory:project-id
+[agent]
+provider = "claude"
+model = "claude-opus-4-8" # fixed verifier; thinking is supported only for Pi
+[agent.model_aliases]
+opus = "claude-opus-4-8"
+sonnet = "sonnet"
+[labels]
+needs_human = "needs-human"
+done = "Internal QA"
+[selection]
+# Optional AND filters (omit to disable; empty strings are invalid):
+# milestone = "Sprint 1"
+# assignee = "@me"
+# author = "alice"
+# search = "accessibility" # tracker-native search
+# confidential = false # non-confidential ONLY; omit for both; GitLab only
+issue_type = "issue" # GitLab only: issue|incident|test_case; no schema default
+exclude_assignees = [] # any match vetoes, including multi-assignee tickets
+[selection.labels]
+all = ["Ready to do", "ready-for-agent"] # [] disables this axis
+none = ["blocked", "needs-human", "wontfix"] # [] disables this axis
+[selection.order]
+# created|updated|popularity on both trackers; GitLab also priority|due_date|relative_position|
+# label_priority|milestone_due|weight. Order is priority, never eligibility.
+by = "created"
+direction = "asc"
+[work]
+units = "subtasks" # issues|subtasks
+[dispatch]
+max_concurrent = 3 # counts active runs across the SHARED board, not just this project
+stagger_seconds = 20
+[merge]
+auto = false
+method = "squash"
+required_checks = []
+[graph]
+model = "sonnet"
+max_analyses_per_pass = 5
+analysis_timeout_minutes = 10
+conflict_ignore = []
+prune_after_days = 30
+[ci]
+wait_minutes = 30
+no_pipeline_minutes = 5
+[sandbox]
+image = "sandcastle-islandhealth" # factory:image
+setup = [] # remove before adding tables below
+# Trusted commands execute in order INSIDE the sandbox, never on the host; TOML is not a security boundary.
+# [[sandbox.setup]]
+# command = '/opt/sandcastle/bootstrap-site.sh'
+# timeout_ms = 600000 # optional; omit for the sandbox default
+# sudo = false

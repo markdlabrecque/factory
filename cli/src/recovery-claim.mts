@@ -1,3 +1,4 @@
+// #137: recovery uses the TOML dispatch cap against the shared board; absent TOML keeps the legacy default.
 // Recovery's atomic claim (slice four, #57; admission record since #75). A repair attempt needs three things at once: a
 // slot under the shared run cap (counted across every project in the run-state folder, as dispatcher launches are),
 // ownership of the affected ticket (no claim or run of it in flight), and its whole project (no other run of it in flight,
@@ -14,6 +15,8 @@
 // Either all of step 2 is committed or nothing is. A crash after it leaves a recovery claim that only the launcher's
 // settle step releases (cli/src/recovery-run.mts, after the attempt's exact container is confirmed gone); an error
 // after it is thrown, never refunded. Nothing here launches, signals or reads the tracker.
+import { join } from 'node:path';
+import { loadTomlConfig } from '../../orchestrator/project-config.mts';
 import { generationOf, keyFor, withAdmission } from '../../board/admission.mts';
 import type { AdmissionTx } from '../../board/admission.mts';
 import { admitRun, writeRecord } from '../../board/board.mts';
@@ -45,12 +48,15 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
   cap?: number; branch?: string; log?: string; dir?: string; container?: string; record?: string;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
   afterCommit?: () => void }): RecoveryClaim {
+  const toml = loadTomlConfig(join(o.root, '.sandcastle'));
+  const cap = o.cap ?? toml?.dispatch.maxConcurrent ?? DEFAULT_CAP;
+  if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('Recovery cap must be a positive safe integer');
   const dir = o.dir ?? runStateDir(p);
   return withAdmission(dir, tx => {
     replayAdmitted(p, tx, o.root, o.tracker);
     const generation = generationOf(tx.state, o.tracker);
     const a = admitRun(tx, dir, {
-      iid: String(o.ticket), pid: o.pid, cap: o.cap ?? DEFAULT_CAP, project: o.tracker, kind: 'recovery', attempt: o.id,
+      iid: String(o.ticket), pid: o.pid, cap, project: o.tracker, kind: 'recovery', attempt: o.id,
       also: () => {
         const problem = attemptProblem(readRecovery(p, o.root), o.ticket, generation);
         if (problem) throw new Error(problem);

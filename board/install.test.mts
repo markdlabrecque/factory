@@ -1,3 +1,4 @@
+// #137: copied standalone apps include the shared offline TOML parser and metadata module.
 // Standalone Linux/macOS installer regressions (#78): run the real scripts in temporary HOMEs against strict,
 // ordered systemctl/launchctl stubs, then import and serve only the copied board files. No real service is touched.
 // Required journal/tickets modules are copied too, for verdict projection and shared archive validation.
@@ -48,7 +49,7 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     const script = resolve(`board/install-${platform === 'systemd' ? 'service' : 'launchd'}.sh`);
     const install = () => execFileSync('bash', [script], { cwd: home, env, encoding: 'utf8' });
     install();
-    const files = ['admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'refresh-worker.mts', 'tickets.mts'];
+    const files = ['admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'project-config.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor'];
     assert.deepEqual(readdirSync(app).sort(), files);
     // Simulate a partial/outdated install. Updating must restore every runtime dependency too.
     for (const file of ['admission.mts', 'assessment.mts', 'journal.mts', 'refresh-worker.mts', 'tickets.mts']) rmSync(join(app, file));
@@ -56,7 +57,7 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     assert.deepEqual(readdirSync(app).sort(), files);
     assert.deepEqual(readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(s => JSON.parse(s)), expected);
     execFileSync(process.execPath, ['--input-type=module', '-e',
-      "import { buildBoardData } from './board.mts'; if (buildBoardData('http').runs.length) process.exit(1);"], { cwd: app, env });
+      "import { buildBoardData } from './board.mts'; import { loadTomlConfig } from './project-config.mts'; if (loadTomlConfig('./missing-scaffold') !== undefined || buildBoardData('http').runs.length) process.exit(1);"], { cwd: app, env });
 
     const server = spawn(process.execPath, ['board-server.mts'], { cwd: app, env, stdio: ['ignore', 'pipe', 'pipe'] });
     t.after(async () => {

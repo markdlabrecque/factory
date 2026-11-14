@@ -1,9 +1,10 @@
+// #137: analysis uses validated TOML models/graph settings, falling back only when TOML is absent.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keyFor, stateDir } from "./board.mts";
-import { AGENT, GRAPH } from "./config.mts";
+import { AGENT, GRAPH } from "./runtime-config.mts"; // #137: TOML authority before legacy imports
 import { contentHash, isSandcastleNote, unitHash } from "./graph.mts";
 import { piAnalysisArgs } from "./models.mts";
 import type { Manifest, Note, Requirement } from "./graph.mts";

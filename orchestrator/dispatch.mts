@@ -1,3 +1,4 @@
+// #137: TOML completely replaces legacy SELECT; shared selection preserves exhaustive-read semantics.
 // #126: description model resolutions are persisted independently of immutable running attempt choices.
 import { recordModelResolution } from "./assessment.mts";
 import { spawn, execFileSync } from "node:child_process";
@@ -8,12 +9,13 @@ import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { claimRun, markMergedOutside, PARKED, queueModelProblem, readRuns, removeRun, reserveRun, setProject, setStage, stateDir, keyFor, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
-import { AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./config.mts";
+import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { disallowedModels, ticketModel } from "./models.mts";
 import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
 import { refreshProject } from "./refresh.mts";
+import { selectCandidates, unitEligibility } from "./selection.mts";
 import * as tracker from "./tracker.mts";
 import type { Ticket } from "./tracker.mts";
 
@@ -53,11 +55,11 @@ import type { Ticket } from "./tracker.mts";
 // fingerprint (unitHash and labels minus the ones Sandcastle writes). The tick counts it only once the pass exits 0. Manual
 // passes are not asked for one. The report changes nothing here; the tick decides what to do with it.
 
-// ---- Selection config: which tickets get a run ----------------------------------------
-// Tracker, milestone and labels live in config.mts. Every option below is optional; leave one unset
+// ---- Legacy SELECT fallback: used ONLY when factory.toml is absent --------------------
+// TOML projects edit selection/work/dispatch tables, never this block. Legacy labels live in config.mts. Every option below is optional; leave one unset
 // (or empty) to skip that filter. Filters combine with AND. Each maps to a `glab issue list` flag, or
 // on GitHub to the matching `gh issue list` flag or search qualifier (GitLab-only ones are ignored).
-const SELECT = {
+const SELECT = effectiveConfig ? { ...effectiveConfig.selection, ...effectiveConfig.dispatch } : {
   // -- People --
   // Only tickets assigned to this username [--assignee]. "@me" means whoever glab is logged in as.
   // Examples: "mark" | "@me" | undefined (any assignee, including unassigned)
@@ -110,6 +112,7 @@ const dry = opts["dry-run"];
 const subtasks = SUBTASKS.enabled && !opts["whole-issues"];
 const PROJECT = TRACKER.project;
 const cap = Number(opts.max ?? SELECT.maxConcurrent);
+if ((opts.max !== undefined || effectiveConfig) && (!Number.isSafeInteger(cap) || cap <= 0)) throw new Error('--max must be a positive safe integer');
 const here = dirname(fileURLToPath(import.meta.url));
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
@@ -133,7 +136,7 @@ const allRuns = readRuns();
 const running = (r: BoardRun) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
 const active = allRuns.filter(running).length;
 const room = Math.max(0, cap - active);
-log(`${active} active run(s), cap ${cap}`);
+log(`${active} active run(s), cap ${cap} (source: ${opts.max !== undefined ? '--max' : effectiveConfig ? 'factory.toml dispatch.max_concurrent' : 'legacy SELECT'}); work: ${subtasks ? 'subtasks' : 'issues'} (source: ${opts['whole-issues'] ? '--whole-issues' : effectiveConfig ? 'factory.toml work.units' : 'legacy SUBTASKS'})`);
 
 // ---- merged work -------------------------------------------------------------
 // Runs whose MR merged into their base since the last pass: close the Task, or move the ticket on.
@@ -151,7 +154,7 @@ for (const r of allRuns) {
 
 // ---- candidates --------------------------------------------------------------
 const ready = tracker.readyList(SELECT);
-const parents = ready.filter((i) => !(SELECT.excludeAssignees.length && i.assignees?.some((a) => SELECT.excludeAssignees.includes(a.username))));
+const parents = selectCandidates(ready, SELECT, tracker.currentUsername);
 
 // Ready issues with Tasks become their open Tasks; an issue whose Tasks are all closed moves on.
 const work = tracker.workCatalogue(subtasks);
@@ -196,7 +199,7 @@ const parentById = new Map(parents.map((p) => [p.iid, p]));
 const issues = units
   // The catalogue copy is canonical: it carries parent context, so analysis, hashing and dispatch agree.
   .map((u) => workById.get(u.iid) ?? parentById.get(u.iid))
-  .filter((t): t is Ticket => !!t && !t.labels?.some((l) => LABELS.exclude.includes(l)));
+  .filter((t): t is Ticket => !!t && unitEligibility(t, true, LABELS.exclude).status === 'selected');
 
 sh("git", ["fetch", "origin", "--prune"]);
 const branches = new Set(

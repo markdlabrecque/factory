@@ -1,3 +1,4 @@
+// #137: scaffolded fixtures use authoritative TOML for settings, shared-board capacity and CLI overrides.
 // #126: dispatch/refresh resolve description models on both trackers, preserving running attempt models.
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
 // rejecting gh/glab/analyst/npx fixtures. Covers retained parked cards, edits at every stage, manual refresh without
@@ -75,6 +76,26 @@ function fixture(t: any, kind = "github") {
 }
 
 for (const kind of ["github", "gitlab"]) {
+  test(`${kind}: TOML cap counts other projects and CLI cap/work overrides report their sources`, t => {
+    const f = fixture(t, kind);
+    f.data.tickets[0].description = 'Model: sonnet';
+    const path = join(f.root, '.sandcastle/factory.toml');
+    writeFileSync(path, f.bytes(path).replace('max_concurrent = 3', 'max_concurrent = 1').replace('units = "subtasks"', 'units = "issues"'));
+    writeFileSync(join(f.dir, 'another_project--99.json'), JSON.stringify({
+      iid: '99', project: 'another/project', stage: 'implementing', pid: process.pid,
+    }));
+    f.manifest(7);
+    const held = f.pass(['--dry-run']);
+    assert.match(held.stdout, /1 active run\(s\), cap 1 \(source: factory\.toml dispatch\.max_concurrent\)/);
+    assert.match(held.stdout, /work: issues \(source: factory\.toml work\.units\)/);
+    assert.doesNotMatch(held.stdout, /would launch/);
+    const overridden = f.pass(['--dry-run', '--max', '2', '--whole-issues']);
+    assert.match(overridden.stdout, /cap 2 \(source: --max\)/);
+    assert.match(overridden.stdout, /work: issues \(source: --whole-issues\)/);
+    assert.match(overridden.stdout, /#7 .*would launch/);
+    assert.equal(existsSync(join(f.fake, 'launches')), false);
+  });
+
   test(`${kind}: description failures queue without model labels, edits refresh the choice but not the attempt`, (t) => {
     const f = fixture(t, kind);
     f.data.tickets = [ticket(7, { description: "No declaration" }), ticket(8, { description: "Model: unknown" }),
@@ -337,8 +358,9 @@ test("analysis timeout is recorded without changing execution or losing the last
   const f = fixture(t), record = f.record(7, "stopped");
   f.pass(["--refresh-only", "--ticket", "7"]);
   const prior = f.assessment().analysis;
-  const config = join(f.root, ".sandcastle/config.mts");
-  writeFileSync(config, f.bytes(config).replace("analysisTimeoutMinutes: 10", "analysisTimeoutMinutes: 0.001"));
+  // #137: new fixtures use TOML authoritatively, so changing stale legacy code has no effect.
+  const config = join(f.root, '.sandcastle/factory.toml');
+  writeFileSync(config, f.bytes(config).replace('analysis_timeout_minutes = 10', 'analysis_timeout_minutes = 0.001'));
   f.data.tickets[0].description = "edited DEP:21";
   f.pass(["--refresh-only", "--ticket", "7"], { FAKE_ANALYSIS_DELAY: "3000" });
   assert.equal(f.assessment().analysisState, "error");

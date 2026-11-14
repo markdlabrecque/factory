@@ -1,3 +1,4 @@
+// #137: TOML metadata is authoritative; standalone installs ship the same parser beside this worker.
 // Board-triggered refresh (#78): find the project's copy without loading tracker adapters into the server, then run
 // its --refresh-only command in a bounded process group. No scheduler, timer service, admission or ticket execution.
 // One worker per card in this server; assessment attempt tokens fence overlaps with other servers/scheduled passes.
@@ -38,7 +39,11 @@ async function perform(key: string, timeout: number): Promise<void> {
       const registry = JSON.parse(readFileSync(resolve(process.env.FACTORY_HOME || homedir(), ".config/factory/projects.json"), "utf8"));
       for (const p of registry.projects ?? []) if (typeof p.root === "string") roots.add(p.root);
     } catch { /* Standalone board/copy need not have a Factory registry. */ }
+    const helper = existsSync(new URL('./project-config.mts', import.meta.url)) ? './project-config.mts' : '../orchestrator/project-config.mts';
+    const { tomlIdentity } = await import(helper);
     const matches = [...roots].filter((root) => {
+      const identity = tomlIdentity(resolve(root, '.sandcastle'));
+      if (identity) return identity.project === run.project && existsSync(resolve(root, '.sandcastle/dispatch.mts'));
       try {
         const config = readFileSync(resolve(root, ".sandcastle/config.mts"), "utf8");
         return config.match(/^\s*project:\s*"([^"]+)"/m)?.[1] === run.project && existsSync(resolve(root, ".sandcastle/dispatch.mts"));

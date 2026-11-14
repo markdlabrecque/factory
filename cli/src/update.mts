@@ -1,3 +1,4 @@
+// #137: TOML is project-owned even when absent; shared offline-parser assets remain Factory-owned.
 // Project copy classification for `factory update` (slice 4.5, #91). Compares each file Factory scaffolds into a
 // project's `.sandcastle/` with Factory's own copy and sorts it into one class:
 //   current  - matches Factory's current copy; nothing to do.
@@ -17,8 +18,10 @@
 // files are never written. A missing .env.example takes the profile's template: client when config.mts has gitlabHost.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, fchmodSync, linkSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
-import { join } from 'node:path';
+// #137: TOML is always project-owned; runtime/vendor files ship together, even before npm install.
+import { loadTomlConfig } from '../../orchestrator/project-config.mts';
+import { closeSync, mkdirSync, existsSync, fchmodSync, linkSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { basename, dirname, join, relative } from 'node:path';
 import type { Paths } from './paths.mts';
 import { scaffoldName, shq } from './paths.mts';
 import { appRoot, FROM_BOARD, FROM_ORCHESTRATOR } from './scaffold.mts';
@@ -28,13 +31,14 @@ export type FileStatus = { file: string; class: FileClass; source: string; detai
 export type History = { kind: 'git' | 'catalog' | 'none'; blobs: Map<string, Set<string>> };
 export const HISTORY_FILE = 'scaffold-history.json';
 /** Never overwritten by `factory update`; reported for a hand merge. */
-export const PROJECT_OWNED = ['config.mts', 'main.mts', 'dispatch.sh', 'prompt.md', 'prompt.verify.md'];
+export const PROJECT_OWNED = ['factory.toml', 'config.mts', 'main.mts', 'dispatch.sh', 'prompt.md', 'prompt.verify.md'];
 const TEMPLATE = 'cli/templates/project';
 const PLACEHOLDER = '{{STATE_DIR_QUOTED}}';
 
 /** Each scaffolded file (except .env) and the Factory source file(s) it comes from. config.mts and .env.example have one per profile. */
 export function scaffoldSources(): Record<string, string[]> {
   const out: Record<string, string[]> = {
+    'factory.toml': ['orchestrator/factory.personal.toml', 'orchestrator/factory.client.toml'],
     'config.mts': ['orchestrator/config.personal.mts', 'orchestrator/config.mts'], 'main.mts': ['orchestrator/main.mts'],
     'prompt.md': [`${TEMPLATE}/prompt.md`], 'prompt.verify.md': [`${TEMPLATE}/prompt.verify.md`],
     '.env.example': [`${TEMPLATE}/env.personal.example`, `${TEMPLATE}/env.client.example`], '.gitignore': [`${TEMPLATE}/gitignore`],
@@ -112,7 +116,7 @@ export function classifyCopy(p: Paths, root: string, o: { app?: string; history?
       : { file, class: 'missing', source: file === '.env.example' ? envExampleSource(root, sources) : sources[0], detail: 'would create' };
     if (!st.isFile()) return { file, class: owned ? 'project' : 'modified', source: sources[0], detail: 'not a regular file; resolve by hand' };
     const content = readFileSync(target);
-    if (file === 'config.mts' || file === 'main.mts') {
+    if (file === 'factory.toml' || file === 'config.mts' || file === 'main.mts') {
       return { file, class: 'project', source: sources.join(' or '), detail: 'templated with your settings; compare with Factory\'s copy and merge by hand' };
     }
     if (file === 'factory-dispatch.sh') {
@@ -137,6 +141,8 @@ export function classifyCopy(p: Paths, root: string, o: { app?: string; history?
 
 /** The .env.example template for the project's profile: the client one when its config.mts names a GitLab host. */
 function envExampleSource(root: string, sources: string[]) {
+  const toml = loadTomlConfig(join(root, scaffoldName));
+  if (toml) return toml.TRACKER.kind === 'gitlab' ? sources.find(s => s.includes('client')) ?? sources[0] : sources[0];
   let config = '';
   try { config = readFileSync(join(root, scaffoldName, 'config.mts'), 'utf8'); } catch { /* personal */ }
   return /^\s*gitlabHost:/m.test(config) ? sources.find(s => s.includes('client')) ?? sources[0] : sources[0];
@@ -163,7 +169,14 @@ export function applyCopy(p: Paths, root: string, o: { app?: string; history?: H
     if (f.file === 'factory-dispatch.sh') content = Buffer.from(content.toString('utf8').replace(PLACEHOLDER, () => shq(p.state)));
     const mode = f.file === 'factory-dispatch.sh' ? 0o755 : statSync(src).mode & 0o777;
     const target = join(dir, f.file);
-    const tmp = join(dir, `.${f.file}.factory-update-${process.pid}`);
+    // Nested vendor assets need directories; refuse symlinked parents before writing through them.
+    let parent = dir;
+    for (const part of relative(dir, dirname(target)).split('/').filter(Boolean)) {
+      parent = join(parent, part);
+      if (existsSync(parent)) { const st = lstatSync(parent); if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`Unsafe update directory: ${parent}`); }
+      else mkdirSync(parent);
+    }
+    const tmp = join(dirname(target), `.${basename(f.file)}.factory-update-${process.pid}`);
     rmSync(tmp, { force: true }); // a leftover from an interrupted update
     const fd = openSync(tmp, 'wx', mode);
     try {

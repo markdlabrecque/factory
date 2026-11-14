@@ -1,9 +1,10 @@
+// #137: TOML identity and labels are authoritative; legacy adapter exports are preserved.
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { ciGate, missingChecks } from "./ci.mts";
 import type { Gate } from "./ci.mts";
-import { LABELS, MERGE, TRACKER } from "./config.mts";
+import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
 import type { Child, Note } from "./graph.mts";
 import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
@@ -20,15 +21,16 @@ const HOST = (TRACKER as { host?: string }).host ?? "github.com";
 const [OWNER, NAME] = REPO.split("/");
 
 function gh(args: string[], input?: string): string {
-  return execFileSync("gh", args, { encoding: "utf8", input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
+  return execFileSync("gh", args, { encoding: "utf8", env: { ...process.env, GH_HOST: HOST }, input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
 }
 const json = <T,>(args: string[]): T => JSON.parse(gh(args));
 const git = (args: string[], env?: NodeJS.ProcessEnv) => execFileSync("git", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "inherit"] }).trim();
 
-type GhIssue = { number: number; title: string; body: string; state: string; labels?: { name: string }[]; assignees?: { login: string }[] };
-const slim = (i: GhIssue): Ticket => ({ iid: i.number, title: i.title, description: i.body ?? "", state: i.state.toLowerCase(), labels: (i.labels ?? []).map((l) => l.name) });
-const FIELDS = "number,title,body,state,labels";
+type GhIssue = { number: number; title: string; body: string; state: string; labels?: { name: string }[]; assignees?: { login: string }[]; author?: { login: string }; milestone?: { title: string } | null };
+const slim = (i: GhIssue): Ticket => ({ iid: i.number, title: i.title, description: i.body ?? "", state: i.state.toLowerCase(), labels: (i.labels ?? []).map((l) => l.name), assignees: i.assignees?.map(a => ({ username: a.login })), author: i.author ? { username: i.author.login } : undefined, milestone: i.milestone });
+const FIELDS = "number,title,body,state,labels,assignees,author,milestone";
 
+export const currentUsername = () => json<{ login: string }>(['api', 'user']).login;
 export const ticketUrl = (iid: number | string) => `https://${HOST}/${REPO}/issues/${iid}`;
 
 /** Open issues the graph can name as blockers: the milestone's, or the whole repo's when none is set. */
@@ -38,7 +40,7 @@ export function catalogue(milestone = TRACKER.milestone): Ticket[] {
 
 /** GraphQL; a missing issue (NOT_FOUND, e.g. a PR number) comes back as null rather than an error. */
 function gql<T>(query: string): T {
-  const res = spawnSync("gh", ["api", "graphql", "-f", `query=${query}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const res = spawnSync("gh", ["api", "graphql", "-f", `query=${query}`], { encoding: "utf8", env: { ...process.env, GH_HOST: HOST }, maxBuffer: 64 * 1024 * 1024 });
   let out: { data?: T; errors?: { type?: string; message: string }[] };
   try {
     out = JSON.parse(res.stdout);
@@ -134,7 +136,7 @@ export function readyList(select: Select = {}): ReadyTicket[] {
     `sort:${ORDER[select.order ?? ""] ?? "created"}-${select.sort === "desc" ? "desc" : "asc"}`,
     select.search ?? "",
   ].filter(Boolean).join(" ");
-  const args = ["issue", "list", "-R", REPO, "--state", "open", "--json", `${FIELDS},assignees`, "--search", search];
+  const args = ["issue", "list", "-R", REPO, "--state", "open", "--json", FIELDS, "--search", search];
   for (const l of LABELS.ready) args.push("--label", l);
   if (TRACKER.milestone) args.push("--milestone", TRACKER.milestone);
   if (select.assignee) args.push("--assignee", select.assignee);
@@ -205,7 +207,7 @@ export async function ensureLabels(names: string[]): Promise<void> {
   if (!missing.length) return;
   const list = missing.map((m) => `"${m}"`).join(", ");
   if (!process.stdin.isTTY) {
-    console.error(`Missing label(s) in ${REPO}: ${list}. Run this once from a terminal to create them, or change LABELS in config.mts.`);
+    console.error(`Missing label(s) in ${REPO}: ${list}. Run this once from a terminal to create them, or change labels in factory.toml (legacy: LABELS in config.mts).`);
     process.exit(1);
   }
   const rl = createInterface({ input: process.stdin, output: process.stdout });

@@ -1,3 +1,4 @@
+// #137: executable runtime/parser helpers join recovery review; TOML data remains project-owned.
 // Recovery workflow gate (slice four, #63). A project's self-recovery is active only when its .sandcastle copy has the
 // complete recovery workflow (WORKFLOW: main.mts with --recover/--attempt-record and every file the repair path runs) and
 // a person has reviewed exactly those files. The review is a host-owned record, <state>/recovery/<key>.review.json
@@ -15,13 +16,16 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import type { Paths } from './paths.mts';
 import { recoveryFile } from './recovery-state.mts';
-import { appRoot } from './scaffold.mts';
+// #137: executable TOML/runtime/parser helpers are reviewed with recovery; factory.toml remains project-owned.
+import { appRoot, FROM_ORCHESTRATOR } from './scaffold.mts';
+const CONFIG_WORKFLOW = FROM_ORCHESTRATOR.filter(f => ['runtime-config.mts','project-config.mts','selection.mts'].includes(f) || f.startsWith('vendor/') && (f.endsWith('.js') || f.endsWith('package.json')));
 
 /** Every .sandcastle file the repair path runs, as the review covers them. config.mts is project configuration, not workflow. */
 export const WORKFLOW = ['main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.mts',
-  'prompt.recover.md', 'prompt.verify.md'];
+  'prompt.recover.md', 'prompt.verify.md', ...CONFIG_WORKFLOW];
 /** Where Factory's own copy of each workflow file lives, for showing which project files differ. main.mts is templated, so it has none. */
 const SHIPPED: Record<string, string> = {
+  ...Object.fromEntries(CONFIG_WORKFLOW.map(f => [f, `orchestrator/${f}`])),
   'recovery.mts': 'orchestrator/recovery.mts', 'recovery-sandbox.mts': 'orchestrator/recovery-sandbox.mts', 'handoff.mts': 'orchestrator/handoff.mts',
   'ownership.mts': 'orchestrator/ownership.mts', 'admission.mts': 'board/admission.mts', 'assessment.mts': 'board/assessment.mts', 'journal.mts': 'board/journal.mts', 'board.mts': 'board/board.mts',
   'prompt.recover.md': 'orchestrator/prompt.recover.md', 'prompt.verify.md': 'cli/templates/project/prompt.verify.md',

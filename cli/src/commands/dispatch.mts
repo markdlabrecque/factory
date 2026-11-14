@@ -1,3 +1,4 @@
+// #137: reject unsafe cap overrides before shell preflight, matching TOML and dispatcher validation.
 // `factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]`: one dispatcher pass for one
 // project. Runs the project's own `.sandcastle/dispatch.sh` from its checkout root, so its checks (tools,
 // logins, .env, image, node deps) and run behaviour stay exactly as before. SANDCASTLE_STATE_DIR is set to
@@ -16,12 +17,12 @@ import { resolveProject, runStateDir } from '../runs.mts';
 import type { ProjectContext } from '../runs.mts';
 export type DispatchOptions = { project?: string; cwd?: string; dryRun?: boolean; max?: string; wholeIssues?: boolean };
 
-/** The arguments passed on to dispatch.sh. `--max` must be a positive whole number. */
+/** The arguments passed on to dispatch.sh. `--max` must be a positive safe integer. */
 export function dispatchArgs(o: DispatchOptions): string[] {
   const args: string[] = [];
   if (o.dryRun) args.push('--dry-run');
   if (o.max !== undefined) {
-    if (!/^[1-9]\d*$/.test(o.max)) throw new Error(`--max needs a positive whole number, got ${JSON.stringify(o.max)}`);
+    if (!/^[1-9]\d*$/.test(o.max) || !Number.isSafeInteger(Number(o.max))) throw new Error(`--max needs a positive whole number within the safe integer range, got ${JSON.stringify(o.max)}`);
     args.push('--max', o.max);
   }
   if (o.wholeIssues) args.push('--whole-issues');
