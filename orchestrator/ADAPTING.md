@@ -1,3 +1,4 @@
+<!-- Workflow content identity is diagnostic only; scheduler/recovery observations do not certify executable compatibility. -->
 <!-- #153: delivery checkpoints and claims continue exact-head CI waits only with fresh proof/settings/scheduler authority. -->
 <!-- #149: ship shared dependency evaluation and its callers as one reviewed upgrade. -->
 <!-- #140: compact red current blockers replace the Current ticket panel and manual refresh control; backend checks remain. -->
@@ -15,6 +16,16 @@
 <!-- #122: GitLab MR-first auto delivery, shared required checks, blocked gates wait for a person. -->
 <!-- #150: upgrade structured proof, prompts and executable delivery dependencies together. -->
 # Orchestrator
+
+## Comparing workflow copies before an upgrade
+
+Use `factory workflow status --source /path/to/factory --project <registered-name-or-path>` before deciding what to merge into a project's `.sandcastle`. Add `--json` for the version-1 structured report. For a rootless local daemon, pass an explicit Unix socket such as `--docker-socket /run/user/1000/docker.sock`. The full command and schema contract is in [the CLI reference](../docs/factory-cli.md#read-only-workflow-identity-report).
+
+The report separates the chosen source, the app executing the command, the installed app and the project workflow copy. A copied installation's content digest is not a release number. Historical blob matches establish that a project file is an unedited earlier copy, not which commit installed the app. App inventories use source-relative paths while project inventories use scaffold-relative paths, so compare project files through the separate source and installed classifications rather than comparing those two layouts' digests.
+
+`modified` and `project` files still require a hand merge. Missing source or installed facts stay unknown. Scheduler reservation strings, recovery workflow presence and the recorded-review comparison are separate observations. A met string check cannot prove all helpers work together. A changed reviewed helper blocks the review comparison even if the scheduler check remains met.
+
+Image identity is a bounded local inspection only. It does not pull the configured image, test its verification capabilities or contact remote Docker contexts. Invalid TOML never triggers execution of legacy code. Unknown image/provenance facts remain unknown, not readiness passes. The report changes no files, review records, schedules or metadata and grants no automatic repair permission. Follow the existing explicit upgrade and review procedures after reviewing its findings. No shared-runtime implementation or migration is included.
 
 ## Continuing existing delivery
 

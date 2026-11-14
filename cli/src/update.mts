@@ -1,4 +1,5 @@
-// #153: scaffoldSources inherits the observer/checkpoint module pair; customized workflow stays protected.
+// Read-only workflow reports can classify selected files independently so unreadable facts stay unknown.
+// scaffoldSources inherits the observer/checkpoint module pair; customized workflow stays protected.
 // #137: TOML is project-owned even when absent; shared offline-parser assets remain Factory-owned.
 // Project copy classification for `factory update` (slice 4.5, #91). Compares each file Factory scaffolds into a
 // project's `.sandcastle/` with Factory's own copy and sorts it into one class:
@@ -98,7 +99,7 @@ export function factoryHistory(app = appRoot): History {
 }
 
 /** Classify every scaffolded file in `root`'s copy. Read-only. */
-export function classifyCopy(p: Paths, root: string, o: { app?: string; history?: History } = {}): FileStatus[] {
+export function classifyCopy(p: Paths, root: string, o: { app?: string; history?: History; files?: string[] } = {}): FileStatus[] {
   const app = o.app ?? appRoot;
   const history = o.history ?? factoryHistory(app);
   const read = (rel: string) => readFileSync(join(app, rel));
@@ -108,7 +109,7 @@ export function classifyCopy(p: Paths, root: string, o: { app?: string; history?
     const algorithm = [...ids][0].length === 64 ? 'sha256' : 'sha1';
     return ids.has(blobId(content, algorithm));
   };
-  return Object.entries(scaffoldSources()).sort(([a], [b]) => a.localeCompare(b)).map(([file, sources]): FileStatus => {
+  return Object.entries(scaffoldSources()).filter(([file]) => !o.files || o.files.includes(file)).sort(([a], [b]) => a.localeCompare(b)).map(([file, sources]): FileStatus => {
     const target = join(root, scaffoldName, file);
     const owned = PROJECT_OWNED.includes(file);
     const st = (() => { try { return lstatSync(target); } catch { return undefined; } })();
