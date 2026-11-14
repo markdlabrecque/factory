@@ -15,6 +15,15 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Local event observations
+
+```sh
+node --test board/execution-events.test.mts cli/test/telemetry.test.mts
+node --test board/board.test.mts board/install.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts orchestrator/recovery-runner.test.mts
+```
+
+These tests use disposable state roots, synthetic Git projects, injected tracker replies and fake scheduler/container boundaries. Store tests spawn only local Node writers, crash them before/after publication, race stale-owner reclamation, check restrictive modes and verify append order and idempotent replay. Export tests compare file bytes and modification times, including missing history, filters, concurrent publication and corrupt data. Control tests check unknown attribution, explicit request/result correlation, no-op/refused/failed outcomes and the absence of inferred or automatic controls. Recorder failures at admission, charge, cleanup, settlement and command boundaries must leave authoritative outcomes unchanged. No installed project copy, login, service manager, browser, tracker or Docker daemon is required.
+
 ## Systemd is a trusted dependency
 
 Systemd is a well-tested third-party component. Factory tests its integration with systemd, not systemd's implementation.

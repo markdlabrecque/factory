@@ -1,3 +1,5 @@
+// Explicit journal controls emit metadata only, never text, actor names, delivery errors or sync helper calls.
+import { controlAction } from '../../../board/execution-events.mts';
 // #137: validated TOML metadata is authoritative for tracker kind/host/project before journal writes.
 // `factory ticket comment <ticket> <text...> [--project <name|path>]` (slice 5, #99): save a manual comment on a board
 // ticket in the shared ticket journal (board/journal.mts, `<state>/journal/`, in the run-state folder), then post it to
@@ -30,7 +32,7 @@ import { join } from 'node:path';
 import { keyFor } from '../../../board/admission.mts';
 import { addComment, beginDelivery, correctVerdict, finishDelivery, journalDir, markerFor, normalizeVerdict, projectTicket, readJournal, runIdentity } from '../../../board/journal.mts';
 import type { JournalEvent, Ticket } from '../../../board/journal.mts';
-import { archiveTicket } from '../../../board/tickets.mts';
+import { ArchiveRefused, archiveTicket } from '../../../board/tickets.mts';
 import type { Paths } from '../paths.mts';
 import { findRun, projectRuns, resolveProject, runStateDir, ticketId } from '../runs.mts';
 import type { ProjectContext } from '../runs.mts';
@@ -181,11 +183,13 @@ export function ticketComment(p: Paths, ticket: string | undefined, words: strin
   if (!text) throw new Error('Give the comment text: factory ticket comment <ticket> <text>');
   const ctx = resolveProject(p, { project: o.project, cwd: o.cwd });
   const dir = runStateDir(p);
+  return controlAction(dir, { project: ctx.tracker, ticket: iid }, 'ticket-comment', done => {
   const t: Ticket = { project: ctx.tracker, iid };
   const { run } = findRun(p, ctx, iid, dir);
   const e = addComment(dir, t, { text, actor: o.actor ?? actorName(), ...(run ? { run: runIdentity(run) } : {}) });
   console.log(`Saved the comment on #${iid} in ${ctx.name} (${e.id}).`);
   const r = deliver(ctx, dir, t, e.id, o.exec ?? realExec);
+  done(r.state === 'posted' || r.state === 'found' || r.state === 'delivered' ? 'changed' : 'failed', r.state === 'failed' ? 'publication-failed' : 'unspecified');
   if (r.state === 'posted' || r.state === 'found') {
     console.log(`Posted to ${ctx.tracker}#${iid}${'url' in r && r.url ? `: ${r.url}` : ` (comment ${r.remoteId})`}.`);
     return 0;
@@ -197,6 +201,7 @@ export function ticketComment(p: Paths, ticket: string | undefined, words: strin
   console.error(`Not posted to ${ctx.tracker}#${iid}: ${r.error}. The comment is kept in the journal`
     + (r.uncertain ? '; the post may have reached the tracker, so `factory ticket sync` looks for its marker before posting again.' : '; `factory ticket sync` posts it later.'));
   return 1;
+  });
 }
 
 /** The ticket numbers with a journal in this project, from the journal file names (`keyFor`), sorted. */
@@ -249,28 +254,37 @@ export function ticketVerdict(p: Paths, ticket: string | undefined, o: TicketOpt
   if (!o.message?.trim()) throw new Error('A verdict correction requires a non-empty --message explanation.');
   const ctx = resolveProject(p, o);
   const dir = runStateDir(p);
+  return controlAction(dir, { project: ctx.tracker, ticket: iid }, 'ticket-verdict', done => {
   const { run } = findRun(p, ctx, iid, dir);
   if (!run || run.project !== ctx.tracker || run.iid !== iid || !run.startedAt) {
+    done('refused');
     throw new Error(`No matching run for #${iid} in ${ctx.name}.`);
   }
   const t = { project: ctx.tracker, iid };
   const e = correctVerdict(dir, t, run, { verdict, text: o.message, actor: o.actor ?? actorName() });
   const r = deliver(ctx, dir, t, e.id, o.exec ?? realExec);
+  done(r.state === 'posted' || r.state === 'found' || r.state === 'delivered' ? 'changed' : 'failed', r.state === 'failed' ? 'publication-failed' : 'unspecified');
   if (r.state === 'posted' || r.state === 'found' || r.state === 'delivered') {
     console.log(`Saved manual correction on #${iid}: ${e.verdict?.from ?? 'no verdict'} to ${verdict}, run ${e.run}; posted to tracker.`);
     return 0;
   }
   console.error(`Saved locally; ${ctx.tracker} sync pending. ${r.state === 'failed' ? r.error : r.state}. Run factory ticket sync ${iid}.`);
   return 1;
+  });
 }
 
 /** Archive or restore only after re-reading and validating the raw current record under admission. */
 export function ticketArchive(p: Paths, ticket: string | undefined, archived: boolean, o: TicketOptions = {}): number {
   const iid = ticketId(ticket);
   const ctx = resolveProject(p, o);
-  const r = archiveTicket(runStateDir(p), { project: ctx.tracker, iid }, archived, o.actor ?? actorName());
-  console.log(`#${iid}: ${r.changed ? '' : 'already '}${archived ? 'archived' : 'restored'}; run data preserved.`);
-  return 0;
+  return controlAction(runStateDir(p), { project: ctx.tracker, ticket: iid }, archived ? 'ticket-archive' : 'ticket-restore', done => {
+    let r;
+    try { r = archiveTicket(runStateDir(p), { project: ctx.tracker, iid }, archived, o.actor ?? actorName()); }
+    catch (error) { done(error instanceof ArchiveRefused ? 'refused' : 'failed'); throw error; }
+    done(r.changed ? 'changed' : 'no-op');
+    console.log(`#${iid}: ${r.changed ? '' : 'already '}${archived ? 'archived' : 'restored'}; run data preserved.`);
+    return 0;
+  });
 }
 
 /** Show manual history even when archived. JSON is also available for scripts. */

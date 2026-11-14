@@ -18,6 +18,8 @@
 // never copies or changes project files and launches nothing.
 // recoverySummary is also what `factory status` shows (confirmation, attempts and outcomes); a malformed recovery record
 // is reported there as a problem, never overwritten.
+// Reset and confirmed review record explicit unknown-actor controls, outside authoritative locks.
+import { controlAction } from '../../../board/execution-events.mts';
 import { existsSync } from 'node:fs';
 import { readAdmission, withAdmission } from '../../../board/admission.mts';
 import type { AdmissionClaim } from '../../../board/admission.mts';
@@ -129,7 +131,7 @@ function activeProblem(s: RecoveryState, claims: AdmissionClaim[], pending: bool
 }
 
 /** `factory recovery review`: list the workflow files; with --confirm, record them as reviewed. */
-function review(p: Paths, ctx: ProjectContext, o: RecoveryOptions): number {
+function review(p: Paths, ctx: ProjectContext, o: RecoveryOptions, done?: ReturnType<typeof import('../../../board/execution-events.mts').startAction>): number {
   const prior = readReview(p, ctx.root);
   const changed = prior && typeof prior === 'object' ? changedSinceReview(ctx.root, prior) : null;
   console.log(`Recovery workflow in ${ctx.root}/.sandcastle (${ctx.name})`);
@@ -142,6 +144,7 @@ function review(p: Paths, ctx: ProjectContext, o: RecoveryOptions): number {
   const missing = missingWorkflow(ctx.root);
   console.log(prior === null ? 'Review: none recorded' : typeof prior === 'string' ? `Review: ${prior}` : `Review: recorded ${prior.reviewedAt} (${prior.by})`);
   if (missing.length) {
+    done?.('refused');
     console.error(`factory: the copy is missing ${missing.join(', ')}. Upgrade it by hand (orchestrator/ADAPTING.md, "Upgrading an existing project for self-recovery"); recovery stays inactive. Nothing was recorded.`);
     return 1;
   }
@@ -150,6 +153,7 @@ function review(p: Paths, ctx: ProjectContext, o: RecoveryOptions): number {
     return 0;
   }
   recordReview(p, ctx.root, { at: o.at });
+  done?.('changed');
   console.log(`Recorded the review: recovery is active for ${ctx.name}. Editing any of these files turns it off until it is reviewed again. Nothing was launched.`);
   return 0;
 }
@@ -160,13 +164,16 @@ export async function recovery(p: Paths, action: string | undefined, o: Recovery
   }
   const ctx = resolveProject(p, o);
   const now = o.now ?? Date.now();
-  if (action === 'review') return review(p, ctx, o);
+  if (action === 'review') return o.confirm
+    ? controlAction(runStateDir(p), { project: ctx.tracker }, 'recovery-review', done => review(p, ctx, o, done))
+    : review(p, ctx, o);
   if (action === 'status') {
     const r = recoverySummary(p, ctx);
     if (o.json) console.log(JSON.stringify({ version: 1, project: { name: ctx.name, root: ctx.root, tracker: ctx.tracker }, recovery: r }, null, 2));
     else show(ctx, r, now);
     return r.problem ? 1 : 0;
   }
+  return controlAction(runStateDir(p), { project: ctx.tracker }, 'recovery-reset', done => {
   const at = o.at ?? new Date(now).toISOString();
   const refused = withAdmission(runStateDir(p), tx => {
     const claims = Object.values(tx.state.claims).filter(c => c.kind === 'recovery' && c.project === ctx.tracker);
@@ -177,10 +184,13 @@ export async function recovery(p: Paths, action: string | undefined, o: Recovery
     return null;
   });
   if (refused) {
+    done('refused');
     console.error(`factory: reset refused for ${ctx.name}: ${refused}. Nothing changed.`);
     return 1;
   }
+  done('changed');
   console.log(`Reset recovery for ${ctx.name}: the jam episode ended, so confirmation starts over on later completed passes, and every ticket has ${ATTEMPT_LIMIT} attempts again.`);
   console.log('Nothing was launched; the next scheduled passes re-evaluate the project. Ticket branches, worktrees, run records, logs, reports and evidence are untouched.');
   return 0;
+  });
 }

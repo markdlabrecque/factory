@@ -1,3 +1,5 @@
+// HTTP archive observations cover header gates, unknown attribution and changed/no-op/refused result pairs.
+import { exportEvents } from './execution-events.mts';
 // #140: Board cards expose only current compact blockers, not assessment facts or manual refresh controls.
 // #141: concise recorded-blocker summaries and production stats DOM; stored history stays intact.
 // Archive coverage exercises project/header gates, active/queued refusal, preservation and idempotence over HTTP,
@@ -680,6 +682,16 @@ test("board, /api/runs and evidence agree and render safely", async () => {
     const original = readFileSync(resolve(dir, 'demo--1.json'), 'utf8');
     assert.equal((await archive('demo')).status, 200);
     assert.equal((await archive('demo')).status, 200, 'idempotent');
+    const controls = exportEvents(dir).events.filter(e => e.eventKind.startsWith('action-'));
+    assert.equal(controls.length, 10, 'two unauthenticated/method requests emit nothing');
+    const outcomes = controls.filter(e => e.eventKind === 'action-result');
+    assert.equal(outcomes.filter(e => e.result === 'refused').length, 3);
+    assert.equal(outcomes.filter(e => e.result === 'changed').length, 1);
+    assert.equal(outcomes.filter(e => e.result === 'no-op').length, 1);
+    for (const result of outcomes) {
+      assert.ok(controls.some(e => e.eventKind === 'action-requested' && e.operationId === result.operationId));
+      assert.equal(result.actorIdentity, 'unknown'); assert.equal(result.origin, 'board');
+    }
     const journal = JSON.parse(readFileSync(resolve(dir, 'journal/demo--1.json'), 'utf8'));
     assert.equal(journal.events.length, 1);
     const after = await (await fetch(base + '/api/runs')).json();

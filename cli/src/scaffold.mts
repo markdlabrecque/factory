@@ -1,5 +1,6 @@
 // #153: continuation observer and checkpoint schema ship together in every copied scaffold.
 // #149: fresh/copied installs ship dependencies.mts through the shared update source list.
+// Local execution events ship with board imports; existing copies require a workflow review after upgrading.
 // #150: verification.mts is shipped and included automatically in update scaffoldSources.
 // #137: new scaffolds ship versioned TOML and offline parser; legacy reruns never opt in implicitly.
 // Scaffold writer: builds the allowlisted `.sandcastle/` assets from the installed app (never from cwd) and
@@ -36,7 +37,7 @@ export const FROM_ORCHESTRATOR = ['dependencies.mts', 'dispatch.mts', 'dispatch.
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];
 // journal.mts is a mandatory board projection import, including in project dispatcher copies.
-export const FROM_BOARD = ['delivery.mts', 'board.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.template.html'];
+export const FROM_BOARD = ['execution-events.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.template.html'];
 
 type Edit = { tag: string; line?: RegExp; value?: (m: RegExpMatchArray) => string };
 const marker = (tag: string) => new RegExp(`// factory:${tag}(?![\\w:-])`, 'g');

@@ -5,6 +5,8 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// Persisted transitions emit observations after authoritative locks, never on heartbeat writes.
+import { observeRun } from './execution-events.mts';
 import { claimLive, keyFor, newToken, ownerOf, releaseClaim, transferClaim, withAdmission, writeDurable } from "./admission.mts";
 import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
@@ -217,8 +219,7 @@ function writeStage(tx: AdmissionTx, iid: string, patch: Partial<RunState>): voi
     stageSince: stageChanged || !cur.stageSince ? at : cur.stageSince,
     queueReasons: patch.queueReasons ?? (stageChanged || Object.prototype.hasOwnProperty.call(patch, "note") ? undefined : cur.queueReasons),
   } as RunState, at);
-  if (patch.delivery !== undefined) writeDurable(file, JSON.stringify(next, null, 2));
-  else write(file, JSON.stringify(next, null, 2));
+  writeRecord(stateDir(), keyFor(iid, project), next);
   // A normal run that finished or parked lets go of its claim (a recovery claim is released only by settling).
   if (held && patch.stage && (TERMINAL.includes(patch.stage) || PARKED.includes(patch.stage))) {
     try {
@@ -313,15 +314,19 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   }
   const run = trackStage(cur, { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
     queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token,
-    verification: undefined, delivery: undefined,
+    verification: undefined, delivery: undefined, recovery: kind === 'normal' ? undefined : cur.recovery,
     executionId: kind === "normal" ? token : cur.executionId, updatedAt: at, stageSince: at } as RunState, at);
   return { ok: true, key, token, claim, current, run };
 }
 
 /** Write a claimed run's record (temp file + rename). */
-export function writeRecord(dir: string, key: string, run: RunState): void {
+export function writeRecord(dir: string, key: string, run: RunState, origin?: import('./execution-events.mts').Origin, reason?: import('./execution-events.mts').Reason): void {
   mkdirSync(dir, { recursive: true });
-  writeDurable(resolve(dir, `${key}.json`), JSON.stringify(run, null, 2));
+  const file = resolve(dir, `${key}.json`);
+  let previous: Partial<RunState> = {};
+  try { previous = JSON.parse(readFileSync(file, 'utf8')); } catch { /* no usable previous observation */ }
+  writeDurable(file, JSON.stringify(run, null, 2));
+  observeRun(dir, previous, run, origin ?? (run.recovery?.id ? 'recovery' : 'runner'), reason);
 }
 
 /** Atomically claim a slot under the shared cap and ownership of ticket `iid` for process `pid` (see admitRun). Refused,
@@ -411,7 +416,7 @@ export function markMergedOutside(iid: string, from: Stage, pr: { number: number
     } else if (pr.checkpoint) return false;
     const at = now();
     writeRecord(dir, key, trackStage(cur, { ...cur, stage: "done", stageSince: at, updatedAt: at, queueReasons: undefined, mr: pr.url,
-      ...(pr.checkpoint ? { delivery: pr.checkpoint } : {}), mergedAt: pr.mergedAt, mergedOutside: { pr: pr.number, matchedBy: pr.matchedBy }, note: `merged outside Factory (matched by ${pr.matchedBy})` }, at));
+      ...(pr.checkpoint ? { delivery: pr.checkpoint } : {}), mergedAt: pr.mergedAt, mergedOutside: { pr: pr.number, matchedBy: pr.matchedBy }, note: `merged outside Factory (matched by ${pr.matchedBy})` }, at), 'reconciliation', 'merged');
     return true;
   });
   if (done) renderBoard();
@@ -445,7 +450,7 @@ export function readRuns(dir = stateDir(), reconcile = true): BoardRun[] {
         const at = now();
         s = trackStage(s, { ...s, note: `process ${s.pid} exited without finishing (last stage: ${s.stage})`,
           stage: "stopped", stageSince: at }, at);
-        write(file, JSON.stringify(s, null, 2));
+        writeRecord(dir, f.replace(/\.json$/, ''), s, 'reconciliation', 'process-exited');
       }
       runs.push({ ...s, key: f.replace(/\.json$/, "") });
     } catch {

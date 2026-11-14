@@ -88,7 +88,7 @@ test('scheduled copied dispatch: pending then green uses the same proof/PR; manu
   const evidence = join(f.home,'evidence'); mkdirSync(evidence);
   writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\n'); writeFileSync(join(evidence,'out.txt'),'verified');
   writeFileSync(join(evidence,'verification.json'),JSON.stringify({version:1,verdict:'PASS',changeKind:'feature',evidenceKind:'command',interactive:false,criteria:[{requirement:'behavior',result:'pass',evidence:['out.txt']}],artifacts:[{path:'out.txt',kind:'command-output',phase:'check'}],limitations:[]}));
-  const names = ['factory.toml','main.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','dispatch.mts','runtime-config.mts','project-config.mts','selection.mts'];
+  const names = ['factory.toml','main.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','execution-events.mts','dispatch.mts','runtime-config.mts','project-config.mts','selection.mts'];
   const settings = {image:cfg.config.image,model:cfg.AGENT.model,thinking:cfg.AGENT.thinking??null,merge:{auto:cfg.MERGE.auto,method:cfg.MERGE.method,requiredChecks:cfg.MERGE.requiredChecks??[]},ciWaitMinutes:cfg.config.ciWaitMinutes,noPipelineMinutes:cfg.config.noPipelineMinutes};
   const hash = unitHash(f.data.tickets[0], []);
   const identity = {project:'owner/repo',ticket:'7',executionId:'execution',branch:'7-topic',base:'main',baseline:tip,tip,requirementsHash:hash};

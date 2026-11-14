@@ -29,7 +29,7 @@ const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-c
 // Fresh and repaired scaffolds ship both dependency evaluation and delivery continuation.
 const EXPECTED = ['dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts', 'factory.toml', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(f => `vendor/smol-toml/${f}`), '.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
-  'dispatch.sh', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
+  'dispatch.sh', 'execution-events.mts', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
   'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'].sort();
 
 function fixture(t: TestContext, homeName = 'home') {
@@ -190,7 +190,7 @@ test('shared state: a run written through the generated board module is read by 
   const script = `import { setProject, setStage } from './.sandcastle/board.mts'; setProject('me/site'); setStage('7', { stage: 'done', title: 'Hello' });`;
   const res = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, SANDCASTLE_STATE_DIR: state } });
   assert.equal(res.status, 0, res.stderr);
-  assert.deepEqual(readdirSync(state), ['admission', 'me_site--7.json']);
+  assert.deepEqual(readdirSync(state), ['admission', 'me_site--7.json', 'telemetry']);
   const read = spawnSync(process.execPath, ['--input-type=module', '-e', `import { readRuns } from './board/board.mts'; console.log(JSON.stringify(readRuns().map(r => [r.iid, r.title, r.stage])));`],
     { cwd: join(import.meta.dirname, '../..'), encoding: 'utf8', env: { ...process.env, SANDCASTLE_STATE_DIR: state } });
   assert.deepEqual(JSON.parse(read.stdout), [['7', 'Hello', 'done']]);

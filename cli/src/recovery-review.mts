@@ -1,3 +1,4 @@
+// Execution-event helpers are part of the complete copied workflow; missing reviewed files fail closed.
 // #153: checkpoint/observer/dispatch dependencies are reviewed with the shared delivery lifecycle.
 // #149: review shared dependency evaluation with its recovery callers.
 // #150: review proof validation and all executable delivery adapters/CI as one workflow.
@@ -26,14 +27,15 @@ const CONFIG_WORKFLOW = FROM_ORCHESTRATOR.filter(f => ['runtime-config.mts','pro
 /** Every .sandcastle file the repair path runs, as the review covers them. config.mts is project configuration, not workflow. */
 // #150: proof and all executable delivery dependencies must be reviewed as one coherent upgrade.
 // #153: delivery claims and followup are part of the coherent reviewed lifecycle.
-export const WORKFLOW = ['dependencies.mts', 'delivery.mts', 'dispatch.mts', 'delivery-followup.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.mts',
+// The observational helper is part of the complete copied workflow and must be reviewed after upgrade.
+export const WORKFLOW = ['execution-events.mts', 'dependencies.mts', 'delivery.mts', 'dispatch.mts', 'delivery-followup.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.mts',
   'prompt.recover.md', 'prompt.verify.md', ...CONFIG_WORKFLOW];
 /** Where Factory's own copy of each workflow file lives, for showing which project files differ. main.mts is templated, so it has none. */
 const SHIPPED: Record<string, string> = {
   ...Object.fromEntries(CONFIG_WORKFLOW.map(f => [f, `orchestrator/${f}`])),
   ...Object.fromEntries(['dependencies.mts', 'dispatch.mts', 'delivery-followup.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts'].map(f => [f, `orchestrator/${f}`])),
   'recovery.mts': 'orchestrator/recovery.mts', 'recovery-sandbox.mts': 'orchestrator/recovery-sandbox.mts', 'handoff.mts': 'orchestrator/handoff.mts',
-  'delivery.mts': 'board/delivery.mts', 'ownership.mts': 'orchestrator/ownership.mts', 'admission.mts': 'board/admission.mts', 'assessment.mts': 'board/assessment.mts', 'journal.mts': 'board/journal.mts', 'board.mts': 'board/board.mts',
+  'execution-events.mts': 'board/execution-events.mts', 'delivery.mts': 'board/delivery.mts', 'ownership.mts': 'orchestrator/ownership.mts', 'admission.mts': 'board/admission.mts', 'assessment.mts': 'board/assessment.mts', 'journal.mts': 'board/journal.mts', 'board.mts': 'board/board.mts',
   'prompt.recover.md': 'orchestrator/prompt.recover.md', 'prompt.verify.md': 'cli/templates/project/prompt.verify.md',
 };
 export type Review = { version: 1; root: string; reviewedAt: string; by: 'init' | 'review'; files: Record<string, string> };
@@ -63,7 +65,7 @@ export function readReview(p: Paths, root: string): Review | null | string {
 
 /** Files whose content is not what was reviewed. */
 export function changedSinceReview(root: string, r: Review): string[] {
-  return WORKFLOW.filter(f => r.files[f] !== sha(join(sandcastle(root), f)));
+  return WORKFLOW.filter(f => !existsSync(join(sandcastle(root), f)) || r.files[f] !== sha(join(sandcastle(root), f)));
 }
 
 /** Why the project cannot run a repair now, or null: the workflow must be complete, compatible and reviewed as it is. */

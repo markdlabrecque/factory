@@ -1,4 +1,5 @@
 // #153: import-safe single observation of a host-recorded PR; no agents, repair charge, comments or creation.
+// Continuation provenance includes the copied execution-event helper, without granting telemetry any authority.
 // All production subprocesses share one 30s deadline and a 10s per-command limit; locks cover only local CAS.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -55,7 +56,7 @@ export async function observeWaitingDelivery(run: RunState, host: FollowupHost):
         branch: d.branch, base: d.base, baseline: owned.implementationBaseSha ?? '', tip: d.sha, requirementsHash: owned.verification.requirementsHash }, d.proofId);
       if (frozen.report.verdict !== 'PASS') return 'Host proof is not PASS';
       const code = frozen.proof.provenance.code;
-      const required = ['delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'];
+      const required = ['delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'];
       if (!required.every(k => typeof code[k] === 'string')) return 'Workflow proof inputs missing; fresh verification required';
       for (const [path, hash] of Object.entries(code)) {
         if (!/^[a-zA-Z0-9.-]+$/.test(path) || sha256(readFileSync(resolve(host.workflow, path))) !== hash) return `Workflow changed: ${path}; fresh verification required`;
