@@ -137,6 +137,16 @@ verification and delivery. Scheduled recovery fixtures inject synthetic preparat
 rather than running a real analyst. No test contacts live trackers, agents, Docker,
 credentials or a service manager.
 
+## Offline image readiness tests
+
+`orchestrator/capabilities.test.mts` injects Docker commands to exercise immutable identity, non-root/offline container arguments, exact cleanup, cancellation, owner-process locks, malformed cache and non-sticky failures. No daemon or auth is used. `browser-provisioning.test.mts` runs the actual Node watchdog against fixture-owned fake global modules and checks descendant cleanup. Normal/recovery entrypoint tests use synthetic owned Docker responses and verify setup failures start no agents; admitted setup failures retain their budget charge. CLI recovery tests inject readiness to prove known-bad images spend zero attempts and pause/off/cancellation still prevent admission. `image-config.test.mts` proves configuration discovery never executes project code.
+
+Run these focused tests before the full suite:
+
+```sh
+node --test orchestrator/capabilities.test.mts orchestrator/browser-provisioning.test.mts orchestrator/verification-entrypoint.test.mts orchestrator/recovery-entrypoint.test.mts cli/test/image-config.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/init.test.mts cli/test/update.test.mts
+```
+
 ## Optional browser image smoke test
 
 Run `./scripts/test-browser-image.sh` from this checkout with Docker/build access, network access for public build dependencies, and a non-root caller UID/GID. It builds a uniquely tagged disposable image from `.sandcastle/Dockerfile`, overrides the entrypoint and checks the non-root browser with synthetic content, screenshot and video from an empty directory. The runtime check downloads nothing. The image and container are removed on exit; configured images and services are untouched. The regular Node suite never runs this test.

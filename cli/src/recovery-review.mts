@@ -27,13 +27,13 @@ const CONFIG_WORKFLOW = FROM_ORCHESTRATOR.filter(f => ['runtime-config.mts','pro
 /** Every .sandcastle file the repair path runs, as the review covers them. config.mts is project configuration, not workflow. */
 // #150: proof and all executable delivery dependencies must be reviewed as one coherent upgrade.
 // #153: delivery claims and followup are part of the coherent reviewed lifecycle.
-// The observational helper and complete read-only preparation workflow must be reviewed after upgrade.
-export const WORKFLOW = ['execution-events.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'analyze.mts', 'graph.mts', 'manifests.mts', 'models.mts', 'prompt.analyze.md', 'config-read.mts', 'dependencies.mts', 'delivery.mts', 'dispatch.mts', 'delivery-followup.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.mts',
+// Read-only preparation, image readiness and observation helpers are reviewed together after upgrade.
+export const WORKFLOW = ['capabilities.mts', 'execution-events.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'analyze.mts', 'graph.mts', 'manifests.mts', 'models.mts', 'prompt.analyze.md', 'config-read.mts', 'dependencies.mts', 'delivery.mts', 'dispatch.mts', 'delivery-followup.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'main.mts', 'recovery.mts', 'recovery-sandbox.mts', 'handoff.mts', 'ownership.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.mts',
   'prompt.recover.md', 'prompt.verify.md', ...CONFIG_WORKFLOW];
 /** Where Factory's own copy of each workflow file lives, for showing which project files differ. main.mts is templated, so it has none. */
 const SHIPPED: Record<string, string> = {
   ...Object.fromEntries(CONFIG_WORKFLOW.map(f => [f, `orchestrator/${f}`])),
-  ...Object.fromEntries(['recovery-analysis.mts', 'recovery-analysis-contract.mts', 'analyze.mts', 'graph.mts', 'manifests.mts', 'models.mts', 'prompt.analyze.md', 'config-read.mts', 'dependencies.mts', 'dispatch.mts', 'delivery-followup.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts'].map(f => [f, `orchestrator/${f}`])),
+  ...Object.fromEntries(['capabilities.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'analyze.mts', 'graph.mts', 'manifests.mts', 'models.mts', 'prompt.analyze.md', 'config-read.mts', 'dependencies.mts', 'dispatch.mts', 'delivery-followup.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts'].map(f => [f, `orchestrator/${f}`])),
   'recovery.mts': 'orchestrator/recovery.mts', 'recovery-sandbox.mts': 'orchestrator/recovery-sandbox.mts', 'handoff.mts': 'orchestrator/handoff.mts',
   'execution-events.mts': 'board/execution-events.mts', 'delivery.mts': 'board/delivery.mts', 'ownership.mts': 'orchestrator/ownership.mts', 'admission.mts': 'board/admission.mts', 'assessment.mts': 'board/assessment.mts', 'journal.mts': 'board/journal.mts', 'board.mts': 'board/board.mts',
   'prompt.recover.md': 'orchestrator/prompt.recover.md', 'prompt.verify.md': 'cli/templates/project/prompt.verify.md',

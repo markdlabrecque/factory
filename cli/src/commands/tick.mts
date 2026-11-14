@@ -2,6 +2,7 @@
 // pause gate. Maintenance never launches, refreshes or counts a pass; failure disables recovery launch for this tick.
 // Global off/unknown and cancellation still stop all maintenance. Paused projects keep their pause and spent budgets.
 // Recovery preparation inherits saved scheduler Node/PATH and cancellation, only after maintenance and launch gates.
+// Image readiness carries cancellation and rereads pause state before and after its pre-charge probe.
 // Scheduled children inherit trusted absolute CLI/Node authorization paths; refreshes never do.
 // One scheduler tick: the internal command `factory tick`, run by factory-tick.service on Linux (not for people to type;
 // it takes no flags), and on macOS called in-process by the launchd supervisor (commands/supervise.mts). It visits the registered projects one after another, in registry order rotated so that a different project

@@ -30,6 +30,7 @@ import { projectId, readReceipt, receiptFile } from "./ownership.mts";
 import { paths } from "../cli/src/paths.mts";
 import { recordReview } from "../cli/src/recovery-review.mts";
 import { buildAssets } from "../cli/src/scaffold.mts";
+import { checkImageCapabilities } from './capabilities.mts';
 import { launchRecovery, settleRecovery } from "../cli/src/recovery-run.mts";
 import type { Spawner } from "../cli/src/recovery-run.mts";
 import { observePass, readRecovery } from "../cli/src/recovery-state.mts";
@@ -40,7 +41,7 @@ const ID = "5b1f3c2a-9d8e-4f70-8a6b-0c1d2e3f4a5b";
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 
-for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'dirty', 'legacy-prompt', 'dependency-unknown']) {
+for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'dirty', 'legacy-prompt', 'dependency-unknown', 'setup-bad']) {
  test(`real recovery entrypoint: ${scenario}`, async (t) => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-entry-")));
   const children: ChildProcess[] = [];
@@ -88,6 +89,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   mkdirSync(fake);
   const env = {
     PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake,
+    FAKE_SETUP_BROWSER_BAD: scenario === 'setup-bad' ? 'yes' : '',
     FAKE_DEPENDENCY_ERROR: scenario === 'dependency-unknown' ? 'yes' : '',
     FAKE_MUTATION: scenario === 'closed-before' ? 'closed' : scenario === 'title' ? 'title' : '',
     FAKE_REPAIR: `printf 'fixed\\n' > fix.txt && git add -A && git commit -qm repair && printf '%s' '${JSON.stringify({ cause: "missing fix", filesChanged: ["fix.txt", "untracked.txt"], tests: [{ command: "true", result: "pass" }], canProceed: true, remainingBlockers: [], requiresHostUpdate: false })}' > "$EVIDENCE/recovery-report.json" && echo ok > "$EVIDENCE/recovery-report.md"`,
@@ -135,7 +137,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
     writeAssessment(state,'owner_repo--7',{iid:'7',project:'owner/repo',analysisState:'current',
       facts:{title:'Fix login',state:'open',labels:[],hash,checkedAt:at(5)},analysis:{input:hash,analyzedAt:at(5),requires:[]}});
     const assessment=readAssessment(state,'owner_repo--7');
-    assert.equal(launchRecovery(p,{root,tracker:'owner/repo',ticket:7,dir:state}).ok,false);
+    assert.equal((await launchRecovery(p,{root,tracker:'owner/repo',ticket:7,dir:state})).ok,false);
     assert.equal(readRecovery(p,root).attempts.length,0);
     const extension=join(home,'subscription-fixture.mjs');writeFileSync(extension,'// fixture only');
     writeFileSync(join(bin,'pi'),`#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify({provides:['fix'],requires:[],footprint:['app.txt']})));\n`,{mode:0o755});
@@ -147,17 +149,31 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
     assert.equal(git(root,'rev-parse','7-fix-login'),git(worktree,'rev-parse','HEAD'),'saved implementation preserved');
     assert.equal(readFileSync(join(evidence,'verdict.md'),'utf8'),'VERDICT: FAIL\nold\n');
   }
-  const launch = launchRecovery(p, { root, preparation, tracker: "owner/repo", ticket: 7, dir: state, docker, spawn: spawner, npx: "npx", uuid: () => ID, at: at(10) });
+  const launch = await launchRecovery(p, { root, preparation, tracker: "owner/repo", ticket: 7, dir: state,
+    capabilities: o => checkImageCapabilities({ ...o, docker: async args => {
+      const r = docker(args); if (r.status !== 0) throw Error('offline Docker failure'); return r.stdout;
+    } }), docker, spawn: spawner, npx: "npx", uuid: () => ID, at: at(10) });
   assert.equal(launch.ok, true, (launch as { reason?: string }).reason);
   const [code] = await once(child, "exit");
   const log = readFileSync(join(root, ".sandcastle/logs/recover-7.log"), "utf8");
   if (scenario !== 'pass') {
     assert.notEqual(code, 0, log);
     assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
-    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/} as Record<string, RegExp>)[scenario];
+    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
     assert.match(log, expected);
     const calls = existsSync(join(fake, 'docker.jsonl')) ? readFileSync(join(fake, 'docker.jsonl'), 'utf8') : '';
     if (scenario === 'missing-baseline') assert.ok(!calls.includes('"run"'), log);
+    if (scenario === 'setup-bad') {
+      assert.equal(readRecovery(p, root).budgets[7].used, 1, 'post-admission setup failures are never refunded');
+      assert.equal(existsSync(join(fake, 'models.log')), false, 'no repair or verifier provider starts');
+      const r = readAttemptRecord(join(p.recovery, 'attempts', `${ID}.json`));
+      assert.equal(r.ok, true);
+      if (r.ok) {
+        assert.match(readFileSync(join(r.record.evidence, 'setup-browser-preflight.log'), 'utf8'), /Chromium launch/);
+        assert.equal(existsSync(join(r.record.evidence, 'browser-preflight.log')), false);
+        assert.equal(r.record.deadline, undefined, 'repair deadline has not started');
+      }
+    }
     return;
   }
   assert.equal(code, 0, log);

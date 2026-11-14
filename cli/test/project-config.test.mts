@@ -143,13 +143,14 @@ test('shell preflight uses TOML tracker/agent/image, not conflicting legacy code
   execFileSync('git',['-C',f.root,'push','-q','origin','HEAD']);
   const bin = f.env.PATH.split(':')[0], log = join(f.base,'preflight.jsonl');
   const script = `#!${process.execPath}
-const fs = require('node:fs'), path = require('node:path');
+import * as fs from 'node:fs'; import * as path from 'node:path';
+import { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, '../../orchestrator/fixtures/capability-docker.mjs'))};
 const tool = path.basename(process.argv[1]), a = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)},JSON.stringify([tool,...a])+'\\n');
 if(tool==='glab' && JSON.stringify(a)===JSON.stringify(['auth','status','--hostname','git.example.com'])) process.exit(0);
 if(tool==='claude' && JSON.stringify(a)===JSON.stringify(['auth','status'])) { console.log('{"loggedIn":true}'); process.exit(0); }
 if(tool==='docker' && a[0]==='info') process.exit(0);
-if(tool==='docker' && a[0]==='image' && a[1]==='inspect' && a[2]==='sandcastle-test') { console.log(''); process.exit(0); }
+if(tool==='docker') { const out = capabilityDocker(a, ${JSON.stringify(f.base)}); if(out !== undefined) { console.log(out); process.exit(0); } }
 if(tool==='curl' && a.includes('https://api.anthropic.com/v1/messages')) { console.log('400'); process.exit(0); }
 console.error('unexpected '+tool+' '+JSON.stringify(a));process.exit(91);
 `;

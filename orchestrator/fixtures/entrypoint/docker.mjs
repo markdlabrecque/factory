@@ -1,3 +1,5 @@
+// Offline image readiness uses separately recorded synthetic owned probes before recovery/verification container work.
+import { capabilityDocker } from '../capability-docker.mjs';
 // #150: image inspection returns a fixed immutable synthetic image identity.
 // Test-only `docker` for the recovery entrypoint smoke test (#74). Containers are JSON files in $FAKE_STATE/containers.
 // `run -d --name N ... IMAGE` records the exact arguments and mounts; `exec ... N sh -c CMD` runs CMD on the host the way
@@ -8,6 +10,8 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
+const capability = capabilityDocker(args, process.env.FAKE_STATE);
+if (capability !== undefined) { process.stdout.write(capability + '\n'); process.exit(0); }
 const dir = join(process.env.FAKE_STATE, "containers");
 mkdirSync(dir, { recursive: true });
 appendFileSync(join(process.env.FAKE_STATE, "docker.jsonl"), JSON.stringify(args) + "\n");
@@ -23,7 +27,10 @@ if (args[0] === "run") {
   const sh = args.lastIndexOf("sh");
   const name = args[sh - 1];
   if (!existsSync(file(name))) fail(`Error: No such container: ${name}`, 1);
-  if (args[sh + 2].startsWith("command -v playwright ")) { process.stdout.write("browser preflight OK\n"); process.exit(0); }
+  if (args[sh + 2].startsWith("command -v playwright ")) {
+    const bad = process.env.FAKE_SETUP_BROWSER_BAD === 'yes';
+    process.stdout.write(bad ? 'browser preflight failed: Chromium launch\n' : 'browser preflight OK\n'); process.exit(bad ? 1 : 0);
+  }
   const { mounts } = JSON.parse(readFileSync(file(name), "utf8"));
   const at = (box) => mounts.find((m) => m.box === box).host;
   const evidence = mounts.find((m) => m.box.startsWith("/home/agent/evidence/") && !m.ro).host;
@@ -35,7 +42,7 @@ if (args[0] === "run") {
 } else if (args[0] === "container" && args[1] === "inspect") {
   const name = args.at(-1);
   if (!existsSync(file(name))) fail(`Error: No such container: ${name}`, 1);
-  process.stdout.write(args.includes('{{.Image}}') ? `sha256:${'d'.repeat(64)}\n` : `/${name}\n`);
+  process.stdout.write(args.includes('{{.Image}}') ? `sha256:${'a'.repeat(64)}\n` : `/${name}\n`);
 } else if (args[0] === "rm" && args[1] === "-f") {
   rmSync(file(args.at(-1)), { force: true });
 } else fail(`fake docker: unexpected call: ${args.join(" ")}`);

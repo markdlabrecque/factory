@@ -88,7 +88,7 @@ test('scheduled copied dispatch: pending then green uses the same proof/PR; manu
   const evidence = join(f.home,'evidence'); mkdirSync(evidence);
   writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\n'); writeFileSync(join(evidence,'out.txt'),'verified');
   writeFileSync(join(evidence,'verification.json'),JSON.stringify({version:1,verdict:'PASS',changeKind:'feature',evidenceKind:'command',interactive:false,criteria:[{requirement:'behavior',result:'pass',evidence:['out.txt']}],artifacts:[{path:'out.txt',kind:'command-output',phase:'check'}],limitations:[]}));
-  const names = ['factory.toml','main.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','execution-events.mts','dispatch.mts','runtime-config.mts','project-config.mts','selection.mts'];
+  const names = ['factory.toml','main.mts','capabilities.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','execution-events.mts','dispatch.mts','runtime-config.mts','project-config.mts','selection.mts'];
   const settings = {image:cfg.config.image,model:cfg.AGENT.model,thinking:cfg.AGENT.thinking??null,merge:{auto:cfg.MERGE.auto,method:cfg.MERGE.method,requiredChecks:cfg.MERGE.requiredChecks??[]},ciWaitMinutes:cfg.config.ciWaitMinutes,noPipelineMinutes:cfg.config.noPipelineMinutes};
   const hash = unitHash(f.data.tickets[0], []);
   const identity = {project:'owner/repo',ticket:'7',executionId:'execution',branch:'7-topic',base:'main',baseline:tip,tip,requirementsHash:hash};
@@ -159,6 +159,7 @@ for (const kind of ["github", "gitlab"]) {
     f.data.tickets[1].contextOnly = true;
     f.data.errors = [20];
     f.save();
+    writeFileSync(join(dirname(f.node), 'docker'), `#!${process.execPath}\nimport { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, 'fixtures/capability-docker.mjs'))}; const out = capabilityDocker(process.argv.slice(2), process.env.FAKE_STATE); if (out === undefined) process.exit(90); console.log(out);`, { mode: 0o755 });
     const module = join(f.root, "node_modules/@ai-hero/sandcastle");
     mkdirSync(join(module, "sandboxes"), { recursive: true });
     writeFileSync(join(module, "package.json"), JSON.stringify({ type: "module", exports: { ".": "./index.mjs", "./sandboxes/docker": "./sandboxes/docker.mjs" } }));
@@ -169,7 +170,7 @@ for (const kind of ["github", "gitlab"]) {
       export const pi = () => ({}), claudeCode = pi;
       export const createSandbox = async ({branch, baseBranch, sandbox}) => {
         execFileSync('git', ['branch', branch, baseBranch]);
-        return { close: async () => {}, run: async () => {
+        return { close: async () => {}, exec: async () => ({stdout:'browser preflight OK',exitCode:0}), run: async () => {
           writeFileSync(sandbox.mounts[0].hostPath + '/blocked.json', JSON.stringify({blockers: [{iid:20, what:'provider', evidence:'missing API'}]}));
           return {commits: []};
         }};

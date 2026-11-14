@@ -1,3 +1,6 @@
+// Independent verification retains its own browser check even after image and sandbox-setup readiness succeed.
+import { browserPreflight } from './capabilities.mts';
+export { browserPreflight, BROWSER_PROBE } from './capabilities.mts';
 // #153: persist exact opened PR identity before CI; later delivery results retain the original host proof.
 import type { DeliveryCheckpoint } from './delivery.mts';
 // #149: recovery holds on shared unknown dependency results and sanitized reasons.
@@ -6,7 +9,6 @@ import type { DependencyResult } from "./dependencies.mts";
 import { rmSync, writeFileSync } from "node:fs";
 import { readProof, validateEvidence } from './verification.mts';
 import type { Identity } from './verification.mts';
-import { Buffer } from "node:buffer";
 import { resolve } from "node:path";
 import type { RunState } from "./board.mts";
 import { edgesOf, SANDCASTLE_MARK } from "./graph.mts";
@@ -66,56 +68,6 @@ export const VERIFY_PROMPT = "./.sandcastle/prompt.verify.md";
 export function beginVerification(host: Pick<Host, "setStage">, iid: string, evidenceHost: string): void {
   for (const name of ['verdict.md', 'verification.json']) rmSync(resolve(evidenceHost, name), { force: true });
   host.setStage(iid, { stage: "verifying", verdict: undefined, verification: undefined, delivery: undefined, mr: undefined, mergedAt: undefined });
-}
-
-// Fixed stage names avoid recording environment variables or arbitrary browser error messages in evidence.
-export const BROWSER_PROBE = `
-const { execFileSync } = require('node:child_process');
-let stage = 'global module resolution';
-(async () => {
-  let browser;
-  try {
-    const root = execFileSync('npm', ['root', '-g'], {encoding:'utf8', timeout:10000}).trim();
-    const { chromium } = require(require('node:path').join(root, 'playwright'));
-    stage = 'Chromium launch';
-    browser = await chromium.launch({headless:true, timeout:15000});
-    stage = 'DOM marker';
-    const page = await browser.newPage();
-    await page.setContent('<div id="factory-probe">ready</div>');
-    if (await page.locator('#factory-probe').textContent() !== 'ready') throw Error('marker mismatch');
-  } catch (_) { console.error('browser preflight failed: ' + stage); process.exitCode = 1; }
-  finally { if (browser) await browser.close(); }
-  if (!process.exitCode) console.log('browser preflight OK');
-})().catch(() => { console.error('browser preflight failed: cleanup'); process.exitCode = 1; });`;
-
-/** Probe the installed runtime without downloads, retaining only bounded, non-secret stage diagnostics. */
-export async function browserPreflight(sandbox: Pick<VerifierSandbox, "exec">, evidenceHost: string, timeoutMs = 30000): Promise<string | undefined> {
-  const path = resolve(evidenceHost, "browser-preflight.log");
-  let diagnostic = "probe failed";
-  let ok = false;
-  try {
-    rmSync(path, { force: true });
-    // Own the group directly: host `timeout` implementations differ in descendant handling.
-    // Kill again after leader exit to catch a descendant forked while the deadline signal was delivered.
-    const watchdog = `
-const { spawn } = require('node:child_process');
-const child = spawn(process.execPath, ['-e', ${JSON.stringify(BROWSER_PROBE)}], { detached: true, stdio: 'inherit' });
-let expired = false;
-const kill = () => { if (child.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; } } };
-const timer = setTimeout(() => { expired = true; kill(); }, ${Math.max(1, timeoutMs)});
-child.on('error', () => { clearTimeout(timer); kill(); process.exitCode = 1; });
-child.on('exit', code => { clearTimeout(timer); kill(); process.exitCode = expired ? 124 : (code ?? 1); });`;
-    const encoded = Buffer.from(watchdog).toString("base64");
-    const result = await sandbox.exec(`command -v playwright >/dev/null || { echo "browser preflight failed: CLI missing"; exit 1; }; exec node -e "eval(Buffer.from('${encoded}','base64').toString())"`);
-    const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-    const failure = text.match(/browser preflight failed: (?:CLI missing|global module resolution|Chromium launch|DOM marker|cleanup)/);
-    diagnostic = failure?.[0] ?? (text.includes("browser preflight OK") ? "browser preflight OK" : "browser preflight failed: probe execution or timeout");
-    ok = (result.exitCode ?? 0) === 0 && diagnostic === "browser preflight OK";
-  } catch { diagnostic = "browser preflight failed: probe or timeout"; }
-  try { writeFileSync(path, diagnostic.slice(0, 256) + "\n"); }
-  catch { ok = false; diagnostic = "browser preflight evidence could not be recorded"; }
-  if (!ok) return `Playwright/Chromium provisioning failure: ${diagnostic}. Add the documented browser layer and explicitly rebuild the configured image; custom images remain operator-owned.`;
-  return undefined;
 }
 
 /** Run the independent verifier on `tip` in the run's sandbox. Returns why the result can't be used, or undefined. */

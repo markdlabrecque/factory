@@ -64,7 +64,7 @@ function sandcastleProject(t: TestContext) {
   for (const name of ['npm', 'glab']) tool(name, '');
   tool('claude', `echo '{"loggedIn": true}'`);
   tool('curl', 'while IFS= read -r _; do :; done; printf 400');
-  tool('docker', `[ "$1" = image ] && id -u; exit 0`);
+  writeFileSync(join(bin, 'docker'), `#!${process.execPath}\nimport { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, '../../orchestrator/fixtures/capability-docker.mjs'))};\nconst a = process.argv.slice(2); if (a[0] === 'info') process.exit(0); const out = capabilityDocker(a, ${JSON.stringify(home)}); if (out === undefined) process.exit(90); console.log(out);`, { mode: 0o755 });
   tool('npx', `printf '%s\\n' "$*" > "$PWD/npx-called"; echo "run output"; exit 4`);
   const origin = join(home, 'origin.git');
   execFileSync('git', ['init', '-q', '--bare', origin]);
@@ -72,6 +72,9 @@ function sandcastleProject(t: TestContext) {
   mkdirSync(join(root, '.sandcastle'), { recursive: true });
   mkdirSync(join(root, 'node_modules/@ai-hero/sandcastle'), { recursive: true });
   copyFileSync(join(import.meta.dirname, '../../orchestrator/dispatch.sh'), join(root, '.sandcastle/dispatch.sh'));
+  copyFileSync(join(import.meta.dirname, '../../orchestrator/capabilities.mts'), join(root, '.sandcastle/capabilities.mts'));
+  copyFileSync(join(import.meta.dirname, '../../board/admission.mts'), join(root, '.sandcastle/admission.mts'));
+  copyFileSync(join(import.meta.dirname, '../../board/execution-events.mts'), join(root, '.sandcastle/execution-events.mts'));
   writeFileSync(join(root, '.sandcastle/dispatch.mts'), '');
   writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  gitlabHost: "gitlab.example",\n  project: "me/site",\n};\n');
   writeFileSync(join(root, '.sandcastle/main.mts'), 'const CONFIG = {\n  image: "site-image",\n};\n');

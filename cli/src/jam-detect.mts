@@ -30,6 +30,7 @@ import type { Paths } from './paths.mts';
 import { refreshFollowups } from './recovery-followup.mts';
 import type { Settled } from './recovery-run.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
+// Await both analysis preparation and image readiness before atomic claim-and-charge.
 import { inspectRecoveryCandidate, launchRecovery, settleRecovery } from './recovery-run.mts';
 import { readRecoveryRuns } from './recovery-claim.mts';
 import { attemptProblem, deliveryMarker, observePass, observeTicket, readRecovery, remainingAttempts, runningAttempt } from './recovery-state.mts';
@@ -54,9 +55,10 @@ export function readJamReport(file: string, pass: string, project: string): JamR
 
 export type AfterPassOptions = { root: string; tracker: string; name: string; pass: string; report: string; dir: string;
   mayLaunch: () => Promise<boolean>; log: (line: string) => void; now?: () => Date;
-  signal?:AbortSignal;node?:string;path?:string;
-  inspect?:typeof inspectRecoveryCandidate;prepare?:typeof prepareRecovery;
-  settle?: typeof settleRecovery; launch?: typeof launchRecovery; pauseReason?: () => string | undefined };
+  signal?: AbortSignal; node?: string; path?: string;
+  inspect?: typeof inspectRecoveryCandidate; prepare?: typeof prepareRecovery;
+  settle?: typeof settleRecovery; pauseReason?: () => string | undefined;
+  launch?: (...args: Parameters<typeof launchRecovery>) => ReturnType<typeof launchRecovery> | Awaited<ReturnType<typeof launchRecovery>> };
 
 /** Settle, observe, confirm and maybe launch for one completed pass; see the file comment. Never throws. */
 export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
@@ -116,7 +118,7 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
         return say(`jam on ${jam} confirmed; preparation ${prepared.code} (${prepared.scope} hold): ${prepared.reason}; no attempt charged`);
       }
       if(!(await o.mayLaunch()))return say(`jam on ${jam} confirmed; preparation complete but scheduled work was stopped; no attempt charged`);
-      const launched = (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now(),preparation:prepared });
+      const launched = await (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now(), preparation: prepared, mayLaunch: o.mayLaunch, signal: o.signal });
       refreshFollowups(p, { ...o, at: now(), paused: o.pauseReason?.() });
       switch (launched.kind) {
         case 'ticket-refused':
