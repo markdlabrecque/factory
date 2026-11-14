@@ -1,3 +1,4 @@
+<!-- Workflow status documents read-only content identity, existing gate observations and bounded local image inspection. -->
 <!-- #153: live read-only scheduler authorization and delivery claims continue existing exact-head PRs. -->
 <!-- #117: scheduled passes send no --max override; each project's .sandcastle/dispatch.mts SELECT.maxConcurrent sets the cap, counted across the shared board. -->
 <!-- #103: board archive uses project-scoped POST with x-factory: 1 and admission-locked validation; corrected verdict badges preserve the original in a tooltip. CLI roadmap: slice 4.5's `factory clean` (#96) also runs after each completed scheduled pass (#97, tick.mts cleanAfterPass); slice 4.5's `factory legacy status|retire` (#95, cli/src/commands/legacy.mts) lists and explicitly retires legacy dispatcher timers; `factory update --dry-run` (#91, cli/src/update.mts) classifies a project's copy and writes nothing, and --apply (#92) creates missing and replaces unedited outdated files; slice two (project registry, init, Pi subscription models) implemented locally; .sandcastle retained, .factory migration deferred; board redesign (#3) implemented; slice three (`factory dispatch`, `run` with `dispatch.sh --issue`, `retry`, `status`, `logs`, and the shared lookup in cli/src/runs.mts) implemented and specified in "Slice three spec"; slice four's scheduler storage (project opt-in and launch configuration, cli/src/schedule.mts) implemented, see "Slice four: scheduler storage"; launch reservations (#32) implemented, see "Slice four: launch admission"; the Linux scheduler (#33: `factory schedule`, factory-tick units, internal `factory tick` in cli/src/commands/tick.mts, tick cancellation in cli/src/tick-cancel.mts; the service manager owns global state) implemented, with the rotating first project (#34), see "Slice four: the Linux scheduler"; the macOS scheduler (#35: the com.factory.tick launch agent running the internal `factory supervise`, cli/src/platform/scheduler-launchd.mts and cli/src/commands/supervise.mts) implemented, see "Slice four: the macOS scheduler"; scheduler health and timings in `factory status` and `schedule status` (#37, cli/src/scheduler-health.mts) implemented; the one-machine cutover runbook (#38) is docs/scheduler-cutover.md, done by hand and rehearsed in cli/test/cutover.test.mts; slice four self-recovery requirements are agreed but unimplemented except its durable recovery state (#55, cli/src/recovery-state.mts) is stored, and atomic capacity/ticket/project claims (#57, claimRun in board/board.mts, cli/src/recovery-claim.mts) exist, kept since #75 in one admission record (board/admission.mts) with ownership receipts (orchestrator/ownership.mts), a remote-only branch fetch and a prerequisite recheck before verification and delivery, and main.mts's verifier, evidence and delivery steps are shared with recovery runs (#58, orchestrator/handoff.mts), and since #61 the tick confirms jams after each completed scheduled pass (shown by `factory recovery status`, summarized in `factory status`, repair logs in `factory logs --recovery`, explicit reset with `factory recovery reset`, #62) and calls the repair launcher (cli/src/jam-detect.mts, graph.mts findJam), which launches only in a project whose complete recovery workflow is unchanged since a recorded review (factory init records it for a new scaffold; existing projects upgrade by hand, then `factory recovery review --confirm`; cli/src/recovery-review.mts, #63, see "Slice four: reviewed recovery workflow"), see "Slice four: recovery state", "Slice four: launch admission" and "Slice four: jam confirmation"; the end-to-end proof that scheduled recovery stays safe across tick restarts, schedule off, crashed repairs and a spent budget, and the zombie-owner fix it found, are in "Slice four: scheduled recovery across restart and failure" (#64); decisions in docs/slice-4/plan.md. -->
@@ -23,6 +24,7 @@ Turn this repo from a set of skills and patterns into a software factory with on
 factory install              set up the CLI, write the manifest (the bootstrap script runs this)
 factory doctor               check node, docker, glab/gh, claude/pi, logins, linger
 factory update               refresh copies inside projects (--dry-run classifies; --apply creates missing and replaces unedited outdated files)
+factory workflow status      compare an explicit source, invoking/installed apps and registered project copy; read-only (--json)
 factory uninstall            stop and remove everything in the manifest
     --dry-run                show what would go, touch nothing
     --purge                  also delete config, run state, evidence, images
@@ -49,6 +51,47 @@ factory config get|set
 ```
 
 Every command takes `--json` where it prints data, and exits non-zero on failure.
+
+## Read-only workflow identity report
+
+```sh
+factory workflow status --source /path/to/factory --project my-project
+factory workflow status --source /path/to/factory --project /path/to/project --json
+factory workflow status --source /path/to/factory --docker-socket /run/user/1000/docker.sock --json
+```
+
+`--source` is required and must name a Factory source directory with `cli/src/scaffold.mts` and `orchestrator/`. It is never inferred from an install ledger. `--project` uses the existing registered-name/path/worktree resolution. Without it, the current checkout must be registered. Selection does not require valid project configuration, so missing workflow files and malformed TOML can still be reported. An explicitly named registered but missing checkout is reported as missing.
+
+The invoking application and `Paths.app` installed application are separate observations. A symlink install reports `linked` and its canonical target. A regular installed directory reports `copied`. A commit is shown only if Git identifies that exact directory as a checkout root. Copied apps have no invented commit or release version, even when `scaffold-history.json` recognizes a historical blob. Unavailable commit/dirty facts are `null` in JSON and `unknown` in text. `dirty` is local Git worktree status, not a compatibility assessment. No refs are fetched.
+
+### Version-1 JSON contract
+
+The top-level `version` is `1`. These are the report sections:
+
+| Field | Content |
+| --- | --- |
+| `source`, `invokingApp` | `path`, `canonicalPath`, `status`, `linked`, `commit`, `dirty`, `workflowDigest`, `inventory` |
+| `installedApp` | Same identity fields, `status` of `copied`, `linked`, `missing` or `unknown`, plus `files` with `againstSource` of `same`, `different` or `unknown` |
+| `projectCopy` | Same identity fields for `.sandcastle`, registered `root`, plus `files` with independent `againstSource` and `againstInstalled` classifications |
+| `capabilities` | `schedulerCopy`, `recoveryWorkflow`, `recoveryReview`, each `{state, reason, evidence}`, and a compatibility `limitation` |
+| `image` | `configuration`, local `socket`, and `inspection` |
+| `limitations` | Explicit limits of the collected evidence |
+
+Inventory entries are `{path, status, sha256}`. Status is `present`, `missing`, `not-regular` or `unknown`; unavailable hashes are `null`. Only the sorted `scaffoldSources` allowlist is inventoried, including the orchestrator/board files, profiles, entrypoint and prompt templates. No arbitrary directory traversal, `.env`, auth files, installed dependencies, Git objects or runtime state enters the content digest. Internal inventory symlinks are not followed.
+
+`workflowDigest` is SHA-256 over UTF-8 `JSON.stringify` of `[path, status, sha256]` rows, sorted by relative path in codepoint order. Missing-file markers are part of this encoding. It identifies selected content, not a release. Source/app paths use the source layout; project paths use the scaffold layout, with rendered settings. Do not compare a project digest directly to an app digest to infer drift. Use the per-file comparisons instead. Source and app digests are directly comparable because they use the same inventory.
+
+Project classifications reuse `factory update`'s read-only `classifyCopy`: `current`, `missing`, `outdated`, `modified`, `project`. `outdated` requires an exact historical blob match, not a guess that a differing file is old. Project-owned settings, entrypoint and prompts keep the existing hand-merge rules. An unavailable comparison is `unknown` with a reason, not `current` or `missing`. Source and installed comparisons use their own histories. The command never calls `applyCopy`.
+
+### Observations, not compatibility certification
+
+The capability states are `met`, `blocked` and `unknown`. Scheduler copy observation uses the existing executable-dispatch and reservation-string gate. Recovery workflow observation checks the existing file inventory and entrypoint marker. Review observation compares current workflow hashes to the existing host-owned review record. Missing reviews block that observation; malformed/unreadable records stay unknown. A changed helper may leave the scheduler string gate met while blocking recovery review. Passing these checks does **not** establish complete executable compatibility or authorize an update, review or schedule change.
+
+Image configuration comes from validated TOML through `loadTomlConfig`. Invalid or unreadable TOML is `invalid-config`, with no legacy fallback. When TOML is absent, a conservative static reader accepts one literal `CONFIG.image` in `main.mts`, including the standard `effectiveConfig` fallback form. Dynamic expressions, duplicate keys, spreads, computed keys and unsupported CONFIG uses produce `unknown`. This is a literal observation, not execution of the project module.
+
+Image inspection sends only `GET /images/<encoded-reference>/json` to the local Unix socket. The default is `/var/run/docker.sock`; `--docker-socket` must be an absolute local path, not a URL. Remote `DOCKER_HOST` and Docker contexts are ignored. The request has a total 3-second deadline and a 1 MiB body limit. A 404 reports `missing`; inaccessible sockets, daemon errors, malformed/oversized bodies and timeouts report `unknown`. Successful inspection retains only image ID, RepoDigests, OS, architecture and configured user. It excludes image Env, labels and daemon error bodies. Missing optional identity fields remain absent in JSON and unknown in text.
+
+A valid report exits 0 even with drift, blocked checks, invalid configuration or unknown image facts. Bad arguments, an invalid source directory, unregistered project selection or inability to construct a report exits 1. Collection and formatting create no directories or metadata and do not run doctor, dispatch, service managers, tracker/auth commands or verification probes. They never pull, build or run images. This command is diagnostic, not a deployment or shared-runtime migration step.
 
 ## Layout
 

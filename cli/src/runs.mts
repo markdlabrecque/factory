@@ -1,4 +1,5 @@
-// #137: read validated TOML identity first without executing any project modules.
+// Shared registered-project selection is also used by workflow status, without requiring valid project configuration.
+// Read validated TOML tracker identity for run commands without executing any project modules.
 // Shared project and run lookup for the slice 3 commands (dispatch, run, retry, status, logs). Picks the
 // registered project a command is for (`--project <name|path>`, else the registered checkout the caller is
 // standing in), reads its tracker name from `.sandcastle/config.mts` (the name its run records carry), and
@@ -22,7 +23,7 @@ export type ProjectContext = Project & { scaffold: string; tracker: string };
 export type Run = RunState & { key: string };
 
 /** The project a command is for: `--project` (a registered name, or a path inside a registered checkout), else `cwd`'s checkout. */
-export function resolveProject(p: Paths, options: { project?: string; cwd?: string } = {}): ProjectContext {
+export function resolveRegisteredProject(p: Paths, options: { project?: string; cwd?: string } = {}): Project {
   const registered = readRegistry(p).projects;
   const known = registered.length ? ` Registered: ${registered.map(x => x.name).join(', ')}.` : ' No projects are registered; run: factory project add';
   const checkout = (root: string | undefined): Project | undefined => {
@@ -57,6 +58,12 @@ export function resolveProject(p: Paths, options: { project?: string; cwd?: stri
     found = checkout(root);
     if (!found) throw new Error(`${root ?? cwd} is not a registered project. Run this inside one, or pass --project <name>.${known}`);
   }
+  return found;
+}
+
+/** Run commands additionally require an existing checkout and readable tracker configuration. */
+export function resolveProject(p: Paths, options: { project?: string; cwd?: string } = {}): ProjectContext {
+  const found = resolveRegisteredProject(p, options);
   if (!existsSync(found.root)) throw new Error(`Checkout missing for project ${found.name}: ${found.root}`);
   const scaffold = join(found.root, scaffoldName);
   const toml = tomlIdentity(scaffold);
