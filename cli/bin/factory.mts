@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Telemetry exports local observations as JSON/JSONL without recording controls or reconciling state.
-// #137: selection explain reads authoritative TOML and tracker membership without starting work.
+// workflow status compares source/app/project content and local image identity without changing state.
+// selection explain reads authoritative TOML and tracker membership without starting work.
 // Factory CLI: install (from the checkout it is run from, install.mts), diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
 // failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show, reset or review a project's self-recovery (`recovery status|reset|review`), classify a project's
@@ -29,6 +30,7 @@ import { retry } from '../src/commands/retry.mts';
 import { status } from '../src/commands/status.mts';
 import { recovery } from '../src/commands/recovery.mts';
 import { update } from '../src/commands/update.mts';
+import { workflow } from '../src/commands/workflow.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { legacy } from '../src/commands/legacy.mts';
 import { clean } from '../src/commands/clean.mts';
@@ -50,6 +52,7 @@ factory retry <ticket> [--project <name>]
 factory status [--json] [--project <name>]
 factory logs [ticket] [-f] [--recovery] [--project <name>]
 factory update --dry-run|--apply [--project <name|path>] [--json]
+factory workflow status --source <Factory-checkout> [--project <name|path>] [--docker-socket <local-path>] [--json]
 factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]
 factory schedule on|off|status [--project <name|path>] [--json (status)]
 factory legacy status [--json] | factory legacy retire
@@ -72,6 +75,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   status: { json: { type: 'boolean' }, project: { type: 'string' } },
   logs: { follow: { type: 'boolean', short: 'f' }, recovery: { type: 'boolean' }, project: { type: 'string' } },
   update: { 'dry-run': { type: 'boolean' }, apply: { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
+  workflow: { source: { type: 'string' }, project: { type: 'string' }, 'docker-socket': { type: 'string' }, json: { type: 'boolean' } },
   recovery: { json: { type: 'boolean' }, confirm: { type: 'boolean' }, project: { type: 'string' } },
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
   legacy: { json: { type: 'boolean' } },
@@ -108,6 +112,9 @@ try {
     } else if (command === 'update') {
       if (first) throw new Error('Unexpected arguments (name a project with --project)');
       process.exitCode = update(p, { dryRun: v['dry-run'], apply: v.apply, json: v.json, project: v.project });
+    } else if (command === 'workflow') {
+      if (second || extra.length) throw new Error('Unexpected arguments (name a project with --project)');
+      process.exitCode = await workflow(p, first, { source: v.source, project: v.project, dockerSocket: v['docker-socket'], json: v.json });
     } else if (command === 'recovery') {
       if (second || extra.length) throw new Error('Unexpected arguments (name a project with --project)');
       if (v.json && first !== 'status') throw new Error('--json applies to recovery status');

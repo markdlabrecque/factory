@@ -1,3 +1,6 @@
+// Scan stopped candidates once in numeric order; only a typed read-only ticket refusal permits continuation. Recheck
+// cancellation, generation, budget, review and run state for every candidate. Local follow-up observations refresh after
+// settlement and every launch/refusal. Only fresh successful-pass reports, never snapshots, can confirm/admit recovery.
 // Jam confirmation after normal dispatch (slice four self-recovery, #61). The scheduler's tick (commands/tick.mts) gives
 // every scheduled pass its own pass id and report file (FACTORY_PASS_ID, FACTORY_JAM_REPORT); the project's dispatcher
 // writes there what it saw after its normal work (orchestrator/dispatch.mts, graph.mts findJam): the jammed tickets, or
@@ -9,7 +12,7 @@
 //    requirement change or verified delivery renews that ticket's spent budget.
 // 3. counts the pass (observePass, with the project's admission activity generation): the same jam on two consecutive
 //    completed passes, with no normal admission between them, is confirmed; a pass with no jam ends the episode.
-// 4. for a confirmed jam, picks the lowest still-stopped jammed ticket with attempts left (dependency-held tickets have no
+// 4. for a confirmed jam, scans still-stopped jammed tickets with attempts left in numeric order (dependency-held tickets have no
 //    work of their own to repair; their stopped prerequisite is the target) and, only when the project's copy has the
 //    recovery workflow, reviewed as it is (recovery-review.mts recoveryCopyProblem, #63; otherwise recovery stays inactive
 //    and the jam is only recorded), and the
@@ -20,11 +23,13 @@
 // Errors are logged and never fail the pass. The report file is the caller's to remove.
 import { existsSync, readFileSync } from 'node:fs';
 import { generationOf, readAdmission } from '../../board/admission.mts';
-import { readRuns } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
+import { refreshFollowups } from './recovery-followup.mts';
+import type { Settled } from './recovery-run.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
 import { launchRecovery, settleRecovery } from './recovery-run.mts';
-import { attemptProblem, deliveryMarker, observePass, observeTicket, readRecovery } from './recovery-state.mts';
+import { readRecoveryRuns } from './recovery-claim.mts';
+import { attemptProblem, deliveryMarker, observePass, observeTicket, readRecovery, remainingAttempts, runningAttempt } from './recovery-state.mts';
 
 export type JamReport = { version: 1; pass: string; project: string; at: string; tickets: number[]; reasons?: Record<string, string>;
   none?: string; observed: { iid: number; content: string; labels: string[] }[] };
@@ -46,21 +51,23 @@ export function readJamReport(file: string, pass: string, project: string): JamR
 
 export type AfterPassOptions = { root: string; tracker: string; name: string; pass: string; report: string; dir: string;
   mayLaunch: () => Promise<boolean>; log: (line: string) => void; now?: () => Date;
-  settle?: typeof settleRecovery; launch?: typeof launchRecovery };
+  settle?: typeof settleRecovery; launch?: typeof launchRecovery; pauseReason?: () => string | undefined };
 
 /** Settle, observe, confirm and maybe launch for one completed pass; see the file comment. Never throws. */
 export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
   const say = (line: string) => o.log(`recovery ${o.name}: ${line}`);
   const now = () => (o.now ?? (() => new Date()))().toISOString();
+  let settled: Settled | undefined;
   try {
-    const settled = (o.settle ?? settleRecovery)(p, { root: o.root, tracker: o.tracker, dir: o.dir, at: now() });
+    settled = (o.settle ?? settleRecovery)(p, { root: o.root, tracker: o.tracker, dir: o.dir, at: now() });
+    refreshFollowups(p, { ...o, at: now(), settled, paused: o.pauseReason?.() });
     if (settled.state === 'settled') say(`attempt ${settled.attempt.seq} on #${settled.attempt.ticket} ended: ${settled.attempt.result}`);
     if (settled.state === 'running') return say(`attempt ${settled.attempt.seq} on #${settled.attempt.ticket} is running; pass not counted`);
     if (settled.state === 'unconfirmed') return say(`${settled.reason}; pass not counted`);
     const report = readJamReport(o.report, o.pass, o.tracker);
     if (report === null) return; // an older dispatcher copy: recovery is not evaluated, quietly
     if (typeof report === 'string') return say(`${report}; pass not counted`);
-    const runs = readRuns(o.dir).filter(r => r.project === o.tracker);
+    const runs = readRecoveryRuns(o.dir).filter(r => r.project === o.tracker);
     const runOf = (t: number) => runs.find(r => r.iid === String(t));
     for (const t of report.observed) {
       const renewed = observeTicket(p, o.root, { ticket: t.iid, at: report.at, content: t.content, labels: t.labels, delivery: deliveryMarker(runOf(t.iid)) });
@@ -71,19 +78,49 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
     if (!episode) return;
     const jam = episode.tickets.map(t => `#${t}`).join(', ');
     if (!episode.confirmedAt) return say(`jam on ${jam} seen (${episode.passes.length} of 2 passes)`);
-    const state = readRecovery(p, o.root);
-    const stopped = episode.tickets.filter(t => runOf(t)?.stage === 'stopped');
-    const target = stopped.find(t => !attemptProblem(state, t, generation));
-    if (target === undefined) {
-      return say(`jam on ${jam} confirmed; ${stopped.length ? attemptProblem(state, stopped[0], generation) : 'no stopped ticket with recorded work to repair'}`);
+    const stopped = [...new Set(episode.tickets)].filter(t => runOf(t)?.stage === 'stopped').sort((a, b) => a - b);
+    for (const target of stopped) {
+      if (!(await o.mayLaunch())) return say(`jam on ${jam} confirmed; not repairing: scheduled work was stopped`);
+      // mayLaunch is async. Read everything again after it, not before the scheduler/cancellation check.
+      if (generationOf(readAdmission(o.dir), o.tracker) !== generation) return say('project-stopped generation-changed: normal admission changed the confirmed generation');
+      const current = readRecoveryRuns(o.dir).find(r => r.project === o.tracker && r.iid === String(target));
+      if (!current || current.stage !== 'stopped') return say(`project-stopped candidate-changed: #${target} is no longer stopped`);
+      const state = readRecovery(p, o.root);
+      if (state.episode?.id !== episode.id) return say('project-stopped episode-changed: confirmed jam changed during scan');
+      const problem = attemptProblem(state, target, generation);
+      if (problem) {
+        if (!runningAttempt(state) && state.episode?.id === episode.id && state.episode.confirmedAt &&
+            state.episode.generation === episode.generation && state.episode.tickets.includes(target) && !remainingAttempts(state, target)) {
+          say(`#${target} not repairing: ${problem}`);
+          continue; // only this ticket's exhausted budget is skippable
+        }
+        return say(`project-stopped recovery-held: ${problem}`);
+      }
+      const copy = recoveryCopyProblem(p, o.root);
+      if (copy) return say(`jam on ${jam} confirmed; not repairing: ${copy}`);
+      const launched = (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now() });
+      refreshFollowups(p, { ...o, at: now(), paused: o.pauseReason?.() });
+      switch (launched.kind) {
+        case 'ticket-refused':
+          say(`#${target} ticket-refused ${launched.code}: ${launched.reason}`);
+          continue;
+        case 'started':
+          return say(`jam on ${jam} confirmed; attempt ${launched.attempt.seq} on #${target} started (pid ${launched.pid}, log ${launched.log})`);
+        case 'admitted-failed':
+          return say(`admitted-failed: attempt ${launched.attempt.seq} on #${target}: ${launched.reason}`);
+        case 'project-stopped':
+          return say(`project-stopped ${launched.code}: #${target}: ${launched.reason}`);
+        default: {
+          const unexpected: never = launched;
+          throw new Error(`unknown launch outcome: ${JSON.stringify(unexpected)}`);
+        }
+      }
     }
-    const copy = recoveryCopyProblem(p, o.root);
-    if (copy) return say(`jam on ${jam} confirmed; not repairing: ${copy}`);
-    if (!(await o.mayLaunch())) return say(`jam on ${jam} confirmed; not repairing: scheduled work was stopped`);
-    const launched = (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now() });
-    say(launched.ok ? `jam on ${jam} confirmed; attempt ${launched.attempt.seq} on #${target} started (pid ${launched.pid}, log ${launched.log})`
-      : `jam on ${jam} confirmed; attempt on #${target} not started: ${launched.reason}`);
+    say(`jam on ${jam} confirmed; no stopped candidate admitted (${stopped.length} considered)`);
   } catch (e) {
     say(`not evaluated: ${(e as Error).message.split('\n')[0]}`);
+  } finally {
+    try { refreshFollowups(p, { ...o, at: now(), settled, paused: o.pauseReason?.() }); }
+    catch (e) { say(`follow-up not recorded: ${(e as Error).message.split('\n')[0]}`); }
   }
 }

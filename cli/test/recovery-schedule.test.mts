@@ -1,4 +1,6 @@
-// #153: expanded review inventory preserves the fixture's reservation-aware dispatcher stub.
+// Deferred stopped work survives competing delivery and a project pause; local maintenance settles only the finished
+// attempt's exact container/claim, then later successful passes confirm and admit the remaining saved work.
+// The expanded review inventory preserves the fixture's reservation-aware dispatcher stub.
 // #137: complete review includes TOML runtime/parser helpers, still using only stand-in processes.
 // The complete reviewed workflow fixture includes assessment.mts and journal.mts, board.mts's mandatory imports.
 // Scheduled self-recovery end to end across restarts and failures (#64, the acceptance step of #30's slice four). Every
@@ -22,13 +24,95 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSy
 import { WORKFLOW } from '../src/recovery-review.mts';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { keyFor, readAdmission } from '../../board/admission.mts';
+import { keyFor, readAdmission, ownerOf, withAdmission } from '../../board/admission.mts';
 import { claimRun, readRuns } from '../../board/board.mts';
 import { readAttemptRecord, writeAttemptRecord } from '../../orchestrator/recovery.mts';
 import type { AttemptRecord } from '../../orchestrator/recovery.mts';
 import { readRecovery } from '../src/recovery-state.mts';
 import { groupOf, sameProcess } from '../src/tick-lock.mts';
 import { factoryBin, git, home, repo, systemctlStub } from './schedule-helpers.mts';
+import { FakeSchedule } from '../src/platform/fake.mts';
+import { tick } from '../src/commands/tick.mts';
+import { setProjectSchedule, writeScheduleConfig } from '../src/schedule.mts';
+import { readRegistry, removeProject } from '../src/projects.mts';
+
+test('tick maintenance holds the lock before pause gates and fails closed for off, unknown, cancellation and removal', async t => {
+  const { p } = home(t, 'factory-maintenance-gates-');
+  const root = repo(p, 'paused');
+  setProjectSchedule(p, root, true);
+  setProjectSchedule(p, root, false);
+  writeScheduleConfig(p, { path: process.env.PATH!, node: process.execPath });
+  const backend = new FakeSchedule(p);
+  backend.enabled = true; backend.timer = 'active';
+  let maintenance = 0, passes = 0, refreshes = 0, recovery = 0;
+  const run = (signal?: AbortSignal) => tick(p, { backend, signal, log: () => {},
+    maintenance: (_p, o) => { assert.ok(existsSync(p.tickLock)); assert.match(o.paused!, /paused/); maintenance++; },
+    pass: async () => { passes++; return 0; }, refresh: async () => { refreshes++; return 0; },
+    recovery: async () => { recovery++; } });
+  const pause = readRegistry(p).projects[0].schedule;
+  assert.equal((await run()).result, 'done');
+  assert.equal(maintenance, 1);
+  assert.deepEqual([passes, refreshes, recovery], [0, 0, 0]);
+  assert.deepEqual(readRegistry(p).projects[0].schedule, pause);
+  backend.enabled = false;
+  assert.equal((await run()).result, 'off');
+  backend.enabled = true; backend.fail.add('status');
+  assert.equal((await run()).result, 'unknown');
+  backend.fail.clear();
+  const abort = new AbortController(); abort.abort();
+  assert.equal((await run(abort.signal)).result, 'interrupted');
+  removeProject(p, root);
+  assert.equal((await run()).result, 'done');
+  assert.equal(maintenance, 1, 'no local side effects after any fail-closed gate');
+});
+
+test('maintenance failure suppresses recovery only, preserving the normal successful pass result', async t => {
+  const { p } = home(t, 'factory-maintenance-error-');
+  const root = repo(p, 'site');
+  setProjectSchedule(p, root, true);
+  writeScheduleConfig(p, { path: process.env.PATH!, node: process.execPath });
+  const backend = new FakeSchedule(p);
+  backend.enabled = true; backend.timer = 'active';
+  let launches = 0;
+  const logs: string[] = [];
+  const result = await tick(p, { backend, log: s => logs.push(s), maintenance: async () => { throw new Error('unreadable recovery state'); },
+    pass: async () => 0, clean: () => {}, recovery: async () => { launches++; } });
+  assert.equal(result.result, 'done');
+  assert.deepEqual(result.passes, ['site']);
+  assert.equal(launches, 0);
+  assert.match(logs.join('\n'), /maintenance failed; no recovery launch this tick: unreadable/);
+});
+
+test('pause/removal/cancellation during maintenance and a pause during a pass cannot authorize recovery', async t => {
+  const { p } = home(t, 'factory-maintenance-races-');
+  const root = repo(p, 'site');
+  setProjectSchedule(p, root, true);
+  writeScheduleConfig(p, { path: process.env.PATH!, node: process.execPath });
+  const backend = new FakeSchedule(p);
+  backend.enabled = true; backend.timer = 'active';
+  let passes = 0;
+  const pass = async () => { passes++; return 0; };
+  const abort = new AbortController();
+  const cancelled = await tick(p, { backend, signal: abort.signal, log: () => {}, pass,
+    maintenance: async () => { abort.abort(); } });
+  assert.equal(cancelled.result, 'interrupted');
+  assert.equal(passes, 0);
+  const paused = await tick(p, { backend, log: () => {}, pass,
+    maintenance: async () => { setProjectSchedule(p, root, false); } });
+  assert.match(paused.skipped.site, /paused/);
+  assert.equal(passes, 0);
+  setProjectSchedule(p, root, true);
+  let authorized = true;
+  await tick(p, { backend, log: () => {}, maintenance: () => {}, clean: () => {},
+    pass: async () => { setProjectSchedule(p, root, false); return 0; },
+    recovery: async (_p, o) => { authorized = await o.mayLaunch(); assert.match(o.pauseReason!()!, /paused/); } });
+  assert.equal(authorized, false);
+  setProjectSchedule(p, root, true);
+  const removed = await tick(p, { backend, log: () => {}, pass,
+    maintenance: async () => { removeProject(p, root); } });
+  assert.equal(removed.result, 'done');
+  assert.equal(passes, 0);
+});
 
 const fixtureTick = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/tick-recovery.mts');
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -253,4 +337,88 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   const own = new Set(repairs().map(x => `factory-recovery-${basename(x.args.at(-1)!, '.json')}`));
   assert.deepEqual(w.dockerCalls().filter(c => c.rejected || !own.has(c.argv.at(-1)!)), []);
   assert.deepEqual(w.stub.rejected(), []);
+});
+
+
+test('paused maintenance settles competing delivery; later eligible passes recover the deferred saved ticket', { timeout: 60_000 }, async t => {
+  const w = world(t);
+  const { p } = w;
+  await w.cli('install', '--link');
+  await w.cli('schedule', 'on');
+  const root = repo(p, 'site', { script: DISPATCH.replace('"tickets":[7]', '"tickets":[7,9]') });
+  const sc = join(root, '.sandcastle');
+  writeFileSync(join(sc, 'config.mts'), 'export const TRACKER = {\n  kind: "github",\n  host: "github.com",\n  project: "site/site",\n};\n');
+  writeFileSync(join(sc, 'main.mts'), '"attempt-record": { type: "string" }\n');
+  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts' && f !== 'dispatch.mts')) {
+    mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), '');
+  }
+  const tips: Record<string, string> = {};
+  for (const iid of ['7', '9']) {
+    git(root, 'branch', `${iid}-saved`);
+    tips[iid] = execFileSync('git', ['rev-parse', `${iid}-saved`], { cwd: root, encoding: 'utf8' }).trim();
+    claimRun({ dir: p.state, project: 'site/site', iid, pid: 99999999, cap: 99,
+      patch: { stage: 'stopped', starting: undefined, branch: `${iid}-saved`, base: 'main', verdict: 'FAIL' } });
+  }
+  await w.cli('schedule', 'on', '--project', 'site');
+  await w.cli('recovery', 'review', '--project', 'site', '--confirm');
+  const repairs = () => existsSync(join(sc, 'repairs.jsonl'))
+    ? readFileSync(join(sc, 'repairs.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)) as { pid: number; args: string[] }[] : [];
+  assert.equal((await w.tick()).code, 0);
+  assert.equal((await w.tick()).code, 0);
+  await waitFor('competing repair', () => repairs().length === 1);
+  assert.equal(readRecovery(p, root).followups?.['9'].state, 'waiting');
+  await w.cli('schedule', 'off', '--project', 'site');
+  const first = repairs()[0];
+  const file = first.args.at(-1)!;
+  const record = (readAttemptRecord(file) as { record: AttemptRecord }).record;
+  writeAttemptRecord(file, { ...record, phase: 'finished', outcome: 'delivered', reason: 'PR opened', finishedAt: new Date().toISOString() });
+  const runFile = join(p.state, `${keyFor('7', 'site/site')}.json`);
+  writeFileSync(runFile, JSON.stringify({ ...JSON.parse(readFileSync(runFile, 'utf8')), stage: 'done', mr: 'https://example.test/pull/7' }));
+  process.kill(first.pid, 'SIGTERM');
+  await waitFor('competing repair exit', () => !up(first.pid));
+  const beforePasses = readRecovery(p, root).episode?.passes;
+  const container = `factory-recovery-${basename(file, '.json')}`;
+  writeFileSync(join(w.docker, 'stuck', container), '');
+  withAdmission(p.state, tx => {
+    tx.state.claims[keyFor('99', 'other/project')] = { token: 'other', iid: '99', project: 'other/project', kind: 'normal',
+      owner: ownerOf(process.pid), at: new Date().toISOString() };
+    tx.commit();
+  });
+  const held = await w.tick();
+  assert.equal(held.code, 0, held.out);
+  assert.equal(readRecovery(p, root).attempts[0].result, 'running');
+  assert.equal(readRecovery(p, root).followups?.['9'].state, 'operator-required');
+  assert.ok(readAdmission(p.state).claims[keyFor('7', 'site/site')], 'unconfirmed exact container retains ownership while paused');
+  assert.equal(repairs().length, 1);
+  rmSync(join(w.docker, 'stuck', container));
+  const r = await w.tick();
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /attempt 1 on #7 ended: delivered/);
+  assert.doesNotMatch(r.out, /pass site .*start|refresh site .*start/);
+  const s = readRecovery(p, root);
+  assert.equal(s.attempts[0].result, 'delivered');
+  assert.equal(readAdmission(p.state).claims[keyFor('7', 'site/site')], undefined);
+  assert.equal(readAdmission(p.state).claims[keyFor('99', 'other/project')]?.token, 'other', 'settlement releases only its own claim');
+  assert.equal(s.followups?.['9'].state, 'paused');
+  assert.notEqual(s.followups?.['7'].state, 'complete');
+  assert.equal(s.budgets['7'].used, 1);
+  assert.equal(s.budgets['9'], undefined);
+  assert.deepEqual(s.episode?.passes, beforePasses, 'housekeeping is not a confirming pass');
+  assert.equal(repairs().length, 1);
+  const status = JSON.parse(await w.cli('recovery', 'status', '--project', 'site', '--json'));
+  assert.equal(status.recovery.followups['9'].state, 'paused');
+  writeFileSync(join(sc, 'dispatch.sh'), DISPATCH.replace('"tickets":[7]', '"tickets":[9]'));
+  await w.cli('schedule', 'on', '--project', 'site');
+  const firstPass = await w.tick();
+  assert.match(firstPass.out, /jam on #9 seen \(1 of 2 passes\)/);
+  assert.equal(repairs().length, 1);
+  const secondPass = await w.tick();
+  assert.match(secondPass.out, /attempt 2 on #9 started/);
+  await waitFor('deferred repair', () => repairs().length === 2);
+  assert.equal(readRecovery(p, root).budgets['9'].used, 1);
+  for (const iid of ['7', '9']) {
+    assert.equal(execFileSync('git', ['rev-parse', `${iid}-saved`], { cwd: root, encoding: 'utf8' }).trim(), tips[iid]);
+  }
+  assert.deepEqual(w.stub.rejected(), []);
+  assert.deepEqual(w.dockerCalls().filter(c => c.rejected), []);
 });

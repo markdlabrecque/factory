@@ -1,3 +1,4 @@
+// Only typed read-only ticket refusals permit another candidate. Settlement is explicit; any preparation or admission failure stops the pass.
 // #150: carry host-recorded execution and historical implementation baseline into attempt/ownership metadata.
 // #137: tracker metadata reads TOML first, without executing legacy project configuration.
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
@@ -5,8 +6,8 @@
 // scheduled pass and launchRecovery for a confirmed jam's ticket, only when the project's copy has the recovery workflow
 // and a person has reviewed it as it is (recovery-review.mts recoveryCopyProblem, #63), so recovery stays inactive until
 // that copy is complete and reviewed.
-// launchRecovery, in order: settle the project's running attempt, if any (refusing while it still runs or its container
-// is unconfirmed); read the ticket's ownership receipt (orchestrator/ownership.mts, keyed by the project's id from its
+// launchRecovery, in order: read-only holds for any running/unsettled attempt (the caller settles separately), shared
+// capacity, claims, budget, workflow review and stopped run; read the ticket's ownership receipt (orchestrator/ownership.mts, keyed by the project's id from its
 // checkout and tracker, read from .sandcastle/config.mts) and check its recorded branch and worktree may be resumed
 // (recovery-workspace.mts resumeTarget). A branch only on origin is fetched exactly and created locally without force
 // (fetchRecordedBranch), under a receipt that says so, unless a claim protects the ticket. A pre-upgrade run's exact
@@ -36,7 +37,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { claimLive, keyFor, ownerState, readAdmission, releaseClaim, transferClaim, withAdmission } from '../../board/admission.mts';
+import { claimLive, generationOf, keyFor, ownerState, readAdmission, releaseClaim, transferClaim, withAdmission } from '../../board/admission.mts';
 import type { AdmissionClaim } from '../../board/admission.mts';
 // Launcher patches share the persisted stage writer; settlement is observational, after charge/cleanup locks.
 import { observeEvent } from '../../board/execution-events.mts';
@@ -48,11 +49,12 @@ import { attemptEvidence, attemptGitDir, containerFor, ownedContainerGone, readA
 import type { AttemptRecord, RecoveryOutcome } from '../../orchestrator/recovery.mts';
 import type { Docker } from '../../orchestrator/recovery.mts';
 import type { Paths } from './paths.mts';
-import { claimRecovery, replayAdmitted } from './recovery-claim.mts';
+import { claimRecovery, DEFAULT_CAP, readRecoveryRuns, replayAdmitted } from './recovery-claim.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
-import { finishAttempt, readRecovery, runningAttempt } from './recovery-state.mts';
+import { attemptProblem, finishAttempt, readRecovery, runningAttempt } from './recovery-state.mts';
 import type { Attempt } from './recovery-state.mts';
 import { fetchRecordedBranch, resumeTarget } from './recovery-workspace.mts';
+import type { RefusalCode } from './recovery-workspace.mts';
 import { runStateDir } from './runs.mts';
 
 /** Starts the repair process detached, its output appended to `log`; returns its pid or throws. */
@@ -73,7 +75,11 @@ type Common = { root: string; tracker: string; dir?: string; docker?: Docker; at
   identity?: TrackerIdentity };
 export type Settled = { state: 'none' } | { state: 'running'; attempt: Attempt } | { state: 'settled'; attempt: Attempt }
   | { state: 'unconfirmed'; attempt: Attempt; reason: string };
-export type Launch = { ok: true; attempt: Attempt; pid: number; branch: string; log: string } | { ok: false; reason: string };
+export type Launch =
+  | { ok: true; kind: 'started'; admitted: true; attempt: Attempt; pid: number; branch: string; log: string }
+  | { ok: false; kind: 'ticket-refused'; admitted: false; code: RefusalCode; reason: string }
+  | { ok: false; kind: 'project-stopped'; admitted: false; code: string; reason: string }
+  | { ok: false; kind: 'admitted-failed'; admitted: true; attempt: Attempt; reason: string };
 
 const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
 
@@ -173,35 +179,58 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
   const dir = o.dir ?? runStateDir(p);
   const at = o.at ?? new Date().toISOString();
   const docker = o.docker ?? realDocker;
-  const prior = settleRecovery(p, { ...o, at });
-  if (prior.state === 'running') return { ok: false, reason: `Recovery attempt ${prior.attempt.seq} on #${prior.attempt.ticket} is still running.` };
-  if (prior.state === 'unconfirmed') return { ok: false, reason: prior.reason };
-  const run = readRuns(dir).find(r => r.project === o.tracker && r.iid === String(o.ticket));
-  if (!run) return { ok: false, reason: `#${o.ticket} has no run record; recovery repairs only recorded work` };
+  const stop = (code: string, reason: string): Launch => ({ ok: false, kind: 'project-stopped', admitted: false, code, reason });
+  let committed = false;
+  let admissionStarted = false;
+  let id: string | undefined;
+  try {
+  const config = loadTomlConfig(join(o.root, '.sandcastle'));
+  const cap = o.cap ?? config?.dispatch.maxConcurrent ?? DEFAULT_CAP;
+  if (!Number.isSafeInteger(cap) || cap <= 0) return stop('capacity-invalid', 'Recovery cap must be a positive safe integer');
+  // No settlement here: even reconciliation/cleanup writes would invalidate a read-only refusal.
+  const state = readRecovery(p, o.root);
+  const active = runningAttempt(state);
+  if (active) return stop('active-recovery', `Recovery attempt ${active.seq} on #${active.ticket} is still running or its container is not confirmed gone; settle it first.`);
+  const admission = readAdmission(dir);
+  if (admission.recovery[o.tracker]?.pending.length || Object.values(admission.claims).some(c => c.project === o.tracker && c.kind === 'recovery')) {
+    return stop('unsettled-recovery', 'Recovery admission or cleanup is unconfirmed; settle it first');
+  }
+  const generation = generationOf(admission, o.tracker);
+  const problem = attemptProblem(state, o.ticket, generation);
+  if (problem) return stop('recovery-held', problem);
+  const runs = readRecoveryRuns(dir);
+  const busy = new Set([...runs.filter(inFlight).map(r => r.key),
+    ...Object.entries(admission.claims).filter(([, c]) => claimLive(c)).map(([key]) => key)]);
+  if (busy.size >= cap) return stop('capacity', `no capacity: ${busy.size} run(s) in flight, cap ${cap}`);
+  if (runs.some(r => r.project === o.tracker && inFlight(r))) return stop('project-active', 'project has a run in flight');
+  const run = runs.find(r => r.project === o.tracker && r.iid === String(o.ticket));
+  if (!run || run.stage !== 'stopped') return stop('candidate-changed', `#${o.ticket} has no stopped run record; recovery repairs only recorded work`);
+  if (Object.values(admission.claims).some(c => c.project === o.tracker && claimLive(c))) return stop('project-claimed', 'project has a live claim');
+  const copy = recoveryCopyProblem(p, o.root);
+  if (copy) return stop('workflow-review', copy);
   const identity = o.identity ?? trackerIdentity(o.root);
-  if (typeof identity === 'string') return { ok: false, reason: `#${o.ticket}: ${identity}; ownership cannot be checked` };
+  if (typeof identity === 'string') return stop('identity-unavailable', `#${o.ticket}: ${identity}; ownership cannot be checked`);
   const receiptPath = receiptFile(dir, projectId(o.root, identity), String(o.ticket));
-  const id = (o.uuid ?? randomUUID)();
+  id = (o.uuid ?? randomUUID)();
   let receipt: Receipt | null;
-  try { receipt = readReceipt(receiptPath); } catch (e) { return { ok: false, reason: `#${o.ticket}: ${(e as Error).message}` }; }
+  try { receipt = readReceipt(receiptPath); } catch (e) { return stop('ownership-unreadable', `#${o.ticket}: ${(e as Error).message}`); }
   let target = resumeTarget(o.root, run, { worktreeDir: o.worktreeDir, receipt });
   if (!target.ok && target.remoteOnly && run.branch) {
     // Fetch the exact recorded branch, under a receipt saying so, unless a claim protects the ticket.
     const held = readAdmission(dir).claims[keyFor(String(o.ticket), o.tracker)];
-    if (held && claimLive(held)) return { ok: false, reason: `#${o.ticket} is claimed (${held.kind}, process ${held.owner.pid}); not fetching its branch` };
+    if (held && claimLive(held)) return stop('candidate-claimed', `#${o.ticket} is claimed (${held.kind}, process ${held.owner.pid}); not fetching its branch`);
     const contains = receipt?.branchSha;
     recordIntent(dir, { root: o.root, tracker: identity, ticket: String(o.ticket), branch: run.branch, base: run.base, runId: id, at,
       implementationBaseSha: run.implementationBaseSha,
       branchToCreate: true, worktreeToCreate: false, ...(contains ? { branchSha: contains } : {}) });
     const fetched = fetchRecordedBranch(o.root, run.branch, { contains });
-    if (!fetched.ok) return { ok: false, reason: `#${o.ticket}: ${fetched.reason}` };
+    if (!fetched.ok) return stop('branch-preparation', `#${o.ticket}: ${fetched.reason}`);
     receipt = fillReceipt(receiptPath, { branchSha: fetched.sha });
     target = resumeTarget(o.root, run, { worktreeDir: o.worktreeDir, receipt });
+    if (!target.ok) return stop('branch-preparation', target.reason);
   }
-  if (!target.ok) return target;
-  if (!target.base) return { ok: false, reason: `#${o.ticket}: its run record names no base branch` };
-  const copy = recoveryCopyProblem(p, o.root);
-  if (copy) return { ok: false, reason: copy };
+  if (!target.ok) return { ...target, admitted: false };
+  if (!target.base) return stop('validation-uncertain', 'validated target has no base');
   // A pre-upgrade run's exact branch is adopted; identities a crash left unrecorded are filled from what Git shows.
   if (target.adopt) {
     recordIntent(dir, { root: o.root, tracker: identity, ticket: String(o.ticket), branch: target.branch, base: target.base, runId: id, at,
@@ -214,9 +243,19 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
   const log = join(o.root, '.sandcastle/logs', `recover-${o.ticket}.log`);
   const container = containerFor(id);
   const record = join(attemptsDir(p), `${id}.json`);
+  const validated = target;
+  admissionStarted = true;
   const claim = claimRecovery(p, { root: o.root, tracker: o.tracker, ticket: o.ticket, pid: process.pid, at, cap: o.cap, branch: target.branch, log, dir,
-    id, container, record, afterCommit: o.afterCommit });
-  if (!claim.ok) return claim;
+    id, container, record, expected: run, generation, episode: state.episode?.id,
+    validate: () => {
+      const changed = recoveryCopyProblem(p, o.root);
+      if (changed) throw new Error(changed);
+      const fresh = resumeTarget(o.root, run, { worktreeDir: o.worktreeDir, receipt: readReceipt(receiptPath) });
+      if (!fresh.ok) throw new Error(fresh.reason);
+      if (fresh.tip !== validated.tip || fresh.worktree?.path !== validated.worktree?.path) throw new Error('workspace changed before admission');
+    },
+    afterCommit: () => { committed = true; o.afterCommit?.(); } });
+  if (!claim.ok) return stop('admission-rejected', claim.reason);
   const key = keyFor(String(o.ticket), o.tracker);
   const seq = claim.attempt.seq;
   const npx = o.npx ?? (existsSync(resolve(dirname(process.execPath), 'npx')) ? resolve(dirname(process.execPath), 'npx') : 'npx');
@@ -253,10 +292,28 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
     // Nothing was started, so its container cannot exist; release once docker confirms that (else the next settle does).
     if (ownedContainerGone(container, docker).ok) releaseClaim(dir, key, claim.token, 'recovery');
     observeSettlement(dir, o.tracker, done, run.executionId);
-    return { ok: false, reason };
+    return { ok: false, kind: 'admitted-failed', admitted: true, attempt: readRecovery(p, o.root).attempts.find(a => a.id === id) ?? claim.attempt, reason };
   }
   // Hand the claim to the repair process, so the ticket stays owned (and counted) while it lives.
   transferClaim(dir, key, claim.token, pid, process.pid);
   patchRecord(dir, o.tracker, o.ticket, { pid });
-  return { ok: true, attempt: claim.attempt, pid, branch: target.branch, log };
+  return { ok: true, kind: 'started', admitted: true, attempt: claim.attempt, pid, branch: target.branch, log };
+  } catch (e) {
+    const reason = (e as Error).message;
+    if (admissionStarted && !committed) {
+      // Even an error returning from the atomic transaction must not disguise a committed charge as a free stop.
+      const admitted = readAdmission(dir);
+      committed = Object.values(admitted.claims).some(c => c.attempt === id) ||
+        !!admitted.recovery[o.tracker]?.pending.some(a => a.id === id) ||
+        readRecovery(p, o.root).attempts.some(a => a.id === id);
+    }
+    if (committed) {
+      // A crash after the atomic commit is charged, even if claimRecovery did not return its attempt yet.
+      withAdmission(dir, tx => replayAdmitted(p, tx, o.root, o.tracker));
+      const attempt = readRecovery(p, o.root).attempts.find(a => a.id === id);
+      if (!attempt) throw e; // uncertain committed state is a stopping exception, never a free refusal
+      return { ok: false, kind: 'admitted-failed', admitted: true, attempt, reason };
+    }
+    return stop('launch-uncertain', reason);
+  }
 }

@@ -1,3 +1,4 @@
+// Read-only validation classifies documented Git negatives locally and unexpected command failures as project stops.
 // Recovery workspace tests (#59): a repair resumes only the ticket's recorded local branch and, at most, one worktree
 // inside Sandcastle's worktree folder, keeping dirty work; every ambiguous ownership case is refused and left untouched.
 // Since #75: a pre-upgrade run only on its canonical worktree, ownership receipts checked and a crash between receipt
@@ -7,7 +8,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { projectId, readReceipt, receiptFile, recordIntent } from '../../orchestrator/ownership.mts';
@@ -34,6 +35,30 @@ function fixture(t: TestContext) {
   return { home, root, git, sh, run, wt };
 }
 const refused = (r: ReturnType<typeof resumeTarget>) => (assert.equal(r.ok, false), (r as { reason: string }).reason);
+
+for (const command of ['rev-parse', 'merge-base'] as const) {
+  test(`unexpected ${command} failure is uncertainty, not missing or diverged work`, t => {
+    const f = fixture(t);
+    f.git('push', '-q', 'origin', '7-fix-login');
+    if (command === 'rev-parse') f.git('branch', '-D', '7-fix-login');
+    const bin = join(f.home, 'bin'); mkdirSync(bin);
+    const git = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    const shim = join(bin, 'git');
+    writeFileSync(shim, `#!/bin/sh\nif [ "$1" = "${command}" ] && [ "$2" != "--git-common-dir" ]; then echo 'injected Git IO error' >&2; exit 128; fi\nexec '${git}' "$@"\n`);
+    chmodSync(shim, 0o755);
+    const path = process.env.PATH;
+    try {
+      process.env.PATH = `${bin}:${path}`;
+      const r = resumeTarget(f.root, f.run);
+      assert.equal(r.ok, false);
+      if (r.ok) assert.fail('unexpected accepted target');
+      assert.equal(r.kind, 'project-stopped');
+      assert.equal(r.code, 'validation-uncertain');
+      assert.match(r.reason, /injected Git IO error/);
+    } finally { process.env.PATH = path; }
+    assert.equal(f.git('rev-parse', 'origin/7-fix-login'), f.git('rev-parse', 'main'));
+  });
+}
 
 test('resumes the recorded branch, reusing its Factory worktree and keeping dirty work', t => {
   const { root, git, run, wt } = fixture(t);

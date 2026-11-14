@@ -1,4 +1,5 @@
-// #153: missing/changed continuation dependencies require operator review.
+// Follow-up status reprojects pause, ownership, budget and delivery facts without trusting stale snapshots or writing.
+// Missing/changed continuation dependencies require operator review.
 // #149: missing or edited shared dependency evaluation invalidates recovery review.
 // #150: proof and delivery dependency omissions/edits invalidate recovery review.
 // #137: review fixtures include nested parser/runtime files, without executing them.
@@ -13,14 +14,15 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { admissionFile, emptyAdmission } from '../../board/admission.mts';
+import { admissionFile, emptyAdmission, keyFor, ownerOf, withAdmission } from '../../board/admission.mts';
 import { paths } from '../src/paths.mts';
 import { readReview, recoveryCopyProblem, WORKFLOW } from '../src/recovery-review.mts';
-import { addProject } from '../src/projects.mts';
-import { beginAttempt, finishAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
+import { addProject, mutate } from '../src/projects.mts';
+import { beginAttempt, finishAttempt, observePass, readRecovery, recoveryFile } from '../src/recovery-state.mts';
 import { recovery } from '../src/commands/recovery.mts';
 import { status } from '../src/commands/status.mts';
 import { logs } from '../src/commands/logs.mts';
+import { refreshFollowups } from '../src/recovery-followup.mts';
 
 function fixture(t: TestContext) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'factory-recovery-cmd-')));
@@ -50,6 +52,48 @@ function fixture(t: TestContext) {
   return { p, root: r, jam, out: () => lines.join('\n'), err: () => errors.join('\n'), clear: () => { lines.length = 0; errors.length = 0; } };
 }
 const now = Date.parse('2026-11-12T10:30:00Z');
+
+test('human and JSON follow-ups reflect current local holds without settling or mutating records', async t => {
+  const { p, root, jam, out, clear } = fixture(t);
+  jam();
+  const record = join(p.state, 'me_site--12.json');
+  const run = { iid: '12', project: 'me/site', stage: 'stopped', branch: '12-saved', pid: 99999999, startedAt: new Date(now).toISOString() };
+  writeFileSync(record, JSON.stringify(run));
+  refreshFollowups(p, { root, tracker: 'me/site', dir: p.state, at: new Date(now).toISOString() });
+  const snapshot = readFileSync(recoveryFile(p, root), 'utf8');
+  const json = async () => { clear(); assert.equal(await recovery(p, 'status', { cwd: root, json: true }), 0); return JSON.parse(out()).recovery.followups['12']; };
+  assert.equal((await json()).state, 'paused', 'not opted in is a pause, even if saved snapshot says pending');
+  mutate(p, r => { r.projects[0].schedule = { enabled: true, branch: 'main', since: new Date(now).toISOString() }; return true; });
+  assert.equal((await json()).state, 'pending');
+  withAdmission(p.state, tx => {
+    tx.state.claims[keyFor('13', 'me/site')] = { token: 't', iid: '13', project: 'me/site', kind: 'normal', owner: ownerOf(process.pid), at: new Date(now).toISOString() };
+    tx.commit();
+  });
+  assert.equal((await json()).state, 'waiting');
+  withAdmission(p.state, tx => { tx.state.claims = {}; tx.commit(); });
+  const a = beginAttempt(p, root, { ticket: 12, at: new Date(now).toISOString(), replay: true });
+  finishAttempt(p, root, a.seq, { at: new Date(now).toISOString(), result: 'host-followup', reason: 'browser host image missing' });
+  assert.match((await json()).reason, /exhausted/);
+  // A reset renews only the budget, not the recorded host prerequisite or delivery verdict.
+  assert.equal(await recovery(p, 'reset', { cwd: root }), 0);
+  assert.match((await json()).reason, /browser host image missing/);
+  clear();
+  await recovery(p, 'status', { cwd: root });
+  assert.match(out(), /#12 operator-required: Recorded host-followup/);
+  assert.match(out(), /Next: Resolve the recorded host prerequisite/);
+  const next = beginAttempt(p, root, { ticket: 12, at: new Date(now).toISOString(), replay: true });
+  finishAttempt(p, root, next.seq, { at: new Date(now).toISOString(), result: 'delivered' });
+  writeFileSync(record, JSON.stringify({ ...run, stage: 'done', mr: 'https://example.test/pr/12' }));
+  assert.match((await json()).reason, /awaiting gates.*not merged/);
+  writeFileSync(record, JSON.stringify({ ...run, stage: 'done', mr: 'https://example.test/pr/12', mergedAt: new Date(now).toISOString() }));
+  const before = readFileSync(recoveryFile(p, root), 'utf8');
+  const admission = readFileSync(admissionFile(p.state), 'utf8');
+  assert.equal((await json()).state, 'complete');
+  assert.equal(readFileSync(recoveryFile(p, root), 'utf8'), before);
+  assert.equal(readFileSync(admissionFile(p.state), 'utf8'), admission);
+  assert.notEqual(snapshot, before, 'only explicit budget/attempt operations changed the ledger');
+  assert.equal(readRecovery(p, root).followups?.['12'].state, 'pending', 'status did not persist its projection');
+});
 
 test('recovery status shows inactive copy, confirmed jam, budgets, attempts with log and report', async t => {
   const { p, root, jam, out } = fixture(t);

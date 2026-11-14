@@ -1,4 +1,5 @@
-<!-- #153: existing delivery tests stub trackers and scheduler authorization; no live CI, agents or managers. -->
+<!-- Deferred recovery tests use fixture-only settlement, exact-container Docker stubs and fake service-manager boundaries.
+Existing delivery tests stub trackers and scheduler authorization; no live CI, agents or managers. -->
 <!-- Factory test policy: fixture-owned boundaries and runtimes for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
 <!-- #150: proof/entrypoint tests use synthetic evidence and stub all agent/container/tracker boundaries. -->
 # Testing
@@ -23,6 +24,14 @@ node --test board/board.test.mts board/install.test.mts cli/test/init.test.mts c
 ```
 
 These tests use disposable state roots, synthetic Git projects, injected tracker replies and fake scheduler/container boundaries. Store tests spawn only local Node writers, crash them before/after publication, race stale-owner reclamation, check restrictive modes and verify append order and idempotent replay. Export tests compare file bytes and modification times, including missing history, filters, concurrent publication and corrupt data. Control tests check unknown attribution, explicit request/result correlation, no-op/refused/failed outcomes and the absence of inferred or automatic controls. Recorder failures at admission, charge, cleanup, settlement and command boundaries must leave authoritative outcomes unchanged. No installed project copy, login, service manager, browser, tracker or Docker daemon is required.
+
+## Deferred recovery regression tests
+
+```sh
+node --test cli/test/recovery-followup.test.mts cli/test/recovery-schedule.test.mts cli/test/jam-detect.test.mts cli/test/recovery-state.test.mts cli/test/recovery-command.test.mts cli/test/scheduler.test.mts
+```
+
+These tests cover local settlement during project pauses, preserved saved branches, later two-pass re-evaluation after competing delivery, unchanged retry budgets, fail-closed ownership/global/cancellation gates, strict backward-compatible snapshots and read-only human/JSON status. The process-level scheduler fixture uses stand-in repair processes and a Docker stub that accepts only exact-container removal/inspection. It proves delivered attempts stay outstanding until authoritative merge, not actual tracker delivery or real Docker behavior. Run the full suite above after integration with the current main branch. Admission race, prerequisite and independent proof/CI/review tests remain mandatory.
 
 ## Systemd is a trusted dependency
 
@@ -119,6 +128,7 @@ A real systemd user-session trial can provide additional deployment confidence, 
 
 Never expose the host's systemd or D-Bus control socket to an agent container merely to satisfy verification. No production access or credential retrieval is authorized by a test or smoke-test instruction.
 
+<!-- Recovery scan tests use disposable Git/state roots and stubbed process/container boundaries only. -->
 ## In this repository
 
 The sentence above about Factory's disable/removal logic not killing an active pass is the general policy. Under the approved #30 and #33 contract, `schedule off`, uninstall and reinstall cancel the tick's own dispatcher process group. The tests here prove two things about that: the cancellation is confined to that group, and independently detached ticket runs survive it.
@@ -129,4 +139,5 @@ The sentence above about Factory's disable/removal logic not killing an active p
 - `cli/test/cutover.test.mts` rehearses the [cutover runbook](docs/scheduler-cutover.md) on a home that starts with a legacy timer and an outdated project copy. Factory's CLI runs against the default stub, so any call it made to a legacy unit would be rejected. Only the explicit `factory legacy retire` step runs with `STUB_LEGACY=1`, which accepts `disable --now` on a legacy timer and removes its `timers.target.wants` link. `cli/test/legacy.test.mts` covers `factory legacy status|retire` the same way, including a failed disable.
 - `cli/test/scheduler.test.mts` covers the same logic against the in-memory `FakeSchedule` (`cli/src/platform/fake.mts`).
 - `cli/test/recovery-schedule.test.mts` (#64) runs scheduled self-recovery end to end: every tick is its own process (`cli/test/fixtures/tick-recovery.mts`, `factory tick` with only the repair command swapped for a stand-in) against the `systemctl` stub, with a `docker` stub that accepts only exact-name `rm -f` and `container inspect`. It covers a tick killed mid-pass, `schedule off` while a repair runs, a crashed repair whose container docker cannot confirm gone, the two-attempt budget and reset. It does not run real Docker, `main.mts --recover` or an agent.
+- Recovery refusal boundaries are covered by `cli/test/recovery-workspace.test.mts`, `cli/test/recovery-run.test.mts`, `cli/test/recovery-claim.test.mts` and `cli/test/jam-detect.test.mts`. They check byte-for-byte preservation on read-only refusal, numeric candidate order, no refusal cache, between-candidate cancellation/generation/review/run changes, project uncertainty, and charged spawn/record/post-commit failures. Disposable Git repos and state roots cover real launcher/afterPass integration; process races prove only one project recovery can be admitted. No tracker, authentication, installed project, Docker daemon or service manager is needed. Run focused tests with `node --test cli/test/recovery-workspace.test.mts cli/test/recovery-claim.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts`, then the full command above.
 - The tick and its cancellation are Factory code, so they are tested with real processes: `cli/src/commands/tick.mts`, `cli/src/tick-lock.mts`, `cli/src/tick-cancel.mts`.

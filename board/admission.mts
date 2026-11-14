@@ -1,4 +1,5 @@
 // Persisted writers may defer observational callbacks until every admission critical section has exited.
+// Admission reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent.
 // #153: short-lived delivery ownership uses normal PID/start fencing and advances project activity without repair charges.
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -117,14 +118,14 @@ const str = (x: unknown) => typeof x === "string" && x.length > 0;
 const optStr = (x: unknown) => x === undefined || typeof x === "string";
 const validOwner = (o: any) => isObj(o) && Number.isInteger(o.pid) && o.pid > 0 && optStr(o.start);
 
-/** The admission record. Missing is empty; malformed or an unknown version throws. Never writes. */
+/** Only ENOENT means absent. IO uncertainty, malformed data or an unknown version holds admission. Never writes. */
 export function readAdmission(stateDir: string): AdmissionState {
   const file = admissionFile(stateDir);
-  if (!existsSync(file)) return emptyAdmission();
   let d: any;
   try {
     d = JSON.parse(readFileSync(file, "utf8"));
-  } catch {
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return emptyAdmission();
     throw new Error(`Admission record is not valid JSON: ${file}. Nothing is admitted until it is fixed; Factory will not overwrite it.`);
   }
   const ok = isObj(d) && d.version === 1
