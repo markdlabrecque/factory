@@ -4,13 +4,13 @@
 // claim and applying its charge is replayed without charging twice or refunding; a normal admission breaks a pending jam
 // confirmation through the project's activity generation. Disposable state folder; sleeping children stand in for live
 // run processes, and a child that exits mid-claim stands in for a crash; an exited child nobody reaped (a zombie) is a dead
-// owner (#64). Nothing launches.
+// owner (#64). The zombie fixture stops its child until the parent has exec'd, preventing shell reaping races. Nothing launches.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -234,13 +234,18 @@ test('the admission lock is never taken over by age or a live pid alone; corrupt
 });
 
 test('an owner that exited but was never reaped (a zombie) is dead, so a crashed repair can be settled (#64)', { skip: process.platform !== 'linux' && 'needs /proc' }, async t => {
-  // `sleep 0` exits at once; its parent becomes `sleep 5`, which never waits for it, so it stays a zombie.
-  const parent = spawn('sh', ['-c', 'sleep 0 & echo $!; exec sleep 5'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  // Hold the child until the shell has exec'd sleep, which never reaps it. An immediate exit can be reaped by sh.
+  const parent = spawn('sh', ['-c', `sh -c 'kill -STOP $$' & echo $!; exec sleep 5`], { stdio: ['ignore', 'pipe', 'ignore'] });
   t.after(() => parent.kill('SIGKILL'));
   const [chunk] = await once(parent.stdout!, 'data');
   const pid = Number(String(chunk).trim());
+  t.after(() => { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } });
   const fields = () => readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ');
   const state = () => fields()[0];
+  const ready = () => state() === 'T' && readlinkSync(`/proc/${parent.pid}/exe`).endsWith('/sleep');
+  for (let i = 0; i < 200 && !ready(); i++) await new Promise(r => setTimeout(r, 10));
+  assert.ok(ready(), 'child stopped and parent no longer a reaping shell');
+  process.kill(pid, 'SIGCONT');
   for (let i = 0; i < 200 && state() !== 'Z'; i++) await new Promise(r => setTimeout(r, 10));
   assert.equal(state(), 'Z');
   assert.equal(ownerState({ pid, start: `linux:${fields()[19]}` }), 'dead', 'even with its own start identity');

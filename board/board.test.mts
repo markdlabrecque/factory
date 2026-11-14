@@ -1,3 +1,4 @@
+// #141: concise recorded-blocker summaries and production stats DOM; current blockers and stored history stay intact.
 // #126: Board DOM separates current description resolution/errors from a running attempt's fixed model.
 // Archive coverage exercises project/header gates, active/queued refusal, preservation and idempotence over HTTP,
 // plus delayed-success/error DOM state and corrected-verdict badges. All fixtures are local, never live tracker data.
@@ -288,6 +289,117 @@ test("#88: a card merged outside Factory is labelled with its PR, and an ordinar
   assert.match(gl.title, /"#7:" title/);
   // Factory's own merge (mergedAt without mergedOutside) gets no label.
   assert.equal(m.mergedOutsideText({ iid: "8", stage: "done", verdict: "PASS", mr: gh.mr, mergedAt: gh.mergedAt }), null);
+});
+
+test('recorded blocker summaries use exact codes and anchored legacy prefixes only', () => {
+  const { blockerEpisodeSummary: summary } = load('model', ['blockerEpisodeSummary']);
+  const one = (code: string, text: string) => summary({ reasons: [{ code, text }] });
+  for (const [code, label] of [['docket_full', 'Docket full'], ['dependency', 'Waiting on dependency'], ['verification_failed', 'Verification failed'], ['unknown', 'Reason unavailable']]) {
+    assert.equal(one(code, 'Long\nreason '.repeat(100)), label);
+  }
+  for (const text of ['WAITING FOR A FREE SLOT until tomorrow', 'dOcKeT iS fUlL: retry later']) assert.equal(one('note', text), 'Docket full');
+  for (const text of ['Waiting on dependency #4', 'WAITING FOR DEPENDENCY approval', 'Dependency #123: missing API']) assert.equal(one('note', text), 'Waiting on dependency');
+  assert.equal(one('note', 'VERIFICATION FAILED: many details'), 'Verification failed');
+  for (const text of ['Discuss verification failed later', 'Not waiting on dependency', 'Dependency #x: unknown']) assert.equal(one('note', text), text);
+  assert.equal(one('future_code', 'Waiting on dependency. More details.'), 'Waiting on dependency', 'unknown codes use excerpts, not categories');
+  assert.equal(one('future_code', 'Verification failed during setup'), 'Verification failed during setup');
+});
+
+test('recorded blocker excerpts are first-sentence, word/code-point bounded and immutable', () => {
+  const { blockerEpisodeSummary: summary } = load('model', ['blockerEpisodeSummary']);
+  const one = (text: string) => summary({ reasons: [{ code: 'note', text }] });
+  assert.equal(one('  Needs\n  human\tapproval! Hidden details. '), 'Needs human approval');
+  assert.equal(one('Version 1.25 needs approval. Hidden details.'), 'Version 1.25 needs approval');
+  assert.equal(one('Question? Hidden details.'), 'Question');
+  assert.equal(one('one two three four five six seven eight nine ten eleven twelve thirteen'), 'one two three four five six seven eight nine ten eleven twelve…');
+  assert.equal(one('abcdefghij '.repeat(10)), 'abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij…');
+  assert.equal(one('😀'.repeat(90)), '😀'.repeat(79) + '…');
+  assert.equal(one('éclair '.repeat(20)), 'éclair '.repeat(10) + 'éclair…');
+  for (const episode of [undefined, null, {}, { reasons: null }, { reasons: {} }, { reasons: [null, 2, {}, { code: 'note', text: 3 }, { code: '', text: ' ' }, { code: ' ', text: 'invalid' }] }]) {
+    assert.equal(summary(episode), 'Reason unavailable');
+  }
+  const reasons = [
+    { code: 'note', text: '  ' + '😀'.repeat(90) + '  ' },
+    { code: 'note', text: '😀'.repeat(90) },
+    { code: 'dependency', text: 'first dependency' },
+    { code: 'dependency', text: 'second dependency' },
+  ];
+  const episode = { reasons };
+  const before = JSON.stringify(episode);
+  assert.equal(summary(episode), '😀'.repeat(71) + '… +2 more');
+  assert.equal(Array.from(summary(episode)).length, 80);
+  assert.equal(JSON.stringify(episode), before);
+  assert.equal(summary({ reasons: reasons.slice(2) }), 'Waiting on dependency +1 more');
+  const phrase = 'abcdefghij '.repeat(7).trim();
+  const clipped = summary({ reasons: [{ code: 'custom', text: phrase }, { code: 'note', text: 'another' }] });
+  assert.equal(clipped, 'abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij… +1 more');
+  assert.ok(Array.from(clipped).length <= 80);
+});
+
+test('production stats render short historical episodes, preserving current blockers, times and empty states', () => {
+  class Node {
+    children: Node[] = [];
+    private text = '';
+    className = '';
+    tag: string;
+    constructor(tag = 'div') { this.tag = tag; }
+    set textContent(text: string) { this.text = text; this.children = []; }
+    get textContent(): string { return this.text + this.children.map(n => n.textContent).join(''); }
+    get ownText(): string { return this.text; }
+    set innerHTML(_: string) { assert.fail('stats must render text, not HTML'); }
+    appendChild(node: Node) { this.children.push(node); return node; }
+    replaceChildren(...nodes: Node[]) { this.text = ''; this.children = nodes; }
+  }
+  const title = new Node(), body = new Node();
+  const at = (s: number) => new Date(s * 1000).toISOString();
+  const long = 'Needs approval from the designated owner before this can proceed safely with any further work. PRIVATE LATER DETAILS';
+  const html = '<img src=x onerror=alert(1)> needs approval. PRIVATE HTML DETAILS';
+  const run: any = { key: 'fixture--1', iid: '1', project: 'fixture', stage: 'waiting', startedAt: at(0), stageSince: at(30),
+    historyComplete: true, queueReasons: [{ code: 'dependency', text: long }],
+    stageHistory: [
+      { stage: 'queued', at: at(0), reasons: [{ code: 'note', text: long }] },
+      { stage: 'setup', at: at(10) },
+      { stage: 'waiting', at: at(20), reasons: [{ code: 'note', text: html }] },
+      { stage: 'waiting', at: at(30), reasons: [{ code: 'dependency', text: long }, { code: 'dependency', text: 'Other dependency' }] },
+    ] };
+  const before = JSON.stringify(run);
+  const board = { selectedKey: run.key, runs: [run], now: 40_000 };
+  const ctx = load('model', ['ticketStats', 'blockerEpisodeSummary'], {
+    board, document: { getElementById: (id: string) => id === 'stats-title' ? title : body },
+    el: (tag: string, cls?: string, text?: string) => { const n = new Node(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; },
+    add: (parent: Node, ...nodes: Node[]) => nodes.forEach(n => parent.appendChild(n)),
+    ticketLabel: (r: any) => '#' + r.iid,
+  });
+  load('stats-render', ['renderStats'], ctx);
+  const render = () => { ctx.renderStats(); return body.children[0]; };
+  const historical = (content: Node) => content.children[content.children.findIndex(n => n.textContent.startsWith('Recorded blocker episodes')) + 1];
+  const content = render(), list = historical(content);
+  assert.equal(list.children.length, 3);
+  assert.ok(content.children.some(n => n.textContent === 'Recorded blocker episodes · 3'));
+  assert.deepEqual(list.children.map(n => n.ownText), ['Needs approval from the designated owner before this can proceed safely with…', '<img src=x onerror=alert(1)> needs approval', 'Waiting on dependency +1 more']);
+  list.children.forEach((item, i) => {
+    assert.equal(item.tag, 'li');
+    assert.equal(item.children.length, 1);
+    assert.equal(item.children[0].tag, 'small');
+    assert.equal(item.children[0].textContent, new Date(at([0, 20, 30][i])).toLocaleString() + ' · 00:10');
+    assert.ok(Array.from(item.ownText).length <= 80);
+  });
+  const inspect = (node: Node) => {
+    assert.ok(['ul', 'li', 'small'].includes(node.tag), 'HTML-like input never becomes markup or an expander');
+    assert.doesNotMatch(JSON.stringify(node), /PRIVATE|designated owner before this can proceed safely with any further/);
+    assert.deepEqual(Object.keys(node).sort(), ['children', 'className', 'tag', 'text'], 'no full-text attributes');
+    node.children.forEach(inspect);
+  };
+  inspect(list);
+  const currentIndex = content.children.findIndex(n => n.textContent === 'Current blockers');
+  assert.equal(content.children[currentIndex + 1].textContent, long);
+  assert.equal(JSON.stringify(run), before);
+  run.stage = 'setup'; run.stageSince = at(0); run.stageHistory = [{ stage: 'setup', at: at(0) }];
+  assert.equal(historical(render()).textContent, 'No blockers recorded.');
+  run.historyComplete = false; run.stageHistory = [];
+  const incomplete = render();
+  assert.equal(historical(incomplete).textContent, 'No blocker history available.');
+  assert.match(incomplete.textContent, /Full history unavailable/);
 });
 
 test("real visit stats count holds, repeated stages and bounces without inventing legacy totals", () => {

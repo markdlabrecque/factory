@@ -1,4 +1,4 @@
-<!-- Factory test policy: fixture-owned boundaries for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
+<!-- Factory test policy: fixture-owned boundaries and runtimes for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
 # Testing
 
 ## Run the tests
@@ -9,7 +9,7 @@ Requires Node 22.18+; CI uses Node 24. From the repository root:
 node --test orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 ```
 
-Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
+Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
