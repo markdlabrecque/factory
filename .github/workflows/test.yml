@@ -14,4 +14,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node --test --test-reporter=tap --test-timeout=120000 orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
+      - name: Isolate browser probe lifecycle
+        run: timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
+      - run: timeout --signal=KILL 180s node --test --test-reporter=tap --test-timeout=120000 orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts

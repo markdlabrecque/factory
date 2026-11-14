@@ -27,7 +27,7 @@ An unsupported CLI or failed upload stops the run before implementation push or 
 
 Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups. Terms used here are defined in [docs/GLOSSARY.md](docs/GLOSSARY.md).
 
-CI uses TAP output and a 120-second test deadline so assertion details are retained even if another test hangs. Scheduler command stubs leave shared state untouched on read-only queries, including concurrent timer-strip requests.
+CI uses TAP output and a 120-second test deadline so assertion details are retained even if another test hangs. Scheduler command stubs leave shared state untouched on read-only queries, including concurrent timer-strip requests. Process fixtures synchronize zombie creation and allow bounded signal-delivery time on constrained runners; cleanup covers every recorded browser-probe descendant even after an assertion fails.
 
 For tests and verification verdicts, follow [TESTING.md](TESTING.md). Test Factory's systemd integration against a stubbed command boundary; real service-manager trials are optional deployment checks. Refresh integration tests supply a fixture-owned `FACTORY_PI_SUBSCRIPTION_EXTENSION` as well as a stub `pi` command. They need no installed provider extension or agent login, and must not inherit those dependencies from a developer's home.
 
