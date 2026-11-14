@@ -18,10 +18,12 @@ import { pathToFileURL } from 'node:url';
 import { admissionFile, generationOf, keyFor, ownerOf, ownerState, readAdmission, releaseClaim, withAdmission, withAdmissionLock } from '../../board/admission.mts';
 import { claimRun, readRuns } from '../../board/board.mts';
 import { paths } from '../src/paths.mts';
-import { claimRecovery, replayAdmitted } from '../src/recovery-claim.mts';
+import {preparedFixture} from './prepared-fixture.mts';
+import { claimRecovery as actualClaimRecovery, replayAdmitted } from '../src/recovery-claim.mts';
 import { attemptProblem, finishAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
 
-const root = '/work/project';
+let root: string;
+const claimRecovery: typeof actualClaimRecovery = (p,o) => actualClaimRecovery(p,{...o,preparation:preparedFixture(o)});
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 const ID = (n: number) => `${String(n).repeat(8)}-1111-4111-8111-111111111111`;
 function fixture(t: TestContext) {
@@ -29,6 +31,7 @@ function fixture(t: TestContext) {
   const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
   t.after(() => { sleeper.kill(); rmSync(home, { recursive: true, force: true }); });
   const p = paths(home);
+  root = join(home,'project');
   const dir = join(home, 'runs');
   observePass(p, root, { pass: 'a', at: at(0), jam: [7, 8] });
   observePass(p, root, { pass: 'b', at: at(5), jam: [7, 8] });
@@ -36,7 +39,7 @@ function fixture(t: TestContext) {
 }
 // A run record whose process exited without finishing.
 const stopped = (dir: string, iid: string, extra = {}) =>
-  claimRun({ dir, project: 'proj', iid, pid: 2 ** 22 + 4321, cap: 99, patch: { stage: 'stopped', note: 'exited', starting: undefined, ...extra } });
+  claimRun({ dir, project: 'proj', iid, pid: 2 ** 22 + 4321, cap: 99, patch: { stage: 'stopped', base:'main', note: 'exited', starting: undefined, ...extra } });
 const run = (dir: string, iid: string) => readRuns(dir).find(r => r.project === 'proj' && r.iid === iid);
 const used = (p: ReturnType<typeof paths>, t: number) => readRecovery(p, root).budgets[t]?.used ?? 0;
 const reason = (x: unknown) => (x as { reason: string }).reason;
@@ -124,6 +127,7 @@ test('a crash between the claim and applying its charge is replayed once: never 
     const { paths } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, '../src/paths.mts')).href)});
     const { claimRecovery } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, '../src/recovery-claim.mts')).href)});
     claimRecovery(paths(${JSON.stringify(p.home)}), { root: ${JSON.stringify(root)}, tracker: 'proj', ticket: 7, pid: ${pid}, at: ${JSON.stringify(at(10))},
+      preparation:${JSON.stringify(preparedFixture({root,tracker:'proj',ticket:7,dir}))},
       dir: ${JSON.stringify(dir)}, id: ${JSON.stringify(ID(1))}, container: 'factory-recovery-${ID(1)}', afterCommit: () => process.exit(9) });`;
   const crash = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
   assert.equal(crash.status, 9, crash.stderr);
@@ -223,10 +227,12 @@ test('competing recovery passes admit exactly one project attempt across process
   stopped(dir, '8', { branch: '8-fix' });
   const source = pathToFileURL(join(import.meta.dirname, '../src/recovery-claim.mts')).href;
   const pathSource = pathToFileURL(join(import.meta.dirname, '../src/paths.mts')).href;
+  const preparations=new Map([7,8].map(ticket=>[ticket,preparedFixture({root,tracker:'proj',ticket,dir})]));
   const kids = Array.from({ length: 6 }, (_, i) => {
     const code = `const {claimRecovery} = await import(${JSON.stringify(source)});
       const {paths} = await import(${JSON.stringify(pathSource)});
       const r = claimRecovery(paths(${JSON.stringify(p.home)}), {root:${JSON.stringify(root)},tracker:'proj',
+        preparation:${JSON.stringify(preparations.get(i%2?7:8))},
         ticket:${i % 2 ? 7 : 8},pid:${pid},at:${JSON.stringify(at(10))},dir:${JSON.stringify(dir)},id:${JSON.stringify(ID(i + 1))}});
       process.stdout.write(r.ok ? 'won' : 'lost');`;
     return spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'inherit'] });
@@ -272,6 +278,32 @@ test('the admission lock is never taken over by age or a live pid alone; corrupt
     assert.equal(readFileSync(admissionFile(dir), 'utf8'), bad, 'never overwritten');
     assert.equal(run(dir, '7'), undefined, 'nothing claimed');
   }
+});
+
+test('preparation missing, stale manifest, changed local base and no-longer-stopped targets refuse with zero charge', t => {
+  const {p,dir,pid}=fixture(t);stopped(dir,'7',{branch:'7-fix'});
+  const preparation=preparedFixture({root,tracker:'proj',ticket:7,dir});
+  const options={root,tracker:'proj',ticket:7,pid,at:at(10),dir,id:ID(1)};
+  assert.equal(actualClaimRecovery(p,options).ok,false);
+  const file=join(dir,'graph','proj--7.json'),bytes=readFileSync(file,'utf8');
+  writeFileSync(file,bytes+' ');assert.match(reason(actualClaimRecovery(p,{...options,preparation})),/manifest changed/);writeFileSync(file,bytes);
+  const ref=join(root,'.git/refs/remotes/origin/main');writeFileSync(ref,'b'.repeat(40));
+  assert.match(reason(actualClaimRecovery(p,{...options,preparation})),/local base changed/);writeFileSync(ref,preparation.baseSha);
+  writeFileSync(join(dir,'proj--7.json'),JSON.stringify({...run(dir,'7'),stage:'done'}));
+  assert.match(reason(actualClaimRecovery(p,{...options,preparation})),/no longer stopped/);
+  assert.equal(used(p,7),0);assert.equal(readRecovery(p,root).attempts.length,0);
+});
+
+test('concurrent prepared recovery claims admit and charge exactly once', async t => {
+  const {p,dir,pid}=fixture(t);stopped(dir,'7',{branch:'7-fix'});
+  const preparation=preparedFixture({root,tracker:'proj',ticket:7,dir});
+  const module=pathToFileURL(join(import.meta.dirname,'../src/recovery-claim.mts')).href;
+  const pathModule=pathToFileURL(join(import.meta.dirname,'../src/paths.mts')).href;
+  const code=`const {claimRecovery}=await import(${JSON.stringify(module)});const {paths}=await import(${JSON.stringify(pathModule)});
+    const r=claimRecovery(paths(${JSON.stringify(p.home)}),${JSON.stringify({root,dir,tracker:'proj',ticket:7,pid,at:at(10),id:ID(1),preparation})});process.stdout.write(r.ok?'won':'lost');`;
+  const kids=Array.from({length:4},()=>spawn(process.execPath,['--input-type=module','-e',code],{stdio:['ignore','pipe','pipe']}));
+  const outputs=await Promise.all(kids.map(async c=>{let s='';c.stdout!.on('data',b=>s+=b);await once(c,'exit');return s;}));
+  assert.equal(outputs.filter(x=>x==='won').length,1);assert.equal(used(p,7),1);assert.equal(readRecovery(p,root).attempts.length,1);
 });
 
 test('an owner that exited but was never reaped (a zombie) is dead, so a crashed repair can be settled (#64)', { skip: process.platform !== 'linux' && 'needs /proc' }, async t => {

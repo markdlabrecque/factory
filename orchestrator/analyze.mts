@@ -1,3 +1,4 @@
+// Recovery uses invocation-specific worktrees, bounded git operations and the exported schema fingerprint.
 // #137: analysis uses validated TOML models/graph settings, falling back only when TOML is absent.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -15,19 +16,20 @@ import type { Ticket } from "./tracker.mts";
 // JSON schema. "pi": `pi -p` with read, grep, find and ls, no discovered extensions, skills or context files
 // (the pi-claude-subscription provider is the one extension loaded, by an explicit -e), and the JSON parsed
 // from its reply. Either way no shell, no writes and no MCP servers, because ticket
-// text is untrusted input. Current-assessment analysis may also include previously named closed providers (#78),
-// without changing the open-provider validation used by execution/admission manifests.
+// text is untrusted input. Assessment and recovery preparation may also include reliably read previously named
+// closed providers. Ordinary execution analysis still validates providers against the open catalogue.
 
 const here = dirname(fileURLToPath(import.meta.url));
-const git = (args: string[], cwd?: string) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+const git = (args: string[], cwd?: string) => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 20_000, killSignal: "SIGKILL", stdio: ["ignore", "pipe", "inherit"] }).trim();
 
 /** Detached worktree at origin/<base> (fetch first). Shared by every analysis in a pass. */
-export function analysisWorktree(project: string, base: string): { path: string; sha: string } {
-  const path = resolve(stateDir(), "worktrees", keyFor(base.replace(/[^A-Za-z0-9._-]+/g, "_"), project));
+export function analysisWorktree(project: string, base: string, ownedPath?: string): { path: string; sha: string } {
+  const path = ownedPath ?? resolve(stateDir(), "worktrees", keyFor(base.replace(/[^A-Za-z0-9._-]+/g, "_"), project));
+  if (ownedPath && existsSync(path)) throw new Error(`Invocation analysis workspace already exists; preserved at ${path}`);
   const sha = git(["rev-parse", `origin/${base}`]);
   if (!existsSync(path)) {
     mkdirSync(dirname(path), { recursive: true });
-    git(["worktree", "prune"]);
+    if (!ownedPath) git(["worktree", "prune"]); // recovery cleans only its own invocation workspace
     git(["worktree", "add", "--detach", path, sha]);
   } else {
     git(["checkout", "--detach", "--force", sha], path);
@@ -36,7 +38,7 @@ export function analysisWorktree(project: string, base: string): { path: string;
   return { path, sha };
 }
 
-const SCHEMA = {
+export const ANALYSIS_SCHEMA = {
   type: "object",
   required: ["provides", "requires", "footprint"],
   properties: {
@@ -65,14 +67,15 @@ const excerpt = (s: string, n = 300) => {
 
 type Analysis = { provides: string[]; requires: Requirement[]; footprint: string[] };
 const spawnOpts = (cwd: string, input: string) => ({ cwd, input, encoding: "utf8" as const, timeout: GRAPH.analysisTimeoutMinutes * 60_000, maxBuffer: 64 * 1024 * 1024 });
-const failed = (iid: number, res: { status: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string }) =>
-  new Error(`analysis of #${iid} failed (exit ${res.status ?? res.signal}): ${(res.stderr || res.stdout || "").slice(0, 500)}`);
+const failed = (iid: number, res: { status: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string; error?: Error }) =>
+  new Error((res.error as NodeJS.ErrnoException)?.code === 'ETIMEDOUT' ? `analysis of #${iid} failed: timed out` :
+    `analysis of #${iid} failed (exit ${res.status ?? res.signal}): ${(res.stderr || res.stdout || "").slice(0, 500)}`);
 
 function runClaude(iid: number, prompt: string, cwd: string): Analysis {
   const res = spawnSync(
     "claude",
     ["-p", "--model", GRAPH.model, "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config",
-      "--no-session-persistence", "--output-format", "json", "--json-schema", JSON.stringify(SCHEMA)],
+      "--no-session-persistence", "--output-format", "json", "--json-schema", JSON.stringify(ANALYSIS_SCHEMA)],
     spawnOpts(cwd, prompt),
   );
   if (res.status !== 0) throw failed(iid, res);
@@ -83,7 +86,7 @@ function runClaude(iid: number, prompt: string, cwd: string): Analysis {
 
 /** pi has no schema flag: ask for bare JSON, take the outermost object from the reply, check its shape. */
 function runPi(iid: number, prompt: string, cwd: string): Analysis {
-  const ask = `${prompt}\n\n## Output\n\nReply with one JSON object and nothing else (no prose, no code fence), matching this JSON Schema:\n\n${JSON.stringify(SCHEMA)}\n`;
+  const ask = `${prompt}\n\n## Output\n\nReply with one JSON object and nothing else (no prose, no code fence), matching this JSON Schema:\n\n${JSON.stringify(ANALYSIS_SCHEMA)}\n`;
   const res = spawnSync("pi", piAnalysisArgs(GRAPH.model, process.env, existsSync), spawnOpts(cwd, ask));
   if (res.status !== 0) throw failed(iid, res);
   const text = res.stdout;
@@ -137,7 +140,7 @@ export function analyse(args: {
   catalogue: Ticket[];
   manifests: Map<number, Manifest>;
   keepImplementerBlockers: boolean;
-  knownProviders?: Ticket[]; // assessment only: previously named dependencies can now be closed
+  knownProviders?: Ticket[]; // assessment/preparation: reliably read previously named dependencies can now be closed
 }): Manifest {
   const { ticket: t, catalogue: cat } = args;
   const vars: Record<string, string> = {
@@ -156,7 +159,7 @@ export function analyse(args: {
 
   const so = AGENT.provider === "pi" ? runPi(t.iid, prompt, args.worktree.path) : runClaude(t.iid, prompt, args.worktree.path);
 
-  // Execution uses only the open catalogue. Read-only assessment can retain a known closed provider's identity.
+  // Ordinary execution uses the open catalogue; assessment/preparation can retain a known closed provider's identity.
   const open = new Map([...cat, ...(args.knownProviders ?? [])].map((c) => [c.iid, c]));
   const requires = so.requires.map((r) => ({ ...r, providedBy: r.providedBy != null && r.providedBy !== t.iid && open.has(r.providedBy) ? r.providedBy : null }));
   const blockerHashes: Record<string, string> = {};

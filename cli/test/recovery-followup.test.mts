@@ -49,6 +49,17 @@ test('follow-up priority preserves stopped saved work across competing recovery,
   assert.equal(f.recovery.budgets['7'].used, 1);
 });
 
+test('typed preparation holds project into follow-up without overriding pause, merge or charged history',()=>{
+  const f=facts();const before=structuredClone(f.recovery.budgets);
+  f.recovery.preparation={at:at(1),ticket:7,state:'held',code:'unknown-dependency',scope:'ticket',reason:'Tracker read unavailable'};
+  assert.equal(projectFollowups(f)['7'].state,'waiting');assert.match(projectFollowups(f)['7'].reason,/preparation unknown-dependency/);
+  assert.equal(projectFollowups(f)['8'].state,'pending');
+  f.recovery.preparation.code='ownership';f.recovery.preparation.scope='project';
+  assert.equal(projectFollowups(f)['8'].state,'operator-required');
+  f.paused='Paused';assert.equal(projectFollowups(f)['7'].state,'paused');f.paused=undefined;
+  f.runs[0].mergedAt=at(2);assert.equal(projectFollowups(f)['7'].state,'complete');assert.deepEqual(f.recovery.budgets,before);
+});
+
 test('delivery-waiting stays outstanding and missing run records cannot hide held recovery ownership', () => {
   const f = facts();
   f.runs = [run('7', { stage: 'waiting', delivery: { state: 'ci-waiting', reasonCode: 'checks-pending' } as any })];

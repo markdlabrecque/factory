@@ -1,3 +1,4 @@
+// Preparation holds are projected as observations, never as launch permission or a budget renewal.
 // Local recovery maintenance and read-only follow-up projection. Settlement retains exact-container and owner fencing.
 // Observations describe saved work, not permission to launch: only successful scheduled passes can confirm/admit repair.
 // No tracker, dispatcher, refresh, budget renewal, project edit or agent launch happens here. Status uses the same
@@ -38,6 +39,10 @@ export function projectFollowups(f: FollowupFacts): Record<string, Followup> {
     const ticket = Number(r.iid);
     if (!Number.isSafeInteger(ticket) || ticket < 1) continue;
     const last = f.recovery.attempts.filter(a => a.ticket === ticket).at(-1);
+    const observedPreparation=f.recovery.preparation;
+    const preparation=observedPreparation && observedPreparation.state!=='ready' && r.stage==='stopped'
+      && (observedPreparation.ticket===ticket || observedPreparation.scope==='project')
+      && (!last || Date.parse(observedPreparation.at)>=Date.parse(last.startedAt)) ? observedPreparation : undefined;
     const merged = !!r.mergedAt || r.delivery?.state === 'merged';
     const relevant = (r.stage === 'stopped' && !!r.branch) || !!r.delivery || !!r.mr || !!last
       || claim?.iid === r.iid || !!f.recovery.followups?.[ticket];
@@ -68,6 +73,11 @@ export function projectFollowups(f: FollowupFacts): Record<string, Followup> {
     } else if (f.claims.some(c => f.owners[c.token] !== 'dead')) {
       state = 'waiting'; reason = 'Competing admitted work still owns this project.';
       nextAction = 'Wait for admission to clear; later successful scheduled passes re-evaluate saved work.';
+    } else if(preparation){
+      const operator=['ownership','config','eligibility'].includes(preparation.code);
+      state=operator?'operator-required':'waiting';reason=`Recovery preparation ${preparation.code}: ${preparation.reason}`;
+      nextAction=operator?'Resolve the recorded preparation/ownership hold and review the workflow if needed; saved work and attempt budgets remain unchanged.'
+        :'A later successful eligible pass will reread execution inputs and prerequisites before any repair attempt is charged.';
     } else {
       state = 'pending'; reason = 'Saved work remains outstanding for normal recovery re-evaluation.';
       nextAction = 'Wait for successful eligible scheduled passes, fresh analysis and two-pass confirmation; normal ownership, prerequisite and admission gates still apply.';

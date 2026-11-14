@@ -55,7 +55,9 @@ export type Budget = { used: number; renewedAt?: string; renewal?: RenewalKind }
 export type Watch = { seenAt: string; content: string; labels: string[]; delivery?: string };
 export type Followup = { state: 'waiting' | 'paused' | 'operator-required' | 'pending' | 'complete';
   reason: string; nextAction: string; changedAt: string };
-export type RecoveryState = { version: 1; root: string; nextSeq: number; episode?: Episode; episodes: Episode[];
+// Preparation status is observational only; it cannot renew budgets or replace historical attempt verdicts.
+export type RecoveryState = { preparation?: {at:string;ticket:number;state:string;code:string;reason:string;scope:string};
+  version: 1; root: string; nextSeq: number; episode?: Episode; episodes: Episode[];
   budgets: Record<string, Budget>; attempts: Attempt[]; renewals: Renewal[]; watch?: Record<string, Watch>;
   followups?: Record<string, Followup> };
 
@@ -99,6 +101,9 @@ export function readRecovery(p: Paths, root: string): RecoveryState {
     && d.attempts.filter((a: any) => a.result === 'running').length <= 1
     && Array.isArray(d.renewals) && d.renewals.every((r: any) => isTime(r?.at) && KINDS.includes(r.kind)
       && (r.ticket === undefined || isIid(r.ticket)) && optStr(r.detail))
+    && (d.preparation === undefined || (isTime(d.preparation?.at) && isIid(d.preparation.ticket)
+      && ['ready','held','error'].includes(d.preparation.state) && ['ticket','project'].includes(d.preparation.scope)
+      && typeof d.preparation.code === 'string' && typeof d.preparation.reason === 'string'))
     && (d.watch === undefined || (d.watch && typeof d.watch === 'object' && !Array.isArray(d.watch)
       && Object.entries<any>(d.watch).every(([k, w]) => isIid(Number(k)) && isTime(w?.seenAt) && typeof w.content === 'string'
         && Array.isArray(w.labels) && w.labels.every((l: unknown) => typeof l === 'string') && optStr(w.delivery))))

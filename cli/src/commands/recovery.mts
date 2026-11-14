@@ -1,5 +1,6 @@
 // Follow-up status derives current local ownership, pause, budgets and delivery gates without settlement or writes.
 // Opened PRs and delivered attempts stay outstanding; only authoritative merged records complete follow-up.
+// Preparation readiness is observational status, separate from attempt verdicts, ownership claims and budgets.
 // `factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]` (slice four
 // self-recovery, #62; review #63).
 // status: whether recovery is active in the project (recovery-review.mts recoveryCopyProblem: the copy must have the
@@ -37,7 +38,9 @@ const RECENT = 10;
 export type RecoveryOptions = { project?: string; cwd?: string; json?: boolean; confirm?: boolean; now?: number; at?: string };
 
 export type AttemptView = Attempt & { logExists?: boolean; reportExists?: boolean };
+// Preparation status is shown separately from historical attempt verdicts and budgets.
 export type RecoverySummary = {
+  preparation?: RecoveryState['preparation'];
   active: boolean; inactiveReason?: string; file: string; problem?: string;
   episode: Episode | null; running: Attempt | null; claim: AdmissionClaim | null;
   budgets: { ticket: number; used: number; remaining: number; renewedAt?: string; renewal?: string }[];
@@ -65,7 +68,7 @@ export function recoverySummary(p: Paths, ctx: ProjectContext): RecoverySummary 
   catch (e) { problem = (e as Error).message; }
   const budgets = Object.entries(s.budgets).map(([k, b]) => ({ ticket: Number(k), used: b.used, remaining: remainingAttempts(s, Number(k)),
     ...(b.renewedAt ? { renewedAt: b.renewedAt } : {}), ...(b.renewal ? { renewal: b.renewal } : {}) })).sort((a, b) => a.ticket - b.ticket);
-  return { ...base, ...(problem ? { problem } : {}), episode: s.episode ?? null, running: runningAttempt(s) ?? null, claim, budgets, followups,
+  return { ...base, ...(problem ? { problem } : {}), preparation:s.preparation, episode: s.episode ?? null, running: runningAttempt(s) ?? null, claim, budgets, followups,
     attempts: s.attempts.slice(-RECENT).reverse().map(withFiles), renewals: s.renewals.slice(-RECENT).reverse(), episodes: s.episodes.slice(-RECENT).reverse() };
 }
 
@@ -87,6 +90,7 @@ export function recoveryStatusLines(r: RecoverySummary, name: string, now: numbe
   const why = r.inactiveReason?.includes('no recovery workflow') ? 'no recovery workflow in this copy' : 'workflow not reviewed as it is';
   const out = [`Recovery: ${r.active ? 'active' : `inactive (${why})`}${r.problem ? '' : `, jam: ${describeJam(r.episode, now)}`}`];
   if (r.problem) out.push(`  Problem: ${r.problem}`);
+  if (r.preparation) out.push(`  Preparation: #${r.preparation.ticket} ${r.preparation.code} (${r.preparation.scope}): ${r.preparation.reason}`);
   if (r.running) out.push(`  Running: ${describeAttempt(r.running, now)}`);
   const last = r.attempts.find(a => a.result !== 'running');
   if (last) out.push(`  Last attempt: ${describeAttempt(last, now)}`);
@@ -102,6 +106,7 @@ function show(ctx: ProjectContext, r: RecoverySummary, now: number) {
   console.log(r.active ? 'State: active' : `State: inactive: ${r.inactiveReason}`);
   if (r.problem) console.log(`Problem: ${r.problem}`);
   console.log(`Jam: ${describeJam(r.episode, now)}`);
+  if (r.preparation) console.log(`Preparation: #${r.preparation.ticket} ${r.preparation.code} (${r.preparation.scope}): ${r.preparation.reason}`);
   console.log(`Running: ${r.running ? describeAttempt(r.running, now) : 'none'}`);
   if (r.claim) console.log(`Claim: #${r.claim.iid} held since ${r.claim.at} by process ${r.claim.owner.pid}${r.claim.attempt ? ` for attempt ${r.claim.attempt}` : ''}`);
   if (r.budgets.length) {

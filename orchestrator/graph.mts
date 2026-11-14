@@ -1,4 +1,5 @@
-// #149: unknown dependency evidence holds dispatch and stays waitable for implementers.
+// Pure graph decisions and manifest metadata. Recovery's execution fingerprint is separate from assessment freshness.
+// Unknown dependency evidence holds dispatch and stays waitable for implementers.
 import { createHash } from "node:crypto";
 import type { DependencyResult } from "./dependencies.mts";
 
@@ -30,7 +31,9 @@ export interface ImplementerBlocker {
   evidence: string;
 }
 
+// Recovery requires its own fresh-input key; assessment freshness never authorizes execution.
 export interface Manifest {
+  recoveryAnalysisKey?: string;
   iid: number;
   project: string;
   hash: string; // contentHash of the ticket when analysed

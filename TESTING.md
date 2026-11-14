@@ -109,6 +109,25 @@ Scheduler tests assert the exact trusted command and malformed/off/paused/base-s
 refusals; they never run the host CLI against the user's service manager. These tests
 do not prove real GitHub/GitLab behavior or atomicity of external edits and merges.
 
+## Recovery preparation tests
+
+Run the preparation boundary before the full suite:
+
+```sh
+node --test orchestrator/recovery-analysis.test.mts orchestrator/recovery-entrypoint.test.mts cli/test/recovery-prepare.test.mts cli/test/recovery-claim.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts cli/test/recovery-schedule.test.mts cli/test/init.test.mts cli/test/update.test.mts
+```
+
+Preparation unit tests inject ticket/catalogue/base reads and analysis. Process tests
+run fixture-owned Node helpers and descendants, checking bounded JSON, cancellation,
+timeout and retained ownership on unconfirmed cleanup. Admission tests compare local
+manifest bytes and Git refs, including concurrent claims and zero-charge refusals.
+The recovery entrypoint's pass scenario uses the copied preparation helper with a
+fixture-owned `pi`, tracker and bare origin. It reproduces current assessment plus
+stale execution analysis, preserves saved work/evidence, then follows independent
+verification and delivery. Scheduled recovery fixtures inject synthetic preparation
+rather than running a real analyst. No test contacts live trackers, agents, Docker,
+credentials or a service manager.
+
 ## Optional browser image smoke test
 
 Run `./scripts/test-browser-image.sh` from this checkout with Docker/build access, network access for public build dependencies, and a non-root caller UID/GID. It builds a uniquely tagged disposable image from `.sandcastle/Dockerfile`, overrides the entrypoint and checks the non-root browser with synthetic content, screenshot and video from an empty directory. The runtime check downloads nothing. The image and container are removed on exit; configured images and services are untouched. The regular Node suite never runs this test.
