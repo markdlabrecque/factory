@@ -1,3 +1,4 @@
+<!-- Scheduler CI: read-only systemctl stubs preserve state under concurrent queries; TAP retains failure details with a bounded test deadline. -->
 <!-- #141: recorded blocker episodes show concise summaries only; current blockers and persisted reasons stay unchanged. -->
 <!-- Shared normal/recovery verification requires a non-root Playwright/Chromium preflight; image and workflow upgrades are explicit. -->
 <!-- #137: versioned factory.toml owns ordinary settings for new/opted-in projects; legacy copies migrate explicitly. -->
@@ -25,6 +26,8 @@ An unsupported CLI or failed upload stops the run before implementation push or 
 > **Experimental:** [Interactive agents under herdr-core](docs/research/interactive-agents-herdr-core.md) (spike #6) tested attaching to and steering a running agent. It is research only and not supported by Factory.
 
 Helpers for [Sandcastle](https://github.com/mattpocock/sandcastle) setups. Terms used here are defined in [docs/GLOSSARY.md](docs/GLOSSARY.md).
+
+CI uses TAP output and a 120-second test deadline so assertion details are retained even if another test hangs. Scheduler command stubs leave shared state untouched on read-only queries, including concurrent timer-strip requests.
 
 For tests and verification verdicts, follow [TESTING.md](TESTING.md). Test Factory's systemd integration against a stubbed command boundary; real service-manager trials are optional deployment checks. Refresh integration tests supply a fixture-owned `FACTORY_PI_SUBSCRIPTION_EXTENSION` as well as a stub `pi` command. They need no installed provider extension or agent login, and must not inherit those dependencies from a developer's home.
 
