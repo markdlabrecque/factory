@@ -31,6 +31,7 @@ import type { AttemptRecord, Docker } from '../../orchestrator/recovery.mts';
 import { paths } from '../src/paths.mts';
 import { afterPass } from '../src/jam-detect.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
+import {preparedFixture} from './prepared-fixture.mts';
 import { launchRecovery, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
 import { beginAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
@@ -100,7 +101,8 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   };
   let n = 0;
   const uuid = () => IDS[n++];
-  const common = { root, tracker: 'proj', dir, docker, spawn: spawner, npx: 'npx', uuid };
+  const preparation=preparedFixture({root,tracker:'proj',dir,ticket:7});
+  const common = { root, tracker: 'proj', dir, docker, spawn: spawner, npx: 'npx', uuid, preparation };
   const run = () => readRuns(dir).find(r => r.project === 'proj' && r.iid === '7')!;
   const kill = async (c: ChildProcess) => { c.kill('SIGKILL'); await once(c, 'exit'); };
   const record = (i: number) => join(p.recovery, 'attempts', `${IDS[i]}.json`);
@@ -148,7 +150,7 @@ test('an attempt is refused without the recovery workflow copy, claiming nothing
   const f = fixture(t, { copy: false });
   const r = launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, false);
-  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing execution-events\.mts, dependencies\.mts, delivery\.mts, dispatch\.mts, delivery-followup\.mts, verification\.mts, tracker\.mts, tracker\.github\.mts, tracker\.gitlab\.mts, ci\.mts, main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md, project-config\.mts, runtime-config\.mts, selection\.mts, vendor\/smol-toml\/index\.js/);
+  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing execution-events\.mts, recovery-analysis\.mts, recovery-analysis-contract\.mts, analyze\.mts, graph\.mts, manifests\.mts, models\.mts, prompt\.analyze\.md, config-read\.mts, dependencies\.mts, delivery\.mts, dispatch\.mts, delivery-followup\.mts, verification\.mts, tracker\.mts, tracker\.github\.mts, tracker\.gitlab\.mts, ci\.mts, main\.mts, recovery\.mts, recovery-sandbox\.mts, handoff\.mts, ownership\.mts, admission\.mts, assessment\.mts, journal\.mts, board\.mts, prompt\.recover\.md, prompt\.verify\.md, project-config\.mts, runtime-config\.mts, selection\.mts, vendor\/smol-toml\/index\.js/);
   assert.equal(f.launched.length, 0);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'no attempt recorded, no budget spent');
   assert.equal(f.run().stage, 'stopped');
@@ -493,6 +495,7 @@ test('real afterPass skips three missing branches, then admits one; subsequent p
     writeFileSync(report, JSON.stringify({ version: 1, pass: id, project: 'proj', at: at(15), tickets: [7, 3, 2, 1], observed: [] }));
     await afterPass(f.p, { root: f.root, tracker: 'proj', name: 'site', pass: id, report, dir: f.dir,
       log: l => lines.push(l), mayLaunch: async () => true,
+      prepare:async (_p,o)=>preparedFixture(o),
       settle: (p, o) => settleRecovery(p, { ...o, docker: f.common.docker }),
       launch: (p, o) => launchRecovery(p, { ...f.common, ...o, uuid: () => IDS[0] }),
     });

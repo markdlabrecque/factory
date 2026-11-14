@@ -1,3 +1,6 @@
+// Recovery admission requires preparation; the pass scenario reproduces current assessment plus stale execution analysis offline.
+import {preparedFixture} from '../cli/test/prepared-fixture.mts';
+import {prepareRecovery} from '../cli/src/recovery-prepare.mts';
 // #153: exact-SHA REST merge remains bound to the original recovery verification.
 // #149: unknown dependency reads prevent recovery verification and delivery.
 // #150: entrypoint uses recorded historical baseline and structured synthetic verification.
@@ -20,6 +23,7 @@ import { once } from "node:events";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import {writeAssessment,readAssessment} from '../board/assessment.mts';
 import { readAdmission } from "../board/admission.mts";
 import { claimRun, readRuns } from "../board/board.mts";
 import { projectId, readReceipt, receiptFile } from "./ownership.mts";
@@ -123,7 +127,27 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
     children.push(child);
     return child.pid!;
   };
-  const launch = launchRecovery(p, { root, tracker: "owner/repo", ticket: 7, dir: state, docker, spawn: spawner, npx: "npx", uuid: () => ID, at: at(10) });
+  let preparation=preparedFixture({root,tracker:'owner/repo',ticket:7,dir:state});
+  if (scenario==='pass') {
+    const file=join(state,'graph','owner_repo--7.json');
+    const stale=JSON.parse(readFileSync(file,'utf8'));delete stale.recoveryAnalysisKey;stale.hash='stale';writeFileSync(file,JSON.stringify(stale));
+    // A current assessment is observational, never authority to spend a recovery attempt.
+    writeAssessment(state,'owner_repo--7',{iid:'7',project:'owner/repo',analysisState:'current',
+      facts:{title:'Fix login',state:'open',labels:[],hash,checkedAt:at(5)},analysis:{input:hash,analyzedAt:at(5),requires:[]}});
+    const assessment=readAssessment(state,'owner_repo--7');
+    assert.equal(launchRecovery(p,{root,tracker:'owner/repo',ticket:7,dir:state}).ok,false);
+    assert.equal(readRecovery(p,root).attempts.length,0);
+    const extension=join(home,'subscription-fixture.mjs');writeFileSync(extension,'// fixture only');
+    writeFileSync(join(bin,'pi'),`#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify({provides:['fix'],requires:[],footprint:['app.txt']})));\n`,{mode:0o755});
+    const ready=await prepareRecovery(p,{root,tracker:'owner/repo',ticket:7,base:'main',dir:state,
+      spawn:(node,args,o)=>spawn(node,args,{...o,env:{...o.env,...env,FACTORY_PI_SUBSCRIPTION_EXTENSION:extension}})});
+    assert.equal(ready.state,'ready',JSON.stringify(ready));if(ready.state!=='ready')throw Error(ready.reason);preparation=ready;
+    assert.equal(readRecovery(p,root).attempts.length,0,'preparation did not charge');
+    assert.deepEqual(readAssessment(state,'owner_repo--7'),assessment,'execution preparation never rewrites assessment');
+    assert.equal(git(root,'rev-parse','7-fix-login'),git(worktree,'rev-parse','HEAD'),'saved implementation preserved');
+    assert.equal(readFileSync(join(evidence,'verdict.md'),'utf8'),'VERDICT: FAIL\nold\n');
+  }
+  const launch = launchRecovery(p, { root, preparation, tracker: "owner/repo", ticket: 7, dir: state, docker, spawn: spawner, npx: "npx", uuid: () => ID, at: at(10) });
   assert.equal(launch.ok, true, (launch as { reason?: string }).reason);
   const [code] = await once(child, "exit");
   const log = readFileSync(join(root, ".sandcastle/logs/recover-7.log"), "utf8");

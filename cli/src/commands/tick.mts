@@ -1,6 +1,7 @@
 // Each registered project gets local recovery settlement and follow-up observation under the tick lock before its
 // pause gate. Maintenance never launches, refreshes or counts a pass; failure disables recovery launch for this tick.
 // Global off/unknown and cancellation still stop all maintenance. Paused projects keep their pause and spent budgets.
+// Recovery preparation inherits saved scheduler Node/PATH and cancellation, only after maintenance and launch gates.
 // Scheduled children inherit trusted absolute CLI/Node authorization paths; refreshes never do.
 // One scheduler tick: the internal command `factory tick`, run by factory-tick.service on Linux (not for people to type;
 // it takes no flags), and on macOS called in-process by the launchd supervisor (commands/supervise.mts). It visits the registered projects one after another, in registry order rotated so that a different project
@@ -344,7 +345,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       // counts. Clean goes first, so a repair attempt jam confirmation launches never races it.
       if (result.code === 0 && !result.cancelled && !result.error && !signal.aborted) {
         try { (o.clean ?? cleanAfterPass)(p, ctx, log); } catch (e) { log(`clean ${project.name}: failed: ${(e as Error).message}`); }
-        if (maintenanceOK) await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall,
+        if (maintenanceOK) await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall, node:config.node,path:config.path,signal,
           pauseReason: () => {
             const current = readRegistry(p).projects.find(x => x.root === root);
             return !current ? 'Project is no longer registered.' : !current.schedule?.enabled ? 'Project scheduling is paused or not opted in.' : undefined;

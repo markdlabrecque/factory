@@ -1,4 +1,5 @@
 // Follow-up status reprojects pause, ownership, budget and delivery facts without trusting stale snapshots or writing.
+// Preparation status is separate from preserved attempt history and budget counts.
 // Missing/changed continuation dependencies require operator review.
 // #149: missing or edited shared dependency evaluation invalidates recovery review.
 // #150: proof and delivery dependency omissions/edits invalidate recovery review.
@@ -18,7 +19,7 @@ import { admissionFile, emptyAdmission, keyFor, ownerOf, withAdmission } from '.
 import { paths } from '../src/paths.mts';
 import { readReview, recoveryCopyProblem, WORKFLOW } from '../src/recovery-review.mts';
 import { addProject, mutate } from '../src/projects.mts';
-import { beginAttempt, finishAttempt, observePass, readRecovery, recoveryFile } from '../src/recovery-state.mts';
+import { beginAttempt, finishAttempt, observePass, readRecovery, recoveryFile, mutateRecovery } from '../src/recovery-state.mts';
 import { recovery } from '../src/commands/recovery.mts';
 import { status } from '../src/commands/status.mts';
 import { logs } from '../src/commands/logs.mts';
@@ -119,6 +120,14 @@ test('factory status summarizes recovery; --json carries it', async t => {
   const data = JSON.parse(out());
   assert.equal(data.recovery.episode.tickets[0], 12);
   assert.equal(data.recovery.attempts[0].result, 'unresolved');
+});
+
+test('preparation refusal remains actionable in status without replacing historical outcomes or budget',async t=>{
+  const {p,root,jam,out,clear}=fixture(t);jam();const before=readRecovery(p,root);
+  mutateRecovery(p,root,s=>{s.preparation={at:'2026-11-12T10:29:00Z',ticket:12,state:'held',code:'unknown-dependency',scope:'project',reason:'Tracker read unavailable; retry when access is restored'};return {write:true,value:undefined};});
+  await recovery(p,'status',{cwd:root,now});assert.match(out(),/Preparation: #12 unknown-dependency \(project\): Tracker read unavailable/);
+  clear();await recovery(p,'status',{cwd:root,json:true});const summary=JSON.parse(out()).recovery;
+  assert.equal(summary.preparation.code,'unknown-dependency');assert.deepEqual(readRecovery(p,root).attempts,before.attempts);assert.deepEqual(readRecovery(p,root).budgets,before.budgets);
 });
 
 test('reset ends the jam and renews budgets without touching run records or launching', async t => {

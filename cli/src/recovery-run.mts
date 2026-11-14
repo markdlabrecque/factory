@@ -1,4 +1,5 @@
 // Only typed read-only ticket refusals permit another candidate. Settlement is explicit; any preparation or admission failure stops the pass.
+// Recovery requires current execution preparation after read-only local candidate screening and before ownership mutation/charge.
 // #150: carry host-recorded execution and historical implementation baseline into attempt/ownership metadata.
 // #137: tracker metadata reads TOML first, without executing legacy project configuration.
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
@@ -56,6 +57,8 @@ import type { Attempt } from './recovery-state.mts';
 import { fetchRecordedBranch, resumeTarget } from './recovery-workspace.mts';
 import type { RefusalCode } from './recovery-workspace.mts';
 import { runStateDir } from './runs.mts';
+import {validPreparation} from '../../orchestrator/recovery-analysis-contract.mts';
+import type {Preparation} from '../../orchestrator/recovery-analysis-contract.mts';
 
 /** Starts the repair process detached, its output appended to `log`; returns its pid or throws. */
 export type Spawner = (cmd: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; log: string }) => number;
@@ -78,7 +81,7 @@ export type Settled = { state: 'none' } | { state: 'running'; attempt: Attempt }
 export type Launch =
   | { ok: true; kind: 'started'; admitted: true; attempt: Attempt; pid: number; branch: string; log: string }
   | { ok: false; kind: 'ticket-refused'; admitted: false; code: RefusalCode; reason: string }
-  | { ok: false; kind: 'project-stopped'; admitted: false; code: string; reason: string }
+  | { ok: false; kind: 'project-stopped'; admitted: false; code: string; reason: string; scope?:'ticket'|'project' }
   | { ok: false; kind: 'admitted-failed'; admitted: true; attempt: Attempt; reason: string };
 
 const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
@@ -172,14 +175,43 @@ function observeSettlement(dir: string, project: string, a: Attempt, executionId
     from: 'running', to: a.result, origin: 'recovery', reasonCode: a.result === 'interrupted' ? 'process-exited' : 'unspecified' });
 }
 
-/** Start one repair attempt on `ticket`, or say why not; see the file comment. */
-export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: number; spawn?: Spawner; worktreeDir?: string; npx?: string;
+/** Read-only local screening before spending analysis time. Only proven local ticket refusals permit scanning.
+ *  Remote fetch/adoption, execution analysis and all ownership mutations happen later, for one selected target. */
+export type CandidateInspection = {ok:true} | Extract<Launch,{admitted:false}>;
+export function inspectRecoveryCandidate(p:Paths,o:Common & {ticket:number;cap?:number;worktreeDir?:string}):CandidateInspection {
+  const stop=(code:string,reason:string):CandidateInspection=>({ok:false,kind:'project-stopped',admitted:false,code,reason});
+  try {
+    const dir=o.dir??runStateDir(p),config=loadTomlConfig(join(o.root,'.sandcastle'));
+    const cap=o.cap??config?.dispatch.maxConcurrent??DEFAULT_CAP;
+    if(!Number.isSafeInteger(cap)||cap<=0)return stop('capacity-invalid','Recovery cap must be a positive safe integer');
+    const state=readRecovery(p,o.root),admission=readAdmission(dir);
+    if(runningAttempt(state)||admission.recovery[o.tracker]?.pending.length||Object.values(admission.claims).some(c=>c.project===o.tracker&&c.kind==='recovery'))
+      return stop('unsettled-recovery','Recovery admission or cleanup is unconfirmed; settle it first');
+    const problem=attemptProblem(state,o.ticket,generationOf(admission,o.tracker));if(problem)return stop('recovery-held',problem);
+    const runs=readRecoveryRuns(dir),busy=new Set([...runs.filter(inFlight).map(r=>r.key),...Object.entries(admission.claims).filter(([,c])=>claimLive(c)).map(([key])=>key)]);
+    if(busy.size>=cap)return stop('capacity',`no capacity: ${busy.size} run(s) in flight, cap ${cap}`);
+    if(runs.some(r=>r.project===o.tracker&&inFlight(r)))return stop('project-active','project has a run in flight');
+    const run=runs.find(r=>r.project===o.tracker&&r.iid===String(o.ticket));
+    if(!run||run.stage!=='stopped')return stop('candidate-changed',`#${o.ticket} has no stopped run record`);
+    if(Object.values(admission.claims).some(c=>c.project===o.tracker&&claimLive(c)))return stop('project-claimed','project has a live claim');
+    const copy=recoveryCopyProblem(p,o.root);if(copy)return stop('workflow-review',copy);
+    const identity=o.identity??trackerIdentity(o.root);if(typeof identity==='string')return stop('identity-unavailable',identity);
+    const receipt=readReceipt(receiptFile(dir,projectId(o.root,identity),String(o.ticket)));
+    const target=resumeTarget(o.root,run,{worktreeDir:o.worktreeDir,receipt});
+    if(!target.ok&&!target.remoteOnly)return {...target,admitted:false};
+    return {ok:true};
+  } catch(e){return stop('validation-uncertain',String(e));}
+}
+
+/** Start one prepared repair attempt on `ticket`, or say why not; see the file comment. */
+export function launchRecovery(p: Paths, o: Common & { ticket: number; preparation?:Preparation; cap?: number; spawn?: Spawner; worktreeDir?: string; npx?: string;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
   afterCommit?: () => void }): Launch {
   const dir = o.dir ?? runStateDir(p);
   const at = o.at ?? new Date().toISOString();
   const docker = o.docker ?? realDocker;
-  const stop = (code: string, reason: string): Launch => ({ ok: false, kind: 'project-stopped', admitted: false, code, reason });
+  const stop = (code: string, reason: string,scope:'ticket'|'project'='project'): Launch => ({ ok: false, kind: 'project-stopped', admitted: false, code, reason,scope });
+  if(!validPreparation(o.preparation)||o.preparation.state!=='ready')return stop('stale','A validated recovery preparation is required; no attempt charged');
   let committed = false;
   let admissionStarted = false;
   let id: string | undefined;
@@ -246,7 +278,7 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
   const validated = target;
   admissionStarted = true;
   const claim = claimRecovery(p, { root: o.root, tracker: o.tracker, ticket: o.ticket, pid: process.pid, at, cap: o.cap, branch: target.branch, log, dir,
-    id, container, record, expected: run, generation, episode: state.episode?.id,
+    id, container, record, preparation:o.preparation, expected: run, generation, episode: state.episode?.id,
     validate: () => {
       const changed = recoveryCopyProblem(p, o.root);
       if (changed) throw new Error(changed);
@@ -255,7 +287,7 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; cap?: num
       if (fresh.tip !== validated.tip || fresh.worktree?.path !== validated.worktree?.path) throw new Error('workspace changed before admission');
     },
     afterCommit: () => { committed = true; o.afterCommit?.(); } });
-  if (!claim.ok) return stop('admission-rejected', claim.reason);
+  if (!claim.ok) return stop(claim.code ?? 'admission-rejected', claim.reason,claim.scope);
   const key = keyFor(String(o.ticket), o.tracker);
   const seq = claim.attempt.seq;
   const npx = o.npx ?? (existsSync(resolve(dirname(process.execPath), 'npx')) ? resolve(dirname(process.execPath), 'npx') : 'npx');

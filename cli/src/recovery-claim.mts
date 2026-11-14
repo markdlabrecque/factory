@@ -16,11 +16,15 @@
 // Either all of step 2 is committed or nothing is. A crash after it leaves a recovery claim that only the launcher's
 // settle step releases (cli/src/recovery-run.mts, after the attempt's exact container is confirmed gone); an error
 // after it is thrown, never refunded. Nothing here launches, signals or reads the tracker.
+// Exact preparation identity is checked under admission/publication locks before an attempt is charged.
+import {executionManifestFile,readinessProblem} from './recovery-readiness.mts';
+import type {ReadinessRefusal} from './recovery-readiness.mts';
+import type {Preparation,PreparationCode} from '../../orchestrator/recovery-analysis-contract.mts';
 import { join } from 'node:path';
 import { readdirSync, readFileSync } from 'node:fs';
 import type { RunState } from '../../board/board.mts';
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
-import { generationOf, keyFor, withAdmission } from '../../board/admission.mts';
+import { generationOf, keyFor, withAdmission, withAdmissionLock } from '../../board/admission.mts';
 import type { AdmissionTx } from '../../board/admission.mts';
 import { admitRun, readRuns, writeRecord } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
@@ -31,7 +35,7 @@ import { runStateDir } from './runs.mts';
 /** The dispatcher's default cap (SELECT.maxConcurrent in orchestrator/dispatch.mts). */
 export const DEFAULT_CAP = 3;
 
-export type RecoveryClaim = { ok: true; attempt: Attempt; token: string } | { ok: false; reason: string };
+export type RecoveryClaim = { ok: true; attempt: Attempt; token: string } | { ok: false; reason: string; code?: PreparationCode; scope?: 'ticket'|'project' };
 
 /** Apply the charges of attempts `tracker`'s admission record admitted but the recovery record of `root` never got
  *  (inside withAdmission). Each is recorded once, by UUID, and then cleared from `pending`. */
@@ -68,6 +72,7 @@ export const recoveryWork = (r: RunState) => JSON.stringify([r.iid, r.project, r
 /** Claim capacity, ticket and project ownership for one repair attempt by process `pid`, or nothing. `tracker` is the
  *  project's TRACKER.project, the name its run records carry; `id` the attempt's UUID. */
 export function claimRecovery(p: Paths, o: { root: string; tracker: string; ticket: number; pid: number; at: string; id: string;
+  preparation?: Preparation;
   cap?: number; branch?: string; log?: string; dir?: string; container?: string; record?: string;
   expected?: RunState; generation?: number; episode?: string; validate?: () => void;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
@@ -77,6 +82,9 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
   if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('Recovery cap must be a positive safe integer');
   const dir = o.dir ?? runStateDir(p);
   return withAdmission(dir, tx => {
+    let entered=false;
+    try { return withAdmissionLock(`${executionManifestFile(dir,o.tracker,o.ticket)}.publication`, () => {
+    entered=true;
     replayAdmitted(p, tx, o.root, o.tracker);
     const generation = generationOf(tx.state, o.tracker);
     const problem = attemptProblem(readRecovery(p, o.root), o.ticket, generation);
@@ -86,6 +94,7 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
     const before = readRecoveryRuns(dir).find(r => r.project === o.tracker && r.iid === String(o.ticket));
     if (!before || before.stage !== 'stopped') return { ok: false, reason: `#${o.ticket} already has a run in flight or is no longer stopped (${before?.stage ?? 'missing'})` };
     if (o.expected && recoveryWork(before) !== recoveryWork(o.expected)) return { ok: false, reason: 'candidate recorded work changed before admission' };
+    let readinessRefused:ReadinessRefusal|undefined;
     const a = admitRun(tx, dir, {
       iid: String(o.ticket), pid: o.pid, cap, project: o.tracker, kind: 'recovery', attempt: o.id,
       also: current => {
@@ -98,10 +107,12 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
           throw new Error('candidate recorded work changed before admission');
         }
         if (o.generation !== undefined && generation !== o.generation) throw new Error('project generation changed before admission');
+        const readiness=readinessProblem({...o,dir},current);
+        if(readiness){readinessRefused=readiness;throw new Error(readiness.reason);}
         o.validate?.();
       },
     });
-    if (!a.ok) return a;
+    if (!a.ok) return readinessRefused ? {...a,...readinessRefused} : a;
     const branch = o.branch ?? a.current?.branch;
     const r = tx.state.recovery[o.tracker] ??= { admitted: 0, pending: [] };
     r.admitted++;
@@ -119,5 +130,9 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
       recovery: { attempt: attempt.seq, id: o.id, ...(c ? { from: { stage: c.stage, note: c.note, stageSince: c.stageSince } } : {}) },
     });
     return { ok: true, attempt, token: a.token };
+    },0); } catch(e) {
+      if(entered)throw e;
+      return {ok:false,code:'ownership',scope:'project',reason:`Execution manifest publication ownership unavailable: ${e}`};
+    }
   });
 }

@@ -3,6 +3,8 @@
 // `npx tsx .sandcastle/main.mts --recover`, so no real npx, tsx or agent runs. Jam confirmation (afterPass), settling and
 // launching (recovery-run.mts) are the real ones; docker is whatever `docker` is first on PATH (the test's stub). Run it
 // with the systemctl stub first on PATH; it never reaches a real service manager.
+// Preparation is a synthetic offline boundary; launcher/admission still validate its exact local manifest/base.
+import {preparedFixture} from '../prepared-fixture.mts';
 import { paths } from '../../src/paths.mts';
 import { scheduleBackend } from '../../src/platform/scheduler.mts';
 import { tick, tickExitCode } from '../../src/commands/tick.mts';
@@ -13,4 +15,4 @@ const abort = new AbortController();
 for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => abort.abort());
 const npx = process.env.RECOVERY_NPX!;
 process.exitCode = tickExitCode(await tick(p, { backend: scheduleBackend(p), signal: abort.signal,
-  recovery: (q, o) => afterPass(q, { ...o, launch: (r, x) => launchRecovery(r, { ...x, npx }) }) }));
+  recovery: (q, o) => afterPass(q, { ...o, prepare:async (_p,x) => preparedFixture(x), launch: (r, x) => launchRecovery(r, { ...x, npx }) }) }));
