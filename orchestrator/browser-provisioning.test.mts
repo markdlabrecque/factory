@@ -1,4 +1,5 @@
-// Exercise the production browser probe, forced process-group timeout and cleanup diagnostics with fixture-owned runtimes, including the current Node executable.
+// Exercise the production browser probe with fixture-owned runtimes. Poll for delivered SIGKILL before asserting exit,
+// and clean up every recorded descendant even if an assertion fails on a constrained CI runner.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
@@ -41,8 +42,13 @@ for (const mode of ['ok', 'cli', 'module', 'launch', 'dom', 'cleanup']) test(`pr
     assert.doesNotMatch(log, /preflight OK/);
   }
 });
-test('timeout awaits forced termination of a SIGTERM-ignoring probe and descendant', {timeout:10000}, async () => {
+test('timeout awaits forced termination of a SIGTERM-ignoring probe and descendant', {timeout:10000}, async t => {
   const f = fixture('hang');
+  t.after(() => {
+    for (const name of ['probe.pid', 'child.pid']) {
+      try { process.kill(Number(readFileSync(join(f.dir, name), 'utf8')), 'SIGKILL'); } catch { /* not started or gone */ }
+    }
+  });
   const start = Date.now();
   const result = await browserPreflight(f, f.dir, 2000);
   assert.match(result!, /provisioning failure/);
@@ -50,11 +56,14 @@ test('timeout awaits forced termination of a SIGTERM-ignoring probe and descenda
   for (const name of ['probe.pid', 'child.pid']) {
     const pid = Number(readFileSync(join(f.dir, name), 'utf8'));
     // Orphaned zombies may remain until container init reaps them; they cannot execute.
-    let live = false;
-    try { live = !/^.*\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    if (live) { try { process.kill(pid, 'SIGKILL'); } catch {} }
-    assert.equal(live, false, `${name} must not survive preflight refusal`);
+    const live = () => {
+      try { return !/^.*\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return false; }
+    };
+    // The timeout process can exit before the kernel schedules every SIGKILL recipient, especially on two CPUs.
+    const deadline = Date.now() + 1000;
+    while (live() && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+    assert.equal(live(), false, `${name} must not survive preflight refusal`);
   }
 });
 test('timeout, rejection and log failure refuse verification', async () => {
