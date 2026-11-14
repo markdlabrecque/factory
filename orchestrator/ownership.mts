@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+// #150: preserve the host-recorded implementation baseline with ownership identity.
 // Ownership receipts (slice four, #75): what Factory itself created for a ticket, written before it creates anything, so
 // a later repair can tell its own branch and worktree apart from anyone else's after a crash. One file per ticket,
 // `<stateDir>/ownership/<projectId>/<iid>.json` (folders 0700, file 0600, temp file + fsync + rename), where
@@ -30,6 +31,7 @@ export interface Receipt {
   runId: string;
   creationIntent: { branch: boolean; worktree: boolean; at: string };
   branchSha?: string;
+  implementationBaseSha?: string;
   worktreeAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -58,6 +60,7 @@ export function readReceipt(file: string): Receipt | null {
   const ok = d?.version === 1 && [d.projectId, d.projectRoot, d.gitCommonDir, d.ticket, d.branch, d.worktreePath, d.runId, d.createdAt, d.updatedAt].every(str)
     && (d.base === undefined || typeof d.base === "string") && typeof d.creationIntent?.branch === "boolean"
     && typeof d.creationIntent.worktree === "boolean" && str(d.creationIntent.at)
+    && (d.implementationBaseSha === undefined || /^[0-9a-f]{40,64}$/.test(d.implementationBaseSha))
     && (d.branchSha === undefined || str(d.branchSha)) && (d.worktreeAt === undefined || str(d.worktreeAt));
   if (!ok) throw new Error(`Ownership receipt ${file} has an unsupported shape or version; Factory will not overwrite it.`);
   return d;
@@ -89,11 +92,12 @@ export function writeReceipt(file: string, r: Receipt): void {
 
 /** Write the receipt for a ticket's branch and worktree before creating either. */
 export function recordIntent(stateDir: string, o: { root: string; tracker: TrackerIdentity; ticket: string; branch: string; base?: string;
-  runId: string; branchToCreate: boolean; worktreeToCreate: boolean; at?: string; branchSha?: string; worktreeAt?: string }): string {
+  runId: string; branchToCreate: boolean; worktreeToCreate: boolean; at?: string; branchSha?: string; worktreeAt?: string; implementationBaseSha?: string }): string {
   const id = projectId(o.root, o.tracker);
   const file = receiptFile(stateDir, id, o.ticket);
   const at = o.at ?? new Date().toISOString();
   writeReceipt(file, {
+    ...(o.implementationBaseSha ? { implementationBaseSha: o.implementationBaseSha } : {}),
     version: 1, projectId: id, projectRoot: real(o.root), gitCommonDir: gitCommonDir(o.root), ticket: o.ticket, branch: o.branch,
     ...(o.base ? { base: o.base } : {}), worktreePath: canonicalWorktree(o.root, o.branch), runId: o.runId,
     creationIntent: { branch: o.branchToCreate, worktree: o.worktreeToCreate, at }, ...(o.branchSha ? { branchSha: o.branchSha } : {}),

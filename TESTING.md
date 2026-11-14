@@ -1,4 +1,5 @@
 <!-- Factory test policy: fixture-owned boundaries and runtimes for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
+<!-- #150: proof/entrypoint tests use synthetic evidence and stub all agent/container/tracker boundaries. -->
 # Testing
 
 ## Run the tests
@@ -59,6 +60,25 @@ The absence of systemd, a user bus, journald, a cgroup setup or a real timer in 
 Evidence must name the stubbed boundary, commands run, assertions made and any untested Factory behavior. Do not claim real timer or journal observations from stub output. Do not turn an earlier INCONCLUSIVE verdict into PASS without reviewing the tested revision against this boundary.
 
 This policy does not waive tests of Factory's own scheduling, concurrency, ownership, failure recovery or process lifecycle. It does not excuse an unrelated missing prerequisite or silently extend the trusted boundary to other dependencies.
+
+## Verified delivery regression tests
+
+Run the changed verification boundary first:
+
+```sh
+node --test orchestrator/verification*.test.mts orchestrator/handoff.test.mts orchestrator/delivery.test.mts orchestrator/recovery*.test.mts
+```
+
+`verification.test.mts` checks schema, evidence paths and frozen proof integrity with
+synthetic bytes, not real browser media. `verification-entrypoint.test.mts` runs the
+scaffolded ordinary entrypoint against real temporary Git repositories and fixture-owned
+SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
+branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
+Recovery entrypoint/runner tests exercise the same proof lifecycle with isolated
+private Git metadata and teardown. Adapter tests assert fresh host authorization after
+CI and before SHA-guarded merge. These prove host integrity and command contracts;
+they do not classify semantic acceptance coverage, validate video codecs or promise
+atomicity between an external ticket edit and a tracker merge.
 
 ## Optional browser image smoke test
 

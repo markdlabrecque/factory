@@ -240,6 +240,7 @@ function checks(pr: string): { name: string; bucket: string }[] {
  * checks within `noCiMinutes`, or still pending at `waitMinutes` parks it for a person. Failed CI
  * retains the existing draft-and-fail behaviour. Required checks must pass, not skip.
  */
+// #150: fresh host authorization after CI, immediately before the SHA-guarded merge.
 export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered> {
   const note = d.autoMerge
     ? "Sandcastle merges this PR once every CI check on this commit has passed. It is never merged without CI."
@@ -272,6 +273,13 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
     spawnSync("gh", ["pr", "ready", url, "--undo"], { stdio: "ignore" });
     spawnSync("gh", ["pr", "comment", url, "--body", `Sandcastle did not merge this PR: ${why}. Marked as a draft.`], { stdio: "ignore" });
     throw new Error(`Not merged: ${why} on ${d.branch}. PR left open as a draft: ${url}`);
+  }
+  let blocked: string | undefined;
+  try { blocked = typeof d.beforeMerge === 'function' ? await d.beforeMerge() : 'host authorization missing'; }
+  catch (e) { blocked = `host authorization unknown: ${(e as Error).message}`; }
+  if (blocked !== undefined) {
+    gh(['pr', 'comment', url, '--body', `Sandcastle did not merge this PR: ${blocked}. Waiting for a person.`]);
+    return { url, merged: false, blocked };
   }
   try {
     gh(["pr", "merge", url, `--${MERGE.method}`, "--match-head-commit", d.sha]);

@@ -1,11 +1,11 @@
+// #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
 // #137: authoritative TOML sandbox/CI settings; legacy CONFIG remains unchanged only when absent.
 // #126: resolve description models once at attempt start; refresh never changes that model.
 import { recordModelResolution } from "./assessment.mts";
 import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -19,6 +19,8 @@ import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest, readManifest } from "./manifests.mts";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
+import { assertProofStoreOutsideMounts, createProof, sha256 } from './verification.mts';
+import type { Provenance } from './verification.mts';
 import type { Host } from "./handoff.mts";
 import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
 import { createOwnedSandbox, gitWorkspace, readDotEnv, realProc } from "./recovery-sandbox.mts";
@@ -169,6 +171,16 @@ const ticket = [tracker.viewText(Number(iid)), parentText(startTicket)].filter(B
 // The version of the ticket this run builds from; compared again before the MR opens.
 const ticketHash = (t = withParent(tracker.ticket(Number(iid)))) => ({ hash: unitHash(t, tracker.notes(Number(iid))), description: t.description });
 const startVersion = ticketHash(startTicket);
+assertProofStoreOutsideMounts(stateDir(), [resolve('.sandcastle/evidence'), resolve('.sandcastle/sandbox'), resolve('.sandcastle/worktrees'), resolve('.sandcastle/recovery')]);
+const provenance = async (sandbox: { exec(cmd: string): Promise<{ stdout: string }> }, container: string): Promise<Provenance> => {
+  // The SDK/host supplies this identity; never trust an agent-controlled hostname or report.
+  const name = container;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) throw Error('Cannot establish verifier container identity');
+  const imageId = sh('docker', ['container', 'inspect', '--format', '{{.Image}}', name]);
+  return { imageId, nodeVersion: (await sandbox.exec('node --version')).stdout.trim(),
+    code: Object.fromEntries(['main.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
+    settings: { image: IMAGE, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: CONFIG.ciWaitMinutes, noPipelineMinutes: CONFIG.noPipelineMinutes } };
+};
 const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);
 const slug = String(issue.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "");
 // ---- recovery mode: one admitted repair attempt (recovery.mts) ------------------------------------------------
@@ -184,6 +196,7 @@ if (recovering) {
   const admitted = claimOf();
   const owned = (() => { try { const r = relative(realpathSync(".sandcastle/worktrees"), realpathSync(rec.worktree)); return !!r && !r.startsWith("..") && !r.includes("/"); } catch { return false; } })();
   if (rec.iid !== iid || rec.seq !== seq || rec.project !== PROJECT || rec.base !== base || rec.phase !== "claimed"
+    || rec.executionId !== claimed?.executionId || rec.implementationBaseSha !== claimed?.implementationBaseSha
     || claimed?.recovery?.attempt !== seq || claimed.recovery.id !== rec.id || claimed.branch !== rec.branch || !owned
     || admitted?.kind !== "recovery" || admitted.attempt !== rec.id || admitted.token !== claimed.claim) {
     fail(`#${iid} is not claimed for recovery attempt ${seq} (${rec.id}); only Factory's recovery launcher starts --recover, once per attempt.`);
@@ -195,7 +208,9 @@ if (recovering) {
     fail(`#${iid}: recovery refused: ${(e as Error).message}`);
   }
   sh("git", ["fetch", "origin", base]);
-  const baseSha = sh("git", ["rev-parse", `origin/${base}`]);
+  if (!claimed?.executionId) fail('Legacy run has no execution identity; historical PASS cannot authorize recovery delivery.');
+  const baseSha = claimed?.implementationBaseSha;
+  if (!baseSha || spawnSync('git', ['cat-file', '-e', `${baseSha}^{commit}`]).status !== 0) fail('Missing recorded implementation baseline; preserve this branch for explicit human review or fresh verification with an established historical baseline.');
   currentIid = iid;
   setStage(iid, { stage: "setup", note: `recovery attempt ${seq}: setting up`, base, starting: undefined });
   setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
@@ -207,7 +222,9 @@ if (recovering) {
   const recheck = () => {
     const now = withParent(tracker.ticket(Number(iid)));
     if (now.state === "closed") return `#${iid} is closed`;
-    if ((now.labels ?? []).includes(LABELS.needsHuman)) return `#${iid} is labelled ${LABELS.needsHuman}`;
+    if (!['open', 'opened'].includes(now.state ?? '')) return `#${iid}'s eligibility is unknown`;
+    if (tracker.parentOf(Number(iid)) !== parentIid) return 'Ticket parent changed';
+    if ((now.labels ?? []).some(l => l === LABELS.needsHuman || LABELS.exclude.includes(l))) return `#${iid} is excluded or needs human review`;
     if (ticketHash(now).hash !== startVersion.hash) return `#${iid}'s requirements changed since the attempt started`;
     const r = readRuns().find((x) => x.project === PROJECT && x.iid === iid);
     const c = claimOf();
@@ -231,6 +248,8 @@ if (recovering) {
   };
   const result = await runRecoveryAttempt({
     root: process.cwd(), record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
+    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash },
+    provenance: (sb) => provenance(sb, rec.container),
     promptArgs: {
       ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
       EVIDENCE_DIR: evidenceBox, CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
@@ -277,10 +296,12 @@ try {
   fail(`#${iid} not started: ${(e as Error).message}`);
 }
 currentIid = iid;
+const executionId = claimToken ?? randomUUID();
 setStage(iid, {
   title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
-  implementationModel: implementerModel,
-  evidenceDir: resolve(".sandcastle/evidence", iid), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
+  implementationModel: implementerModel, implementationBaseSha: baseSha, verification: undefined,
+  executionId,
+  evidenceDir: resolve('.sandcastle/evidence', iid, executionId), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
   parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
   starting: undefined, // this run now owns the record the dispatcher reserved at launch
 });
@@ -289,8 +310,8 @@ setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
 console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${baseSha.slice(0, 8)}), implementer ${implementerModel}`);
 
 // ---- sandbox: one container + one site install shared by both runs -------------
-const evidenceHost = resolve(".sandcastle/evidence", iid);
-const evidenceBox = `/home/agent/evidence/${iid}`;
+const evidenceHost = resolve('.sandcastle/evidence', iid, executionId);
+const evidenceBox = `/home/agent/evidence/${iid}/${executionId}`;
 mkdirSync(evidenceHost, { recursive: true });
 mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true }); // mounted read-only at /opt/sandcastle; empty unless the project adds helpers
 // A relaunched ticket (it was waiting on a blocker) must not pick up the last run's reports.
@@ -317,7 +338,7 @@ function readBlocked(): ImplementerBlocker[] | undefined {
 const tracked = TRACKER as { kind?: string; host?: string; gitlabHost?: string; project: string };
 const receipt = recordIntent(stateDir(), {
   root: process.cwd(), tracker: { kind: tracked.kind ?? "gitlab", host: tracked.host ?? tracked.gitlabHost ?? "", project: PROJECT },
-  ticket: iid, branch, base, runId: claimToken ?? randomUUID(), branchToCreate: true, worktreeToCreate: true,
+  ticket: iid, branch, base, implementationBaseSha: baseSha, runId: claimToken ?? randomUUID(), branchToCreate: true, worktreeToCreate: true,
 });
 const sandbox = await createSandbox({
   branch,
@@ -325,7 +346,7 @@ const sandbox = await createSandbox({
   sandbox: docker({
     imageName: IMAGE,
     mounts: [
-      { hostPath: resolve(".sandcastle/evidence"), sandboxPath: "/home/agent/evidence" },
+      { hostPath: evidenceHost, sandboxPath: evidenceBox },
       { hostPath: resolve(".sandcastle/sandbox"), sandboxPath: "/opt/sandcastle", readonly: true },
     ],
   }),
@@ -337,7 +358,9 @@ const sandbox = await createSandbox({
 });
 
 try {
-  fillReceipt(receipt, { branchSha: sh("git", ["rev-parse", `refs/heads/${branch}`]), worktreeAt: new Date().toISOString() });
+  const actualBase = sh('git', ['rev-parse', `refs/heads/${branch}`]);
+  if (actualBase !== baseSha) { await sandbox.close(); fail('Branch creation baseline changed; refusing unverifiable implementation'); }
+  fillReceipt(receipt, { branchSha: actualBase, worktreeAt: new Date().toISOString() });
 } catch (e) {
   console.warn(`Ownership receipt ${receipt} not filled in (${(e as Error).message}); a later repair reconciles it with Git.`);
 }
@@ -353,6 +376,22 @@ const promptArgs = {
   CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
 };
 
+const recheck = () => {
+  const nowParent = tracker.parentOf(Number(iid));
+  if (nowParent !== parentIid) return 'Ticket parent changed; fresh verification required';
+  const now = withParent(tracker.ticket(Number(iid)));
+  if (now.state === 'closed') return `#${iid} is closed`;
+  if (!['open', 'opened'].includes(now.state ?? '')) return `#${iid}'s eligibility is unknown`;
+  if ((now.labels ?? []).some(l => l === LABELS.needsHuman || LABELS.exclude.includes(l))) return 'Ticket is excluded or needs human review';
+  if (ticketHash(now).hash !== startVersion.hash) return 'Requirements changed; preserve code and evidence for fresh verification or explicit human review';
+  const record = readRuns().find(r => r.project === PROJECT && r.iid === iid);
+  if (record?.executionId !== executionId || record.branch !== branch) return 'Execution identity changed';
+  if (record.claim !== claimToken || readAdmission(stateDir()).claims[keyFor(iid!, PROJECT)]?.token !== claimToken) return 'Expected launch claim is no longer held';
+  return undefined;
+};
+let verifiedProvenance: Provenance | undefined;
+let verifierContainer = '';
+let verificationRefusal: string | undefined;
 let tip = "";
 let blockers: ImplementerBlocker[] | undefined;
 try {
@@ -371,15 +410,28 @@ try {
     if (!blockers) fail(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
   } else {
     tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+    if ([baseSha, tip].some(sha => spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`]).status !== 0)) throw Error('Missing historical verification baseline or tip Git object; verifier not started. Preserve work for restored-baseline verification or explicit human review.');
     // The real diff replaces the predicted footprint for conflict checks from now on.
     patchManifest(PROJECT, Number(iid), { actualFootprint: sh("git", ["diff", "--name-only", `${baseSha}...${tip}`]).split("\n").filter(Boolean) });
 
     // ---- 2. verifier (handoff.mts) -----------------------------------------------
-    const refused = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs, tip });
-    if (refused) fail(refused);
+    verificationRefusal = recheck();
+    if (!verificationRefusal) {
+      sh('git', ['cat-file', '-e', `${baseSha}^{commit}`]);
+      sh('git', ['cat-file', '-e', `${tip}^{commit}`]);
+      verifierContainer = sandbox.sandboxId ?? '';
+      verifiedProvenance = await provenance(sandbox, verifierContainer);
+      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs, tip });
+    }
   }
 } finally {
   await sandbox.close();
+}
+
+if (verificationRefusal) fail(verificationRefusal);
+if (tip) {
+  const gone = spawnSync('docker', ['container', 'inspect', verifierContainer], { encoding: 'utf8' });
+  if (gone.status === null || gone.status === 0 || !/No such (object|container)/i.test(gone.stderr)) fail('Verifier container teardown is unconfirmed; not freezing or delivering evidence');
 }
 
 // ---- implementer reported a missing prerequisite ----------------------------------
@@ -423,25 +475,14 @@ if (blockers) {
 
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
 setStage(iid, { stage: "posting" });
-// Ticket edited since the run started? Still finish (you review every MR), but say so.
-const endVersion = ticketHash();
-let staleNote = "";
-if (endVersion.hash !== startVersion.hash) {
-  const dir = mkdtempSync(resolve(tmpdir(), "sandcastle-"));
-  writeFileSync(resolve(dir, "built-from"), `${startVersion.description}\n`);
-  writeFileSync(resolve(dir, "current"), `${endVersion.description}\n`);
-  const diff = spawnSync("git", ["diff", "--no-index", "--no-color", "built-from", "current"], { cwd: dir, encoding: "utf8" }).stdout.trim();
-  rmSync(dir, { recursive: true, force: true });
-  staleNote = [
-    "**Built from an older version of the ticket.** It was edited while this run was in progress, so check the change against the current text.",
-    diff ? `Description changes:\n\n\`\`\`diff\n${diff}\n\`\`\`` : "The description is unchanged; the title or comments changed.",
-  ].join("\n\n");
-  setStage(iid, { note: "built from an older ticket version" });
-}
+const identity = { project: PROJECT, ticket: iid, executionId, branch, base, baseline: baseSha, tip, requirementsHash: startVersion.hash };
+const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!);
+setStage(iid, { verification: { id: frozen.id, tip, requirementsHash: startVersion.hash } });
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
 const outcome = await postAndDeliver({
   iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid, origin: { kind: "implemented" },
-  staleNote, noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
+  identity, proofId: frozen.id, state: stateDir(), recheck,
+  noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
 }, host);
 if (!outcome.ok) fail(outcome.reason);
 finished = true;

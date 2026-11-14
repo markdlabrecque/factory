@@ -1,4 +1,4 @@
-// Auto-merge adapter contract against recording CLI fixtures. No tracker/network access.
+// #150: auto-merge adapters require fresh authorization after CI; recording fixtures use no tracker/network.
 // Covers required gates, SHA guards, MR-first CI, manual delivery, and GitHub's failed-CI exception.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ const setup = (scenario = {}, required: string[] = []) => {
   MERGE.requiredChecks = required;
 };
 const calls = () => readFileSync(join(dir, "calls"), "utf8").trim().split("\n").filter(Boolean).map((s) => JSON.parse(s) as string[]);
-const delivery = { branch: "topic", base: "main", sha: "tip", title: "title", body: (s: string) => s, onStage: () => {}, waitMinutes: 1, noCiMinutes: 0, autoMerge: true };
+const delivery = { beforeMerge: () => undefined, branch: "topic", base: "main", sha: "tip", title: "title", body: (s: string) => s, onStage: () => {}, waitMinutes: 1, noCiMinutes: 0, autoMerge: true };
 
 // Advance the deadlines without a real 15-second sleep.
 let now = 0;
@@ -101,6 +101,30 @@ test("GitHub rejected SHA-guarded merge comments and parks, without drafting", a
   assert.ok(calls().some((c) => c.includes("comment")));
   assert.ok(!calls().some((c) => c.includes("--undo")));
 });
+
+for (const [name, adapter] of [['GitHub', github], ['GitLab', gitlab]] as const) {
+  test(`${name} authorizes only after checks pass; refusal or unknown never merges`, async () => {
+    for (const mode of ['refuse', 'throw', 'missing']) {
+      setup({}, ['test']);
+      let authorized = false;
+      const result = await adapter.deliver({ ...delivery, beforeMerge: mode === 'missing' ? undefined as any : () => {
+        authorized = true;
+        assert.ok(calls().some(a => a.includes('checks') || a.some(x => x.includes('/pipelines/5/jobs'))), 'CI precedes authorization');
+        assert.ok(!calls().some(a => a.includes('merge') || a.some(x => x.endsWith('/merge'))));
+        if (mode === 'throw') throw Error('tracker read failed');
+        return 'requirements changed';
+      } });
+      assert.equal(authorized, mode !== 'missing');
+      assert.equal(result.merged, false);
+      assert.ok(result.blocked);
+      assert.ok(!calls().some(a => a.includes('merge') || a.some(x => x.endsWith('/merge'))));
+    }
+    setup({ checks: [], noPipeline: true }, ['test']);
+    let called = false;
+    await adapter.deliver({ ...delivery, beforeMerge: () => { called = true; return undefined; } });
+    assert.equal(called, false);
+  });
+}
 
 test("GitHub manual delivery opens only, regardless of required checks", async () => {
   setup({}, ["missing"]);

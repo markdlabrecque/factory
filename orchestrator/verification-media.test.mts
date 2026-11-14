@@ -1,12 +1,13 @@
+// #150: publication uses frozen proof copies, never mutable attempt files.
 // Verification posting contract for canonical adapters and Factory-generated workflows.
 // Real handoff and tracker code, isolated command stubs. No network, credentials, agents or services.
 // This tests gh's invocation contract, not GitHub rendering, which was live-tested in the media research.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildAssets } from '../cli/src/scaffold.mts';
 
@@ -31,8 +32,10 @@ for (const generated of [false, true]) for (const kind of ['github', 'gitlab']) 
       assert.doesNotMatch(post.body, /undefined|sandcastle-evidence/);
       if (kind === 'github') {
         assert.deepEqual(post.args.slice(0, 7), ['issue', 'comment', '7', '-R', generated ? 'test/media' : 'islandhealth/public-site', '--body-file', '-']);
-        assert.deepEqual(post.args.slice(7), f.media.flatMap(p => ['--attach', p]));
-        for (const p of f.media) assert.ok(post.body.includes(`](<${p}>)`));
+        const attachments = post.args.slice(7).filter((_, i) => i % 2 === 1);
+        assert.deepEqual(attachments.map(p => basename(p)), f.media.map(p => basename(p)));
+        assert.ok(attachments.every(p => p.includes('/proof-state/verification/')));
+        for (const p of attachments) assert.ok(post.body.includes(`](<${p}>)`));
         assert.match(post.body, /\n\n!\[before.webm\]\([^\n]+\)\n\n/);
         assert.equal(result.calls.length, 1, 'no git, separate comment, or alternate hosting');
       } else {
@@ -49,7 +52,7 @@ for (const generated of [false, true]) {
     const f = fixture(t, generated, 'github');
     const result = run(f, { origin: 'implemented', verdict: 'PASS', noPush: false });
     assert.equal(result.out.ok, true);
-    assert.deepEqual(result.delivery, [['push', '-u', 'origin', '7-fix'], ['rev-parse', '7-fix'], 'deliver']);
+    assert.deepEqual(result.delivery, [['rev-parse', 'refs/heads/7-fix'], ['push', 'origin', `${'b'.repeat(40)}:refs/heads/7-fix`], ['ls-remote', '--heads', 'origin', 'refs/heads/7-fix'], 'deliver']);
     assert.equal(result.calls.length, 1);
     assert.deepEqual(result.stages.map(s => s.stage), ['posting', undefined, 'pushing', 'done']);
   });
@@ -112,16 +115,26 @@ if (${JSON.stringify(cmd)} === 'glab') {
   return { root, bin, evidence, media, log, modules, generated, kind };
 }
 function run(f: ReturnType<typeof fixture>, o: { origin: string; verdict: string; noPush: boolean; failure?: string }) {
+  // Policy 1 fixture: media is listed explicitly, with command assertions for command PASS.
+  writeFileSync(join(f.evidence, 'check.txt'), 'checked');
+  writeFileSync(join(f.evidence, 'verification.json'), JSON.stringify({ version: 1, verdict: o.verdict, changeKind: 'feature', evidenceKind: 'command', interactive: false,
+    criteria: [{ requirement: 'Fixture', result: o.verdict.toLowerCase(), evidence: ['check.txt'] }], limitations: [],
+    artifacts: [{ path: 'check.txt', kind: 'command-output', phase: 'check' }, ...f.media.filter(p => existsSync(p)).map(p => ({ path: basename(p), kind: p.endsWith('.png') ? 'image' : 'video', phase: basename(p).startsWith('before') ? 'before' : 'after' }))] }));
   writeFileSync(join(f.evidence, 'verdict.md'), `VERDICT: ${o.verdict}\nSynthetic verification summary`);
   const url = (name: string) => JSON.stringify(pathToFileURL(join(f.modules, name)).href);
   const driver = join(f.root, 'driver.mts');
   writeFileSync(driver, `
+// #150: publish only synthetic media frozen by the host proof writer.
+import { createProof } from ${url('verification.mts')};
 import { postAndDeliver } from ${url('handoff.mts')};
 import { postVerification } from ${url(f.generated ? 'tracker.mts' : `tracker.${f.kind}.mts`)};
 const stages = [], delivery = [];
-const out = await postAndDeliver({ iid: '7', project: 'test/media', branch: '7-fix', base: 'main', baseSha: 'base00001', tip: 'tip000001', title: 'Fix', evidenceHost: ${JSON.stringify(f.evidence)}, origin: {kind: ${JSON.stringify(o.origin)}, attempt: 2}, noPush: ${o.noPush}, ciWaitMinutes: 1, noCiMinutes: 1, autoMerge: false }, {
+const identity = { project: 'test/media', ticket: '7', executionId: 'execution', branch: '7-fix', base: 'main', baseline: 'a'.repeat(40), tip: 'b'.repeat(40), requirementsHash: 'c'.repeat(64) };
+const state = ${JSON.stringify(join(f.root, 'proof-state'))};
+const frozen = createProof(state, ${JSON.stringify(f.evidence)}, identity, { imageId: 'sha256:'+'d'.repeat(64), nodeVersion: 'v22', code: {}, settings: {} });
+const out = await postAndDeliver({ identity, state, proofId: frozen.id, recheck: () => undefined, iid: '7', project: 'test/media', branch: '7-fix', base: 'main', baseSha: identity.baseline, tip: identity.tip, title: 'Fix', evidenceHost: ${JSON.stringify(f.evidence)}, origin: {kind: ${JSON.stringify(o.origin)}, attempt: 2}, noPush: ${o.noPush}, ciWaitMinutes: 1, noCiMinutes: 1, autoMerge: false }, {
   setStage: (_iid, s) => stages.push(s), readRuns: () => [], live: () => false,
-  git: a => { delivery.push(a); return 'tip000001'; }, gitStatus: () => { throw Error('unexpected gitStatus'); },
+  git: a => { delivery.push(a); return identity.tip; }, gitStatus: () => { throw Error('unexpected gitStatus'); },
   tracker: { postVerification, openMrBranches: () => new Set(), deliver: async () => { delivery.push('deliver'); return {url: 'https://example.test/pr/1', merged: false}; } }
 });
 console.log(JSON.stringify({ out, stages, delivery }));

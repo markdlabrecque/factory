@@ -1,3 +1,4 @@
+// #150: entrypoint uses recorded historical baseline and structured synthetic verification.
 // #126: normal runs snapshot the description model; invalid direct starts queue before Git/container work.
 // Guarded entrypoint smoke test (#74): a claimed, stopped ticket goes from Factory's real launcher (cli/src/recovery-run.mts)
 // through the real scaffolded `.sandcastle/main.mts --recover` (built by cli/src/scaffold.mts, which ships prompt.recover.md,
@@ -8,6 +9,7 @@
 // with a local bare repository as origin. Unknown gh/docker calls exit non-zero. Since #75 it also checks the admission
 // claim outlives the repair process until settled, the adopted ownership receipt, the prerequisite recheck against a
 // written ticket analysis, and that a dispatched normal run adopts its claim and writes its receipt before Sandcastle.
+import { verificationCommand } from './fixtures/verification.mts';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -32,7 +34,8 @@ const ID = "5b1f3c2a-9d8e-4f70-8a6b-0c1d2e3f4a5b";
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 
-test("a claimed stopped ticket is repaired, independently verified and delivered through the real main.mts --recover", async (t) => {
+for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'dirty', 'legacy-prompt']) {
+ test(`real recovery entrypoint: ${scenario}`, async (t) => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-entry-")));
   const children: ChildProcess[] = [];
   t.after(() => { for (const c of children) c.kill("SIGKILL"); rmSync(home, { recursive: true, force: true }); });
@@ -79,9 +82,14 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   mkdirSync(fake);
   const env = {
     PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake,
+    FAKE_MUTATION: scenario === 'closed-before' ? 'closed' : scenario === 'title' ? 'title' : '',
     FAKE_REPAIR: `printf 'fixed\\n' > fix.txt && git add -A && git commit -qm repair && printf '%s' '${JSON.stringify({ cause: "missing fix", filesChanged: ["fix.txt", "untracked.txt"], tests: [{ command: "true", result: "pass" }], canProceed: true, remainingBlockers: [], requiresHostUpdate: false })}' > "$EVIDENCE/recovery-report.json" && echo ok > "$EVIDENCE/recovery-report.md"`,
-    FAKE_VERIFY: `printf 'VERDICT: PASS\\nverified\\n' > "$EVIDENCE/verdict.md"`,
+    FAKE_VERIFY: `printf 'VERDICT: PASS\\nverified\\n' > "$EVIDENCE/verdict.md" && ${verificationCommand()}`,
   };
+  if (scenario === 'closed-before') env.FAKE_REPAIR += ` && touch '${join(fake, 'changed')}'`;
+  if (scenario === 'title') env.FAKE_VERIFY += ` && touch '${join(fake, 'changed')}'`;
+  if (scenario === 'dirty') env.FAKE_VERIFY += ` && echo dirty > app.txt`;
+  if (scenario === 'legacy-prompt') env.FAKE_VERIFY = `printf 'VERDICT: PASS\\nlegacy\\n' > "$EVIDENCE/verdict.md"`;
   const docker: Docker = (args) => {
     const r = spawnSync(join(bin, "docker"), args, { encoding: "utf8", env: { ...process.env, ...env } });
     return { status: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -91,7 +99,7 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   const p = paths(home);
   recordReview(p, root, { by: "init" });
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
-    patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main", evidenceDir: evidence } });
+    patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main", implementationBaseSha: scenario === 'missing-baseline' ? undefined : git(root, 'rev-parse', 'main'), evidenceDir: evidence } });
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
   observePass(p, root, { pass: "b", at: at(5), jam: [7] });
 
@@ -116,6 +124,15 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
   assert.equal(launch.ok, true, (launch as { reason?: string }).reason);
   const [code] = await once(child, "exit");
   const log = readFileSync(join(root, ".sandcastle/logs/recover-7.log"), "utf8");
+  if (scenario !== 'pass') {
+    assert.notEqual(code, 0, log);
+    assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
+    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
+    assert.match(log, expected);
+    const calls = existsSync(join(fake, 'docker.jsonl')) ? readFileSync(join(fake, 'docker.jsonl'), 'utf8') : '';
+    if (scenario === 'missing-baseline') assert.ok(!calls.includes('"run"'), log);
+    return;
+  }
   assert.equal(code, 0, log);
 
   const record = (readAttemptRecord(join(p.recovery, "attempts", `${ID}.json`)) as { record: AttemptRecord }).record;
@@ -204,4 +221,5 @@ test("a claimed stopped ticket is repaired, independently verified and delivered
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model: opus' } });
   assert.match(fixed.stderr, /docker\(\) must not be used/);
   assert.equal(readRuns(state).find(r => r.iid === '10')?.implementationModel, 'pi-claude-subscription/claude-opus-5-5');
-});
+ });
+}

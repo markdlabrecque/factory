@@ -2,13 +2,17 @@
 // GitHub tracker adapter fixture for one open ticket (#7, description model), records every call to
 // $FAKE_STATE/gh.jsonl (with stdin for comments and PR bodies), and exits 2 on anything else.
 // $FAKE_MERGED_PR (a JSON PR) is the answer to merged-PR lookups (#87); label writes (tracker.advance) succeed.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
 const state = process.env.FAKE_STATE;
 const stdin = args.includes("--body-file") ? readFileSync(0, "utf8") : undefined;
 appendFileSync(join(state, "gh.jsonl"), JSON.stringify({ args, stdin }) + "\n");
 const ticket = { number: 7, title: "Fix login", body: process.env.FAKE_TICKET_BODY ?? "**Model:** Sonnet 5.5\n\nThe login form must work.", state: "OPEN", labels: [{ name: "model:sonnet" }] };
+// #150: mutate live requirements only at an explicitly signalled fixture boundary.
+const changed = existsSync(join(state, 'changed'));
+if (changed && process.env.FAKE_MUTATION === 'title') ticket.title += ' edited';
+if (changed && process.env.FAKE_MUTATION === 'closed') ticket.state = 'CLOSED';
 const out = (v) => { process.stdout.write(typeof v === "string" ? v : JSON.stringify(v)); process.exit(0); };
 const [a, b] = args;
 if (a === "label" && b === "list") out(["ready-for-agent", "blocked", "needs-human", "wontfix", "merged", "model:sonnet", "model:opus"].map((name) => ({ name })));

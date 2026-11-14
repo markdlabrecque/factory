@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+// #150: a repair binds fresh proof to its execution, historical baseline and exact attempt UUID after teardown.
 import { postAndDeliver, runVerifier } from "./handoff.mts";
+import { createProof } from './verification.mts';
+import type { Provenance } from './verification.mts';
 import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 
 // One bounded recovery attempt (slice four, #60, continued by #74): the production lifecycle main.mts's
@@ -60,6 +63,8 @@ export interface AttemptRecord {
   branch: string;
   base: string;
   startSha: string;
+  implementationBaseSha?: string;
+  executionId?: string;
   worktree: string;
   container: string;
   evidence: string;
@@ -99,6 +104,8 @@ export function readAttemptRecord(file: string): { ok: true; record: AttemptReco
   }
   const ok = d?.version === 1 && typeof d.id === "string" && ID.test(d.id) && Number.isInteger(d.seq) && d.seq > 0
     && [d.project, d.iid, d.branch, d.base, d.startSha, d.worktree, d.container, d.evidence, d.gitDir, d.createdAt, d.updatedAt].every(str)
+    && (d.executionId === undefined || str(d.executionId))
+    && (d.implementationBaseSha === undefined || /^[0-9a-f]{40,64}$/.test(d.implementationBaseSha))
     && d.container === containerFor(d.id) && PHASES.includes(d.phase) && Array.isArray(d.events)
     && (d.outcome === undefined || OUTCOMES.includes(d.outcome)) && (d.intended === undefined || OUTCOMES.includes(d.intended));
   return ok ? { ok: true, record: d } : { ok: false, reason: `attempt record ${file} has an unsupported shape or version` };
@@ -255,6 +262,8 @@ export interface RecoveryContext {
   model: string;
   title: string;
   baseSha: string;
+  proof: { state: string; executionId: string; requirementsHash: string };
+  provenance: (sandbox: RecoverySandbox) => Promise<Provenance>;
   parentIid?: number;
   promptArgs: Record<string, string>;
   previousRun: unknown;
@@ -294,6 +303,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   const preserved = `work preserved on ${rec.branch} and in ${rec.worktree}; evidence in ${rec.evidence}`;
   let sandbox: RecoverySandbox | undefined;
   let created = false;
+  let verifiedProvenance: Provenance | undefined;
 
   const finish = (outcome: RecoveryOutcome, reason: string): AttemptResult => {
     let cleanupPending = false;
@@ -326,7 +336,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   if (existsSync(dir)) return finish("ownership-refused", `attempt evidence folder ${dir} already exists; an attempt never reuses one`);
   mkdirSync(join(dir, "input"), { recursive: true });
   writeFileSync(join(dir, "recovery-context.json"), JSON.stringify({ attempt: rec.seq, attemptId: rec.id, ticket: rec.iid, branch: rec.branch,
-    base: rec.base, baseSha: ctx.baseSha, startSha: rec.startSha, diagnostics: ctx.diagnostics ?? null }, null, 2) + "\n");
+    base: rec.base, baseSha: ctx.baseSha, implementationBaseSha: rec.implementationBaseSha, executionId: rec.executionId, startSha: rec.startSha, diagnostics: ctx.diagnostics ?? null }, null, 2) + "\n");
   writeFileSync(join(dir, "previous-run.json"), JSON.stringify(ctx.previousRun ?? null, null, 2) + "\n");
   mkdirSync(join(dir, "previous-logs"), { recursive: true });
   for (const log of ctx.logs) if (existsSync(log) && statSync(log).isFile()) copyFileSync(log, join(dir, "previous-logs", basename(log)));
@@ -395,6 +405,9 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
     if (stale) return finish("unresolved", `not verifying: ${stale}; ${preserved}`);
     if (ctx.cancel.aborted) return finish("interrupted", `cancelled before verification; ${preserved}`);
     save("verifying", { tip });
+    if (!ctx.proof?.executionId || !ctx.baseSha) return finish('unresolved', 'Missing execution identity or historical implementation baseline; fresh verification requires host-owned identity');
+    if (!/^[0-9a-f]{40,64}$/.test(ctx.baseSha) || (await sb.exec(`git cat-file -e ${ctx.baseSha}^{commit} && git cat-file -e ${tip}^{commit}`)).exitCode !== 0) return finish('unresolved', 'Missing recorded historical baseline or tip Git object; verifier not started');
+    verifiedProvenance = await ctx.provenance(sb);
     const refused = await runVerifier(sb, { setStage: (_iid, patch) => deps.setStage(patch) },
       { iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), promptArgs: { ...ctx.promptArgs, TIP_SHA: tip }, tip, promptFile: VERIFY_PROMPT });
     rec.verifier = { tip, ...(refused ? { refused } : {}) };
@@ -425,7 +438,12 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   save("delivering");
   let out: Outcome;
   try {
+    const identity = { project: rec.project, ticket: rec.iid, executionId: ctx.proof.executionId, attemptId: rec.id, branch: rec.branch,
+      base: rec.base, baseline: ctx.baseSha, tip, requirementsHash: ctx.proof.requirementsHash };
+    const frozen = createProof(ctx.proof.state, dir, identity, verifiedProvenance!);
+    deps.setStage({ verification: { id: frozen.id, tip, requirementsHash: ctx.proof.requirementsHash } });
     out = await postAndDeliver({
+      identity, proofId: frozen.id, state: ctx.proof.state, recheck: () => ctx.cancel.aborted ? 'Attempt cancelled' : deps.recheck('deliver'),
       iid: rec.iid, project: rec.project, branch: rec.branch, base: rec.base, baseSha: ctx.baseSha, tip, title: ctx.title, evidenceHost: dir,
       parentIid: ctx.parentIid, origin: { kind: "repaired", attempt: rec.seq }, staleNote: "",
       ciWaitMinutes: ctx.delivery.ciWaitMinutes, noCiMinutes: ctx.delivery.noCiMinutes, autoMerge: ctx.delivery.autoMerge,

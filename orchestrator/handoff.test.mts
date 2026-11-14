@@ -1,6 +1,9 @@
+// #150: every successful handoff fixture supplies a frozen host proof, not legacy verdict prose.
+import { createProof } from './verification.mts';
+import { fixtureProvenance, writeVerification } from './fixtures/verification.mts';
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
@@ -21,7 +24,7 @@ function fakeHost(record: Rec = {}) {
     setStage: (_iid, patch) => Object.assign(record, patch),
     readRuns: () => [],
     live: () => true,
-    git: (args) => { calls.push(`git ${args.join(" ")}`); return "abc123"; },
+    git: (args) => { calls.push(`git ${args.join(" ")}`); return 'b'.repeat(40); },
     gitStatus: () => ({ status: 0, stdout: "" }),
     tracker: {
       postVerification: (_iid, _tip, files, body) => { calls.push("comment"); bodies.push(body(files.map((f) => `![media](${f})`))); },
@@ -32,13 +35,21 @@ function fakeHost(record: Rec = {}) {
   return { host, calls, bodies, record };
 }
 const sandbox = (o: { writes?: string; commits?: number; dir: string }): VerifierSandbox => ({
-  run: async () => { if (o.writes) writeFileSync(join(o.dir, "verdict.md"), o.writes); return { commits: Array(o.commits ?? 0).fill("c") }; },
+  run: async () => { if (o.writes) { writeFileSync(join(o.dir, "verdict.md"), o.writes); writeVerification(o.dir, o.writes.split('\n')[0].slice(9)); } return { commits: Array(o.commits ?? 0).fill("c") }; },
   exec: async (cmd) => ({ stdout: cmd.startsWith("git rev-parse") ? "tip0000001\n" : cmd.startsWith("command -v playwright ") ? "browser preflight OK\n" : "" }),
 });
-const handoff = (dir: string, extra: Partial<Handoff> = {}): Handoff => ({
-  iid: "7", project: "o/r", branch: "7-fix", base: "main", baseSha: "base000001", tip: "tip0000001", title: "Fix", evidenceHost: dir,
-  origin: { kind: "repaired", attempt: 2 }, ciWaitMinutes: 1, noCiMinutes: 1, autoMerge: false, ...extra,
-});
+const handoff = (dir: string, extra: Partial<Handoff> = {}): Handoff => {
+  const state = mkdtempSync(join(tmpdir(), 'handoff-state-'));
+  const identity = { project: 'o/r', ticket: '7', executionId: 'execution', branch: '7-fix', base: 'main', baseline: 'a'.repeat(40), tip: 'b'.repeat(40), requirementsHash: 'c'.repeat(64) };
+  let proofId = '00000000-0000-0000-0000-000000000000';
+  if (existsSync(join(dir, 'verdict.md'))) {
+    writeVerification(dir, requireVerdict(dir));
+    proofId = createProof(state, dir, identity, fixtureProvenance).id;
+  }
+  return { iid: '7', project: 'o/r', branch: '7-fix', base: 'main', baseSha: identity.baseline, tip: identity.tip, title: 'Fix', evidenceHost: dir,
+    identity, state, proofId, recheck: () => undefined, origin: { kind: 'repaired', attempt: 2 }, ciWaitMinutes: 1, noCiMinutes: 1, autoMerge: false, ...extra };
+};
+const requireVerdict = (dir: string) => readFileSync(join(dir, 'verdict.md'), 'utf8').split('\n')[0].slice(9);
 
 test("a repaired branch is independently verified, posted and delivered like an implemented one", async () => {
   const dir = mkdtempSync(join(tmpdir(), "handoff-"));
@@ -47,7 +58,7 @@ test("a repaired branch is independently verified, posted and delivered like an 
   assert.equal(await runVerifier(sandbox({ dir, writes: "VERDICT: PASS\nlooks right" }), host, { iid: "7", evidenceHost: dir, agent: {}, promptArgs: {}, tip: "tip0000001" }), undefined);
   const out = await postAndDeliver(handoff(dir), host);
   assert.deepEqual(out, { ok: true, verdict: "PASS", pushed: true, url: "https://example.test/pr/9", merged: false });
-  assert.deepEqual(calls, ["comment", "git push -u origin 7-fix", "git rev-parse 7-fix", "deliver"]);
+  assert.deepEqual(calls, ['comment', 'git rev-parse refs/heads/7-fix', `git push origin ${'b'.repeat(40)}:refs/heads/7-fix`, 'git ls-remote --heads origin refs/heads/7-fix', 'deliver']);
   assert.match(bodies[0], /Repaired by Factory recovery attempt 2, then verified independently/);
   assert.match(bodies[1], /Refs #7\n\nRepaired by Factory recovery attempt 2, then verified independently\. Verdict: \*\*PASS\*\*/);
   assert.equal(record.stage, "done");
@@ -91,6 +102,23 @@ test("a verifier that changes the branch, or a non-PASS verdict, stops before pu
   assert.deepEqual(calls, ["comment"], "the evidence is posted, nothing pushed");
   assert.equal(record.verdict, "FAIL");
   assert.notEqual(record.stage, "done");
+});
+
+test('branch movement, changed requirements, forged identity and remote mismatch never deliver', async () => {
+  for (const scenario of ['branch', 'requirements', 'identity', 'remote']) {
+    const dir = mkdtempSync(join(tmpdir(), 'handoff-'));
+    writeFileSync(join(dir, 'verdict.md'), 'VERDICT: PASS');
+    const h = handoff(dir);
+    const { host, calls } = fakeHost();
+    if (scenario === 'branch') host.git = args => { calls.push(`git ${args.join(' ')}`); return 'different'; };
+    if (scenario === 'requirements') h.recheck = () => 'requirements changed';
+    if (scenario === 'identity') h.identity.executionId = 'different';
+    if (scenario === 'remote') host.git = args => { calls.push(`git ${args.join(' ')}`); return args[0] === 'ls-remote' ? 'different' : h.tip; };
+    const out = await postAndDeliver(h, host);
+    assert.equal(out.ok, false);
+    assert.ok(!calls.includes('deliver'));
+    if (scenario !== 'remote') assert.ok(!calls.some(c => c.startsWith('git push')));
+  }
 });
 
 test("prerequisite holds: an unmet dependency holds, and so does not knowing", () => {
