@@ -196,7 +196,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   const sc = join(root, '.sandcastle');
   writeFileSync(join(sc, 'config.mts'), 'export const TRACKER = {\n  kind: "github",\n  host: "github.com",\n  project: "site/site",\n};\n');
   // The complete recovery workflow (board.mts keeps what the scheduler's copy check needs), reviewed by a person.
-  writeFileSync(join(sc, 'main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
+  writeFileSync(join(sc, 'main.mts'), 'const CONFIG = { image: "fixture" }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
   // #137: stand-in workflows review the complete runtime/offline-parser inventory too.
   for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts' && f !== 'dispatch.mts')) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
   // The ticket's preserved work: a commit and uncommitted changes in its Factory worktree, and earlier evidence.
@@ -348,7 +348,7 @@ test('paused maintenance settles competing delivery; later eligible passes recov
   const root = repo(p, 'site', { script: DISPATCH.replace('"tickets":[7]', '"tickets":[7,9]') });
   const sc = join(root, '.sandcastle');
   writeFileSync(join(sc, 'config.mts'), 'export const TRACKER = {\n  kind: "github",\n  host: "github.com",\n  project: "site/site",\n};\n');
-  writeFileSync(join(sc, 'main.mts'), '"attempt-record": { type: "string" }\n');
+  writeFileSync(join(sc, 'main.mts'), 'const CONFIG = { image: "fixture" };\n"attempt-record": { type: "string" }\n');
   for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts' && f !== 'dispatch.mts')) {
     mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), '');
   }

@@ -19,11 +19,12 @@ function fixture(mode: string) {
   if (mode !== 'cli') writeFileSync(join(bin, 'playwright'), '#!/bin/sh\nexit 0\n', {mode:0o755});
   if (mode !== 'module') {
     mkdirSync(join(modules, 'playwright'));
-    const hanging = mode === 'hang' ? `
+    const hanging = mode === 'hang' || mode === 'leader' ? `
       process.on('SIGTERM', () => {});
       require('fs').writeFileSync(${JSON.stringify(join(dir, 'probe.pid'))}, String(process.pid));
-      require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(join(dir, 'child.pid'))}, String(process.pid)); setInterval(() => {}, 1000);`)}], {stdio:'inherit'});
-      await new Promise(() => {});` : '';
+      const descendant = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`)}], {stdio:'inherit'});
+      require('fs').writeFileSync(${JSON.stringify(join(dir, 'child.pid'))}, String(descendant.pid));
+      ${mode === 'leader' ? 'process.exit(0);' : 'await new Promise(() => {});'}` : '';
     writeFileSync(join(modules, 'playwright', 'index.js'), `exports.chromium={launch:async()=>{${mode === 'launch' ? 'throw Error("secret")' : ''};return {newPage:async()=>{${hanging};return {setContent:async()=>{},locator:()=>({textContent:async()=>${JSON.stringify(mode === 'dom' ? 'wrong' : 'ready')}})}},close:async()=>{${mode === 'cleanup' ? 'throw Error("secret cleanup")' : ''};require('fs').writeFileSync(${JSON.stringify(join(dir, 'closed'))},'yes')}}}};`);
   }
   const exec = (cmd: string) => new Promise<{stdout:string; stderr:string; exitCode:number}>(resolve => {
@@ -50,8 +51,8 @@ for (const mode of ['ok', 'cli', 'module', 'launch', 'dom', 'cleanup']) test(`pr
     assert.doesNotMatch(log, /preflight OK/);
   }
 });
-test('timeout awaits forced termination of a SIGTERM-ignoring probe and descendant', {timeout:10000}, async t => {
-  const f = fixture('hang');
+for (const mode of ['hang', 'leader']) test(`${mode} awaits forced termination of a SIGTERM-ignoring probe and descendant`, {timeout:10000}, async t => {
+  const f = fixture(mode);
   t.after(() => {
     for (const name of ['probe.pid', 'child.pid']) {
       try {
@@ -81,6 +82,15 @@ test('timeout, rejection and log failure refuse verification', async () => {
   const f = fixture('ok');
   assert.match((await browserPreflight({exec: async () => { throw Error('secret'); }}, f.dir))!, /provisioning failure/);
   assert.match((await browserPreflight(f, join(f.dir, 'missing')))!, /evidence could not be recorded/);
+});
+test('setup and verifier logs stay distinct and both execute the actual probe', async () => {
+  const f = fixture('ok');
+  assert.equal(await browserPreflight(f, f.dir, 30000, 'setup-browser-preflight.log'), undefined);
+  const setup = readFileSync(join(f.dir, 'setup-browser-preflight.log'), 'utf8');
+  assert.equal(existsSync(join(f.dir, 'browser-preflight.log')), false);
+  assert.equal(await browserPreflight(f, f.dir), undefined);
+  assert.equal(readFileSync(join(f.dir, 'setup-browser-preflight.log'), 'utf8'), setup);
+  assert.equal(readFileSync(join(f.dir, 'browser-preflight.log'), 'utf8'), 'browser preflight OK\n');
 });
 test('failure clears stale verdict and delivery before refusing without running verifier', async () => {
   const f = fixture('cli'); writeFileSync(join(f.dir, 'verdict.md'), 'PASS');

@@ -2,6 +2,7 @@
 // #153: continuation observer and checkpoint schema ship together in every copied scaffold.
 // #149: fresh/copied installs ship dependencies.mts through the shared update source list.
 // Local execution events ship with board imports; existing copies require a workflow review after upgrading.
+// Shared browser/image readiness ships with new copies and update scaffoldSources; customized copies stay protected.
 // #150: verification.mts is shipped and included automatically in update scaffoldSources.
 // #137: new scaffolds ship versioned TOML and offline parser; legacy reruns never opt in implicitly.
 // Scaffold writer: builds the allowlisted `.sandcastle/` assets from the installed app (never from cwd) and
@@ -35,7 +36,7 @@ export type PlannedFile = { path: string; content: string | Buffer; mode: number
 // Preparation and its import-safe protocol ship together; old copies must upgrade and be reviewed before recovery.
 export const FROM_ORCHESTRATOR = ['recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'delivery-followup.mts', 'verification.mts', // #150: structured proof is a required runtime dependency.
-  'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
+  'capabilities.mts', 'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];
 // journal.mts is a mandatory board projection import, including in project dispatcher copies.

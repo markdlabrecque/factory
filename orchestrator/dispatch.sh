@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Readiness probes only the exact owned local image, then pins startup; no implementation starts on a readiness hold.
 # #137: validate authoritative TOML before credentials/Docker/npm; scalar argv/stdout bridge, no eval.
 # One dispatcher pass with the defaults, against the branch checked out in the current directory.
 #   .sandcastle/dispatch.sh [--dry-run] [--max N] [--whole-issues]
@@ -140,6 +141,10 @@ if [ -n "$problem" ]; then
   echo "$problem; building it (takes a few minutes)."
   npx sandcastle docker build-image --image-name "$image"
 fi
+
+# No agent installation or dispatch starts until the isolated image capability probe succeeds.
+ready_image="$(node .sandcastle/capabilities.mts "$image" "$(id -u)" "$(id -g)" "$SANDCASTLE_STATE_DIR")" || fail "image readiness failed; provision/rebuild the configured image before retrying."
+export FACTORY_READY_IMAGE="$ready_image"
 
 # The pass imports @ai-hero/sandcastle from the project's node_modules. Install when it's missing or
 # older than the lockfile; quick enough to run under the timer too.

@@ -1,4 +1,4 @@
-// #150: execute scaffolded normal main with real Git and fixture-owned agent/Docker/tracker boundaries.
+// Execute normal readiness/setup/verifier gates with real Git and fixture-owned agent/Docker/tracker boundaries.
 // No Docker daemon, credentials, browser installation, tracker or service manager is used.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,8 +8,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { buildAssets } from '../cli/src/scaffold.mts';
 import { fixtureReport } from './fixtures/verification.mts';
+import { proofRoot } from './verification.mts';
 
-for (const scenario of ['pass', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt']) {
+for (const scenario of ['pass', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt', 'image-bad', 'setup-bad', 'image-changed']) {
   test(`normal entrypoint ${scenario}: only the proven tip may leave`, t => {
     const home = mkdtempSync(join(tmpdir(), 'verification-entry-'));
     t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -38,13 +39,14 @@ export async function createSandbox(o) {
   writeFileSync(join(fake, 'live'), 'yes');
   return {worktreePath:worktree, sandboxId:'fixture-container',
     exec: async cmd => {
-      if (cmd.startsWith('command -v playwright')) return {stdout:'browser preflight OK',exitCode:0};
+      if (cmd.startsWith('command -v playwright')) return scenario === 'setup-bad' ? {stdout:'browser preflight failed: Chromium launch',exitCode:1} : {stdout:'browser preflight OK',exitCode:0};
       if (cmd === 'hostname') return {stdout:'fixture-container',exitCode:0};
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
     run: async o => {
       const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.sandcastle/evidence'));
       if (o.name === 'implementer') {
+        writeFileSync(join(fake,'implementer-started'),'yes');
         writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
         if (scenario === 'missing-baseline') rmSync(join(root,'.git/objects',${JSON.stringify(baseline.slice(0, 2))},${JSON.stringify(baseline.slice(2))}));
         return {commits:['implementation']};
@@ -83,13 +85,18 @@ const ticket =`).replace("const out = (v)", `if (changed) {
 }
 const out = (v)`).replace('parent: null,', "parent: changed && scenario === 'parent' ? {number:9} : null,").replace('out([[]]);', "out([[...(changed && scenario === 'comment' ? [{body:'Human added requirements',system:false}] : [])]]);"), { mode: 0o755 });
     writeFileSync(join(bin, 'docker'), `#!${process.execPath}
-const fs = require('node:fs'), path = require('node:path'), a = process.argv.slice(2);
+import * as fs from 'node:fs'; import * as path from 'node:path';
+import { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, 'fixtures/capability-docker.mjs'))};
+const a = process.argv.slice(2);
+const out = capabilityDocker(a, process.env.FAKE_STATE);
+if (out !== undefined) { console.log(out); process.exit(0); }
 if (a[0] !== 'container' || a[1] !== 'inspect') process.exit(90);
 if (!fs.existsSync(path.join(process.env.FAKE_STATE,'live'))) { console.error('No such container'); process.exit(1); }
-console.log('sha256:'+'d'.repeat(64));
+console.log('sha256:'+'a'.repeat(64));
 `, { mode: 0o755 });
     const result = spawnSync(process.execPath, ['.sandcastle/main.mts', '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state }, timeout: 15000,
+      cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state,
+        FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
     if (scenario === 'pass') {
@@ -99,6 +106,21 @@ console.log('sha256:'+'d'.repeat(64));
       assert.equal(run.verification.tip, tip);
       assert.equal(run.implementationBaseSha, baseline);
       assert.ok(run.executionId);
+      const proof = JSON.parse(readFileSync(join(proofRoot(state, 'owner/repo', '7', run.verification.id), 'proof.json'), 'utf8'));
+      assert.equal(proof.provenance.imageId, `sha256:${'a'.repeat(64)}`);
+      assert.equal(proof.provenance.settings.image, 'img', 'configured settings stay comparable for existing-delivery continuation');
+    } else if (['image-bad', 'setup-bad', 'image-changed'].includes(scenario)) {
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.equal(existsSync(join(fake, 'implementer-started')), false);
+      assert.equal(existsSync(join(fake, 'verifier-started')), false);
+      assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '');
+      assert.match(result.stdout + result.stderr, scenario === 'image-changed' ? /Image changed after readiness/ : /readiness hold|provisioning failure/);
+      if (scenario === 'setup-bad') {
+        const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+        assert.match(readFileSync(join(run.evidenceDir, 'setup-browser-preflight.log'), 'utf8'), /Chromium launch/);
+        assert.equal(existsSync(join(run.evidenceDir, 'browser-preflight.log')), false);
+        assert.equal(existsSync(join(fake, 'live')), false, 'actual sandbox is closed after setup refusal');
+      }
     } else {
       assert.notEqual(result.status, 0, result.stdout + result.stderr);
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', result.stdout + result.stderr);

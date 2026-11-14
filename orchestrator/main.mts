@@ -1,3 +1,5 @@
+// Image readiness pins sandbox construction to immutable input; setup and independent verifier probes remain mandatory.
+import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 // #153: proofs also bind continuation, checkpoint and admission code; upgrades require fresh verification.
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
 // #137: authoritative TOML sandbox/CI settings; legacy CONFIG remains unchanged only when absent.
@@ -78,7 +80,6 @@ const CONFIG = effectiveConfig ? effectiveConfig.config : {
   // factory:sandbox-setup:end
 };
 const PROJECT = TRACKER.project;
-const IMAGE = CONFIG.image;
 // What the container's Pi run needs depends on its model's provider (models.mts). pi-claude-subscription (the
 // personal config) needs nothing from here: the image's Claude Code CLI logs in with CLAUDE_CODE_OAUTH_TOKEN,
 // which Sandcastle reads from .sandcastle/.env itself. Only an `openai/` model (a custom config) gets a
@@ -106,6 +107,15 @@ function fail(msg: string): never {
 process.on("exit", (code) => {
   if (currentIid && !finished) setStage(currentIid, { stage: "stopped", note: lastMessage || `exited with code ${code}` });
 });
+const readinessCancel = new AbortController();
+const cancelReadiness = () => readinessCancel.abort();
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelReadiness);
+const readiness = await checkImageCapabilities({ image: CONFIG.image, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
+  stateDir: stateDir(), signal: readinessCancel.signal });
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelReadiness);
+if (!readiness.ok) fail(readiness.reason);
+if (process.env.FACTORY_READY_IMAGE && process.env.FACTORY_READY_IMAGE !== readiness.imageId) fail('Image changed after readiness admission; preserve work and retry with the reviewed image.');
+const IMAGE = readiness.imageId;
 function sh(cmd: string, args: string[]): string {
   return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 }
@@ -181,9 +191,10 @@ const provenance = async (sandbox: { exec(cmd: string): Promise<{ stdout: string
   const name = container;
   if (!/^[a-zA-Z0-9_.-]+$/.test(name)) throw Error('Cannot establish verifier container identity');
   const imageId = sh('docker', ['container', 'inspect', '--format', '{{.Image}}', name]);
+  if (imageId !== IMAGE) throw Error('Sandbox image differs from admitted immutable image; fresh readiness required');
   return { imageId, nodeVersion: (await sandbox.exec('node --version')).stdout.trim(),
-    code: Object.fromEntries([...(effectiveConfig ? ['factory.toml'] : ['config.mts']), 'graph.mts', 'config-read.mts', 'delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
-    settings: { image: IMAGE, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: CONFIG.ciWaitMinutes, noPipelineMinutes: CONFIG.noPipelineMinutes } };
+    code: Object.fromEntries([...(effectiveConfig ? ['factory.toml'] : ['config.mts']), 'graph.mts', 'config-read.mts', 'delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'capabilities.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
+    settings: { image: CONFIG.image, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: CONFIG.ciWaitMinutes, noPipelineMinutes: CONFIG.noPipelineMinutes } };
 };
 const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);
 const slug = String(issue.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "");
@@ -395,6 +406,9 @@ let verificationRefusal: string | undefined;
 let tip = "";
 let blockers: ImplementerBlocker[] | undefined;
 try {
+  // Custom setup may break a previously good image. This log is not verifier evidence.
+  const setupHold = await browserPreflight(sandbox, evidenceHost, 30000, 'setup-browser-preflight.log');
+  if (setupHold) { lastMessage = setupHold; throw Error(setupHold); }
   // ---- 1. implementer ----------------------------------------------------------
   setStage(iid, { stage: "implementing" });
   const impl = await sandbox.run({

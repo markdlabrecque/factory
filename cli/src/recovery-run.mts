@@ -1,5 +1,8 @@
-// Only typed read-only ticket refusals permit another candidate. Settlement is explicit; any preparation or admission failure stops the pass.
-// Recovery requires current execution preparation after read-only local candidate screening and before ownership mutation/charge.
+// Recovery requires current execution preparation and asynchronous image readiness before admission.
+// Only typed read-only ticket refusals permit scanning. Environment holds stop the pass without spending attempts.
+// Settlement stays explicit; any preparation or admission failure stops the pass.
+import { checkImageCapabilities } from '../../orchestrator/capabilities.mts';
+import { readImageConfig } from './image-config.mts';
 // #150: carry host-recorded execution and historical implementation baseline into attempt/ownership metadata.
 // #137: tracker metadata reads TOML first, without executing legacy project configuration.
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
@@ -81,7 +84,7 @@ export type Settled = { state: 'none' } | { state: 'running'; attempt: Attempt }
 export type Launch =
   | { ok: true; kind: 'started'; admitted: true; attempt: Attempt; pid: number; branch: string; log: string }
   | { ok: false; kind: 'ticket-refused'; admitted: false; code: RefusalCode; reason: string }
-  | { ok: false; kind: 'project-stopped'; admitted: false; code: string; reason: string; scope?:'ticket'|'project' }
+  | { ok: false; kind: 'project-stopped'; admitted: false; code: string; reason: string; scope?: 'ticket' | 'project' | 'environment' }
   | { ok: false; kind: 'admitted-failed'; admitted: true; attempt: Attempt; reason: string };
 
 const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.includes(r.stage);
@@ -204,18 +207,21 @@ export function inspectRecoveryCandidate(p:Paths,o:Common & {ticket:number;cap?:
 }
 
 /** Start one prepared repair attempt on `ticket`, or say why not; see the file comment. */
-export function launchRecovery(p: Paths, o: Common & { ticket: number; preparation?:Preparation; cap?: number; spawn?: Spawner; worktreeDir?: string; npx?: string;
+export async function launchRecovery(p: Paths, o: Common & { ticket: number; preparation?: Preparation; cap?: number; spawn?: Spawner; worktreeDir?: string; npx?: string;
+  signal?: AbortSignal; mayLaunch?: () => Promise<boolean>; capabilities?: typeof checkImageCapabilities;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
-  afterCommit?: () => void }): Launch {
+  afterCommit?: () => void }): Promise<Launch> {
   const dir = o.dir ?? runStateDir(p);
   const at = o.at ?? new Date().toISOString();
   const docker = o.docker ?? realDocker;
-  const stop = (code: string, reason: string,scope:'ticket'|'project'='project'): Launch => ({ ok: false, kind: 'project-stopped', admitted: false, code, reason,scope });
-  if(!validPreparation(o.preparation)||o.preparation.state!=='ready')return stop('stale','A validated recovery preparation is required; no attempt charged');
+  const stop = (code: string, reason: string, scope: 'ticket' | 'project' | 'environment' = 'project'): Launch => ({ ok: false, kind: 'project-stopped', admitted: false, code, reason, scope });
+  if (!validPreparation(o.preparation) || o.preparation.state !== 'ready') return stop('stale', 'A validated recovery preparation is required; no attempt charged');
+  const allowed = async () => !o.signal?.aborted && (!o.mayLaunch || await o.mayLaunch()) && !o.signal?.aborted;
   let committed = false;
   let admissionStarted = false;
   let id: string | undefined;
   try {
+  if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped.');
   const config = loadTomlConfig(join(o.root, '.sandcastle'));
   const cap = o.cap ?? config?.dispatch.maxConcurrent ?? DEFAULT_CAP;
   if (!Number.isSafeInteger(cap) || cap <= 0) return stop('capacity-invalid', 'Recovery cap must be a positive safe integer');
@@ -272,6 +278,14 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; preparati
     fillReceipt(receiptPath, { ...(target.reconcile.branchSha ? { branchSha: target.reconcile.branchSha } : {}), ...(target.reconcile.worktreeAt ? { worktreeAt: at } : {}) });
   }
 
+  if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped.');
+  const image = readImageConfig(o.root);
+  if (!image.ok) return stop('image-config-unknown', image.reason, 'environment');
+  const readiness = await (o.capabilities ?? checkImageCapabilities)({ image: image.image, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
+    stateDir: dir, signal: o.signal });
+  if (!readiness.ok) return stop('image-readiness', readiness.reason, 'environment');
+  if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped during readiness.');
+
   const log = join(o.root, '.sandcastle/logs', `recover-${o.ticket}.log`);
   const container = containerFor(id);
   const record = join(attemptsDir(p), `${id}.json`);
@@ -280,6 +294,9 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; preparati
   const claim = claimRecovery(p, { root: o.root, tracker: o.tracker, ticket: o.ticket, pid: process.pid, at, cap: o.cap, branch: target.branch, log, dir,
     id, container, record, preparation:o.preparation, expected: run, generation, episode: state.episode?.id,
     validate: () => {
+      if (o.signal?.aborted) throw new Error('Scheduled recovery was cancelled before admission');
+      const currentImage = readImageConfig(o.root);
+      if (!currentImage.ok || currentImage.image !== image.image) throw new Error('Image configuration changed during readiness; not admitted');
       const changed = recoveryCopyProblem(p, o.root);
       if (changed) throw new Error(changed);
       const fresh = resumeTarget(o.root, run, { worktreeDir: o.worktreeDir, receipt: readReceipt(receiptPath) });
@@ -312,7 +329,7 @@ export function launchRecovery(p: Paths, o: Common & { ticket: number; preparati
     writeAttemptRecord(record, rec);
     mkdirSync(dirname(log), { recursive: true });
     appendFileSync(log, `\n==== ${at} recovery attempt ${seq} on #${o.ticket} (${target.branch})\n`);
-    pid = (o.spawn ?? spawnDetached)(npx, args, { cwd: o.root, env: { ...process.env, SANDCASTLE_STATE_DIR: dir }, log });
+    pid = (o.spawn ?? spawnDetached)(npx, args, { cwd: o.root, env: { ...process.env, SANDCASTLE_STATE_DIR: dir, FACTORY_READY_IMAGE: readiness.imageId }, log });
   } catch (e) {
     const reason = `recovery attempt ${seq} could not start: ${(e as Error).message}`;
     patchRecord(dir, o.tracker, o.ticket, { stage: 'stopped', note: reason });

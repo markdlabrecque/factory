@@ -3,6 +3,8 @@ import { eventIdFor, observeEvent } from './execution-events.mts';
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+// Setup readiness runs before repair and does not replace the later independent verifier probe or refund admission.
+import { browserPreflight } from './capabilities.mts';
 // #150: a repair binds fresh proof to its execution, historical baseline and exact attempt UUID after teardown.
 import { postAndDeliver, runVerifier } from "./handoff.mts";
 import { createProof } from './verification.mts';
@@ -378,6 +380,10 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   }
   save("setup", { sandboxId: sandbox.id }, "container ready and set up");
   if (ctx.cancel.aborted) return finish("interrupted", `cancelled during setup; ${preserved}`);
+
+  const setupHold = await browserPreflight(sandbox, dir, 30000, 'setup-browser-preflight.log');
+  if (ctx.cancel.aborted) return finish('interrupted', `cancelled during readiness; ${preserved}`);
+  if (setupHold) return finish('failed', `${setupHold}; ${preserved}`);
 
   // 4. the repair agent, bounded from here.
   const ms = ctx.deadlineMs ?? REPAIR_DEADLINE_MS;

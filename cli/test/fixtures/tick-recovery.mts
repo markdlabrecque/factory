@@ -15,4 +15,4 @@ const abort = new AbortController();
 for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => abort.abort());
 const npx = process.env.RECOVERY_NPX!;
 process.exitCode = tickExitCode(await tick(p, { backend: scheduleBackend(p), signal: abort.signal,
-  recovery: (q, o) => afterPass(q, { ...o, prepare:async (_p,x) => preparedFixture(x), launch: (r, x) => launchRecovery(r, { ...x, npx }) }) }));
+  recovery: (q, o) => afterPass(q, { ...o, prepare:async (_p,x) => preparedFixture(x), launch: (r, x) => launchRecovery(r, { ...x, npx, capabilities: async () => ({ ok: true, imageId: `sha256:${'a'.repeat(64)}`, cached: false }) }) }) }));
