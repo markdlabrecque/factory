@@ -1,3 +1,4 @@
+// #153: scheduled children inherit trusted absolute CLI/Node authorization paths; refreshes never do.
 // One scheduler tick: the internal command `factory tick`, run by factory-tick.service on Linux (not for people to type;
 // it takes no flags), and on macOS called in-process by the launchd supervisor (commands/supervise.mts). It visits the registered projects one after another, in registry order rotated so that a different project
 // goes first each tick (rotation(), with state.json's `nextRoot`), and runs one dispatcher pass, the project's own `.sandcastle/dispatch.sh` through runDispatchSh, for each project that
@@ -52,6 +53,8 @@
 // Factory branches and their Factory-owned worktrees are removed, kept ones are logged with the reason, and remote branches are
 // never touched. It never fetches; its failures are logged and never fail the pass or the tick. A failed or cancelled
 // pass, and a read-only refresh, get no cleanup. Output goes to stdout (the journal). Exit codes: 0 done, 1 a project failed or state unknown, 143 cancelled.
+// #153: scheduled children receive this CLI's absolute entrypoint and saved Node for read-only merge authorization.
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -119,13 +122,14 @@ export function schedulingFrom(s: ScheduleStatus): Scheduling {
 
 /** The environment a scheduled pass gets: the caller's, with the saved PATH, shared state and the scheduled marker. */
 export function scheduledEnv(p: Paths, config: ScheduleConfig, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...base, PATH: config.path, SANDCASTLE_STATE_DIR: p.state, FACTORY_SCHEDULED: '1' };
+  return { ...base, PATH: config.path, SANDCASTLE_STATE_DIR: p.state, FACTORY_SCHEDULED: '1',
+    FACTORY_CLI_ENTRYPOINT: fileURLToPath(new URL('../../bin/factory.mts', import.meta.url)), FACTORY_SCHEDULER_NODE: config.node };
 }
 
 /** The environment a read-only refresh gets: the saved PATH and shared state, without the scheduled-pass markers. */
 export function refreshEnv(p: Paths, config: ScheduleConfig, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env = { ...base, PATH: config.path, SANDCASTLE_STATE_DIR: p.state };
-  for (const k of ['FACTORY_SCHEDULED', 'FACTORY_PASS_ID', 'FACTORY_JAM_REPORT', 'FACTORY_REFRESH_KEY', 'FACTORY_REFRESH_ATTEMPT']) delete env[k];
+  for (const k of ['FACTORY_SCHEDULED', 'FACTORY_CLI_ENTRYPOINT', 'FACTORY_SCHEDULER_NODE', 'FACTORY_PASS_ID', 'FACTORY_JAM_REPORT', 'FACTORY_REFRESH_KEY', 'FACTORY_REFRESH_ATTEMPT']) delete env[k];
   return env;
 }
 /** The arguments of a whole-project read-only refresh against `base` (dispatch.mts --refresh-only, #93). */

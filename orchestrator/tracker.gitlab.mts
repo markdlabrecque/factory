@@ -1,10 +1,11 @@
+// #153: existing MR continuation reads exact-head pipeline/jobs and performs no create/post/rerun/draft mutation.
 // #137: validated TOML selection; confidential=false is explicitly non-confidential, not unrestricted.
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
 import { ciGate, missingChecks } from "./ci.mts";
 import type { Child, Note } from "./graph.mts";
-import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
+import type { Delivered, Delivery, DeliveryIdentity, DeliveryObservation, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
 // GitLab adapter for tracker.mts, via `glab` on the host. Units of work can be GitLab Tasks (the
 // "Child items" on an issue). Manual delivery waits for branch CI. Auto delivery opens an MR first,
@@ -17,8 +18,15 @@ import type { Delivered, Delivery, MergedPr, ReadyTicket, Select, Ticket } from 
 const { gitlabHost: HOST = "", projectId: ID = 0 } = TRACKER as { gitlabHost?: string; projectId?: number };
 const enc = encodeURIComponent;
 
+let deliveryDeadline: number | undefined;
+export function setDeliveryDeadline(deadline: number | undefined): void { deliveryDeadline = deadline; }
+function deliveryTimeout(): number | undefined {
+  if (deliveryDeadline === undefined) return undefined;
+  const left = deliveryDeadline - Date.now(); if (left <= 0) throw Error('delivery deadline');
+  return Math.min(10000, left);
+}
 function glab(args: string[], input?: string): string {
-  return execFileSync("glab", args, { encoding: "utf8", env: { ...process.env, GITLAB_HOST: HOST }, input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
+  return execFileSync("glab", args, { encoding: "utf8", timeout: deliveryTimeout(), killSignal: 'SIGKILL', env: { ...process.env, GITLAB_HOST: HOST }, input, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
 }
 
 export const currentUsername = () => JSON.parse(glab(['api', 'user', '--hostname', HOST])).username as string;
@@ -183,7 +191,11 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
     "--yes", "--no-editor",
   ]);
   console.log(out);
-  return { url: out.split(/\s+/).find((w) => w.startsWith("http")) ?? "", merged: false };
+  const url = out.split(/\s+/).find(w => w.startsWith('http')) ?? '';
+  const number = Number(url.match(/\/merge_requests\/(\d+)$/)?.[1]);
+  if (Number.isSafeInteger(number) && number > 0 && url === `https://${HOST}/${TRACKER.project}/-/merge_requests/${number}`) d.onOpened?.({ kind: 'gitlab', host: HOST, repository: TRACKER.project, projectId: ID, number, url, branch: d.branch, base: d.base, sha: d.sha });
+  else if (d.onOpened) throw Error('Unresolved MR creation identity; do not replay creation');
+  return { url, merged: false };
 }
 
 /** #150: open first; same-SHA CI and fresh host authorization precede the SHA-guarded merge. */
@@ -195,48 +207,77 @@ async function autoDeliver(d: Delivery & { waitMinutes: number; noCiMinutes: num
   ])) as { iid: number; web_url: string };
   const url = mr.web_url;
   console.log(url);
+  const identity: DeliveryIdentity = { kind: 'gitlab', host: HOST, repository: TRACKER.project, projectId: ID, number: mr.iid, url, branch: d.branch, base: d.base, sha: d.sha };
+  if (!Number.isSafeInteger(mr.iid) || mr.iid < 1 || url !== `https://${HOST}/${TRACKER.project}/-/merge_requests/${mr.iid}`) throw Error('Unresolved MR creation identity; do not replay creation');
+  d.onOpened?.(identity);
   d.onStage("ci");
   const block = (blocked: string): Delivered => {
     glab(["api", "-X", "POST", `${path}/${mr.iid}/notes`, "--hostname", HOST,
       "-f", `body=Sandcastle did not merge this MR: ${blocked}. Waiting for a person.`]);
     return { url, merged: false, blocked };
   };
-  const required = MERGE.requiredChecks ?? [];
   const deadline = Date.now() + d.waitMinutes * 60_000;
   const noPipelineBy = Date.now() + d.noCiMinutes * 60_000;
   let reason = "no pipeline on the pushed commit";
   while (Date.now() < deadline) {
-    const head = api<{ sha: string; head_pipeline: { id: number; sha: string; status: string } | null }>(`${path}/${mr.iid}`);
-    if (head.sha !== d.sha) return block("MR head changed since Factory pushed");
-    const pipeline = head.head_pipeline;
-    if (pipeline?.sha === d.sha) {
-      const jobs = apiAll<{ name: string; status: string }>(`projects/${ID}/pipelines/${pipeline.id}/jobs?include_retried=false`);
-      const checks = jobs.map((j) => ({ name: j.name, bucket: j.status === "success" ? "pass" : j.status === "skipped" ? "skipping" : j.status === "failed" ? "fail" : j.status === "canceled" ? "cancel" : "pending" }));
-      const gate = ciGate(checks, required);
-      const missing = missingChecks(checks, required);
-      reason = `pipeline ${pipeline.status}; job gate ${gate}${missing.length ? `; required jobs not passed: ${missing.join(", ")}` : ""}`;
-      if (["failed", "canceled", "skipped", "manual"].includes(pipeline.status) || gate === "fail") return block(reason);
-      if (pipeline.status === "success" && gate === "pass") {
-        // GitLab's project setting controls merge vs rebase; squash is selectable per MR.
-        let refused: string | undefined;
-        try { refused = typeof d.beforeMerge === 'function' ? await d.beforeMerge() : 'host authorization missing'; }
-        catch (e) { refused = `host authorization unknown: ${(e as Error).message}`; }
-        if (refused !== undefined) return block(refused);
-        try {
-          const merged = JSON.parse(glab(["api", "-X", "PUT", `${path}/${mr.iid}/merge`, "--hostname", HOST,
-            "-f", `sha=${d.sha}`, "-F", `squash=${MERGE.method === "squash"}`])) as { state: string };
-          if (merged.state !== "merged") return block("GitLab did not confirm the merge");
-          return { url, merged: true };
-        } catch {
-          return block("GitLab refused the SHA-guarded merge; check conflicts and project merge settings");
-        }
-      }
-    } else if (Date.now() >= noPipelineBy) {
-      return block(reason);
-    }
+    const observed = await mergeExistingDelivery(identity, d.beforeMerge);
+    reason = observed.reason;
+    if (observed.state === 'merged') return { url, merged: true, mergedAt: observed.mergedAt, state: 'merged', reasonCode: 'merged' };
+    if (observed.state === 'operator-required' || Date.now() >= noPipelineBy && observed.reasonCode === 'checks-missing') return { ...block(reason), state: observed.state, reasonCode: observed.reasonCode };
     await new Promise((r) => setTimeout(r, 15_000));
   }
-  return block(`CI deadline reached after ${d.waitMinutes} min: ${reason}`);
+  return { ...block(`CI deadline reached after ${d.waitMinutes} min: ${reason}`), state: 'ci-waiting', reasonCode: 'checks-pending' };
+}
+
+function existing(path: string, deadline: number, fields?: string[]): any {
+  const left = deadline - Date.now(); if (left <= 0) throw Error('delivery deadline');
+  return JSON.parse(execFileSync('glab', ['api', ...(fields ? ['-X', 'PUT'] : []), path, '--hostname', HOST, ...(fields ?? [])], {
+    encoding: 'utf8', env: { ...process.env, GITLAB_HOST: HOST }, timeout: Math.min(10000, left), killSignal: 'SIGKILL', maxBuffer: 8 << 20, stdio: ['ignore', 'pipe', 'pipe'],
+  }));
+}
+const hold = (reasonCode: DeliveryObservation['reasonCode'], reason: string): DeliveryObservation => ({ state: 'operator-required', reasonCode, reason });
+export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 30000): DeliveryObservation {
+  if (!/^[0-9a-f]{40,64}$/.test(d.sha) || !d.branch || !d.base || d.kind !== 'gitlab' || d.host !== HOST || d.repository !== TRACKER.project || d.projectId !== ID || !Number.isSafeInteger(d.number) || d.number < 1 || d.url !== `https://${HOST}/${TRACKER.project}/-/merge_requests/${d.number}`) return hold('identity-changed', 'Unknown tracker identity');
+  const mr = existing(`projects/${ID}/merge_requests/${d.number}`, deadline);
+  if (mr.iid !== d.number || mr.project_id !== ID || mr.source_project_id !== ID || mr.target_project_id !== ID || mr.source_branch !== d.branch || mr.target_branch !== d.base || mr.sha !== d.sha) return hold('identity-changed', 'MR repository, branch, base or head changed');
+  if (mr.state === 'merged' && typeof mr.merged_at === 'string' && Number.isFinite(Date.parse(mr.merged_at))) return { state: 'merged', reasonCode: 'merged', reason: 'Confirmed exact-head merge', mergedAt: mr.merged_at };
+  if (mr.state === 'closed') return hold('closed', 'MR closed without merge');
+  if (mr.state !== 'opened' || typeof mr.draft !== 'boolean') return hold('identity-changed', 'Unknown MR status');
+  if (mr.draft) return hold('draft', 'MR is draft');
+  if (mr.has_conflicts === true || ['conflict', 'not_approved', 'discussions_not_resolved', 'blocked_status', 'merge_request_blocked', 'need_rebase', 'external_status_checks'].includes(mr.detailed_merge_status)) return hold('merge-restricted', 'MR conflict, approval or repository restriction');
+  const pipeline = mr.head_pipeline;
+  if (!pipeline || pipeline.sha !== d.sha) return { state: 'ci-waiting', reasonCode: 'checks-missing', reason: 'No pipeline on exact head' };
+  if (!Number.isSafeInteger(pipeline.id) || typeof pipeline.status !== 'string') return hold('identity-changed', 'Malformed pipeline identity');
+  const jobs: any[] = [];
+  for (let page = 1; ; page++) {
+    const batch = existing(`projects/${ID}/pipelines/${pipeline.id}/jobs?include_retried=false&per_page=100&page=${page}`, deadline);
+    if (!Array.isArray(batch)) throw Error('Malformed job response');
+    if (batch.some(j => typeof j.name !== 'string' || typeof j.status !== 'string' || j.commit?.id !== d.sha)) return hold('identity-changed', 'Unknown job identity/head');
+    jobs.push(...batch); if (batch.length < 100) break;
+  }
+  const checks = jobs.map(j => ({ name: j.name, bucket: j.status === 'success' ? 'pass' : j.status === 'skipped' ? 'skipping' : ['failed', 'canceled'].includes(j.status) ? 'fail' : 'pending' }));
+  const gate = ciGate(checks, MERGE.requiredChecks ?? []);
+  if (gate === 'fail' || ['failed', 'canceled', 'manual'].includes(pipeline.status)) return hold('checks-failed', 'Pipeline or job failed/cancelled/manual');
+  if (pipeline.status === 'success' && gate === 'pass') {
+    if (mr.detailed_merge_status !== 'mergeable') return hold('merge-restricted', 'MR merge permission unknown or restricted');
+    return { state: 'ready', reasonCode: 'checks-pending', reason: 'Exact-head pipeline/jobs passed' };
+  }
+  return { state: 'ci-waiting', reasonCode: gate === 'none' ? 'checks-missing' : 'checks-pending', reason: `CI ${pipeline.status}; required jobs: ${missingChecks(checks, MERGE.requiredChecks ?? []).join(', ')}` };
+}
+export async function mergeExistingDelivery(d: DeliveryIdentity, beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
+  const observed = observeDelivery(d, deadline);
+  if (observed.state !== 'ready') return observed;
+  if (!MERGE.auto) return hold('authorization', 'Manual merge policy');
+  let refused: string | undefined;
+  try { refused = typeof beforeMerge === 'function' ? await beforeMerge() : 'Host authorization missing'; }
+  catch (e) {
+    if ((e as any).code === 'DELIVERY_READ_UNKNOWN') return { state: 'ci-waiting', reasonCode: 'transport-unknown', reason: (e as Error).message };
+    refused = `Host authorization unknown: ${(e as Error).message}`;
+  }
+  if (refused !== undefined) return hold('authorization', refused);
+  const result = existing(`projects/${ID}/merge_requests/${d.number}/merge`, deadline, ['-f', `sha=${d.sha}`, '-F', `squash=${MERGE.method === 'squash'}`]);
+  if (result.state !== 'merged') return hold('merge-restricted', 'GitLab did not confirm merge');
+  return observeDelivery(d, deadline);
 }
 
 /** Comments, oldest first. */

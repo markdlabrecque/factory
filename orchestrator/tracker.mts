@@ -1,3 +1,6 @@
+// #153: host checkpoints capture creation before CI; continuation observes and merges only the recorded exact head.
+import type { DeliveryIdentity, DeliveryObservation, DeliveryReason } from './delivery.mts';
+export type { DeliveryIdentity, DeliveryObservation, DeliveryReason } from './delivery.mts';
 // #137: tracker identity/selection labels come from the validated runtime facade.
 import { TRACKER } from "./runtime-config.mts";
 import type { Parent } from "./graph.mts";
@@ -41,6 +44,7 @@ export type ReadyTicket = Ticket & { assignees?: { username: string }[] };
 
 /** #150: adapters require fresh host proof/requirements authorization immediately before auto merge. */
 export interface Delivery {
+  onOpened?: (identity: DeliveryIdentity) => void;
   beforeMerge: () => string | undefined | Promise<string | undefined>;
   branch: string;
   base: string;
@@ -54,6 +58,9 @@ export interface Delivery {
 export interface Delivered {
   url: string;
   merged: boolean;
+  mergedAt?: string;
+  reasonCode?: DeliveryReason;
+  state?: DeliveryObservation['state'];
   blocked?: string; // open PR/MR waiting for a person, not a failed implementation
 }
 
@@ -73,5 +80,5 @@ const impl: typeof gitlab = (TRACKER as { kind?: string }).kind === "github" ? g
 
 export const {
   currentUsername, ticketUrl, catalogue, children, parentOf, workCatalogue, ticket, viewText, notes, readyList, comment,
-  postVerification, openMrBranches, mergedInto, mergedPr, addLabel, close, advance, ensureLabels, deliver,
+  postVerification, openMrBranches, mergedInto, mergedPr, addLabel, close, advance, ensureLabels, deliver, observeDelivery, mergeExistingDelivery, setDeliveryDeadline,
 } = impl;

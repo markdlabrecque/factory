@@ -1,3 +1,4 @@
+<!-- #153: existing delivery tests stub trackers and scheduler authorization; no live CI, agents or managers. -->
 <!-- Factory test policy: fixture-owned boundaries and runtimes for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
 <!-- #150: proof/entrypoint tests use synthetic evidence and stub all agent/container/tracker boundaries. -->
 # Testing
@@ -79,6 +80,25 @@ private Git metadata and teardown. Adapter tests assert fresh host authorization
 CI and before SHA-guarded merge. These prove host integrity and command contracts;
 they do not classify semantic acceptance coverage, validate video codecs or promise
 atomicity between an external ticket edit and a tracker merge.
+
+## Existing-delivery continuation tests
+
+Run the changed boundary first:
+
+```sh
+node --test board/delivery.test.mts orchestrator/delivery*.test.mts cli/test/delivery-followup-schedule.test.mts
+node --test orchestrator/refresh.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
+```
+
+Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
+holds and lost merge responses without live trackers. Proof fixtures use synthetic
+command evidence and frozen host records. The copied-dispatch fixture runs local Git
+against a temporary bare origin and a fixture-owned absolute read-only scheduler CLI;
+manual/dry-run/refresh-only passes must perform no continuation. Admission tests cover
+capacity, conflicting claims, stale tokens and PID reuse without repairing anything.
+Scheduler tests assert the exact trusted command and malformed/off/paused/base-switch
+refusals; they never run the host CLI against the user's service manager. These tests
+do not prove real GitHub/GitLab behavior or atomicity of external edits and merges.
 
 ## Optional browser image smoke test
 

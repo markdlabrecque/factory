@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# #153: delivery checkpoint validation is a mandatory board import.
 # #137: include offline TOML metadata/parser for standalone refresh lookup.
 # Install (or update) the Sandcastle board as a systemd user service on Linux.
 # Copy the complete standalone board, including admission/assessment/journal imports and the manual-refresh worker.
@@ -17,7 +18,7 @@ fi
 
 NODE="$(command -v node)" || { echo "node not found on PATH" >&2; exit 1; }
 mkdir -p "$APP" "$(dirname "$UNIT")" "$HOME/.local/state/sandcastle"
-cp "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/journal.mts" "$HERE/tickets.mts" "$HERE/refresh-worker.mts" \
+cp "$HERE/delivery.mts" "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/journal.mts" "$HERE/tickets.mts" "$HERE/refresh-worker.mts" \
   "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
 cp "$HERE/../orchestrator/project-config.mts" "$APP/"
 mkdir -p "$APP/vendor"

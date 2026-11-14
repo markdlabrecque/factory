@@ -1,3 +1,4 @@
+// #153: expanded review inventory preserves the fixture's reservation-aware dispatcher stub.
 // #137: complete review includes TOML runtime/parser helpers, still using only stand-in processes.
 // The complete reviewed workflow fixture includes assessment.mts and journal.mts, board.mts's mandatory imports.
 // Scheduled self-recovery end to end across restarts and failures (#64, the acceptance step of #30's slice four). Every
@@ -113,7 +114,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   // The complete recovery workflow (board.mts keeps what the scheduler's copy check needs), reviewed by a person.
   writeFileSync(join(sc, 'main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
   // #137: stand-in workflows review the complete runtime/offline-parser inventory too.
-  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts')) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
+  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts' && f !== 'dispatch.mts')) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
   // The ticket's preserved work: a commit and uncommitted changes in its Factory worktree, and earlier evidence.
   git(root, 'branch', '7-fix-login');
   const worktree = join(sc, 'worktrees/7-fix-login');

@@ -1,3 +1,4 @@
+<!-- #153: scheduled exact-head CI continuation reuses immutable proof under delivery admission and live scheduler authorization. -->
 <!-- #140: Board shows compact current red blockers only; backend checks/refresh remain without a panel or refresh button. -->
 <!-- Scheduler CI: concurrent stub queries are read-only; browser preflight uses a Node-owned process group instead of host timeout; TAP retains failures. -->
 <!-- #141: recorded blocker episodes show concise summaries only; persisted reasons stay unchanged. -->
@@ -145,7 +146,11 @@ See [the upgrade contract](orchestrator/ADAPTING.md#verified-delivery-upgrade).
 
 Set `[merge] auto = true` in `.sandcastle/factory.toml` (legacy: `MERGE.auto` in `config.mts`) to opt in. `MERGE.auto: true` supports GitHub and GitLab; `false` keeps manual merging. The optional `MERGE.requiredChecks: ["test", "build"]` lists exact check or job names that must be present and passed, not skipped. An empty or omitted list keeps the all-checks gate.
 
-GitLab opens the MR first, waits for its head pipeline and jobs on the pushed SHA, then requests a SHA-guarded API merge. GitHub also guards the pushed SHA. Missing, pending or otherwise unmet gates leave the PR/MR open, comment the reason and put the run in `waiting` for a person. GitHub failed or cancelled CI retains its existing draft-and-fail behaviour. GitLab uses the project's merge strategy, with `MERGE.method: "squash"` requesting squash. No label or approval gate is added by Factory; tracker-side restrictions still apply. See [the CI gate](orchestrator/ADAPTING.md#two-reference-configs) for setup and upgrade details.
+Both trackers open first, gate checks/jobs on the verified SHA, and use a SHA-guarded API merge. Missing or pending checks leave a host checkpoint marked `ci-waiting`; failed/cancelled checks, changed identity, drafts, conflicts and approval/repository restrictions require an operator. Failed CI never triggers a rerun or draft mutation.
+
+A normal scheduled pass observes at most ten recorded CI waits, oldest-observed first, once each (30 seconds total, at most 10 seconds per tracker/authorization command). It starts no agents and creates no new PR, branch or evidence comment. Exact proof artifacts, requirements, workflow/settings and local/remote heads must still match. The tick's trusted absolute CLI and saved Node authorize read-only `schedule status --project <root> --json` before observation and again before merging; paused/off/unknown scheduling refuses delivery. Manual, dry-run and refresh-only passes never continue an open PR. Delivery claims reserve shared capacity and ticket ownership without consuming or renewing repair budget. A lost merge response is reconciled against the same PR on a later pass.
+
+Upgrade the CLI and the complete project runtime together, including `delivery-followup.mts` and `delivery.mts`, and renew recovery review. Old records are never adopted from PASS notes or PR URLs. Legacy custom CONFIG values that cannot be established authoritatively remain operator-held; migrate explicitly to TOML for scheduled continuation. Original evidence and verdicts stay intact. GitLab uses the project's merge strategy, with `MERGE.method: "squash"` requesting squash. No label or approval gate is added by Factory; tracker-side restrictions still apply. See [the CI gate](orchestrator/ADAPTING.md#two-reference-configs) for setup and upgrade details.
 
 ## Install the Factory CLI
 

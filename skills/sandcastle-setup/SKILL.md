@@ -3,6 +3,7 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab or GitHub tracker, agent and standard Playwright browser provisioning, with optional web runtime and CMS layers and the Factory workflow. Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
+<!-- #153: upgrade CLI/checkpoints/observer/admission/proof together for scheduler-authorized CI continuation. -->
 <!-- #140: compact current red blockers replace the Current ticket panel and manual refresh button; backend checks remain required. -->
 <!-- Scheduler stub reads are concurrent-safe; browser preflight uses a Node-owned process group, independent of host timeout. CI retains TAP failures. -->
 <!-- #141: the production stats dialog summarizes recorded blocker episodes only, without full details; current blockers and stored reasons stay unchanged. -->
@@ -34,6 +35,22 @@ When setting up scheduler tests or verification, read `TESTING.md` in the helper
 When developing this helper repository, follow its `AGENTS.md` and hand implementation to Factory through prepared tickets. For the planned self-recovery slice, read `docs/slice-4/plan.md` in the helper repository for the agreed decisions and manual-upgrade scope; `docs/factory-cli.md` contains the high-level requirements. Its repair prompt (`orchestrator/prompt.recover.md`, used by `main.mts --recover`) is copied by `factory init` with `recovery.mts` and `recovery-sandbox.mts` (#63). Recovery is active only while the copy's recovery workflow is complete and unchanged since its review. `factory init` records the review for a new scaffold. Editing `main.mts` (for example `sandboxSetup`), `prompt.verify.md` or another workflow file turns recovery off until `factory recovery review --confirm --project <name>`. When you finish setting up a project, tell the developer to run that command. For an existing project, follow "Upgrading an existing project for self-recovery" in `orchestrator/ADAPTING.md`; never copy the files over customizations or record the review yourself. A scheduled pass of a current `dispatch.mts` also writes a jam report the Factory scheduler counts (#61); keep `dispatch.mts` and `graph.mts` together when updating a copy. Until the workflow is complete and reviewed, a confirmed jam is only recorded, never repaired.
 
 Sandcastle has no built-in GitLab tracker (maintainer points to `Custom`; upstream #511, #521). Instead of improvising from `SETUP_ISSUE_TRACKER.md`, apply fixed layers from `layers/`. The scaffold is copied into the project, so no fork of Sandcastle is needed.
+
+## Existing PR delivery setup
+
+For automatic continuation of pending CI, follow [Continuing existing delivery](../../orchestrator/ADAPTING.md#continuing-existing-delivery).
+Upgrade the CLI and project runtime together, including `delivery-followup.mts`,
+`board/delivery.mts` copied beside `board.mts`, admission, main/handoff, proof and
+both adapters. Require authoritative TOML settings; do not guess legacy custom
+CONFIG, adopt historical PASS/PR URLs, or replay ambiguous PR creation. Preserve
+customizations and evidence, and ask the operator to reconfirm recovery review.
+Never enable a schedule as part of this upgrade. Only normal scheduled passes
+observe host CI waits; manual/dry-run/refresh-only passes do not merge existing PRs.
+Pending CI is retryable; failed CI or changed proof/requirements/head/settings needs
+an operator or fresh verification. The observer posts no repeated waiting comments,
+starts no agents and consumes no repair budget. Failed CI causes no rerun or draft
+mutation. Old installed CLIs without trusted read-only status authorization cannot
+authorize continuation.
 
 ## Verified delivery setup
 

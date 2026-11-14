@@ -1,3 +1,4 @@
+// #153: opened checkpoints never count as repair-budget progress; only confirmed merged completion does.
 // #137: reviewed workflow fixtures include nested offline-parser/runtime assets.
 // Jam confirmation after normal dispatch (#61, cli/src/jam-detect.mts): a pass's report is counted only for its own pass
 // and project; the same jam on two completed passes is confirmed and one repair is launched on the stopped ticket, only
@@ -15,7 +16,13 @@ import { afterPass } from '../src/jam-detect.mts';
 import type { AfterPassOptions } from '../src/jam-detect.mts';
 import { paths } from '../src/paths.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
-import { beginAttempt, finishAttempt, readRecovery } from '../src/recovery-state.mts';
+import { beginAttempt, deliveryMarker, finishAttempt, readRecovery } from '../src/recovery-state.mts';
+
+test('opened delivery checkpoints never count as recovery progress', () => {
+  const base = { stage: 'done' as const, verdict: 'PASS', mr: 'https://github.com/owner/repo/pull/1' };
+  for (const state of ['ci-waiting','operator-required']) assert.equal(deliveryMarker({ ...base, delivery: {state} as any }), undefined);
+  assert.equal(deliveryMarker({ ...base, delivery: {state:'merged',mergedAt:'2026-01-01T00:00:00Z'} as any }), `merged ${base.mr}`);
+});
 
 const TRACKER = 'acme/site';
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
