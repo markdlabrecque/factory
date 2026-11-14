@@ -1,11 +1,11 @@
-// #126: Board DOM separates current description resolution/errors from a running attempt's fixed model.
+// #140: Board cards expose only current compact blockers, not assessment facts or manual refresh controls.
 // Archive coverage exercises project/header gates, active/queued refusal, preservation and idempotence over HTTP,
 // plus delayed-success/error DOM state and corrected-verdict badges. All fixtures are local, never live tracker data.
 // Regression tests for the Factory board: appearance settings, the pure run model, the live poller, the
 // /api/runs snapshot, the evidence routes (bounded previews, original files, path safety), launch reservations and atomic claims, and marking a card merged outside Factory (#87) and labelling it on the board (#88).
 // Tracker coverage includes latest-ten Shipped selection, queue reasons, persisted stage visits, honest legacy stats
-// and focus returned to the actual stats control, including removed/hidden-control fallbacks. Assessment DOM assertions
-// cover unchecked, fresh, pending-analysis, pending-refresh and failed-with-last-good cards, including reused nodes.
+// and focus returned to the actual stats control, including removed/hidden-control fallbacks. Production card/blocker DOM
+// coverage checks deduplication, unlinked warnings, stale suppression and reuse across HTTP and static modes.
 // #121: the scheduler strip's text rules, per-timer entries and live countdown, and GET /api/timers across a stubbed service manager.
 // A hung manager must time out as Unknown without blocking other HTTP requests.
 // The browser code is loaded from the template's "// <name>:start" … "// <name>:end" sections.
@@ -118,6 +118,8 @@ test('#125: a queued card leaves the snapshot only once refreshed facts confirm 
     assert.deepEqual(shown, ['p--1', 'p--10', 'p--11', 'p--12', 'p--13', 'p--2', 'p--3', 'p--4']);
     const embedded = JSON.parse(board.buildPage('file').match(/<script id="data" type="application\/json">(.*?)<\/script>/s)![1]);
     assert.deepEqual(keys(embedded.runs), shown, 'embedded page agrees with /api/runs');
+    assert.equal(embedded.runs.find((r: any) => r.key === 'p--3').assessment.facts.selected, true,
+      'removing the panel must not strip backend assessment data from snapshots');
     assert.equal(board.readRuns().length, 10, 'raw records remain for dispatch and later refreshes');
     assert.deepEqual(raw(), before, 'filtering writes nothing');
     assert.equal(existsSync(resolve(dir, 'journal')), false);
@@ -162,7 +164,7 @@ test("appearance keeps light/dark/system, follows the OS live and survives block
   assert.doesNotMatch(template, /sandcastle-design|setDesign|data-design/);
 });
 
-test("assessment DOM distinguishes unchecked, fresh, pending and failed checks without hiding refresh", () => {
+test("compact blockers hide stale conclusions and all former assessment details on reused cards", () => {
   class Node {
     hidden = false;
     disabled = false;
@@ -175,47 +177,117 @@ test("assessment DOM distinguishes unchecked, fresh, pending and failed checks w
     appendChild(n: Node) { this.children.push(n); }
     replaceChildren(...nodes: Node[]) { this.text = ''; this.children = nodes; }
   }
-  const ctx = load("assessment", ["renderAssessment"], {
-    fileMode: false,
+  const ctx = load('blockers', ['renderBlockers'], {
     el: (tag: string, cls?: string, text?: string) => new Node(tag, cls, text),
-    add: (parent: Node, ...children: Node[]) => children.forEach(n => parent.appendChild(n)),
-    ago: () => '1m',
   });
-  const card = { assess: new Node(), refresh: new Node('button', '', 'Refresh ticket') };
-  const facts = { state: 'open', selected: true, checkedAt: '2026-11-10T12:00:00Z', model: 'opus' };
+  const card = { blockers: new Node() };
   const render = (assessment?: object) => {
-    ctx.renderAssessment(card, { title: 'Run title', assessment }, 0);
-    assert.equal(card.assess.hidden, false);
-    assert.equal(card.refresh.hidden, false);
-    assert.equal(card.refresh.disabled, false);
-    assert.equal(card.refresh.textContent, 'Refresh ticket');
-    return card.assess.textContent;
+    ctx.renderBlockers(card, { implementationModel: 'attempt-secret', assessment });
+    return card.blockers.textContent;
   };
-  assert.equal(render(), 'Current ticket: not checked yet');
-  assert.equal(card.assess.children[0].className, 'a-title');
-  const fresh = render({ facts, analysisState: 'current' });
-  assert.match(fresh, /Current ticket.*Open in tracker.*Model opus.*Checked 1m ago/);
-  assert.doesNotMatch(fresh, /not checked|Pending|Refresh requested|failed/i);
-  assert.match(render({ facts, analysisState: 'pending' }), /Pending analysis: dependency conclusions are stale/);
-  assert.match(render({ facts, pending: { generation: 'g' } }), /Refresh requested: checking current tracker facts/);
-  const failed = render({ facts, error: 'tracker unavailable', attemptedAt: facts.checkedAt });
-  assert.match(failed, /Open in tracker.*Checked 1m ago.*Last check failed 1m ago: tracker unavailable.*Showing the last good check/);
-  assert.ok(card.assess.children.some(n => n.className === 'a-bad' && /Last check failed/.test(n.textContent)));
-  assert.equal(render(), 'Current ticket: not checked yet', 'reused cards clear stale facts and errors');
-  ctx.renderAssessment(card, { implementationModel: 'old-attempt', assessment: { facts, modelResolution: {
-    status: 'resolved', model: 'new-description', declarations: ['Sonnet 5.5'], revision: 'abc',
-  } } }, 0);
-  assert.match(card.assess.textContent, /Attempt model: old-attempt.*Description model: new-description/);
-  assert.doesNotMatch(card.assess.textContent, /Model opus/);
-  ctx.renderAssessment(card, { implementationModel: 'old-attempt', assessment: { modelResolution: {
-    status: 'missing', error: 'Missing model declaration. Use **Model:** sonnet.', declarations: [], revision: 'def',
-  } } }, 0);
-  assert.match(card.assess.textContent, /Attempt model: old-attempt.*Missing model declaration/);
-  assert.ok(card.assess.children.some(n => n.className === 'a-bad'));
-  ctx.fileMode = true;
-  ctx.renderAssessment(card, {}, 0);
-  assert.equal(card.refresh.hidden, true, 'local snapshots still hide the HTTP action');
-  assert.equal(card.assess.hidden, false);
+  assert.equal(render(), '');
+  assert.equal(card.blockers.hidden, true);
+  const dependencies = [
+    { iid: 12, state: 'satisfied' }, { iid: 4, state: 'unsatisfied', what: 'secret description' },
+    { iid: 12, state: 'unknown' }, { iid: 4, state: 'unknown' },
+    { iid: 8, state: 'satisfied' }, { iid: null, state: 'satisfied' },
+  ];
+  assert.equal(render({ analysisState: 'current', dependencies }), '#4 #12');
+  assert.equal(card.blockers.hidden, false);
+  for (const n of card.blockers.children) {
+    assert.equal(n.tag, 'span');
+    assert.equal(n.className, 'blocker');
+    assert.equal(n.children.length, 0, 'plain text, no links');
+    assert.equal('title' in n, false, 'no tooltips');
+  }
+  assert.match(template, /\.blockers[^}]*flex-wrap:\s*wrap/);
+  assert.match(template, /\.blocker\s*\{[^}]*color:\s*var\(--bad\)/);
+  assert.equal(render({ analysisState: 'current', dependencies: [...dependencies,
+    { iid: null, state: 'unknown' }, { state: 'unsatisfied' } ] }), '#4 #12 Unresolved blocker: no linked ticket');
+  for (const analysisState of ['pending', 'error', undefined]) {
+    assert.equal(render({ analysisState, dependencies, analysisError: 'secret error' }), '');
+    assert.equal(card.blockers.hidden, true);
+  }
+  for (const modelResolution of [undefined, { status: 'resolved', model: 'secret model' },
+    { status: 'missing', error: 'secret model error' }]) {
+    assert.equal(render({ facts: { state: 'closed', selected: false, title: 'secret title', model: 'secret model',
+      modelError: 'secret error', checkedAt: 'secret timestamp' }, modelResolution,
+      changed: true, retryRequired: 'secret retry', pending: { generation: 'g' }, error: 'secret check error' }), '');
+    assert.equal(card.blockers.hidden, true);
+  }
+  for (const deps of [[], [{ iid: 4, state: 'satisfied' }, { state: 'satisfied' }]]) {
+    render({ analysisState: 'current', dependencies });
+    assert.equal(render({ analysisState: 'current', dependencies: deps }), '');
+    assert.equal(card.blockers.hidden, true);
+    assert.equal(card.blockers.children.length, 0);
+  }
+  assert.equal(render({ analysisState: 'current', dependencies: [{ iid: 99, state: 'unknown' }] }), '#99');
+  assert.equal(render(), '', 'reuse clears old blockers');
+});
+
+test('shared production cards omit assessment controls in HTTP and snapshot modes while retaining other UI', () => {
+  class Node {
+    hidden = false;
+    dataset = {};
+    children: Node[] = [];
+    listeners: Record<string, Function> = {};
+    classList = { toggle() {} };
+    tag: string;
+    className: string;
+    textContent: string;
+    constructor(tag = 'div', className = '', textContent = '') {
+      this.tag = tag; this.className = className; this.textContent = textContent;
+    }
+    appendChild(n: Node) { this.children.push(n); }
+    replaceChildren(...nodes: Node[]) { this.children = nodes; }
+    setAttribute() {}
+    addEventListener(name: string, fn: Function) { this.listeners[name] = fn; }
+  }
+  const m = load('model', ['PATH_LABELS', 'PATH', 'stageInfo', 'isQuiet', 'needsAttention', 'trackerStep',
+    'queueReasons', 'ago', 'mergedOutsideText']);
+  const el = (tag: string, cls?: string, text?: string) => new Node(tag, cls, text);
+  const ctx = load('cards', ['buildCard', 'updateCard'], {
+    ...m, ticketLabel: (r: any) => '#' + r.iid, mrLabel: () => 'Pull request', el, add: (parent: Node, ...nodes: Node[]) => nodes.forEach(n => parent.appendChild(n)),
+    document: { createTextNode: (text: string) => el('text', '', text) },
+    link: (_url: string, text: string) => el('a', '', text),
+    openStats: () => { stats++; }, archiveCard: () => { archives++; },
+    fetch: () => { throw new Error('card rendering must not request a manual refresh'); },
+  });
+  let stats = 0, archives = 0;
+  const flatten = (n: Node): Node[] => [n, ...n.children.flatMap(flatten)];
+  const now = Date.now();
+  const run = { key: 'p--1', iid: '1', project: 'p', stage: 'queued', title: 'Run title',
+    stageSince: new Date(now).toISOString(), ticketUrl: 'https://example.test/1',
+    evidenceUrl: '/evidence/p--1/', queueReasons: [{ code: 'dependency', text: 'Recorded queue reason' }] };
+  for (const fileMode of [false, true]) {
+    ctx.fileMode = fileMode;
+    const c = ctx.buildCard(run);
+    ctx.updateCard(c, run, now);
+    assert.equal(c.blockers.hidden, true);
+    assert.equal(c.blockers.children.length, 0);
+    const nodes = flatten(c.el);
+    assert.doesNotMatch(nodes.map(n => n.textContent).join(' '), /Current ticket|Refresh ticket|not checked yet/);
+    assert.ok(!nodes.some(n => /assessment|a-title|a-row|a-bad/.test(n.className)));
+    assert.equal(nodes.filter(n => n.tag === 'button').length, 3, 'archive, title and stats only');
+    assert.equal(c.reasons.hidden, false);
+    assert.equal(c.reasons.children[0].textContent, 'Recorded queue reason');
+    assert.ok(flatten(c.foot).some(n => n.textContent === 'Evidence'));
+    c.title.listeners.click();
+    nodes.find(n => n.textContent === 'View stats ↗')!.listeners.click();
+    c.archive.listeners.click();
+    ctx.updateCard(c, { ...run, stage: 'done', assessment: { analysisState: 'current',
+      dependencies: [{ iid: 7, state: 'unknown' }] } }, now);
+    assert.equal(c.blockers.children[0].textContent, '#7');
+    assert.equal(c.archive.hidden, fileMode);
+    assert.ok(c.el.children.indexOf(c.blockers) < c.el.children.indexOf(c.foot));
+    ctx.updateCard(c, run, now);
+    assert.equal(c.blockers.hidden, true);
+    assert.equal(c.blockers.children.length, 0);
+  }
+  assert.equal(stats, 4);
+  assert.equal(archives, 2);
+  assert.doesNotMatch(template, /Refresh ticket|Current ticket|\/api\/refresh\/|x-factory-refresh|renderAssessment|\.assessment\s*\{|\.a-(?:title|bad|row)/);
+  assert.match(template, /url: '\/api\/runs'/);
 });
 
 test("run model groups every stage, flags attention and rejects unsafe links", () => {
