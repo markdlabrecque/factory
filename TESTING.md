@@ -1,4 +1,4 @@
-<!-- Factory test policy: exercise our real code across a stubbed systemd or launchd boundary; real service-manager trials are optional deployment checks, not verification gates. -->
+<!-- Factory test policy: fixture-owned boundaries and runtimes for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
 # Testing
 
 ## Run the tests
@@ -9,7 +9,7 @@ Requires Node 22.18+; CI uses Node 24. From the repository root:
 node --test orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 ```
 
-Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
+Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
@@ -59,6 +59,10 @@ The absence of systemd, a user bus, journald, a cgroup setup or a real timer in 
 Evidence must name the stubbed boundary, commands run, assertions made and any untested Factory behavior. Do not claim real timer or journal observations from stub output. Do not turn an earlier INCONCLUSIVE verdict into PASS without reviewing the tested revision against this boundary.
 
 This policy does not waive tests of Factory's own scheduling, concurrency, ownership, failure recovery or process lifecycle. It does not excuse an unrelated missing prerequisite or silently extend the trusted boundary to other dependencies.
+
+## Optional browser image smoke test
+
+Run `./scripts/test-browser-image.sh` from this checkout with Docker/build access, network access for public build dependencies, and a non-root caller UID/GID. It builds a uniquely tagged disposable image from `.sandcastle/Dockerfile`, overrides the entrypoint and checks the non-root browser with synthetic content, screenshot and video from an empty directory. The runtime check downloads nothing. The image and container are removed on exit; configured images and services are untouched. The regular Node suite never runs this test.
 
 ## Optional deployment smoke tests
 
