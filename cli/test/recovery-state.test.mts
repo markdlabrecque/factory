@@ -1,3 +1,4 @@
+// Optional followups remain version-1 compatible and reject malformed observations without rewriting the ledger.
 // Recovery state tests (#55, #56): confirming a jam on two completed passes, the per-ticket attempt budget and what renews it,
 // reset, renewal from tracked human requirement changes and verified delivery progress (#56), and fail-closed handling of a malformed or concurrently locked record. Disposable HOME only; nothing launches.
 import { test } from 'node:test';
@@ -9,6 +10,26 @@ import { join } from 'node:path';
 import { paths } from '../src/paths.mts';
 import { ATTEMPT_LIMIT, LOG_LIMIT, attemptProblem, beginAttempt, deliveryMarker, finishAttempt, observePass, observeTicket, readRecovery, recoveryFile,
   remainingAttempts, renewBudget, resetRecovery } from '../src/recovery-state.mts';
+
+test('optional followups load in version 1 and malformed snapshots fail closed', t => {
+  const p = fixture(t);
+  observePass(p, root, { pass: 'a', at: at(0), jam: [7] });
+  const file = recoveryFile(p, root);
+  const legacy = readRecovery(p, root);
+  assert.equal(legacy.followups, undefined);
+  const good = { state: 'pending', reason: 'saved work', nextAction: 'wait for an eligible pass', changedAt: at(1) };
+  writeFileSync(file, JSON.stringify({ ...legacy, followups: { '7': good } }));
+  assert.deepEqual(readRecovery(p, root).followups, { '7': good });
+  for (const bad of [null, [], { '0': good }, { '07': good }, { '9007199254740992': good }, { '7': { ...good, state: 'launch' } },
+    { '7': { ...good, reason: '' } }, { '7': { ...good, nextAction: null } },
+    { '7': { ...good, changedAt: 'yesterday' } }, { '7': { ...good, permission: true } }]) {
+    const raw = JSON.stringify({ ...legacy, followups: bad });
+    writeFileSync(file, raw);
+    assert.throws(() => readRecovery(p, root), /Unsupported recovery state/);
+    assert.throws(() => observePass(p, root, { pass: 'b', at: at(2), jam: [7] }), /Unsupported recovery state/);
+    assert.equal(readFileSync(file, 'utf8'), raw);
+  }
+});
 
 const root = '/work/project';
 function fixture(t: TestContext) {

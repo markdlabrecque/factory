@@ -1,8 +1,11 @@
-// #153: scheduled children inherit trusted absolute CLI/Node authorization paths; refreshes never do.
+// Each registered project gets local recovery settlement and follow-up observation under the tick lock before its
+// pause gate. Maintenance never launches, refreshes or counts a pass; failure disables recovery launch for this tick.
+// Global off/unknown and cancellation still stop all maintenance. Paused projects keep their pause and spent budgets.
+// Scheduled children inherit trusted absolute CLI/Node authorization paths; refreshes never do.
 // One scheduler tick: the internal command `factory tick`, run by factory-tick.service on Linux (not for people to type;
 // it takes no flags), and on macOS called in-process by the launchd supervisor (commands/supervise.mts). It visits the registered projects one after another, in registry order rotated so that a different project
 // goes first each tick (rotation(), with state.json's `nextRoot`), and runs one dispatcher pass, the project's own `.sandcastle/dispatch.sh` through runDispatchSh, for each project that
-// scheduleBlocker() clears. A registered project never opted in (no `schedule` entry; a paused one gets nothing) instead
+// scheduleBlocker() clears. A registered project never opted in (no `schedule` entry; paused projects get maintenance only) instead
 // gets a read-only refresh of its cards (#94): runRefreshOnly runs the saved Node on its `.sandcastle/dispatch.mts
 // --refresh-only --base <current branch>` (#93) as the leader of its own process group, with the saved PATH and the shared
 // state folder but no FACTORY_SCHEDULED or jam report. It is recorded in the lock and cancelled like a pass, takes no
@@ -76,6 +79,7 @@ import type { CancelOptions } from '../tick-cancel.mts';
 import type { ScheduleBackend, ScheduleStatus } from '../platform/scheduler.mts';
 import { runDispatchSh } from './dispatch.mts';
 import { afterPass } from '../jam-detect.mts';
+import { maintainRecovery } from '../recovery-followup.mts';
 import type { ProjectContext } from '../runs.mts';
 import { findRun, projectRuns } from '../runs.mts';
 import { cleanProject } from '../clean.mts';
@@ -88,6 +92,8 @@ export type TickOptions = {
   now?: () => Date; mono?: () => number;
   /** Jam confirmation after a completed pass (jam-detect.mts afterPass); replaceable in tests. */
   recovery?: typeof afterPass;
+  /** Local-only settlement and observation, including paused projects, before dispatch gates. */
+  maintenance?: (p: Paths, o: Parameters<typeof maintainRecovery>[1]) => void | Promise<void>;
   /** Runs one read-only refresh for a project not opted in; resolves to its exit code. The default is runRefreshOnly. */
   refresh?: Pass;
   /** Cleanup after a completed pass (#97); the default is cleanAfterPass. */
@@ -233,15 +239,31 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       if (stopNow) { out.result = stopNow.result; break; }
       if (signal.aborted) { cancelled = true; break; }
       // Read again for each project: an opt-out or removal during the tick applies from here on.
-      const project = readRegistry(p).projects.find(x => x.root === root);
+      let project = readRegistry(p).projects.find(x => x.root === root);
       if (!project) continue;
       const attempt = wall().toISOString();
       const record = (s: ProjectState) => { state.projects[root] = s; writeTickState(p, state); };
       const skip = (reason: string) => { log(`skip ${project.name}: ${reason}`); out.skipped[project.name] = reason; record({ attemptedAt: attempt, result: 'skipped', reason }); };
+      let maintenanceOK = true;
+      try {
+        const local = resolveProject(p, { project: root });
+        await (o.maintenance ?? maintainRecovery)(p, { root, tracker: local.tracker, dir: p.state, at: wall().toISOString(),
+          paused: !project.schedule?.enabled ? 'Project scheduling is paused or not opted in.' : undefined,
+          log: line => log(`recovery ${project.name}: ${line}`) });
+      } catch (e) {
+        maintenanceOK = false;
+        log(`recovery ${project.name}: maintenance failed; no recovery launch this tick: ${(e as Error).message.split('\n')[0]}`);
+      }
+      if (signal.aborted) { cancelled = true; break; }
+      const afterMaintenance = await gate();
+      if (afterMaintenance) { out.result = afterMaintenance.result; break; }
+      project = readRegistry(p).projects.find(x => x.root === root);
+      if (!project) continue;
+      if (signal.aborted) { cancelled = true; break; }
       const exists = existsSync(root);
       const branch = exists ? currentBranch(root) : null;
       const reason = scheduleBlocker({ state: 'on' }, project, exists, branch) ?? (exists ? copyProblem(root) : null);
-      // A project never opted in gets a read-only refresh of its cards instead of a pass (#94); a paused one gets nothing.
+      // A project never opted in gets a read-only refresh instead of a pass; a paused one gets only local maintenance.
       const refreshing = !project.schedule;
       if (reason && !refreshing) { skip(reason); continue; }
       if (refreshing) {
@@ -322,8 +344,16 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       // counts. Clean goes first, so a repair attempt jam confirmation launches never races it.
       if (result.code === 0 && !result.cancelled && !result.error && !signal.aborted) {
         try { (o.clean ?? cleanAfterPass)(p, ctx, log); } catch (e) { log(`clean ${project.name}: failed: ${(e as Error).message}`); }
-        await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall,
-          mayLaunch: async () => !signal.aborted && (await schedulingState(o.backend)).state === 'on' && !signal.aborted });
+        if (maintenanceOK) await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall,
+          pauseReason: () => {
+            const current = readRegistry(p).projects.find(x => x.root === root);
+            return !current ? 'Project is no longer registered.' : !current.schedule?.enabled ? 'Project scheduling is paused or not opted in.' : undefined;
+          },
+          mayLaunch: async () => {
+            if (signal.aborted || (await schedulingState(o.backend)).state !== 'on' || signal.aborted) return false;
+            const current = readRegistry(p).projects.find(x => x.root === root);
+            return !!current && !scheduleBlocker({ state: 'on' }, current, existsSync(root), currentBranch(root));
+          } });
       }
       rmSync(report, { force: true });
       if (result.cancelled) cancelled = true;
