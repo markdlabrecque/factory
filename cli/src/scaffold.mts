@@ -1,4 +1,5 @@
 // #153: continuation observer and checkpoint schema ship together in every copied scaffold.
+// #149: fresh/copied installs ship dependencies.mts through the shared update source list.
 // #150: verification.mts is shipped and included automatically in update scaffoldSources.
 // #137: new scaffolds ship versioned TOML and offline parser; legacy reruns never opt in implicitly.
 // Scaffold writer: builds the allowlisted `.sandcastle/` assets from the installed app (never from cwd) and
@@ -28,7 +29,8 @@ export type Settings = { profile: Profile; repo: string; image: string; host?: s
 export type PlannedFile = { path: string; content: string | Buffer; mode: number };
 
 // #153: ship observer and checkpoint schema together; no partially upgraded automatic continuation.
-export const FROM_ORCHESTRATOR = ['dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
+// #149: dependency evaluation ships with every project copy, including update source discovery.
+export const FROM_ORCHESTRATOR = ['dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'delivery-followup.mts', 'verification.mts', // #150: structured proof is a required runtime dependency.
   'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
