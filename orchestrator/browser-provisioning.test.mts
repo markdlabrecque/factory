@@ -1,4 +1,4 @@
-// Exercise the production browser probe with fixture-owned runtimes. Poll for delivered SIGKILL before asserting exit,
+// Exercise the production Node watchdog without any host timeout utility. Poll for delivered SIGKILL before asserting exit,
 // and clean up every recorded descendant even if an assertion fails on a constrained CI runner.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,6 +13,7 @@ function fixture(mode: string) {
   const bin = join(dir, 'bin'), modules = join(dir, 'modules');
   mkdirSync(bin); mkdirSync(modules);
   symlinkSync(process.execPath, join(bin, 'node'));
+  writeFileSync(join(bin, 'timeout'), '#!/bin/sh\necho "host timeout must not run" >&2\nexit 64\n', { mode: 0o755 });
   writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho '${modules}'\n`, {mode:0o755});
   if (mode !== 'cli') writeFileSync(join(bin, 'playwright'), '#!/bin/sh\nexit 0\n', {mode:0o755});
   if (mode !== 'module') {
@@ -46,7 +47,10 @@ test('timeout awaits forced termination of a SIGTERM-ignoring probe and descenda
   const f = fixture('hang');
   t.after(() => {
     for (const name of ['probe.pid', 'child.pid']) {
-      try { process.kill(Number(readFileSync(join(f.dir, name), 'utf8')), 'SIGKILL'); } catch { /* not started or gone */ }
+      try {
+        const pid = Number(readFileSync(join(f.dir, name), 'utf8'));
+        process.kill(pid, 'SIGKILL');
+      } catch { /* not started or gone */ }
     }
   });
   const start = Date.now();

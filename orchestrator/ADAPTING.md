@@ -1,4 +1,4 @@
-<!-- Scheduler tests keep read-only stub queries free of state writes; CI uses TAP and a bounded test deadline. -->
+<!-- Scheduler stub reads are concurrent-safe; browser preflight owns its group through a Node watchdog, not host timeout. CI retains TAP failures. -->
 <!-- #141: recorded blocker episodes show concise summaries without full details; current blockers and stored reasons are unchanged. -->
 <!-- Browser preflight gates both verifier paths; existing images and workflow copies require explicit operator upgrades below. -->
 <!-- #137: factory.toml is preferred; complete schema and reviewed manual migration are in docs/project-config.md. -->
@@ -15,6 +15,8 @@
 The Factory checkout's `.pi/settings.json` defaults interactive Pi sessions to `openai`; it does not change project orchestrator model configuration.
 
 For GitHub, provision host `gh` 2.99.0+ with `issue comment --attach` and repository push access on GitHub.com or Enterprise Cloud. Factory uses plain `gh`, including one native attachment-bearing verification comment for normal and recovery runs. Interactive agents prefer `gh-axi` except for uploads. See [verification media prerequisites and failure handling](../README.md#github-tooling) and [media upload research](../docs/research/github-media-uploads.md). PASS, FAIL and INCONCLUSIVE all post evidence, even with `--no-push`; only PASS can reach the existing push/delivery gates. Unsupported or failed uploads retain local evidence and stop delivery without an evidence-branch fallback. Old links remain valid. New scaffolds receive this code; review existing project copies before updating them, without overwriting customizations.
+
+Browser preflight now uses a Node watchdog to own and kill its probe's detached process group on deadline and leader exit, rather than depending on host `timeout` descendant semantics. Copy `handoff.mts` through the reviewed workflow upgrade path.
 
 Keep read-only service-manager stubs free of shared-state writes. The timer adapter queries multiple units concurrently; rewriting state on `show` or `list-timers` can truncate another query's JSON input. CI uses TAP and a 120-second test deadline to retain failure details and bound hangs. Process fixtures must synchronize zombie creation, wait a bounded interval for signal delivery, and register descendant cleanup before assertions so failures cannot leak children.
 

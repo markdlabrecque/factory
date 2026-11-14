@@ -3,7 +3,7 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab or GitHub tracker, agent and standard Playwright browser provisioning, with optional web runtime and CMS layers and the Factory workflow. Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
-<!-- Scheduler tests keep read-only stub state unchanged under concurrent queries; CI retains TAP failures with a bounded deadline. -->
+<!-- Scheduler stub reads are concurrent-safe; browser preflight uses a Node-owned process group, independent of host timeout. CI retains TAP failures. -->
 <!-- #141: the production stats dialog summarizes recorded blocker episodes only, without full details; current blockers and stored reasons stay unchanged. -->
 <!-- #137: ordinary settings go in factory.toml for new/opted-in workflows; legacy conversion is reviewed and manual. -->
 <!-- #117: scheduled passes send no --max override; configure the cap in each project's .sandcastle/dispatch.mts SELECT.maxConcurrent, counted across the shared board. -->
@@ -24,6 +24,8 @@ For GitHub setup, check [verification media prerequisites and failure handling](
 > **Experimental, not supported:** interactive agents under herdr-core are research only; see `docs/research/interactive-agents-herdr-core.md`. Do not add them to a project setup.
 
 When copying the workflow, use the shipped `board/` files. Skip `board/board-prototype.html` if present. It is an experimental, simulated-data design lab, not a scaffold or install input. For its dot trackers with centered connectors, solid green/red current dots with soft halos and sonar pulses that freeze on Pause and hide with reduced motion, queue-reason rules, Shipped history, ticket stats, demo controls and themes, read the helper README's [Board design lab](../../README.md#board-design-lab-prototype-branch-only) section. This prototype replaces Assembly and Megastructure. Its approved tracker design now powers the supported `board.template.html`; only the prototype file is excluded from installation. Both changes were made directly with human approval, without Factory.
+
+Browser preflight owns its detached probe group through a Node watchdog, killing on deadline and leader exit without relying on the host's `timeout` utility. Upgrade `handoff.mts` through the reviewed workflow-copy procedure.
 
 When setting up scheduler tests or verification, read `TESTING.md` in the helper repository. Use stubbed service-manager commands for automated verification; real systemd trials are optional and require operator approval. Read-only stubs must leave shared state byte-identical because timer queries run concurrently. Run CI with TAP failure details and a bounded test deadline rather than waiting for the job limit. Synchronize process fixtures instead of assuming immediate exit or signal delivery, and register all descendant cleanup before assertions.
 

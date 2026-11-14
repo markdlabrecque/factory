@@ -6,7 +6,8 @@ import { edgesOf, SANDCASTLE_MARK } from "./graph.mts";
 import type { Manifest } from "./graph.mts";
 import type { Delivered, Delivery } from "./tracker.mts";
 
-// Browser preflight awaits process-group termination at its hard deadline and records success only after browser cleanup.
+// Browser preflight owns its process group with a Node watchdog, independent of host timeout implementations.
+// It kills descendants on deadline and leader exit, and records success only after browser cleanup.
 // The hand-off every branch goes through before it leaves the host: the independent verifier, then evidence posted to
 // the ticket, then on PASS push and normal delivery (tracker.deliver: an MR on GitLab, a PR merged after CI on GitHub
 // with MERGE.auto). Blocked merge gates leave the run waiting for a person. main.mts calls it after its implementer; a recovery run (slice four) calls the same functions after
@@ -87,13 +88,18 @@ export async function browserPreflight(sandbox: Pick<VerifierSandbox, "exec">, e
   let ok = false;
   try {
     rmSync(path, { force: true });
-    const encoded = Buffer.from(BROWSER_PROBE).toString("base64");
-    // GNU timeout owns the probe process group. Kill the entire group at the hard
-    // deadline, even if a descendant ignores SIGTERM. Await exec settlement.
-    const seconds = Math.max(0.001, timeoutMs / 1000);
-    const script = `command -v playwright >/dev/null || { echo "browser preflight failed: CLI missing"; exit 1; }; exec node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
-    const quoted = "'" + script.replaceAll("'", "'\\''") + "'";
-    const result = await sandbox.exec(`timeout --signal=KILL ${seconds}s sh -c ${quoted}`);
+    // Own the group directly: host `timeout` implementations differ in descendant handling.
+    // Kill again after leader exit to catch a descendant forked while the deadline signal was delivered.
+    const watchdog = `
+const { spawn } = require('node:child_process');
+const child = spawn(process.execPath, ['-e', ${JSON.stringify(BROWSER_PROBE)}], { detached: true, stdio: 'inherit' });
+let expired = false;
+const kill = () => { if (child.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; } } };
+const timer = setTimeout(() => { expired = true; kill(); }, ${Math.max(1, timeoutMs)});
+child.on('error', () => { clearTimeout(timer); kill(); process.exitCode = 1; });
+child.on('exit', code => { clearTimeout(timer); kill(); process.exitCode = expired ? 124 : (code ?? 1); });`;
+    const encoded = Buffer.from(watchdog).toString("base64");
+    const result = await sandbox.exec(`command -v playwright >/dev/null || { echo "browser preflight failed: CLI missing"; exit 1; }; exec node -e "eval(Buffer.from('${encoded}','base64').toString())"`);
     const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
     const failure = text.match(/browser preflight failed: (?:CLI missing|global module resolution|Chromium launch|DOM marker|cleanup)/);
     diagnostic = failure?.[0] ?? (text.includes("browser preflight OK") ? "browser preflight OK" : "browser preflight failed: probe execution or timeout");
