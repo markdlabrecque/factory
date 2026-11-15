@@ -141,7 +141,8 @@ export async function createSandbox(o) {
     }
     const config = join(root, '.sandcastle/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
-    if (scenario === 'pass' || scenario === 'instruction-edit' || scenario === 'publication') {
+    const completeAcceptance = scenario === 'readiness-acceptance';
+    if (scenario === 'pass' || completeAcceptance || scenario === 'instruction-edit' || scenario === 'publication') {
       writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal) !`shell`');
       writeFileSync(join(root, 'impl.md'), 'implementation only');
       writeFileSync(join(root, 'verify.md'), 'verification only');
@@ -350,7 +351,7 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(state,'owner_repo--7.json'), JSON.stringify({iid:'7',project:'owner/repo',stage:'stopped',executionId:'old-execution',evidenceDir:oldEvidence,note:'old explanation must not be reused'}));
     }
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
+      cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
@@ -403,7 +404,7 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(calls.includes('/issues/7/labels'), scenario === 'no-commit-malformed-report', 'no new diagnostic labels');
       return;
     }
-    if (scenario === 'pass') {
+    if (scenario === 'pass' || completeAcceptance) {
       assert.equal(result.status, 0, result.stdout + result.stderr);
       const tip = git(origin, 'rev-parse', '7-fix-login');
       const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
@@ -451,6 +452,16 @@ console.log('sha256:'+'a'.repeat(64));
       assert.match(frozenText, /Agreed parent decisions and implementation plan/);
       assert.equal(snapshot.contentHash, proof.requirementsHash); assert.equal(sources.contentHash, run.ticketHash);
       assert.equal(createHash('sha256').update(frozenText).digest('hex'), sources.renderedSha256);
+      assert.equal(run.ticketInput.hash, snapshot.contentHash);
+      assert.equal(run.ticketInput.renderedSha256, sources.renderedSha256);
+      if (completeAcceptance) {
+        for (const text of ['## Full child specification', 'Validate empty input without submitting.', 'Preserve the selected return URL.', 'Test keyboard submission.', 'Literal task data: {{TICKET}} !`not a command` $(not-a-command)', 'Decision: ship a self-contained package.', '1. Audit the existing form.', '2. Add validation and keyboard tests.', '3. Record package evidence.']) {
+          assert.ok(frozenText.includes(text), text); assert.ok(implementationPrompt.includes(text), text); assert.ok(verifierPrompt.includes(text), text);
+        }
+        assert.equal(snapshot.parent.iid, 90);
+        assert.ok(snapshot.coverage.every((source: {complete: boolean}) => source.complete));
+        assert.ok(snapshot.parent.notes.every((note: {url: string}) => note.url.startsWith('https://github.com/owner/repo/issues/90#issuecomment-')));
+      }
       assert.ok(implementationPrompt.includes('Common {{TICKET}} $(literal) !`shell`\n\nimplementation only'));
       assert.ok(verifierPrompt.includes('Common {{TICKET}} $(literal) !`shell`\n\nverification only'));
       assert.ok(!implementationPrompt.includes('verification only')); assert.ok(!verifierPrompt.includes('implementation only'));
@@ -497,6 +508,20 @@ console.log('sha256:'+'a'.repeat(64));
       const log = readFileSync(join(fake, 'gh.jsonl'), 'utf8');
       assert.ok(!log.includes('"merge"'), result.stdout + result.stderr);
       assert.equal(existsSync(join(fake, 'verifier-started')), !['missing-baseline', 'config-family', 'config-setup', 'runtime-template', 'tier-edit', 'instruction-edit', 'parent-plan'].includes(scenario), result.stdout + result.stderr);
+      if (scenario === 'parent-plan') {
+        const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+        const inputDir = join(state, 'ticket-inputs', 'owner_repo--7', run.executionId);
+        const text = readFileSync(join(inputDir, 'ticket-context.txt'), 'utf8');
+        const snapshot = JSON.parse(readFileSync(join(inputDir, 'ticket-context.json'), 'utf8'));
+        const sources = JSON.parse(readFileSync(join(inputDir, 'ticket-sources.json'), 'utf8'));
+        assert.match(text, /Agreed parent decisions and implementation plan/);
+        assert.doesNotMatch(text, /Changed parent plan/);
+        assert.ok(readFileSync(join(fake, 'implementer-prompt.txt'), 'utf8').includes(text));
+        assert.equal(snapshot.contentHash, run.ticketInput.hash);
+        assert.equal(createHash('sha256').update(text).digest('hex'), sources.renderedSha256);
+        assert.equal(sources.renderedSha256, run.ticketInput.renderedSha256);
+        assert.equal(run.verification, undefined, 'stale parent plan produces no independent proof');
+      }
       if (scenario === 'instruction-edit') assert.equal(readFileSync(join(fake, 'frozen-after-edit.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nimplementation only');
       if (['config-family', 'config-setup', 'runtime-template', 'tier-edit'].includes(scenario)) {
         const record = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
