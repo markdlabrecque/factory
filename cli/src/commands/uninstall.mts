@@ -16,7 +16,8 @@ import { isTickEntry, scheduleBackend } from '../platform/scheduler.mts';
 import type { ScheduleBackend } from '../platform/scheduler.mts';
 import type { CancelOptions } from '../tick-cancel.mts';
 import { describeStop, stopScheduling } from './schedule.mts';
-export async function uninstall(p: Paths, service: ServiceBackend, options: { dryRun?: boolean; purge?: boolean; schedule?: ScheduleBackend; cancel?: CancelOptions } = {}) {
+import { assertRuntimeAvailable, clearRuntimeRemoving, markRuntimeRemoving, preflightRuntimeRemoval, withRuntimeLock, withRuntimeTransaction } from '../runtime-ownership.mts';
+async function uninstallOwned(p: Paths, service: ServiceBackend, options: { dryRun?: boolean; purge?: boolean; schedule?: ScheduleBackend; cancel?: CancelOptions } = {}) {
   const m = readManifest(p);
   if (!m) {
     console.log('Nothing installed: no manifest. No files removed.');
@@ -33,6 +34,12 @@ export async function uninstall(p: Paths, service: ServiceBackend, options: { dr
     }
   } catch (e) { console.log(`Could not read the project registry: ${(e as Error).message}`); }
   for (const entry of m.entries) validate(p, entry);
+  const ownsRuntimes = m.entries.some(e => e.path === p.runtimes);
+  if (ownsRuntimes) withRuntimeLock(p, () => {
+    assertRuntimeAvailable(p);
+    if (options.dryRun) preflightRuntimeRemoval(p); else markRuntimeRemoving(p);
+  });
+  try {
   const scheduling = options.schedule ?? (m.entries.some(isTickEntry) ? scheduleBackend(p) : undefined);
   if (m.entries.some(isTickEntry)) {
     console.log(`${options.dryRun ? 'Would stop' : 'Stopping'} the scheduler: disable the timer, stop the tick service, cancel the active tick and its dispatcher pass. Ticket runs keep going.`);
@@ -43,6 +50,7 @@ export async function uninstall(p: Paths, service: ServiceBackend, options: { dr
     if (options.dryRun) continue;
     if (isTickEntry(entry)) await scheduling!.remove(entry);
     else if (entry.kind === 'systemd' || entry.kind === 'launchd') await service.remove(entry);
+    else if (entry.path === p.runtimes) withRuntimeLock(p, () => { preflightRuntimeRemoval(p); rmSync(p.runtimes, { recursive: true, force: true }); });
     else rmSync(entry.path, { recursive: entry.kind === 'dir', force: true });
   }
   if (options.purge) {
@@ -62,4 +70,9 @@ export async function uninstall(p: Paths, service: ServiceBackend, options: { dr
   if (process.platform === 'linux') console.log('If linger was enabled, it has been left enabled.');
   console.log(`${options.dryRun ? 'Would remove' : 'Removing'} manifest: ${p.manifest}`);
   if (!options.dryRun) rmSync(p.manifest, { force: true });
+  } finally {
+    if (ownsRuntimes && !options.dryRun) withRuntimeLock(p, () => clearRuntimeRemoving(p));
+  }
 }
+export const uninstall = (p: Paths, service: ServiceBackend, options: Parameters<typeof uninstallOwned>[2] = {}) =>
+  withRuntimeTransaction(p, () => uninstallOwned(p, service, options));

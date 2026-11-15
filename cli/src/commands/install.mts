@@ -1,4 +1,5 @@
-// Install only Factory-owned paths, recording each artifact before starting services. Reinstalling over a ledger that
+// Install only Factory-owned paths, recording each artifact before starting services. Runtime preparation
+// reserves ownership before publication; the descriptor advances only after the app and services install successfully. Reinstalling over a ledger that
 // has scheduler units stops scheduling before anything is replaced (stopScheduling, commands/schedule.mts: disable
 // and stop the timer, stop the tick and cancel its dispatcher pass, wait for confirmation) and, if that fails, stops
 // the install before it touches a file. Afterwards the owned scheduler units are rewritten from the saved launch
@@ -26,6 +27,9 @@ import type { ScheduleBackend } from '../platform/scheduler.mts';
 import { readScheduleConfig } from '../schedule.mts';
 import type { CancelOptions } from '../tick-cancel.mts';
 import { describeStop, stopScheduling } from './schedule.mts';
+import { prepareRuntimeBundle } from '../runtime-bundle.mts';
+import type { PackageInstaller } from '../runtime-bundle.mts';
+import { assertRuntimeAvailable, recoverRuntimePreparations, reserveRuntimePreparation, runtimeOwned, withRuntimeLock, withRuntimeTransaction, writeRuntimeDescriptor } from '../runtime-ownership.mts';
 export const repository = fileURLToPath(new URL('../../../', import.meta.url));
 export function nodeSupported(version = process.versions.node) {
   const [major, minor] = version.split('.').map(Number);
@@ -74,14 +78,16 @@ export function resumeReminder(p: Paths, stopped: boolean): string | null {
   const who = waiting.length ? ` Opted-in projects waiting: ${waiting.join(', ')}.` : '';
   return `The scheduler is off; install never turns it back on.${who} Resume it with: factory schedule on`;
 }
-export async function install(p: Paths, service: ServiceBackend, options: { link?: boolean; source?: string; cwd?: string; running?: string; schedule?: ScheduleBackend; cancel?: CancelOptions } = {}) {
+async function installOwned(p: Paths, service: ServiceBackend, options: { link?: boolean; source?: string; cwd?: string; running?: string; schedule?: ScheduleBackend; cancel?: CancelOptions; installPackages?: PackageInstaller } = {}) {
   if (!nodeSupported()) throw new Error(`Node 22.18+ required; found ${process.versions.node}`);
   const source = realpathSync(options.source || installSource(p, options.cwd, options.running));
+  if (!options.link && source.startsWith(p.app + '/')) throw new Error('Source cannot be inside the installed app');
   console.log(`Installing from ${source}`);
   const manifest = readManifest(p);
+  const runtimeEntries = [{ kind: 'dir' as const, path: p.runtimes }, { kind: 'file' as const, path: p.runtimeDescriptor }];
   const entries = [ { kind: 'dir' as const, path: p.app }, { kind: 'file' as const, path: p.bin },
     process.platform === 'darwin' ? { kind: 'launchd' as const, label: 'com.factory.board', path: p.launchd } : { kind: 'systemd' as const, unit: 'factory-board.service', path: p.systemd } ];
-  for (const entry of entries) {
+  for (const entry of [...entries, ...runtimeEntries]) {
     validate(p, entry);
     let present = false;
     try { lstatSync(entry.path); present = true; } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
@@ -95,9 +101,19 @@ export async function install(p: Paths, service: ServiceBackend, options: { link
     console.log(describeStop(await stopScheduling(scheduling, p, options.cancel)));
   }
   mkdirSync(p.data, { recursive: true });
+  const runtimeId = withRuntimeLock(p, () => {
+    assertRuntimeAvailable(p);
+    for (const entry of runtimeEntries) record(p, entry);
+    if (existsSync(p.runtimes)) recoverRuntimePreparations(p);
+    const existing = existsSync(p.runtimes) ? new Set(readdirSync(p.runtimes)) : new Set<string>();
+    const bundle = prepareRuntimeBundle({ sourceRoot: source, runtimeStore: p.runtimes, install: options.installPackages,
+      beforePrepare: plan => reserveRuntimePreparation(p, plan) });
+    if (existing.has(bundle.id) && !runtimeOwned(p, bundle.id)) throw new Error(`Unknown ownership of runtime bundle: ${bundle.id}`);
+    recoverRuntimePreparations(p);
+    return bundle.id;
+  });
   if (resolve(source) !== resolve(p.app)) {
     // In --link mode the source resolves through app; never delete the source checkout.
-    if (!options.link && source.startsWith(p.app + '/')) throw new Error('Source cannot be inside the installed app');
     const alreadyLinked = existsSync(p.app) && lstatSync(p.app).isSymbolicLink() && realpathSync(p.app) === source;
     if (!alreadyLinked || !options.link) {
       rmSync(p.app, { recursive: true, force: true });
@@ -106,7 +122,7 @@ export async function install(p: Paths, service: ServiceBackend, options: { link
         // Record the app before copying, so an interrupted copy is removable.
         mkdirSync(p.app, { recursive: true });
         record(p, entries[0]);
-        for (const name of ['cli', 'board', 'orchestrator', 'skills']) cpSync(join(source, name), join(p.app, name), { recursive: true });
+        for (const name of ['cli', 'board', 'orchestrator', 'skills', 'package.json', 'package-lock.json']) cpSync(join(source, name), join(p.app, name), { recursive: true });
         writeHistoryCatalog(source, p.app); // earlier scaffold versions, so `factory update` can tell old copies from edited ones
       }
     }
@@ -125,6 +141,10 @@ export async function install(p: Paths, service: ServiceBackend, options: { link
     const saved = readScheduleConfig(p);
     if (saved) await scheduling.install({ node: saved.node, app: p.app, state: p.state, path: saved.path }, e => record(p, e));
   }
+  withRuntimeLock(p, () => {
+    assertRuntimeAvailable(p);
+    writeRuntimeDescriptor(p, runtimeId);
+  });
   const old = legacyPaths(p);
   if (old.length) console.warn(`Legacy Sandcastle paths left untouched (adoption is not available yet):\n${old.join('\n')}`);
   if (!(process.env.PATH || '').split(':').includes(dirname(p.bin))) console.log(`Add to your shell: export PATH="${dirname(p.bin)}:$PATH"`);
@@ -132,3 +152,5 @@ export async function install(p: Paths, service: ServiceBackend, options: { link
   const reminder = resumeReminder(p, !!scheduling);
   if (reminder) console.log(reminder);
 }
+export const install = (p: Paths, service: ServiceBackend, options: Parameters<typeof installOwned>[2] = {}) =>
+  withRuntimeTransaction(p, () => installOwned(p, service, options));
