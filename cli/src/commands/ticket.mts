@@ -25,8 +25,12 @@ import { controlAction } from '../../../board/execution-events.mts';
 // Verdict changes create one deliverable correction event with the prior/new verdict and run reference.
 // archive/restore validate under admission through board/tickets.mts; archived/show read journal projections,
 // including original/effective verdicts, full event history and outstanding tracker delivery. No run is rewritten.
+// Show also reads current project readiness without fetching trackers or logs. Missing optional input/execution
+// producers stay unknown, separately from historical run notes. A project hold is visible even without a run.
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
+import { savedReadiness } from '../readiness.mts';
+import { readinessLines, scopedReadiness } from '../../../board/readiness.mts';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { keyFor } from '../../../board/admission.mts';
@@ -295,13 +299,22 @@ export function ticketShow(p: Paths, ticket: string | undefined, o: TicketOption
   const j = readJournal(dir, { project: ctx.tracker, iid });
   const found = findRun(p, ctx, iid, dir).run;
   const run = found?.project === ctx.tracker && found.iid === iid && found.startedAt ? found : undefined;
-  if (!run && !j.events.length) throw new Error(`No run or journal for #${iid} in ${ctx.name}.`);
+  if (found && !run && !j.events.length) throw new Error(`No run or journal for #${iid} in ${ctx.name}.`);
+  const readiness = savedReadiness(p, ctx.root);
   const view = projectTicket(j, run ?? { startedAt: '' });
-  const data = { project: ctx.tracker, iid, run, ...view, manuallyCorrected: !!view.correction, history: j.events };
+  const projectReadiness = scopedReadiness(readiness, 'project');
+  const input = { state: 'unknown', reason: 'No applicable saved ticket-input projection is available', coverage: [], contentHash: null, references: [] };
+  const executionReadiness = { state: 'unknown', reason: 'No structured execution readiness observation is available',
+    ...(run ? { execution: runIdentity(run), stage: run.stage, note: run.note ?? null } : {}) };
+  const data = { version: 1, project: ctx.tracker, iid, run, ...view, manuallyCorrected: !!view.correction, history: j.events,
+    readiness: projectReadiness, input, executionReadiness };
   if (o.json) console.log(JSON.stringify(data, null, 2));
   else {
     console.log(`${ctx.name} #${iid}: ${view.archived ? 'archived' : 'not archived'}`);
     console.log(`Original verdict: ${view.original ?? 'none'}; effective verdict: ${view.verdict ?? 'none'}${view.correction ? ' (manually corrected)' : ''}`);
+    for (const l of readinessLines(projectReadiness, 'Current project readiness')) console.log(l);
+    console.log(`Ticket input: ${input.state}; ${input.reason}. No tracker or arbitrary links fetched.`);
+    console.log(`Historical execution readiness: ${executionReadiness.state}; ${executionReadiness.reason}${run ? `; ${runIdentity(run)} ${run.stage}${run.note ? `; ${run.note}` : ''}` : '; no execution'}`);
     console.log(`Run: ${run ? runIdentity(run) : 'none'}; pending tracker posts: ${view.undelivered.length}`);
     for (const e of j.events) console.log(`${e.at} ${e.actor} ${e.kind}${e.verdict ? ` ${e.verdict.from ?? 'none'} -> ${e.verdict.to}` : ''}${e.run ? ` [${e.run}]` : ''}${e.text ? `: ${e.text}` : ''}${e.delivery ? ` [${e.delivery.state}${e.delivery.lastError ? `: ${e.delivery.lastError}` : ''}]` : ''}`);
   }

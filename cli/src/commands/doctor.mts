@@ -1,3 +1,5 @@
+// Prerequisite checks and passive filesystem observations; only --probe-filesystem permits owned writes.
+// Doctor never publishes over launch reports, imports project executables, repairs files or creates sandboxes.
 // Read-only prerequisite checks. Missing linger warns but never changes the host. Once the scheduler's units are in the
 // ledger, the service manager's answer is checked (the timer on Linux, the com.factory.tick agent on macOS): enabled and active passes, enabled but stopped fails, running
 // but disabled warns, and an unreadable manager fails (unknown is never on). A scheduler that is simply off is
@@ -13,7 +15,36 @@ import { nodeSupported } from './install.mts';
 import type { ScheduleBackend } from '../platform/scheduler.mts';
 import { isTickEntry } from '../platform/scheduler.mts';
 import { legacyAdvice } from './schedule.mts';
-export async function doctor(p: Paths, schedule?: Pick<ScheduleBackend, 'status'>) {
+import { resolveProject } from '../runs.mts';
+import { doctorReadiness } from '../readiness.mts';
+import { readinessLines } from '../../../board/readiness.mts';
+import { safeErrno } from '../../../orchestrator/readiness-schema.mts';
+export async function doctor(p: Paths, schedule?: Pick<ScheduleBackend, 'status'>, o: { project?: string; cwd?: string; probeFilesystem?: boolean; json?: boolean } = {}) {
+  // Explicit project mode is bounded to project filesystem diagnostics, not service/network checks.
+  if (o.project || o.probeFilesystem || o.json) {
+    const ctx = resolveProject(p, o);
+    try {
+      const { report, saved, matchingActiveWrites } = await doctorReadiness(p, ctx.root, !!o.probeFilesystem);
+      const data = { version: 1, project: { name: ctx.name, root: ctx.root }, readiness: { state: 'current' as const, report }, saved,
+        writeCapability: o.probeFilesystem ? report.status : matchingActiveWrites ? 'observed recently, not authorization' : 'untested',
+        coverage: 'Host filesystem only; custom workflow sandbox internals are opaque. No repair or setup is performed.' };
+      if (o.json) console.log(JSON.stringify(data, null, 2));
+      else {
+        for (const l of readinessLines(data.readiness, 'Filesystem observation')) console.log(l);
+        console.log(`Write capability: ${data.writeCapability}`);
+        if (matchingActiveWrites) for (const l of readinessLines(saved, 'Saved active observation')) console.log(l);
+        console.log(data.coverage);
+        console.log('--probe-filesystem creates, writes, renames and removes private disposable files in Factory directories. It may create missing ordinary artifact directories.');
+        console.log(`Explicit recheck: factory doctor --project ${JSON.stringify(ctx.name)} --probe-filesystem`);
+      }
+      return report.status === 'blocked' || (o.probeFilesystem && report.status !== 'ready') ? 1 : 0;
+    } catch (e) {
+      const readiness = { state: 'invalid' as const, reason: 'Filesystem observation could not be established; inspect project configuration, Git paths and selected runtime', errno: safeErrno(e) };
+      if (o.json) console.log(JSON.stringify({ version: 1, project: { name: ctx.name, root: ctx.root }, readiness }));
+      else for (const l of readinessLines(readiness)) console.log(l);
+      return 1;
+    }
+  }
   let failures = 0;
   const check = (name: string, ok: boolean, fix: string, warning = false) => {
     console.log(`${ok ? 'PASS' : warning ? 'WARN' : 'FAIL'} ${name}${ok ? '' : `: ${fix}`}`);
@@ -56,5 +87,9 @@ export async function doctor(p: Paths, schedule?: Pick<ScheduleBackend, 'status'
   } catch (error) { check('Scheduler', false, String(error)); }
   const legacy = legacyAdvice(p);
   check('No legacy dispatcher timers', !legacy.length, legacy.join('\n'), true);
+  // Preserve installation diagnostics outside a project. Within a registered checkout, add passive observations.
+  let project;
+  try { project = resolveProject(p, { cwd: o.cwd }); } catch { /* Installation-only doctor remains supported. */ }
+  if (project) failures += await doctor(p, schedule, { ...o, project: project.root });
   return failures ? 1 : 0;
 }
