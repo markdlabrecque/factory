@@ -44,7 +44,7 @@ const git = (cwd, args) => execFileSync('git', args, {cwd, encoding:'utf8'}).tri
 const readFileSyncBarrier = () => { try { return readFileSync(join(fake, 'release'), 'utf8') === 'yes'; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 export const pi = (model, options) => {
   if (Object.keys(options.env ?? {}).some(key => key !== 'OPENAI_API_KEY')) throw Error('Unexpected credential handed to sandbox agent');
-  return {model, thinking: options.thinking};
+  return Object.defineProperty({model, thinking: options.thinking}, 'sessionRoot', {value:options.sessionStorage?.hostSessionsDir});
 };
 export async function createSandbox(o) {
   if (scenario === 'shared-projects') writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
@@ -55,6 +55,7 @@ export async function createSandbox(o) {
     exec: async cmd => {
       if (cmd.startsWith('command -v playwright')) return scenario === 'setup-bad' ? {stdout:'browser preflight failed: Chromium launch',exitCode:1} : {stdout:'browser preflight OK',exitCode:0};
       if (cmd === 'hostname') return {stdout:'fixture-container',exitCode:0};
+      if (cmd.includes(' status --porcelain') && scenario === 'no-commit-unknown-worktree') return {stdout:'',exitCode:1};
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
     run: async o => {
@@ -74,8 +75,22 @@ export async function createSandbox(o) {
       const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.sandcastle/evidence'));
       if (o.name === 'implementer') {
         writeFileSync(join(fake,'implementer-started'),'yes');
+        if (scenario === 'primary-cleanup-error') throw Error('fixture primary error');
         if (scenario === 'publication' && process.env.FIXTURE_BARRIER === 'yes') {
           while (!readFileSyncBarrier()) await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        if (scenario.startsWith('no-commit')) {
+          if (scenario === 'no-commit-dirty') writeFileSync(join(worktree,'app.txt'),'uncommitted');
+          const session = join(o.agent.sessionRoot, 'fixture.jsonl'); mkdirSync(o.agent.sessionRoot, {recursive:true});
+          if (scenario !== 'no-commit-unavailable') writeFileSync(session, JSON.stringify({type:'message',message:{role:'assistant',stopReason:'stop',content:[{type:'text',text:'I cannot implement this safely because the agreed audit, Q&A and plan in comments are unavailable. Inspect /private/context. token=fixture-secret'}]}}));
+          if (scenario === 'no-commit-malformed-report') writeFileSync(join(evidence,'blocked.json'),'{');
+          if (scenario === 'no-commit-blocked') writeFileSync(join(evidence,'blocked.json'),JSON.stringify({blockers:[{iid:8,what:'dependency',evidence:'open ticket'}]}));
+          if (scenario === 'no-commit-stale') {
+            const file = join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json');
+            const run = JSON.parse(readFileSync(file));
+            writeFileSync(file, JSON.stringify({...run, executionId:'new-execution',note:'new execution owns this record',evidenceDir:'new-evidence',stage:'implementing'}));
+          }
+          return {commits:[], iterations:[{sessionFilePath:session}], stdout:'arbitrary raw log must never be reported'};
         }
         writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
         if (scenario === 'instruction-edit') { writeFileSync(join(root,'common.md'),'changed after invocation'); writeFileSync(join(fake,'frozen-after-edit.txt'),o.promptArgs.ADDITIVE_INSTRUCTIONS); }
@@ -95,7 +110,10 @@ export async function createSandbox(o) {
       return {commits:[]};
     },
     close: async () => {
-      rmSync(join(fake,'live'));
+      writeFileSync(join(fake,'closed'), 'yes');
+      if (scenario === 'no-commit-cleanup-error' || scenario === 'primary-cleanup-error') throw Error('fixture teardown failed');
+      if (scenario !== 'no-commit-unconfirmed-cleanup') rmSync(join(fake,'live'));
+      if (scenario === 'no-commit-blocked') git(root,['worktree','remove',worktree]);
       if (scenario === 'branch') git(worktree,['reset','--hard','HEAD~1']);
       if (scenario === 'claim') {
         const p = join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json');
@@ -324,6 +342,12 @@ console.log('sha256:'+'a'.repeat(64));
     if (scenario === 'instruction-missing') {
       writeFileSync(config, readFileSync(config, 'utf8') + '\n[instructions]\ncommon = ["missing.md"]\n');
     }
+    if (scenario === 'no-commit-unavailable') {
+      mkdirSync(state, {recursive:true});
+      const oldEvidence = join(root,'.sandcastle/evidence/7/old-execution'); mkdirSync(oldEvidence, {recursive:true});
+      writeFileSync(join(oldEvidence,'no-commit.json'), JSON.stringify({agentReply:'old explanation must not be reused'}));
+      writeFileSync(join(state,'owner_repo--7.json'), JSON.stringify({iid:'7',project:'owner/repo',stage:'stopped',executionId:'old-execution',evidenceDir:oldEvidence,note:'old explanation must not be reused'}));
+    }
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
       cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
@@ -333,6 +357,50 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(existsSync(join(fake, 'npm-called')), false, 'execution must not invoke npm');
       assert.equal(existsSync(join(root, 'node_modules')), false, 'execution must not create project dependencies');
       assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false, 'execution must not fall back to project dependencies');
+    }
+    if (scenario === 'primary-cleanup-error') {
+      assert.notEqual(result.status, 0);
+      assert.equal(existsSync(join(fake, 'closed')), true);
+      assert.equal(existsSync(join(fake, 'live')), true);
+      assert.equal(existsSync(join(fake, 'verifier-started')), false);
+      const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+      assert.match(run.note, /fixture primary error/); assert.match(run.note, /fixture teardown failed/);
+      assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '');
+      return;
+    }
+    if (scenario.startsWith('no-commit')) {
+      if (scenario === 'no-commit-blocked') assert.equal(result.status, 0, result.stdout + result.stderr);
+      else assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.equal(existsSync(join(fake, 'closed')), true, 'cleanup completed before exit');
+      assert.equal(existsSync(join(fake, 'live')), ['no-commit-cleanup-error','no-commit-unconfirmed-cleanup'].includes(scenario));
+      assert.equal(existsSync(join(fake, 'verifier-started')), false);
+      assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '');
+      const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+      if (scenario === 'no-commit-stale') {
+        assert.equal(run.executionId, 'new-execution'); assert.equal(run.note, 'new execution owns this record');
+        assert.equal(run.evidenceDir, 'new-evidence'); assert.equal(run.stage, 'implementing');
+        return;
+      }
+      assert.equal(run.stage, scenario === 'no-commit-blocked' ? 'waiting' : 'stopped');
+      assert.match(run.note, /zero commits/);
+      assert.match(run.note, /worktree (clean|dirty|unknown)/);
+      assert.match(run.note, /[Ii]nspect ticket context/);
+      assert.match(run.note, ['no-commit-blocked','no-commit-malformed-report'].includes(scenario) ? /Existing blocked-report dependency policy only/ : /No automatic retry/);
+      assert.match(run.note, scenario === 'no-commit-unavailable' ? /cause unknown/ : /agreed audit, Q&A and plan/);
+      if (scenario === 'no-commit-cleanup-error') assert.match(run.note, /fixture teardown failed/);
+      if (scenario === 'no-commit-unconfirmed-cleanup') assert.match(run.note, /cleanup ownership retained/);
+      const report = JSON.parse(readFileSync(join(run.evidenceDir, 'no-commit.json'), 'utf8'));
+      assert.equal(report.worktree, scenario === 'no-commit-dirty' ? 'dirty' : scenario === 'no-commit-unknown-worktree' ? 'unknown' : 'clean');
+      assert.equal(report.executionId, run.executionId);
+      assert.notEqual(run.executionId, 'old-execution');
+      assert.ok(!run.note.includes('old explanation must not be reused'));
+      assert.ok(!JSON.stringify(report).includes('fixture-secret'));
+      assert.ok(!JSON.stringify(report).includes('/private/context'));
+      const calls = readFileSync(join(fake, 'gh.jsonl'), 'utf8');
+      assert.ok(!calls.includes('"merge"') && !calls.includes('"close"'));
+      assert.equal(calls.includes('"comment"'), scenario === 'no-commit-malformed-report', 'only existing malformed blocked-report policy posts');
+      assert.equal(calls.includes('/issues/7/labels'), scenario === 'no-commit-malformed-report', 'no new diagnostic labels');
+      return;
     }
     if (scenario === 'pass') {
       assert.equal(result.status, 0, result.stdout + result.stderr);
