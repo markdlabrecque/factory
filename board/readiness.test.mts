@@ -90,6 +90,27 @@ test('late atomic report rename failure propagates its actual errno and leaves n
   assert.equal(result.code, 'ENOSPC'); assert.equal(result.message, 'fixture rename failure'); assert.equal(result.read.state, 'pending');
   assert.deepEqual(fs.readdirSync(join(f.state, 'readiness')), [f.file.split('/').at(-1)]);
 });
+test('store directory replacement is rejected before atomic publication, without following its link', t => {
+  const f = fixture(t), token = beginReadiness(f.state, f.identity, f.owner), report = f.observe(token);
+  const store = new URL('./readiness.mts', import.meta.url).href, dir = join(f.state, 'readiness');
+  const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { publishReadiness } from ${JSON.stringify(store)};
+    const original = fs.openSync;
+    fs.openSync = (...args) => {
+      const fd = original(...args);
+      if (String(args[0]).endsWith('.tmp')) { fs.renameSync(${JSON.stringify(dir)}, ${JSON.stringify(`${dir}.old`)}); fs.symlinkSync(${JSON.stringify(f.project)}, ${JSON.stringify(dir)}); }
+      return fd;
+    };
+    syncBuiltinESMExports();
+    try { publishReadiness(${JSON.stringify(f.state)}, ${JSON.stringify(token)}, ${JSON.stringify(report)}); process.exit(99); }
+    catch (error) { console.log(error.code); }
+  `], { encoding: 'utf8' });
+  assert.equal(output.trim(), 'ESTALE'); assert.deepEqual(fs.readdirSync(f.project), []);
+  assert.equal(readReadiness(f.state, f.identity).state, 'invalid');
+  assert.deepEqual(fs.readdirSync(`${dir}.old`), [f.file.split('/').at(-1)]);
+});
 test('post-rename directory fsync failure withdraws the owned healthy report', t => {
   const f = fixture(t), token = beginReadiness(f.state, f.identity, f.owner), report = f.observe(token);
   const store = new URL('./readiness.mts', import.meta.url).href;
