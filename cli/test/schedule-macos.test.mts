@@ -8,6 +8,7 @@
 // own cadence and cancellation, and Factory's process handling on synthetic process trees. They do not prove that launchd
 // loads agents at login, honours KeepAlive or ExitTimeOut, or writes the log file; that is trusted. They run on Linux:
 // the adapter's commands are the same, and /proc gives the tick lock its start times.
+import { refreshManifest } from './workflow-fixture.mts';
 import { test as nodeTest } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -68,7 +69,8 @@ async function armed(w: World, projects: string[] = []) {
 }
 function heldProject(w: World, name: string) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
-  writeFileSync(join(root, '.sandcastle/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  refreshManifest(root);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* not started or gone */ } });
   return root;
 }
@@ -348,7 +350,7 @@ test('off disables, then boots out: the supervisor cancels its held pass and nes
   await w.stub.using(() => uninstall(w.p, w.service, { schedule: w.backend }));
   assert.deepEqual(changes(w.stub).slice(m), [`disable ${SVC}`], 'nothing left to boot out');
   for (const path of [w.p.tickPlist, w.p.manifest]) assert.equal(existsSync(path), false, path);
-  for (const keep of [w.p.projects, w.p.scheduleConfig, join(a, '.sandcastle/dispatch.sh')]) assert.equal(existsSync(keep), true, keep);
+  for (const keep of [w.p.projects, w.p.scheduleConfig, join(a, '.factory-workflow/dispatch.sh')]) assert.equal(existsSync(keep), true, keep);
   assert.equal(up(pids.ticket), true, 'uninstall preserved the detached ticket run');
   assert.deepEqual(w.stub.rejected(), []);
 });

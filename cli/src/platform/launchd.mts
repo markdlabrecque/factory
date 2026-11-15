@@ -14,7 +14,7 @@ export class Launchd implements ServiceBackend {
     if (await this.status() !== 'missing') await this.stop();
     const escape = (s: string) => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
     let text = readFileSync(new URL('../../templates/com.factory.board.plist', import.meta.url), 'utf8');
-    for (const [key, value] of Object.entries({ NODE: spec.node, SERVER: `${spec.app}/board/board-server.mts`, STATE: spec.state })) text = text.replaceAll(`@${key}@`, () => escape(value));
+    for (const [key, value] of Object.entries({ NODE: spec.node, SERVER: `${spec.app}/board/board-server.mts`, STATE: spec.state, RUNTIME: this.p.runtimeDescriptor })) text = text.replaceAll(`@${key}@`, () => escape(value));
     mkdirSync(dirname(this.p.launchd), { recursive: true });
     writeFileSync(this.p.launchd, text);
     return { kind: 'launchd' as const, label: 'com.factory.board', path: this.p.launchd };

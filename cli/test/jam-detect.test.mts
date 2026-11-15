@@ -19,6 +19,7 @@ import { afterPass } from '../src/jam-detect.mts';
 import type { AfterPassOptions } from '../src/jam-detect.mts';
 import { paths } from '../src/paths.mts';
 import {preparedFixture} from './prepared-fixture.mts';
+import { projectFixture } from './workflow-fixture.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import { beginAttempt, deliveryMarker, finishAttempt, readRecovery, mutateRecovery } from '../src/recovery-state.mts';
 
@@ -61,9 +62,10 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   writeFileSync(join(sc, 'factory.toml'), factoryToml(TRACKER));
   if (o.copy !== false) {
     // #137: reviewed workflow includes nested vendored parser assets.
-    for (const f of WORKFLOW) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
-    writeFileSync(join(sc, 'main.mts'), '"attempt-record": { type: "string" }\n');
-    recordReview(p, root);
+    const code = join(root, '.factory-workflow');
+    for (const f of WORKFLOW.filter(f => !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(code, f, '..'), { recursive: true }); writeFileSync(join(code, f), ''); }
+    writeFileSync(join(code, 'main.mts'), '"attempt-record": { type: "string" }\n');
+    projectFixture(p, root); recordReview(p, root);
   }
   const dir = p.state;
   mkdirSync(dir, { recursive: true });
@@ -102,7 +104,7 @@ test('a confirmed jam launches nothing without the recovery workflow, or once sc
   const bare = fixture(t, { copy: false });
   bare.record(3, 'stopped');
   await bare.pass([3]);
-  assert.match((await bare.pass([3])).join('\n'), /confirmed; not repairing: .*no recovery workflow/);
+  assert.match((await bare.pass([3])).join('\n'), /confirmed; not repairing: .*runtime.json/);
   assert.deepEqual(bare.launches, []);
   const off = fixture(t);
   off.record(3, 'stopped');
@@ -185,7 +187,7 @@ for (const stop of ['project-stopped', 'admitted-failed', 'throw', 'off', 'gener
         if (o.ticket === 2) {
           if (stop === 'off') allowed = false;
           if (stop === 'generation') withAdmission(f.dir, tx => { tx.state.generations[TRACKER] = 1; tx.commit(); });
-          if (stop === 'review') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed');
+          if (stop === 'review') writeFileSync(join(f.root, '.factory-workflow/recovery.mts'), 'changed');
           if (stop === 'active') beginAttempt(f.p, f.root, { ticket: 2, at: at(10), replay: true });
           if (stop === 'changed-run') f.record(10, 'done');
           if (stop === 'malformed-store') writeFileSync(join(f.dir, 'broken.json'), '{');

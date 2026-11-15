@@ -17,7 +17,8 @@ import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { Paths } from './paths.mts';
-import { scaffoldName } from './paths.mts';
+import { projectWorkflow } from './workflow.mts';
+import { paths } from './paths.mts';
 import { mutate } from './projects.mts';
 import type { Project, ProjectSchedule } from './projects.mts';
 export type ScheduleConfig = { version: 1; path: string; node: string };
@@ -64,16 +65,13 @@ export function optInProblem(root: string, branch: string): string | null {
   return null;
 }
 
-/** Why a project's `.sandcastle` copy can't be scheduled safely, or null. */
-export function copyProblem(root: string): string | null {
-  const scaffold = join(root, scaffoldName);
-  const script = join(scaffold, 'dispatch.sh');
-  if (!existsSync(script)) return `no ${scaffoldName}/dispatch.sh. Run: factory init ${root}`;
-  try { accessSync(script, constants.X_OK); } catch { return `${script} is not executable. Run: chmod +x ${script}`; }
-  const read = (name: string) => { try { return readFileSync(join(scaffold, name), 'utf8'); } catch { return ''; } };
-  if (!read('dispatch.mts').includes('reserveRun(') || !read('board.mts').includes('export function reserveRun'))
-    return `its ${scaffoldName} dispatcher copy predates launch reservations, so scheduled passes could overfill the run cap. Copy dispatch.mts, refresh.mts, analyze.mts, main.mts and ownership.mts from Factory's orchestrator/, and board.mts, admission.mts, assessment.mts and board.template.html from board/ into ${scaffold} (see "Updating a project's copy of the workflow"), then opt in again.`;
-  return null;
+/** Why the selected complete workflow cannot be scheduled safely, or null. */
+export function copyProblem(root: string, p: Paths = paths()): string | null {
+  try {
+    const workflow = projectWorkflow(p, root);
+    accessSync(workflow.entrypoints.dispatch, constants.X_OK);
+    return null;
+  } catch (error) { return (error as Error).message; }
 }
 
 /** Switch a registered project's scheduling on (saving its current branch) or off. Returns the stored switch

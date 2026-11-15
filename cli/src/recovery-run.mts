@@ -1,28 +1,27 @@
 // Recovery requires current execution preparation and asynchronous image readiness before admission.
 // Only typed read-only ticket refusals permit scanning. Environment holds stop the pass without spending attempts.
 // Settlement stays explicit; any preparation or admission failure stops the pass.
-import { checkImageCapabilities } from '../../orchestrator/capabilities.mts';
+import type { checkImageCapabilities } from '../../orchestrator/capabilities.mts';
 import { readImageConfig } from './image-config.mts';
 // #150: carry host-recorded execution and historical implementation baseline into attempt/ownership metadata.
 // #137: tracker metadata reads TOML first, without executing legacy project configuration.
 // Recovery launcher (slice four, #60, continued by #74 and #75): starts one bounded repair attempt on a jammed ticket and
 // settles attempts that ended. The tick's jam confirmation (#61, jam-detect.mts) calls settleRecovery after each completed
-// scheduled pass and launchRecovery for a confirmed jam's ticket, only when the project's copy has the recovery workflow
-// and a person has reviewed it as it is (recovery-review.mts recoveryCopyProblem, #63), so recovery stays inactive until
-// that copy is complete and reviewed.
+// scheduled pass and launchRecovery for a confirmed jam's ticket. Both use the selected complete workflow.
+// Validated Factory bundles need no per-project review; project overrides must match host-owned review metadata.
 // launchRecovery, in order: read-only holds for any running/unsettled attempt (the caller settles separately), shared
 // capacity, claims, budget, workflow review and stopped run; read the ticket's ownership receipt (orchestrator/ownership.mts, keyed by the project's id from its
-// checkout and tracker, read from .sandcastle/config.mts) and check its recorded branch and worktree may be resumed
+// checkout and tracker, read from v2 TOML) and check its recorded branch and worktree may be resumed
 // (recovery-workspace.mts resumeTarget). A branch only on origin is fetched exactly and created locally without force
 // (fetchRecordedBranch), under a receipt that says so, unless a claim protects the ticket. A pre-upgrade run's exact
 // branch is adopted into a new receipt; identities a receipt is missing are filled in from Git. Then: check the
-// project's copy has the complete recovery workflow and that it is unchanged since it was reviewed (recovery-review.mts;
-// factory init delivers and records it for a new scaffold, #63); choose the attempt's UUID and its exact container
+// selected workflow is complete and any project-mode review is current (recovery-review.mts);
+// choose the attempt's UUID and its exact container
 // name (factory-recovery-<uuid>); take capacity, ticket and project together with the attempt's charge in one admission
 // record replacement (recovery-claim.mts); record the intent and add the branch's Factory worktree if it is missing
 // (`git worktree add`, never a reset); write the host-owned attempt record (orchestrator/recovery.mts, phase `claimed`,
 // under <state>/recovery/attempts/, never mounted into a container); then spawn
-// `npx tsx .sandcastle/main.mts --issue <t> --base <b> --recover <seq> --attempt-record <file>` from the project root,
+// saved Node with selected absolute tsx/main paths and --issue/--base/--recover/--attempt-record from the project root,
 // detached into its own process group (so cancelling a dispatcher pass or `schedule off` never reaches it, like
 // dispatched ticket runs), output appended to .sandcastle/logs/recover-<t>.log, SANDCASTLE_STATE_DIR set to the
 // run-state folder. The claim is handed to the child's pid at once; main.mts adopts it and checks the record, run record
@@ -39,6 +38,10 @@ import { readImageConfig } from './image-config.mts';
 // touches branches, worktrees, commits or evidence, and the budget the attempt spent stays spent (recovery-state.mts).
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { projectWorkflow } from './workflow.mts';
+import { acquireRuntimeLease, releaseRuntimeLease, transferRuntimeLease } from './runtime-ownership.mts';
+import { ownerOf } from '../../board/admission.mts';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { claimLive, generationOf, keyFor, ownerState, readAdmission, releaseClaim, transferClaim, withAdmission } from '../../board/admission.mts';
@@ -77,7 +80,8 @@ export const spawnDetached: Spawner = (cmd, args, o) => {
 };
 
 type Common = { root: string; tracker: string; dir?: string; docker?: Docker; at?: string; uuid?: () => string;
-  /** The tracker kind and host for the project's id; read from .sandcastle/config.mts when not given. */
+  node?: string; path?: string; workflowEnv?: NodeJS.ProcessEnv;
+  /** The tracker kind and host for the project's id; read from v2 TOML when not given. */
   identity?: TrackerIdentity };
 export type Settled = { state: 'none' } | { state: 'running'; attempt: Attempt } | { state: 'settled'; attempt: Attempt }
   | { state: 'unconfirmed'; attempt: Attempt; reason: string };
@@ -215,7 +219,8 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   let id: string | undefined;
   try {
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped.');
-  const config = loadTomlConfig(join(o.root, '.sandcastle'));
+  const workflow = projectWorkflow(p, o.root, o.workflowEnv);
+  const config = workflow.config;
   const cap = o.cap ?? config?.dispatch.maxConcurrent ?? DEFAULT_CAP;
   if (!Number.isSafeInteger(cap) || cap <= 0) return stop('capacity-invalid', 'Recovery cap must be a positive safe integer');
   // No settlement here: even reconciliation/cleanup writes would invalidate a read-only refusal.
@@ -274,7 +279,8 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped.');
   const image = readImageConfig(o.root);
   if (!image.ok) return stop('image-config-unknown', image.reason, 'environment');
-  const readiness = await (o.capabilities ?? checkImageCapabilities)({ image: image.image, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
+  const selectedCapabilities = o.capabilities ?? (await import(pathToFileURL(workflow.entrypoints.capabilities).href)).checkImageCapabilities;
+  const readiness = await selectedCapabilities({ image: image.image, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
     stateDir: dir, signal: o.signal });
   if (!readiness.ok) return stop('image-readiness', readiness.reason, 'environment');
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped during readiness.');
@@ -290,6 +296,7 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
       if (o.signal?.aborted) throw new Error('Scheduled recovery was cancelled before admission');
       const currentImage = readImageConfig(o.root);
       if (!currentImage.ok || currentImage.image !== image.image) throw new Error('Image configuration changed during readiness; not admitted');
+      projectWorkflow(p, o.root, workflow.env);
       const changed = recoveryCopyProblem(p, o.root);
       if (changed) throw new Error(changed);
       const fresh = resumeTarget(o.root, run, { worktreeDir: o.worktreeDir, receipt: readReceipt(receiptPath) });
@@ -300,8 +307,8 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   if (!claim.ok) return stop(claim.code ?? 'admission-rejected', claim.reason,claim.scope);
   const key = keyFor(String(o.ticket), o.tracker);
   const seq = claim.attempt.seq;
-  const npx = o.npx ?? (existsSync(resolve(dirname(process.execPath), 'npx')) ? resolve(dirname(process.execPath), 'npx') : 'npx');
-  const args = ['tsx', '.sandcastle/main.mts', '--issue', String(o.ticket), '--base', target.base, '--recover', String(seq), '--attempt-record', record];
+  const args = [workflow.tsx, workflow.entrypoints.main, '--issue', String(o.ticket), '--base', target.base, '--recover', String(seq), '--attempt-record', record];
+  let runtimeToken: string | undefined;
   let pid: number;
   try {
     // The branch's Factory worktree, added without any reset when it is missing (resumeTarget accepted the branch),
@@ -322,8 +329,11 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
     writeAttemptRecord(record, rec);
     mkdirSync(dirname(log), { recursive: true });
     appendFileSync(log, `\n==== ${at} recovery attempt ${seq} on #${o.ticket} (${target.branch})\n`);
-    pid = (o.spawn ?? spawnDetached)(npx, args, { cwd: o.root, env: { ...process.env, SANDCASTLE_STATE_DIR: dir, FACTORY_READY_IMAGE: readiness.imageId }, log });
+    projectWorkflow(p, o.root, workflow.env);
+    runtimeToken = acquireRuntimeLease(p, workflow.env.FACTORY_HOST_RUNTIME_ID).token;
+    pid = (o.spawn ?? spawnDetached)(o.node ?? process.execPath, args, { cwd: o.root, env: { ...process.env, ...workflow.env, PATH: o.path ?? process.env.PATH, FACTORY_RUNTIME_LEASE: runtimeToken, SANDCASTLE_STATE_DIR: dir, FACTORY_READY_IMAGE: readiness.imageId }, log });
   } catch (e) {
+    if (runtimeToken) releaseRuntimeLease(p, runtimeToken);
     const reason = `recovery attempt ${seq} could not start: ${(e as Error).message}`;
     patchRecord(dir, o.tracker, o.ticket, { stage: 'stopped', note: reason });
     if (existsSync(record)) {
@@ -336,6 +346,8 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
     observeSettlement(dir, o.tracker, done, run.executionId);
     return { ok: false, kind: 'admitted-failed', admitted: true, attempt: readRecovery(p, o.root).attempts.find(a => a.id === id) ?? claim.attempt, reason };
   }
+  // Once spawned, uncertain handoff retains ownership and the charged attempt for settlement.
+  transferRuntimeLease(p, runtimeToken!, ownerOf(pid), workflow.env.FACTORY_HOST_RUNTIME_ID);
   // Hand the claim to the repair process, so the ticket stays owned (and counted) while it lives.
   transferClaim(dir, key, claim.token, pid, process.pid);
   patchRecord(dir, o.tracker, o.ticket, { pid });

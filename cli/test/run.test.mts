@@ -3,6 +3,7 @@
 // real orchestrator/dispatch.sh --issue, with stub tools on the PATH (no tracker, Docker or agent): it runs
 // main.mts for that ticket in the foreground, logs to .sandcastle/logs/run-<n>.log, and rejects pass-only flags.
 // The curl stub drains the piped dummy auth header before returning, avoiding SIGPIPE under dispatch.sh's pipefail.
+import { projectFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
 import { bindExecution } from './execution-fixture.mts';
 import { test } from 'node:test';
@@ -27,7 +28,9 @@ function fixture(t: TestContext) {
     mkdirSync(join(root, '.sandcastle'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
     writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`me/${dir}`));
-    writeFileSync(join(root, '.sandcastle/dispatch.sh'), script, { mode: 0o755 });
+    mkdirSync(join(root, '.factory-workflow'), { recursive: true });
+    writeFileSync(join(root, '.factory-workflow/dispatch.sh'), script, { mode: 0o755 });
+    projectFixture(p, root);
     addProject(p, realpathSync(root));
     return realpathSync(root);
   };
@@ -47,12 +50,13 @@ test('runs dispatch.sh --issue <n> from the project root with Factory\'s state f
   assert.deepEqual(called(b), [b, p.state, '--issue 7']);
 });
 
-test('a bad ticket or an older dispatch.sh without --issue fails before anything runs', async t => {
+test('bad tickets and a stale complete override fail before anything runs', async t => {
   const { p, project } = fixture(t);
   const a = project('a', `#!/usr/bin/env bash\ntouch "$PWD/called"\n`);
   await assert.rejects(run(p, 'abc', { cwd: a }), /Expected a ticket number/);
   await assert.rejects(run(p, undefined, { cwd: a }), /Expected a ticket number/);
-  await assert.rejects(run(p, '15', { cwd: a }), /older copy without --issue/);
+  writeFileSync(join(a, '.factory-workflow/dispatch.sh'), '#!/bin/sh\nexit 99\n');
+  await assert.rejects(run(p, '15', { cwd: a }), /identity mismatch/);
   assert.throws(() => readFileSync(join(a, 'called')));
 });
 

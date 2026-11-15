@@ -5,15 +5,16 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RUNTIME_ASSETS } from '../src/runtime-assets.mts';
 import { prepareRuntimeBundle } from '../src/runtime-bundle.mts';
-import { recordRuntimeOwnership, withRuntimeLock } from '../src/runtime-ownership.mts';
+import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../src/runtime-ownership.mts';
 import { installPackages } from './runtime-fixture.mts';
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 export function executionSnapshot(runtime: { directory: string; env: NodeJS.ProcessEnv }, root: string) {
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `const {executionContext}=await import(${JSON.stringify(join(runtime.directory, 'context.mts'))}); const c=await executionContext(); console.log(JSON.stringify({identity:c.identity,policyIdentity:c.policyIdentity,config:c.config}));`], { cwd: root, env: runtime.env, encoding: 'utf8' }));
 }
-export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env, options: { overlays?: boolean; install?: (dir: string) => void } = {}) {
+export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env, options: { overlays?: boolean; install?: (dir: string) => void; paths?: import('../src/paths.mts').Paths } = {}) {
   const staging = mkdtempSync(join(dirname(root), 'execution-'));
-  const source = join(staging, 'source'), data = join(staging, 'data'), runtimes = join(data, 'runtimes');
+  const source = join(staging, 'source'), data = options.paths?.data ?? join(staging, 'data'), runtimes = options.paths?.runtimes ?? join(data, 'runtimes');
+  const descriptor = options.paths?.runtimeDescriptor ?? join(data, 'runtime.json');
   for (const asset of RUNTIME_ASSETS) {
     const target = join(source, asset.source); mkdirSync(dirname(target), { recursive: true });
     const overlay = join(root, '.sandcastle', asset.destination);
@@ -32,6 +33,7 @@ export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env
     }
     options.install?.(dir);
   } });
-  withRuntimeLock({ data, runtimes } as any, () => recordRuntimeOwnership({ data, runtimes } as any, bundle.id));
-  return { ...bundle, env: { ...env, FACTORY_PROJECT_ROOT: root, FACTORY_RUNTIME_ROOT: bundle.directory, FACTORY_RUNTIME_ID: bundle.id }, staging };
+  const p = { data, runtimes, runtimeDescriptor: descriptor } as any;
+  withRuntimeLock(p, () => { recordRuntimeOwnership(p, bundle.id); writeRuntimeDescriptor(p, bundle.id); });
+  return { ...bundle, env: { ...env, FACTORY_RUNTIME_DESCRIPTOR: descriptor, FACTORY_PROJECT_ROOT: root, FACTORY_RUNTIME_ROOT: bundle.directory, FACTORY_RUNTIME_ID: bundle.id, FACTORY_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies, FACTORY_HOST_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies }, staging };
 }

@@ -2,6 +2,7 @@
 // `factory dispatch` tests: it runs the chosen project's own dispatch.sh from the checkout root, with the
 // flags passed through and Factory's run-state folder, and returns its exit code. A stub dispatch.sh stands in
 // for the real one; no tracker, Docker or service manager.
+import { projectFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -25,8 +26,10 @@ function fixture(t: TestContext) {
     mkdirSync(join(root, '.sandcastle'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
     writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`me/${dir}`));
-    writeFileSync(join(root, '.sandcastle/dispatch.sh'),
+    mkdirSync(join(root, '.factory-workflow'), { recursive: true });
+    writeFileSync(join(root, '.factory-workflow/dispatch.sh'),
       `#!/usr/bin/env bash\nprintf '%s\\n' "$PWD" "$SANDCASTLE_STATE_DIR" "$*" > "$PWD/called"\nexit ${exit}\n`, { mode: 0o755 });
+    projectFixture(p, root);
     addProject(p, realpathSync(root));
     return realpathSync(root);
   };

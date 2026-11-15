@@ -1,13 +1,14 @@
 // V2 TOML metadata identifies refresh targets; unrelated invalid registry entries cannot block discovery.
-// Board-triggered refresh (#78): find the project's copy without loading tracker adapters into the server, then run
-// its --refresh-only command in a bounded process group. No scheduler, timer service, admission or ticket execution.
+// Board-triggered refresh resolves one complete workflow from a trusted descriptor without importing project code,
+// then runs --refresh-only in a bounded process group. No scheduler, timer service, admission or ticket execution.
 // One worker per card in this server; assessment attempt tokens fence overlaps with other servers/scheduled passes.
 // Kill this worker's group on exit, close, spawn error and timeout, even when descendants redirect their stdio.
-// Missing projects, old copies and timeouts become fenced assessment failures without changing run records.
+// Missing/ambiguous projects, invalid runtimes and timeouts become fenced assessment failures without changing run records.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { realpathSync } from 'node:fs';
 import { readRuns, stateDir } from "./board.mts";
 import { assessed, beginAssessment, clearRequest, pendingRequests, publishAssessment, readAssessment, writeAssessment } from "./assessment.mts";
 
@@ -43,10 +44,10 @@ async function perform(key: string, timeout: number): Promise<void> {
     const { tomlIdentity } = await import(helper);
     const configErrors: Error[] = [];
     const matches = [...roots].filter((root) => {
-      // Discovery examines several roots. Validate the selected copy again in its dispatcher.
+      // Discovery reads identity only. Complete workflow validation follows selection.
       try {
         const identity = tomlIdentity(resolve(root, '.sandcastle'));
-        return identity.project === run.project && existsSync(resolve(root, '.sandcastle/dispatch.mts'));
+        return identity.project === run.project;
       } catch (error) {
         configErrors.push(error as Error);
         return false;
@@ -54,10 +55,14 @@ async function perform(key: string, timeout: number): Promise<void> {
     });
     if (!matches.length && configErrors.length) throw configErrors[0];
     if (matches.length !== 1) throw new Error(matches.length ? "Several project roots match this card; cannot safely refresh" : "Project root not found. Register its checkout with factory project add, or run a dispatch pass from it.");
-    const root = matches[0];
+    const root = realpathSync(matches[0]);
+    if (!process.env.FACTORY_RUNTIME_DESCRIPTOR) throw Error('Missing trusted Factory runtime descriptor; read-only refresh cannot select a workflow');
+    const workflowHelper = existsSync(new URL('./workflow.mts', import.meta.url)) ? './workflow.mts' : '../orchestrator/workflow.mts';
+    const { resolveWorkflow } = await import(workflowHelper);
+    const workflow = resolveWorkflow(root, process.env.FACTORY_RUNTIME_DESCRIPTOR);
     await new Promise<void>((accept, reject) => {
-      const child = spawn(process.execPath, [resolve(root, ".sandcastle/dispatch.mts"), "--refresh-only", "--ticket", run.iid, "--base", run.base ?? "main"], {
-        cwd: root, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SANDCASTLE_STATE_DIR: dir,
+      const child = spawn(process.execPath, [workflow.entrypoints.refresh, "--refresh-only", "--ticket", run.iid, "--base", run.base ?? "main"], {
+        cwd: root, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...workflow.env, SANDCASTLE_STATE_DIR: dir,
           FACTORY_REFRESH_KEY: key, FACTORY_REFRESH_ATTEMPT: token },
       });
       let output = "", expired = false;
@@ -79,7 +84,7 @@ async function perform(key: string, timeout: number): Promise<void> {
       });
     });
     if (pendingRequests(dir).get(key)?.some((g) => generations?.includes(g))) {
-      throw new Error("Read-only refresh exited without recording a result for this request. Check the project's workflow copy and assessment store.");
+      throw new Error("Read-only refresh exited without recording a result for this request. Check the selected workflow and assessment store.");
     }
   } catch (e) {
     try {

@@ -10,7 +10,7 @@ export class Systemd implements ServiceBackend {
   async install(spec: ServiceSpec) {
     const quote = (s: string) => '"' + s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%') + '"';
     let text = readFileSync(new URL('../../templates/factory-board.service', import.meta.url), 'utf8');
-    for (const [key, value] of Object.entries({ NODE: spec.node, SERVER: `${spec.app}/board/board-server.mts`, STATE: `SANDCASTLE_STATE_DIR=${spec.state}` })) text = text.replaceAll(`@${key}@`, () => quote(key === 'STATE' ? value : value.replaceAll('$', () => '$$')));
+    for (const [key, value] of Object.entries({ NODE: spec.node, SERVER: `${spec.app}/board/board-server.mts`, STATE: `SANDCASTLE_STATE_DIR=${spec.state}`, RUNTIME: `FACTORY_RUNTIME_DESCRIPTOR=${this.p.runtimeDescriptor}` })) text = text.replaceAll(`@${key}@`, () => quote(['STATE', 'RUNTIME'].includes(key) ? value : value.replaceAll('$', () => '$$')));
     mkdirSync(dirname(this.p.systemd), { recursive: true });
     writeFileSync(this.p.systemd, text);
     return { kind: 'systemd' as const, unit: 'factory-board.service', path: this.p.systemd };

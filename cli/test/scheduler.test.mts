@@ -85,7 +85,7 @@ test('project on/off use --project, never touch the timer, and a deleted checkou
   quiet(t);
   const { p, sched, repo } = fixture(t);
   repo('old', { current: false });
-  await assert.rejects(schedule(p, sched, 'on', { project: 'old' }), /predates launch reservations/);
+  await assert.rejects(schedule(p, sched, 'on', { project: 'old' }), /runtime-manifest.json/);
   const root = repo('new');
   await schedule(p, sched, 'on', { project: 'new' });
   await schedule(p, sched, 'off', { project: root });
@@ -498,7 +498,7 @@ test('each completed pass hands its own jam report to jam confirmation; a failed
   assert.ok(lines.some(l => /recovery a: jam on #7 seen \(1 of 2 passes\)/.test(l)));
   await tick(p, { backend: sched, log: l => lines.push(l), pass: pass(0) as any });
   assert.ok(readRecovery(p, a).episode?.confirmedAt, 'two completed passes confirm the jam');
-  assert.ok(lines.some(l => /recovery a: jam on #7 confirmed; not repairing: .*no recovery workflow/.test(l)), 'inactive until the copy is upgraded');
+  assert.ok(lines.some(l => /recovery a: jam on #7 confirmed; not repairing: .*not been reviewed/.test(l)), 'inactive until the copy is upgraded');
   assert.equal(new Set(reports).size, 3, 'every pass has its own report file');
   assert.ok(reports.every(r => !existsSync(r)), 'report files are removed after the pass');
   let called = false;

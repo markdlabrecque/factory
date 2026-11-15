@@ -547,7 +547,8 @@ test("manual worker has a bounded process group and coalesces overlapping reques
   // A deliberately hung project command, not a tracker/agent. It stands in for an adapter blocked in network I/O.
   writeFileSync(join(f.root, ".sandcastle/dispatch.mts"), `import { appendFileSync } from 'node:fs';\nappendFileSync(process.env.FAKE_STATE + '/hung-command', String(process.pid) + '\\n');\nawait new Promise(r => setTimeout(r, 60000));\n`);
   const env = { ...process.env };
-  for (const [key, value] of Object.entries(f.env)) if (value !== undefined) process.env[key] = value;
+  const hung = bindExecution(f.root, f.env);
+  for (const [key, value] of Object.entries(hung.env)) if (value !== undefined) process.env[key] = value;
   t.after(() => { for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key]; Object.assign(process.env, env); });
   requestRefresh(f.dir, f.key(7), "7", "owner/repo");
   const a = readAssessment(f.dir, f.key(7))!;

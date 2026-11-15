@@ -22,6 +22,7 @@ import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { projectFixture, refreshManifest } from './workflow-fixture.mts';
 import { WORKFLOW } from '../src/recovery-review.mts';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -125,7 +126,7 @@ const up = (pid: number) => sameProcess({ pid, startTicks: null });
 
 // The dispatcher: reports a jam on #7 for its pass, then holds the pass open while .sandcastle/hold exists.
 const DISPATCH = `#!/bin/sh
-d="$(dirname "$0")"
+d="$PWD/.sandcastle"
 printf '{"version":1,"pass":"%s","project":"site/site","at":"%s","tickets":[7],"observed":[]}' "$FACTORY_PASS_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$FACTORY_JAM_REPORT"
 if [ -e "$d/hold" ]; then echo $$ > "$d/pass.pid"; sleep 300; fi
 exit 0
@@ -141,7 +142,7 @@ if (a[0] === 'rm') { if (!fs.existsSync(path.join(D, 'stuck', name))) fs.rmSync(
 if (fs.existsSync(f)) { console.log('/' + name); process.exit(0); }
 console.error('Error: No such container: ' + name); process.exit(1);
 `;
-// The repair stand-in for \`npx tsx .sandcastle/main.mts --recover\`: records itself, creates its exact container, waits.
+// The selected workflow's repair stand-in records itself, creates its exact container and waits.
 const REPAIR = `#!${process.execPath}
 const fs = require('node:fs'), path = require('node:path');
 const a = process.argv.slice(2), rec = a[a.indexOf('--attempt-record') + 1];
@@ -197,9 +198,11 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   const sc = join(root, '.sandcastle');
   writeFileSync(join(sc, 'factory.toml'), factoryToml('site/site'));
   // The complete recovery workflow (board.mts keeps what the scheduler's copy check needs), reviewed by a person.
-  writeFileSync(join(sc, 'main.mts'), 'const CONFIG = { image: "fixture" }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
+  const code = join(root, '.factory-workflow');
+  writeFileSync(join(code, 'main.mts'), 'const CONFIG = { image: "fixture" }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
   // #137: stand-in workflows review the complete runtime/offline-parser inventory too.
-  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts' && f !== 'dispatch.mts')) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
+  for (const f of WORKFLOW.filter(f => !['main.mts','board.mts','dispatch.mts','dispatch.sh','package.json','package-lock.json'].includes(f))) { mkdirSync(join(code, f, '..'), { recursive: true }); writeFileSync(join(code, f), ''); }
+  projectFixture(p, root);
   // The ticket's preserved work: a commit and uncommitted changes in its Factory worktree, and earlier evidence.
   git(root, 'branch', '7-fix-login');
   const worktree = join(sc, 'worktrees/7-fix-login');
@@ -249,7 +252,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   await repairsAt(1);
   assert.equal(repairs().length, 1);
   const first = repairs()[0];
-  assert.deepEqual(first.args.slice(0, 8), ['tsx', '.sandcastle/main.mts', '--issue', '7', '--base', 'main', '--recover', '1']);
+  assert.deepEqual(first.args.slice(0, 8), [join(code, 'node_modules/tsx/dist/cli.mjs'), join(code, 'main.mts'), '--issue', '7', '--base', 'main', '--recover', '1']);
   assert.ok(up(first.pid), 'the repair outlives the tick that launched it');
   assert.equal(groupOf(first.pid), first.pid, 'in its own process group');
   assert.equal(claim()?.owner.pid, first.pid, 'its recovery claim belongs to the repair process');
@@ -349,10 +352,12 @@ test('paused maintenance settles competing delivery; later eligible passes recov
   const root = repo(p, 'site', { script: DISPATCH.replace('"tickets":[7]', '"tickets":[7,9]') });
   const sc = join(root, '.sandcastle');
   writeFileSync(join(sc, 'factory.toml'), factoryToml('site/site'));
-  writeFileSync(join(sc, 'main.mts'), 'const CONFIG = { image: "fixture" };\n"attempt-record": { type: "string" }\n');
-  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'board.mts' && f !== 'dispatch.mts')) {
-    mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), '');
+  const code = join(root, '.factory-workflow');
+  writeFileSync(join(code, 'main.mts'), 'const CONFIG = { image: "fixture" };\n"attempt-record": { type: "string" }\n');
+  for (const f of WORKFLOW.filter(f => !['main.mts','board.mts','dispatch.mts','dispatch.sh','package.json','package-lock.json'].includes(f))) {
+    mkdirSync(join(code, f, '..'), { recursive: true }); writeFileSync(join(code, f), '');
   }
+  projectFixture(p, root);
   const tips: Record<string, string> = {};
   for (const iid of ['7', '9']) {
     git(root, 'branch', `${iid}-saved`);
@@ -408,7 +413,9 @@ test('paused maintenance settles competing delivery; later eligible passes recov
   assert.equal(repairs().length, 1);
   const status = JSON.parse(await w.cli('recovery', 'status', '--project', 'site', '--json'));
   assert.equal(status.recovery.followups['9'].state, 'paused');
-  writeFileSync(join(sc, 'dispatch.sh'), DISPATCH.replace('"tickets":[7]', '"tickets":[9]'));
+  writeFileSync(join(code, 'dispatch.sh'), DISPATCH.replace('"tickets":[7]', '"tickets":[9]'));
+  refreshManifest(root);
+  await w.cli('recovery', 'review', '--project', 'site', '--confirm');
   await w.cli('schedule', 'on', '--project', 'site');
   const firstPass = await w.tick();
   assert.match(firstPass.out, /jam on #9 seen \(1 of 2 passes\)/);

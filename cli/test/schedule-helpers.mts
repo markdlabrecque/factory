@@ -2,6 +2,7 @@
 // a bare local `origin` and a pushed `main`, a project dispatcher that is an executable script the test supplies, and a
 // stateful `systemctl` or `launchctl` stub (stubs/) to put first on PATH. Nothing here touches a real service manager, tracker,
 // Docker or credential; every path is under the temporary HOME.
+import { projectFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
 import type { TestContext } from 'node:test';
 import { execFileSync } from 'node:child_process';
@@ -34,11 +35,14 @@ export function repo(p: ReturnType<typeof paths>, name: string, o: RepoOptions =
     git(root, 'remote', 'add', 'origin', origin);
     git(root, 'push', '-q', 'origin', 'main');
   }
-  writeFileSync(join(root, '.sandcastle/dispatch.sh'), o.script ?? '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  mkdirSync(join(root, '.factory-workflow'), { recursive: true });
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), o.script ?? '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`${name}/${name}`));
   const current = o.current !== false;
-  writeFileSync(join(root, '.sandcastle/dispatch.mts'), current ? 'reserveRun(iid, pid);\n' : 'spawn();\n');
-  writeFileSync(join(root, '.sandcastle/board.mts'), current ? 'export function reserveRun() {}\n' : '');
+  writeFileSync(join(root, '.factory-workflow/dispatch.mts'), current ? 'reserveRun(iid, pid);\n' : 'spawn();\n');
+  writeFileSync(join(root, '.factory-workflow/board.mts'), current ? 'export function reserveRun() {}\n' : '');
+  projectFixture(p, root);
+  if (!current) rmSync(join(root, '.factory-workflow/runtime-manifest.json'));
   const real = realpathSync(root);
   if (o.register !== false) addProject(p, real);
   return real;
@@ -54,6 +58,7 @@ function commandStub(t: TestContext, p: ReturnType<typeof paths>, name: 'systemc
   writeFileSync(join(bin, name), readFileSync(stub));
   chmodSync(join(bin, name), 0o755);
   const env: Record<string, string> = { STUB_DIR: dir, ...extra, PATH: `${bin}:${process.env.PATH}` };
+  writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nconst {installPackages}=await import(${JSON.stringify(new URL('./runtime-fixture.mts', import.meta.url).href)}); if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['ci','--include=dev','--include=optional','--ignore-scripts']))process.exit(99); installPackages(process.cwd());\n`, {mode:0o755});
   const stateFile = join(dir, 'state.json');
   const log = () => existsSync(join(dir, 'calls.jsonl')) ? readFileSync(join(dir, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
   const api = {
@@ -118,7 +123,7 @@ ticket.unref();
 writeFileSync(dir + 'held.json', JSON.stringify({ dispatcher: process.pid, shell: shell.pid, analysis: analysis.pid, ticket: ticket.pid }));
 setInterval(() => {}, 1000);
 `;
-export const QUICK = `#!/bin/sh\necho "$@" > "$(dirname "$0")/quick.args"\npwd > "$(dirname "$0")/quick.cwd"\n: > "$(dirname "$0")/ran"\nexit "\${QUICK_EXIT:-0}"\n`;
-export const heldScript = (root: string) => { writeFileSync(join(root, '.sandcastle/held.mjs'), HELD); return `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/held.mjs" "$@"\n`; };
+export const QUICK = `#!/bin/sh\necho "$@" > "$PWD/.sandcastle/quick.args"\npwd > "$PWD/.sandcastle/quick.cwd"\n: > "$PWD/.sandcastle/ran"\nexit "\${QUICK_EXIT:-0}"\n`;
+export const heldScript = (root: string) => { writeFileSync(join(root, '.sandcastle/held.mjs'), HELD); return `#!/bin/sh\nexec "${process.execPath}" "$PWD/.sandcastle/held.mjs" "$@"\n`; };
 
 export const held = (root: string): Record<'dispatcher' | 'shell' | 'analysis' | 'ticket', number> => JSON.parse(readFileSync(join(root, '.sandcastle/held.json'), 'utf8'));

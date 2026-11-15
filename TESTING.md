@@ -70,14 +70,48 @@ They preserve the independent verifier, immutable evidence, historical baseline,
 claim, dependency, readiness, recovery-budget and exact-SHA delivery assertions.
 Settings/template changes revoke authority without changing the running model
 snapshot. The recovery fixture checks Large repair/verification regardless of
-Small/Mid/Large implementation tier. Existing CLI/Board callers use fixture-only
-bridges where top-level routing is still owned by #164. Instruction loader and
+Small/Mid/Large implementation tier. Instruction loader and
 context tests cover role ordering and containment. Refresh exercises analysis prompt
 composition and cache invalidation after instruction edits, and existing-delivery
 continuation refuses an old proof after an edit. Normal entrypoint tests check frozen
 invocation text and refusal before verification; recovery captures composed repair and
 independent verifier prompts. The normal SDK boundary is a one-pass substitution
 contract stub, not a test of the real SDK. Run the full suite above after these focused tests.
+
+## Complete workflow routing
+
+```sh
+node --test orchestrator/workflow.test.mts orchestrator/context.test.mts cli/test/workflow-routing.test.mts cli/test/run.test.mts cli/test/dispatch.test.mts cli/test/scheduler.test.mts cli/test/schedule-linux.test.mts cli/test/schedule-macos.test.mts cli/test/recovery-run.test.mts cli/test/recovery-prepare.test.mts cli/test/recovery-schedule.test.mts board/refresh-worker.test.mts board/install.test.mts
+```
+
+Resolver tests reject missing/unknown inventories, stale hashes, missing transitive
+helpers/dependencies, illegal directories and source/dependency symlinks without
+importing project code or falling back. The selected source tree is closed to the
+runtime inventory, its parent directories, manifest and private dependencies.
+Unknown helpers cannot sit outside the hashed inventory. Children pin both selected
+and host dependency roots along with their runtime identities. Manifest regeneration is read-only until
+the caller writes the returned value. Explicit override review binds complete source,
+dependency and location identity; edits require regeneration and renewed review.
+
+`cli/test/workflow-fixture.mts` publishes complete project overrides in
+`.factory-workflow`, separate from mutable `.sandcastle` configuration, logs,
+evidence and environment files. Tests edit selected code there and explicitly
+regenerate its manifest before renewed review. Initial scaffold fixtures copy only
+inventory assets across the data/code boundary. Re-publishing never restores a
+removed mandatory helper. `cli/test/workflow-fixture.test.mts` checks those fixture
+boundaries, including unchanged identity after data writes and refusal of unknown
+code helpers or missing mandatory files.
+
+`cli/test/workflow-routing.test.mts` records actual selected entrypoints and context
+for both Factory and complete-project modes across CLI run/dispatch, scheduled
+passes, never-opted read-only refresh, Board, recovery preparation and recovery
+launch. It checks saved Node/PATH, cwd, argv, state and host-runtime handoff, plus
+pause, ambiguous roots, missing descriptors and no-fallback refusal. The recovery
+spawn boundary uses a sleeping Node child and the selected image-capability helper
+is a fixture stub. This proves routing and host admission/charge contracts, not
+actual agent, image or tracker behavior. Existing entrypoint, proof, lease, cleanup,
+admission and budget tests remain mandatory. Board installation uses a fixture-only
+npm command and fake service managers, never a registry or the user's services.
 
 ## Local event observations
 

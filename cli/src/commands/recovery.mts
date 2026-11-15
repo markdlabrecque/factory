@@ -3,8 +3,8 @@
 // Preparation readiness is observational status, separate from attempt verdicts, ownership claims and budgets.
 // `factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]` (slice four
 // self-recovery, #62; review #63).
-// status: whether recovery is active in the project (recovery-review.mts recoveryCopyProblem: the copy must have the
-// complete recovery workflow, unchanged since it was reviewed), the
+// status: selected complete workflow identity and recovery eligibility. Installed Factory bundles are trusted;
+// project overrides require a review of the current complete inventory and private dependencies. Also reports the
 // current jam and its confirmation, the running attempt and any recovery claim, each ticket's attempt budget and how it
 // was last renewed, recent attempts newest first with their outcome, reason, repair log and retained report (and whether
 // those files still exist), renewals and ended episodes. Read-only: it never settles, launches or touches tickets.
@@ -14,14 +14,13 @@
 // confirmation starts over on later completed passes, and renews every ticket's budget. It never launches anything:
 // re-evaluation is left to the normal scheduled passes. Ticket branches, worktrees, run records, logs, reports and
 // evidence are untouched; recovery history is kept. Separate from `factory retry`, which clears one failed run.
-// review: the explicit review gate for an existing project's hand-made upgrade (orchestrator/ADAPTING.md). Without
-// --confirm it only lists each workflow file: missing, or whether it matches Factory's own copy, and whether it changed
-// since the last review. With --confirm it records the files as they are now as reviewed (refused while any is missing or
-// main.mts lacks --recover --attempt-record), which makes recovery active; any later edit makes it inactive again. It
-// never copies or changes project files and launches nothing.
+// review lists the selected inventory. Confirmation binds mode, root, content identity and dependency hashes in host
+// state. Invalid manifests cannot be reviewed; regeneration is an explicit separate maintenance step. No code is copied
+// or changed and nothing is launched. Mode switches cannot reuse a project-code review.
 // recoverySummary is also what `factory status` shows (confirmation, attempts and outcomes); a malformed recovery record
 // is reported there as a problem, never overwritten.
 // Reset and confirmed review record explicit unknown-actor controls, outside authoritative locks.
+import { projectWorkflow } from '../workflow.mts';
 import { controlAction } from '../../../board/execution-events.mts';
 import { existsSync } from 'node:fs';
 import { readAdmission, withAdmission } from '../../../board/admission.mts';
@@ -42,6 +41,7 @@ export type RecoveryOptions = { project?: string; cwd?: string; json?: boolean; 
 export type AttemptView = Attempt & { logExists?: boolean; reportExists?: boolean };
 // Preparation status is shown separately from historical attempt verdicts and budgets.
 export type RecoverySummary = {
+  workflow?: { mode: 'factory' | 'project'; root: string; id: string };
   preparation?: RecoveryState['preparation'];
   active: boolean; inactiveReason?: string; file: string; problem?: string;
   episode: Episode | null; running: Attempt | null; claim: AdmissionClaim | null;
@@ -54,7 +54,9 @@ const withFiles = (a: Attempt): AttemptView => ({ ...a, ...(a.log ? { logExists:
 /** The project's recovery picture, newest history first. Never throws for a malformed record or admission file: it is `problem`. */
 export function recoverySummary(p: Paths, ctx: ProjectContext): RecoverySummary {
   const copy = recoveryCopyProblem(p, ctx.root);
-  const base = { active: !copy, ...(copy ? { inactiveReason: copy } : {}), file: recoveryFile(p, ctx.root) };
+  let workflow: RecoverySummary['workflow'];
+  try { const w = projectWorkflow(p, ctx.root); workflow = { mode: w.mode, root: w.root, id: w.id }; } catch { /* inactive reason contains the validation failure */ }
+  const base = { active: !copy, ...(workflow ? { workflow } : {}), ...(copy ? { inactiveReason: copy } : {}), file: recoveryFile(p, ctx.root) };
   let claim: AdmissionClaim | null = null;
   let problem: string | undefined;
   try { claim = Object.values(readAdmission(runStateDir(p)).claims).find(c => c.kind === 'recovery' && c.project === ctx.tracker) ?? null; }
@@ -153,22 +155,23 @@ function activeProblem(s: RecoveryState, claims: AdmissionClaim[], pending: bool
 
 /** `factory recovery review`: list the workflow files; with --confirm, record them as reviewed. */
 function review(p: Paths, ctx: ProjectContext, o: RecoveryOptions, done?: ReturnType<typeof import('../../../board/execution-events.mts').startAction>): number {
+  const missing = missingWorkflow(ctx.root, p);
+  if (missing.length) {
+    done?.('refused');
+    console.error(`factory: invalid selected workflow: ${missing.join(', ')}. Recovery stays inactive. Nothing was recorded.`);
+    return 1;
+  }
   const prior = readReview(p, ctx.root);
-  const changed = prior && typeof prior === 'object' ? changedSinceReview(ctx.root, prior) : null;
-  console.log(`Recovery workflow in ${ctx.root}/.sandcastle (${ctx.name})`);
-  for (const f of workflowFiles(ctx.root)) {
+  const changed = prior && typeof prior === 'object' ? changedSinceReview(ctx.root, prior, p) : null;
+  const selected = projectWorkflow(p, ctx.root);
+  console.log(`Recovery workflow for ${ctx.name}: ${selected.mode} ${selected.root} (${selected.id})`);
+  for (const f of workflowFiles(ctx.root, undefined, p)) {
     const notes = !f.present ? ['missing']
       : [f.matchesFactory === null ? 'project-specific' : f.matchesFactory ? "same as Factory's" : "differs from Factory's copy",
         ...(changed ? [changed.includes(f.file) ? 'changed since review' : 'reviewed'] : [])];
     console.log(`  ${f.file.padEnd(22)} ${notes.join(', ')}`);
   }
-  const missing = missingWorkflow(ctx.root);
-  console.log(prior === null ? 'Review: none recorded' : typeof prior === 'string' ? `Review: ${prior}` : `Review: recorded ${prior.reviewedAt} (${prior.by})`);
-  if (missing.length) {
-    done?.('refused');
-    console.error(`factory: the copy is missing ${missing.join(', ')}. Upgrade it by hand (orchestrator/ADAPTING.md, "Upgrading an existing project for self-recovery"); recovery stays inactive. Nothing was recorded.`);
-    return 1;
-  }
+  console.log(prior === null ? 'Review: none recorded' : typeof prior === 'string' ? `Review: ${prior}` : `Review: recorded ${prior.reviewedAt} (${prior.by}, ${prior.mode}, ${prior.id})`);
   if (!o.confirm) {
     console.log(`Recovery is ${recoveryCopyProblem(p, ctx.root) ? 'inactive' : 'active'}. Check these files (with your customizations) against Factory's workflow, then run: factory recovery review --confirm --project ${ctx.name}`);
     return 0;

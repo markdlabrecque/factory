@@ -43,7 +43,11 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     if (!/^[a-f0-9]{64}$/.test(env.FACTORY_RUNTIME_ID ?? '')) throw Error(`Missing selected runtime identity. ${guidance}`);
     const { validateRuntimeBundle } = await import(pathToFileURL(join(runtimeRoot, 'runtime-bundle.mts')).href);
     const manifest = freezeSnapshot(validateRuntimeBundle(runtimeRoot));
-    if (manifest.id !== env.FACTORY_RUNTIME_ID || basename(runtimeRoot) !== manifest.id) throw Error('Selected runtime identity mismatch');
+    if (manifest.id !== env.FACTORY_RUNTIME_ID || env.FACTORY_RUNTIME_DEPENDENCIES && manifest.dependencies !== env.FACTORY_RUNTIME_DEPENDENCIES || env.FACTORY_WORKFLOW_MODE !== 'project' && basename(runtimeRoot) !== manifest.id) throw Error('Selected runtime identity mismatch');
+    if (env.FACTORY_WORKFLOW_MODE) {
+      const { resolveWorkflow } = await import('./workflow.mts');
+      resolveWorkflow(projectRoot, '', env);
+    }
     let assetRoot: string;
     try {
       assetRoot = canonical(within(projectRoot, '.sandcastle'), 'Project asset root');
@@ -79,7 +83,7 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
       },
       tsx: codePath('node_modules/tsx/dist/cli.mjs'),
       sandcastle: codePath(`node_modules/@ai-hero/sandcastle/${JSON.parse(readFileSync(codePath('package-lock.json'), 'utf8')).packages['node_modules/@ai-hero/sandcastle'].bin.sandcastle}`),
-      env: Object.freeze({ FACTORY_PROJECT_ROOT: projectRoot, FACTORY_RUNTIME_ROOT: runtimeRoot, FACTORY_RUNTIME_ID: manifest.id, SANDCASTLE_STATE_DIR: sharedState }) });
+      env: Object.freeze({ FACTORY_PROJECT_ROOT: projectRoot, FACTORY_RUNTIME_ROOT: runtimeRoot, FACTORY_RUNTIME_ID: manifest.id, FACTORY_RUNTIME_DEPENDENCIES: manifest.dependencies, ...(env.FACTORY_WORKFLOW_MODE ? { FACTORY_WORKFLOW_MODE: env.FACTORY_WORKFLOW_MODE } : {}), ...(env.FACTORY_HOST_RUNTIME_ROOT ? { FACTORY_HOST_RUNTIME_ROOT: env.FACTORY_HOST_RUNTIME_ROOT, FACTORY_HOST_RUNTIME_ID: env.FACTORY_HOST_RUNTIME_ID, FACTORY_HOST_RUNTIME_DEPENDENCIES: env.FACTORY_HOST_RUNTIME_DEPENDENCIES } : { FACTORY_HOST_RUNTIME_DEPENDENCIES: manifest.dependencies }), SANDCASTLE_STATE_DIR: sharedState }) });
   } catch (error) {
     const message = (error as Error).message;
     throw Error(`Invalid Factory execution context: ${message}${message.includes('Use Factory commands') ? '' : `. ${guidance}`}`);
@@ -97,20 +101,22 @@ export const executionContext = () => selected ??= loadExecutionContext();
 export async function retainRuntime(context: ExecutionContext) {
   const ownership = await import(pathToFileURL(context.codePath('runtime-ownership.mts')).href);
   const admission = await import(pathToFileURL(context.codePath('admission.mts')).href);
-  const paths = { data: dirname(dirname(context.runtimeRoot)), runtimes: dirname(context.runtimeRoot) };
+  const hostRoot = context.env.FACTORY_HOST_RUNTIME_ROOT ?? context.runtimeRoot;
+  const leaseId = context.env.FACTORY_HOST_RUNTIME_ID ?? context.manifest.id;
+  const paths = { data: dirname(dirname(hostRoot)), runtimes: dirname(hostRoot) };
   const inherited = process.env.FACTORY_RUNTIME_LEASE;
   // The inherited capability is consumed once; grandchildren receive their own token.
   delete process.env.FACTORY_RUNTIME_LEASE;
-  const lease = inherited ? ownership.transferRuntimeLease(paths, inherited, admission.ownerOf(process.pid), context.manifest.id)
-    : ownership.acquireRuntimeLease(paths, context.manifest.id);
+  const lease = inherited ? ownership.transferRuntimeLease(paths, inherited, admission.ownerOf(process.pid), leaseId)
+    : ownership.acquireRuntimeLease(paths, leaseId);
   let cleanupConfirmed = true, released = false;
   const release = () => {
     if (!released && cleanupConfirmed) { ownership.releaseRuntimeLease(paths, lease.token); released = true; }
   };
   process.once('exit', release);
   return { token: lease.token, pendingCleanup: () => { cleanupConfirmed = false; }, confirmedCleanup: () => { cleanupConfirmed = true; }, release,
-    childLease: () => ownership.acquireRuntimeLease(paths, context.manifest.id),
-    transfer: (token: string, pid: number) => ownership.transferRuntimeLease(paths, token, admission.ownerOf(pid), context.manifest.id),
+    childLease: () => ownership.acquireRuntimeLease(paths, leaseId),
+    transfer: (token: string, pid: number) => ownership.transferRuntimeLease(paths, token, admission.ownerOf(pid), leaseId),
     releaseChild: (token: string) => ownership.releaseRuntimeLease(paths, token) };
 }
 /** Re-read current inputs before granting new analysis or delivery authority. Frozen choices remain unchanged. */

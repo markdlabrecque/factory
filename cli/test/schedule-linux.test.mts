@@ -12,6 +12,7 @@
 // child) and one detached "ticket run" in its own process group. Everything lives under a temporary HOME; no host service,
 // tracker, Docker or credential is touched, and every spawned process is killed at the end of its test.
 // The end-to-end CLI test also has a project never opted in whose synthetic dispatch.mts records the read-only refresh a tick gives it (#94).
+import { refreshManifest } from './workflow-fixture.mts';
 import { test as nodeTest } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -81,7 +82,8 @@ function world(t: TestContext) {
 /** A project whose dispatcher is the held process tree; registered and opted in. */
 async function heldProject(w: World, name: string, extra: Record<string, string> = {}) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
-  writeFileSync(join(root, '.sandcastle/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  refreshManifest(root);
   const r = await cli(w, ['schedule', 'on', '--project', name], extra);
   assert.equal(r.code, 0, r.err);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* not started or gone */ } });
@@ -268,8 +270,9 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   const root = repo(w.p, 'alpha', { script: QUICK });
   const other = repo(w.p, 'beta', { script: QUICK });
   // beta is never opted in: each tick runs its dispatch.mts --refresh-only (#94), which records what it got.
-  writeFileSync(join(other, '.sandcastle/dispatch.mts'), "import { writeFileSync } from 'node:fs';\n" +
+  writeFileSync(join(other, '.factory-workflow/dispatch.mts'), "import { writeFileSync } from 'node:fs';\n" +
     "writeFileSync('.sandcastle/refresh.json', JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), state: process.env.SANDCASTLE_STATE_DIR, scheduled: process.env.FACTORY_SCHEDULED ?? null, jam: process.env.FACTORY_JAM_REPORT ?? null }));\n");
+  refreshManifest(other);
   const unrelated = join(w.p.home, '.config/systemd/user/unrelated.service');
   mkdirSync(join(w.p.home, '.config/systemd/user'), { recursive: true });
   writeFileSync(unrelated, '[Service]\nExecStart=/bin/true\n');
@@ -353,7 +356,7 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
     'stop factory-tick.service', 'disable factory-tick.service', 'daemon-reload',
     'stop factory-board.service', 'disable factory-board.service', 'daemon-reload'], 'exact calls and order');
   for (const path of [w.p.tickService, w.p.tickTimer, w.p.manifest, w.p.systemd]) assert.equal(existsSync(path), false, path);
-  for (const keep of [unrelated, w.p.projects, w.p.scheduleConfig, join(root, '.sandcastle/dispatch.sh')]) assert.equal(existsSync(keep), true, `${keep} is kept`);
+  for (const keep of [unrelated, w.p.projects, w.p.scheduleConfig, join(root, '.factory-workflow/dispatch.sh')]) assert.equal(existsSync(keep), true, `${keep} is kept`);
   assert.deepEqual(w.stub.rejected(), [], 'the stub rejected nothing: every call had a shape Factory is meant to send');
 });
 
@@ -380,10 +383,10 @@ test('cli: opt-in refusals (no origin, local-only branch, non-executable script,
   const { execFileSync } = await import('node:child_process');
   const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@e.x', ...a], { cwd, stdio: 'ignore' });
   g(local, 'checkout', '-q', '-b', 'only-here');
-  chmodSync(join(exec644, '.sandcastle/dispatch.sh'), 0o644);
+  chmodSync(join(exec644, '.factory-workflow/dispatch.sh'), 0o644);
   g(detached, 'checkout', '-q', '--detach');
   const before = readFileSync(w.p.projects, 'utf8');
-  const expect: Record<string, RegExp> = { noorigin: /no `origin` remote/, local: /branch only-here is not on origin/, x644: /not executable/, old: /predates launch reservations/, detached: /detached HEAD/ };
+  const expect: Record<string, RegExp> = { noorigin: /no `origin` remote/, local: /branch only-here is not on origin/, x644: /identity mismatch/, old: /runtime-manifest.json/, detached: /detached HEAD/ };
   for (const [name, re] of Object.entries(expect)) { const r = await cli(w, ['schedule', 'on', '--project', name]); assert.notEqual(r.code, 0, name); assert.match(r.err, re, name); }
   assert.equal(readFileSync(w.p.projects, 'utf8'), before, 'no refusal wrote the registry');
   assert.deepEqual(w.stub.lines(), []);
@@ -479,7 +482,8 @@ test('SIGTERM to the tick alone (what systemctl stop is documented to send under
 test('cancellation grace is for cancellation only: a pass that outlives it normally is never signalled; an ignored SIGTERM is escalated to SIGKILL on the owned group only', async t => {
   const w = world(t);
   const root = repo(w.p, 'stubborn', { script: '#!/bin/sh\n' });
-  writeFileSync(join(root, '.sandcastle/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  refreshManifest(root);
   writeFileSync(join(root, '.sandcastle/ignore-term'), '');
   assert.equal((await cli(w, ['schedule', 'on', '--project', 'stubborn'])).code, 0);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* gone */ } });
@@ -809,7 +813,8 @@ const left = (root: string): Record<'dispatcher' | 'leftover' | 'ticket', number
 async function leftoverProject(w: World, name: string, stubborn = false) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
   writeFileSync(join(root, '.sandcastle/leftover.mjs'), LEFTOVER);
-  writeFileSync(join(root, '.sandcastle/dispatch.sh'), `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/leftover.mjs" "$@"\n`, { mode: 0o755 });
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), `#!/bin/sh\nexec "${process.execPath}" "$PWD/.sandcastle/leftover.mjs" "$@"\n`, { mode: 0o755 });
+  refreshManifest(root);
   if (stubborn) writeFileSync(join(root, '.sandcastle/stubborn'), '');
   assert.equal((await cli(w, ['schedule', 'on', '--project', name])).code, 0);
   return root;

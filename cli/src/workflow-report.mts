@@ -12,6 +12,7 @@ import { appRoot } from './scaffold.mts';
 import { classifyInventory, factoryHistory, PROJECT_OWNED, scaffoldSources } from './update.mts';
 import type { History } from './update.mts';
 import { copyProblem } from './schedule.mts';
+import { projectWorkflow } from './workflow.mts';
 import { changedSinceReview, missingWorkflow, readReview, WORKFLOW } from './recovery-review.mts';
 
 export type Observation = { state: 'met' | 'blocked' | 'unknown'; reason: string; evidence: string[] };
@@ -87,29 +88,31 @@ export function capabilityObservations(p: Paths, root: string) {
   if (unsafe.length) {
     const unavailable: Observation = { state: 'unknown', reason: 'workflow contains unreadable or non-regular files; checks were not followed through symlinks', evidence: unsafe };
     return { schedulerCopy: unavailable, recoveryWorkflow: unavailable, recoveryReview: unavailable,
-      limitation: 'These existing string, presence and recorded-hash checks do not establish complete executable compatibility. Helper drift requires review; this report authorizes no repair.' };
+      limitation: 'Unreadable copy diagnostics do not certify behavior or authorize repair, review or schedule changes.' };
   }
   const schedulerCopy = observe(() => {
-    const problem = copyProblem(root);
-    return { state: problem ? 'blocked' : 'met', reason: problem ?? 'existing executable dispatch and reservation-string check passes',
-      evidence: problem ? [problem] : ['dispatch.sh executable', 'dispatch.mts: reserveRun(', 'board.mts: export function reserveRun'] };
+    const problem = copyProblem(root, p);
+    return { state: problem ? 'blocked' : 'met', reason: problem ?? 'complete selected workflow and executable dispatch validated',
+      evidence: problem ? [problem] : ['complete runtime manifest, private dependencies and dispatch.sh executable'] };
   });
   const recoveryWorkflow = observe(() => {
-    const missing = missingWorkflow(root);
-    return { state: missing.length ? 'blocked' : 'met', reason: missing.length ? 'recovery workflow is incomplete' : 'existing recovery file and entrypoint-string checks pass', evidence: missing };
+    const missing = missingWorkflow(root, p);
+    return { state: missing.length ? 'blocked' : 'met', reason: missing.length ? 'recovery workflow is incomplete' : 'complete selected runtime inventory validated', evidence: missing };
   });
   const recoveryReview = observe(() => {
+    if (recoveryWorkflow.state === 'met' && projectWorkflow(p, root).mode === 'factory')
+      return { state: 'met', reason: 'validated installed Factory bundle needs no per-project review', evidence: [] };
     const review = readReview(p, root);
     if (review === null) return { state: 'blocked', reason: 'no recorded recovery review', evidence: [] };
     if (typeof review === 'string' || Array.isArray(review.files)
       || Object.values(review.files).some(value => typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))
       return { state: 'unknown', reason: 'malformed recovery review', evidence: [] };
     if (recoveryWorkflow.state !== 'met') return { state: 'blocked', reason: 'cannot match review against incomplete workflow', evidence: [] };
-    const changed = changedSinceReview(root, review);
+    const changed = changedSinceReview(root, review, p);
     return { state: changed.length ? 'blocked' : 'met', reason: changed.length ? 'workflow changed since recorded review' : 'workflow matches recorded review', evidence: changed };
   });
   return { schedulerCopy, recoveryWorkflow, recoveryReview,
-    limitation: 'These existing string, presence and recorded-hash checks do not establish complete executable compatibility. Helper drift requires review; this report authorizes no repair.' };
+    limitation: 'Complete selected-runtime validation does not establish complete executable compatibility or certify arbitrary project behavior; this report authorizes no repair, review or schedule changes.' };
 }
 
 // The legacy lexer remains available for diagnostics only, never runtime image selection.

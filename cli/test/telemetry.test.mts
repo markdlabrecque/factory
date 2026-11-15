@@ -19,6 +19,7 @@ import { telemetry } from '../src/commands/telemetry.mts';
 import { update } from '../src/commands/update.mts';
 import { saveManifest } from '../src/manifest.mts';
 import { appRoot, buildAssets, writeScaffold } from '../src/scaffold.mts';
+import { projectFixture } from './workflow-fixture.mts';
 import { recordReview } from '../src/recovery-review.mts';
 import type { ScheduleBackend } from '../src/platform/scheduler.mts';
 const at = '2026-01-01T00:00:00.000Z';
@@ -36,6 +37,7 @@ function fixture(t: any) {
   execFileSync('git',['-c','user.name=t','-c','user.email=t@t','commit','-qm','init','--allow-empty'],{cwd:root});
   writeScaffold(root,buildAssets({profile:'personal',repo:'owner/repo',image:'fake'},p.state));
   populateCopiedWorkflow(root, appRoot);
+  projectFixture(p,root);
   addProject(p,root); mkdirSync(p.state,{recursive:true});
   t.mock.method(console,'log',()=>{}); t.mock.method(console,'error',()=>{}); t.mock.method(console,'warn',()=>{});
   const run=(stage: any='done')=>writeRecord(p.state,'owner_repo--1',{iid:'1',project:'owner/repo',stage,pid:process.pid,startedAt:at,stageSince:at,updatedAt:at,executionId:'execution-one',verdict:'FAIL',note:secret});
@@ -86,7 +88,7 @@ test('only reset and review --confirm emit controls, including missing-workflow 
   await recovery(f.p,'status',f.o); await recovery(f.p,'review',f.o); assert.equal(f.controls().length,0);
   assert.equal(await recovery(f.p,'review',{...f.o,confirm:true}),0);
   assert.equal(await recovery(f.p,'reset',f.o),0);
-  rmSync(join(f.sc,'execution-events.mts'));
+  rmSync(join(f.root,'.factory-workflow/execution-events.mts'));
   assert.equal(await recovery(f.p,'review',{...f.o,confirm:true}),1);
   pairs(f.controls()); assert.deepEqual(f.controls().filter(e=>e.result).map(e=>[e.action,e.result]),[['recovery-review','changed'],['recovery-reset','changed'],['recovery-review','refused']]);
 });

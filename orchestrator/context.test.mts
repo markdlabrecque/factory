@@ -145,7 +145,7 @@ test('a handoff capability for A cannot be consumed or released by selected runt
   const lease = acquireRuntimeLease(paths, f.runtime.id);
   try {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `const {executionContext,retainRuntime}=await import(${JSON.stringify(join(b.directory,'context.mts'))}); await retainRuntime(await executionContext());`], {
-      cwd: f.root, env: { ...f.runtime.env, FACTORY_RUNTIME_ROOT: b.directory, FACTORY_RUNTIME_ID: b.id, FACTORY_RUNTIME_LEASE: lease.token }, encoding: 'utf8', timeout: 5000,
+      cwd: f.root, env: { ...f.runtime.env, FACTORY_RUNTIME_ROOT: b.directory, FACTORY_RUNTIME_ID: b.id, FACTORY_RUNTIME_DEPENDENCIES: b.manifest.dependencies, FACTORY_HOST_RUNTIME_DEPENDENCIES: b.manifest.dependencies, FACTORY_RUNTIME_LEASE: lease.token }, encoding: 'utf8', timeout: 5000,
     });
     assert.notEqual(result.status, 0); assert.match(result.stderr, /Runtime lease identity mismatch/);
     const saved = JSON.parse(readFileSync(join(store, '.leases', lease.token+'.json'), 'utf8'));
@@ -163,7 +163,7 @@ test('an active process pins A after B publication; detached child owns A until 
   // Supply the fixture tsx in source-independent private dependencies before publication, not afterward.
   // This invocation launches main with Node, so the placeholder tsx is never executed.
   withRuntimeLock(paths, () => { recordRuntimeOwnership(paths, a.id); writeRuntimeDescriptor(paths, a.id); });
-  const env = { ...f.runtime.env, FACTORY_RUNTIME_ROOT: a.directory, FACTORY_RUNTIME_ID: a.id };
+  const env = { ...f.runtime.env, FACTORY_RUNTIME_ROOT: a.directory, FACTORY_RUNTIME_ID: a.id, FACTORY_RUNTIME_DEPENDENCIES: a.manifest.dependencies, FACTORY_HOST_RUNTIME_DEPENDENCIES: a.manifest.dependencies };
   const driver = join(f.home, 'driver.mts');
   writeFileSync(driver, `import {spawn} from 'node:child_process'; import {writeFileSync} from 'node:fs'; const {executionContext,retainRuntime}=await import(${JSON.stringify(join(a.directory, 'context.mts'))}); const c=await executionContext(), own=await retainRuntime(c); writeFileSync(${JSON.stringify(ready)},c.manifest.id); process.stdin.once('data',()=>{const lease=own.childLease();const child=spawn(process.execPath,[c.codePath('main.mts')],{cwd:c.projectRoot,env:{...process.env,...c.env,FACTORY_RUNTIME_LEASE:lease.token},detached:true,stdio:['pipe','ignore','inherit']});own.transfer(lease.token,child.pid);child.once('exit',()=>process.exit(0));process.stdin.once('data',()=>child.stdin.write('cleanup'));});`);
   const parent = spawn(process.execPath, [driver], { cwd: f.root, env, stdio: ['pipe', 'ignore', 'pipe'] });
