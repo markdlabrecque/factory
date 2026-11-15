@@ -1,7 +1,7 @@
 // Fixture-only coverage of data-only config explanation and failure redaction.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs, { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import fs, { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, symlinkSync, readFileSync } from 'node:fs';
 import childProcess from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
@@ -115,6 +115,17 @@ test('config explain: fixture-only lookup, policy, redaction and refusals', () =
     const unreadable = capture(p, { project: root, json: true }, join(root, 'notes.md'));
     assert.equal(unreadable.code, 1); assert.equal(unreadable.value.errors[0].phase, 'instruction files');
     assert.match(unreadable.value.errors[0].message, /permissions/i);
+    for (const target of ['.env', 'auth.json']) {
+      rmSync(join(root, 'notes.md'));
+      symlinkSync(target, join(root, 'notes.md'));
+      const alias = capture(p, { project: root, json: true });
+      assert.equal(alias.code, 1); assert.equal(alias.value.errors[0].phase, 'instruction files');
+    }
+    rmSync(join(root, 'notes.md')); writeFileSync(join(root, 'notes.md'), 'SECRET_INSTRUCTION_BODY');
+    rmSync(config); symlinkSync(join(root, '.env'), config);
+    const configAlias = capture(p, { project: root, json: true });
+    assert.equal(configAlias.code, 1); assert.equal(configAlias.value.errors[0].phase, 'configuration');
+    rmSync(config);
     writeFileSync(config, base + '\n[agent]\nfamily = "anthropic"\n');
     const explicit = capture(p, { project: root, json: true });
     assert.equal(explicit.code, 0); assert.equal(explicit.value.sources['agent.family'], 'explicit');
@@ -148,7 +159,17 @@ test('config explain: fixture-only lookup, policy, redaction and refusals', () =
       assert.match(r.value.errors[0].message, /check/i, name);
     }
     rmSync(config); const missing = capture(p, { project: root, json: true }); assert.equal(missing.code, 1); assert.equal(missing.value.errors[0].phase, 'configuration');
-    writeFileSync(config, base); writeFileSync(p.runtimeDescriptor, 'SECRET_SCRIPT_BODY');
+    writeFileSync(config, base);
+    const policyOverlay = join(root, '.sandcastle/model-policy.mts');
+    writeFileSync(policyOverlay, readFileSync(join(runtime.directory, 'model-policy.mts'), 'utf8').replaceAll('gpt-6.1-terra', 'fixture-selected-model'));
+    const changed = bindExecution(root, {}, { paths: p });
+    rmSync(policyOverlay);
+    const differentPolicy = capture(p, { project: root, json: true });
+    assert.equal(differentPolicy.code, 0, differentPolicy.out);
+    assert.equal(differentPolicy.value.workflow.identity, changed.id);
+    assert.deepEqual(differentPolicy.value.policy, { configuredFamily: 'openai', actual: 'unknown', behavior: 'unknown' });
+    assert.match(differentPolicy.value.warnings.join(' '), /policy.*unknown/);
+    writeFileSync(p.runtimeDescriptor, 'SECRET_SCRIPT_BODY');
     const invalidRuntime = capture(p, { project: root, json: true });
     assert.equal(invalidRuntime.code, 1); assert.equal(invalidRuntime.value.errors[0].phase, 'workflow runtime');
     rmSync(p.runtimeDescriptor);

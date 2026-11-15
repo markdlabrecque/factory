@@ -37,6 +37,7 @@ export function configExplain(p: Paths, action: string | undefined, o: { project
     result.projectRoot = root;
     phase = 'configuration';
     const configPath = resolveCheckoutPath(root, '.sandcastle/factory.toml', 'file');
+    if (configPath !== join(root, '.sandcastle', 'factory.toml')) throw Error('Configuration aliases are not supported by explanation');
     const c = loadTomlConfig(join(root, '.sandcastle'));
     result.config = { path: configPath, schema: 2, sha256: createHash('sha256').update(readFileSync(configPath)).digest('hex') };
     result.warnings = c.warnings;
@@ -55,9 +56,15 @@ export function configExplain(p: Paths, action: string | undefined, o: { project
     result.workflow = { mode: workflow.mode, root: workflow.root, identity: workflow.id,
       manifest: { version: workflow.manifest.version, dependencies: workflow.manifest.dependencies },
       behavior: workflow.mode === 'project' ? 'opaque' : 'factory' };
-    result.policy = workflow.mode === 'factory'
+    // Static policy is meaningful only when it is byte-identical to the selected inventory.
+    // Do not import the selected module to discover policy, even in Factory mode.
+    const localPolicyHash = createHash('sha256').update(readFileSync(new URL('../../../orchestrator/model-policy.mts', import.meta.url))).digest('hex');
+    const policyMatches = workflow.manifest.files.find(file => file.path === 'model-policy.mts')?.sha256 === localPolicyHash;
+    result.policy = workflow.mode === 'factory' && policyMatches
       ? { source: MODEL_POLICY_ID, family: c.AGENT.family, tiers: MODEL_POLICY[c.AGENT.family], implementationDefault: 'mid', roles: ROLE_TIERS, ...AGENT_POLICY }
-      : { configuredFamily: c.AGENT.family, actual: 'unknown', behavior: 'opaque' };
+      : { configuredFamily: c.AGENT.family, actual: 'unknown', behavior: workflow.mode === 'project' ? 'opaque' : 'unknown' };
+    if (workflow.mode === 'factory' && !policyMatches)
+      (result.warnings as string[]).push('Selected runtime model policy differs from this CLI; effective model policy is unknown.');
   } catch (error) {
     // Loader errors may contain arbitrary keys or file contents. Only retain known schema keys.
     const message = error instanceof Error ? error.message : '';

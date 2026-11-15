@@ -17,6 +17,9 @@ export function loadInstructions(root: string, lists: EffectiveConfig['instructi
     let resolved: string, bytes: Buffer;
     try {
       resolved = resolveCheckoutPath(root, path, 'file');
+      // Validate the target too: a Markdown alias must not open .env or auth data.
+      if (!/\.md$/i.test(resolved) || relative(root, resolved).split(/[\\/]/).some(part => /^(?:\.env(?:\..*)?|auth\.json)$/i.test(part)))
+        throw Error('Instruction target must be a Markdown file outside secret paths');
       if (seen.has(resolved)) continue;
       bytes = readFileSync(resolved);
     } catch (error) {
