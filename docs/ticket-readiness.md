@@ -123,6 +123,8 @@ Required blocked checks make the report blocked; otherwise any required unknown 
 - `readReadiness(stateRoot, identity, now?, maxAgeMs?) -> ReadinessRead`. Returns `{ state: 'current' | 'stale', report }` or `{ state: 'missing' | 'pending' | 'invalid', reason, errno? }`. Reading never creates directories or runs probes.
 - `readStoredReadiness(stateRoot, registeredProjectRoot, now?, maxAgeMs?) -> ReadinessRead`. Reads the same envelope without resolving project code or inventing a current config/runtime identity. The caller must supply a trusted canonical registered root, never a browser-supplied path. Token and report project roots must exactly match the requested root, including for pending envelopes. Freshness here compares observation age only; the stored identity is not evidence that the current selected configuration still matches.
 - `displayFreshness`, and the `ReadinessToken` and `ReadinessRead` types.
+- `readinessLines(read, label?)` for the shared safe human projection, including observation versus authorization, exact operation/path/errno, identity, next actor/action and automatic recheck.
+- `scopedReadiness(read, scope)` to retain freshness while recomputing the aggregate over only that scope. A ticket failure must not become a project failure.
 
 The caller supplies an existing canonical shared-state root. Files live in its no-follow `readiness` directory, under a SHA-256 project-root filename. There is one current envelope per project and at most three prior timestamp/status diagnostic summaries, not a journal. Reads accept only regular files up to `MAX_REPORT_BYTES`, 256 KiB, and use no-follow nonblocking opens. These are size-bounded synchronous local reads, not an asynchronous filesystem deadline service. Publications use private exclusive temporary files, file/directory fsync and rename. A post-rename fsync failure attempts to withdraw only the newly owned report and still throws the direct failure. It never authorizes launch, even if a damaged filesystem also prevents withdrawal. Report files are mode 0600 and the new store directory is mode 0700. Parent state ownership belongs to the caller.
 
@@ -148,11 +150,11 @@ Focused fixtures in `orchestrator/no-commit.test.mts` exercise the missing-plan 
 
 ## Runtime and coverage boundary
 
-The closed runtime inventory includes `orchestrator/no-commit.mts` as `no-commit.mts`. It ships `orchestrator/readiness.mts` as `readiness.mts`, the schema as `readiness-schema.mts`, `orchestrator/sandbox-readiness.mts` as `sandbox-readiness.mts`, and `board/readiness.mts` as `readiness-store.mts` to avoid a flat-layout name collision. The Board consumes the store through the passive registered-root projection described below. Host observations do not prove effective sandbox-user/mount access.
+The closed runtime inventory includes `orchestrator/no-commit.mts` as `no-commit.mts`. It ships `orchestrator/readiness.mts` as `readiness.mts`, the schema as `readiness-schema.mts`, `orchestrator/sandbox-readiness.mts` as `sandbox-readiness.mts`, and `board/readiness.mts` as `readiness-store.mts` to avoid a flat-layout name collision. CLI diagnostics use these modules without introducing another readiness schema. The text projection ships in the existing `readiness-store.mts` inventory asset. CLI-only input resolution lives in `cli/src/readiness.mts`; no extra executable project module is required. The Board consumes the store through the passive registered-root projection described below. Host observations do not prove effective sandbox-user/mount access.
 
 Complete custom workflow overrides remain internally opaque unless their implementation invokes the shared sandbox helper. Factory does not import installed helpers into an override, execute an override to explain its coverage, or impose a handshake. An override copied from the standard implementation may retain its helper calls; arbitrary custom code is not covered by that observation.
 
-Focused core fixture tests are `orchestrator/readiness.test.mts` and `board/readiness.test.mts`. Sandbox tests are `orchestrator/sandbox-readiness.test.mts`, the normal/recovery entrypoint fixtures, and `orchestrator/recovery-runner.test.mts`. They use temporary directories, local Git, local Node children and injected external boundaries. They do not operate on installed apps, registered projects, Docker, authentication, service managers or production systems.
+Focused core fixture tests are `orchestrator/readiness.test.mts`, `board/readiness.test.mts` and `cli/test/readiness*.test.mts`. Sandbox tests are `orchestrator/sandbox-readiness.test.mts`, the normal/recovery entrypoint fixtures, and `orchestrator/recovery-runner.test.mts`. They use temporary directories, local Git, local Node children and injected external boundaries. They do not operate on installed apps, registered projects, Docker, authentication, service managers or production systems.
 
 ## Prepared sandbox gate
 
@@ -167,6 +169,32 @@ Completed probes clean only known files inside inode-pinned private directories.
 The default probe deadline is 15 seconds. The Docker client is killed on cancellation/deadline, output is capped at 128 KiB, and each Git command has a 1.5-second bound and 4 MiB output cap. There is also a 20-second client watchdog. Kernel filesystem stalls and abrupt container/client loss cannot guarantee probe-file cleanup. Such incomplete probes report unknown work/probe cleanup and hold launch; do not recursively remove old probe directories. Linux container `/proc/self/fd` support is required for pinned directory operations. Reports are observations, not a guarantee of future access.
 
 Normal workflow errors unwind through `finally`, then exit. `closeSandbox(sandbox, proc?)` bounds SDK close and independently confirms the exact `sandboxId` absent because the locked SDK can swallow Docker removal errors. Unconfirmed teardown retains the runtime cleanup lease and ownership receipt, records the exact identity and stops delivery. Existing normal admission-claim lifetime rules are unchanged. Recovery keeps its existing exact-name cleanup-pending record and persistent recovery claim until settlement confirms absence. Primary readiness and cleanup errors both survive. See the [fixture-backed SDK/identity/path/teardown map](sandbox-readiness-map.md).
+
+## CLI observation examples
+
+A project with zero executions can still have a project hold:
+
+```text
+Project: sample (me/sample)  /fixture/sample
+Current project readiness: blocked | active | checked 2026-11-15T12:00:00Z
+  Identity: <runtime identity> / <configuration identity> / <context fingerprint>
+  Observation: <invocation> / <generation>; not launch authorization.
+  project/active logs: blocked; create "/fixture/sample/.sandcastle/logs" [EACCES]; Required filesystem operation failed
+    Next actor: operator; Inspect create access at the reported path. Automatic recheck: next-launch.
+No runs yet.
+```
+
+A stale success instead starts with `Current project readiness: unknown (stale)`. The old operation remains an observation, not a claim about current write ability. Missing, pending and invalid reports name their state and safe errno when known; no cached success is substituted. Status and ticket show use the same registered-root `readStoredReadiness` projection as Board. Freshness there describes the stored observation's age, not a revalidation of current configuration/runtime. Doctor separately resolves current identity before crediting any saved write observation.
+
+Doctor first explains that `--probe-filesystem` creates, writes, renames and removes private files, and can create ordinary missing artifact directories, then prints the explicit recheck command using the existing `--project` selector. Default doctor retains write-unproven checks. A matching recent saved active observation can be displayed separately, but doctor never overwrites it. Host checks cannot establish access as the actual sandbox user.
+
+The CLI currently has no frozen ticket-input or execution-specific report producer in its dependency baseline. `ticket show` therefore exposes `input: {state:"unknown", reason, coverage:[], contentHash:null, references:[]}` and a separate `executionReadiness` unknown with historical execution reference/stage/note when present. It never guesses coverage from a title, follows source URLs, opens arbitrary evidence/log paths or fetches tracker comments to fill that gap. Current ticket holds are already projected through `ticketReadiness` and `input.readiness` when a check has explicit matching `ticket` attribution. No attribution is inferred from a check path/id/owner. Later coverage producer integration must use the collector's complete coverage/hash/source references and execution identity; it must not reuse a historical execution as current project readiness.
+
+Offline CLI fixtures cover zero runs, separate scopes, multiple holds, missing/pending/invalid/stale reports, path spaces, JSON-only output, passive mutation/process/network/secret traps, owned active cleanup and operation-specific failure. Run:
+
+```sh
+node --test cli/test/readiness*.test.mts cli/test/status.test.mts cli/test/ticket.test.mts board/readiness.test.mts orchestrator/readiness.test.mts
+```
 
 ## Board projection
 
