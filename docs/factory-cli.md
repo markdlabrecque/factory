@@ -7,7 +7,9 @@ Live read-only scheduler authorization and delivery claims continue existing exa
 
 Dispatch and recovery enforce [image and sandbox readiness](image-readiness.md) before agent work. Recovery awaits readiness before atomic claim-and-charge, reports environment holds without spending attempts, and rechecks scheduling eligibility after the probe. The shared runtime contract is a breaking change. Project owners are responsible for reviewing their own configuration and custom code; Factory does not automatically migrate them.
 
-The [ticket-readiness contract](ticket-readiness.md) defines the shared filesystem probe/report API and its passive-reader boundary. These core modules do not yet add filesystem gating or CLI commands; consumers wire those separately. Saved readiness is never launch authority.
+The [structured ticket-context contract](ticket-readiness.md#structured-ticket-context) defines complete child and immediate-parent input, bounded collection holds, provenance, hashing and untrusted rendering. It currently owns collection only; launch and operator-report consumers adopt it separately.
+
+The [ticket-readiness contract](ticket-readiness.md) also defines the shared filesystem probe/report API and its passive-reader boundary. These core modules do not yet add filesystem gating or CLI commands; consumers wire those separately. Saved readiness is never launch authority.
 
 ## Configuration explanation
 

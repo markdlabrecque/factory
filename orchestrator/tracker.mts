@@ -7,6 +7,7 @@ import type { Parent } from "./graph.mts";
 import * as github from "./tracker.github.mts";
 import * as gitlab from "./tracker.gitlab.mts";
 
+// contextSource exposes bounded structured ticket/notes/parentOf reads for context collection only.
 // Tracker facade: every tracker call main.mts, dispatch.mts and the ticket graph make. TRACKER.kind in
 // config.mts picks the adapter: "gitlab" (tracker.gitlab.mts, `glab`) or "github" (tracker.github.mts,
 // `gh`). A config without `kind` is GitLab. Every call runs on the host with that CLI's own login.
@@ -79,6 +80,6 @@ export interface MergedPr {
 const impl: typeof gitlab = (TRACKER as { kind?: string }).kind === "github" ? github : gitlab;
 
 export const {
-  currentUsername, ticketUrl, catalogue, children, parentOf, workCatalogue, ticket, viewText, notes, readyList, comment,
+  contextSource, currentUsername, ticketUrl, catalogue, children, parentOf, workCatalogue, ticket, viewText, notes, readyList, comment,
   postVerification, openMrBranches, mergedInto, mergedPr, addLabel, close, advance, ensureLabels, deliver, observeDelivery, mergeExistingDelivery, setDeliveryDeadline,
 } = impl;
