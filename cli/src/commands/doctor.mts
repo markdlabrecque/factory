@@ -7,7 +7,7 @@
 // touches them and points to `factory legacy retire`.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { boardURL } from '../paths.mts';
+import { boardURL, shq } from '../paths.mts';
 import type { Paths } from '../paths.mts';
 import { readManifest } from '../manifest.mts';
 import { run } from '../platform/index.mts';
@@ -35,7 +35,7 @@ export async function doctor(p: Paths, schedule?: Pick<ScheduleBackend, 'status'
         if (matchingActiveWrites) for (const l of readinessLines(saved, 'Saved active observation')) console.log(l);
         console.log(data.coverage);
         console.log('--probe-filesystem creates, writes, renames and removes private disposable files in Factory directories. It may create missing ordinary artifact directories.');
-        console.log(`Explicit recheck: factory doctor --project ${JSON.stringify(ctx.name)} --probe-filesystem`);
+        console.log(`Explicit recheck: factory doctor --project ${shq(ctx.name)} --probe-filesystem`);
       }
       return report.status === 'blocked' || (o.probeFilesystem && report.status !== 'ready') ? 1 : 0;
     } catch (e) {

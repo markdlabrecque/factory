@@ -95,6 +95,19 @@ test('passive status, ticket show and doctor do not mutate, read secrets or call
   assert.equal(fs.existsSync(join(f.root, '.sandcastle/logs')), false);
   t.mock.restoreAll(); syncBuiltinESMExports();
 });
+test('only matching recent active write cycles establish an observed write capability, never passive overwrites', async t => {
+  const f = fixture(t), input = diagnosticInput(f.p, f.root);
+  const token = beginReadiness(f.p.state, input.identity, input.owner);
+  const report = collectReadiness({ ...input, owner: token.owner }, 'active');
+  assert.equal(publishReadiness(f.p.state, token, report), true);
+  const file = join(f.p.state, 'readiness', `${projectKey(f.root)}.json`), before = fs.readFileSync(file);
+  assert.equal(await doctor(f.p, undefined, { project: 'project with spaces', json: true }), 0);
+  const data = JSON.parse(f.out()); assert.equal(data.writeCapability, 'observed recently, not authorization');
+  assert.equal(data.readiness.report.phase, 'passive'); assert.deepEqual(fs.readFileSync(file), before);
+  fs.writeFileSync(join(f.root, '.sandcastle/factory.toml'), factoryToml('me/project') + '\n# changed identity\n');
+  assert.equal(await doctor(f.p, undefined, { project: 'project with spaces', json: true }), 0);
+  assert.equal(JSON.parse(f.out()).writeCapability, 'untested'); assert.deepEqual(fs.readFileSync(file), before);
+});
 test('default installation doctor keeps project observations passive with fake prerequisite/service boundaries', async t => {
   const f = fixture(t), calls: string[] = [];
   t.mock.method(childProcess, 'execFileSync', (command: string, args: string[]) => {
