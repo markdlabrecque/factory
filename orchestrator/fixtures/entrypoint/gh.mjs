@@ -1,10 +1,6 @@
-// #153: exact-head REST PR/check/merge state is fixture-owned and rejects unexpected calls.
-// #149: dependency failure is injected only for the named provider, never the work ticket.
+// Rejecting GitHub boundary for normal/recovery shared-runtime fixtures. Records exact argv/body calls.
+// Models complete child/parent context, pagination/byte failures and exact-head PR checks/merge without a live tracker.
 import { execFileSync } from 'node:child_process';
-// Test-only `gh` for the recovery entrypoint smoke test (#74). Answers exactly the calls main.mts --recover and the
-// GitHub tracker adapter fixture for one open ticket (#7, description model), records every call to
-// $FAKE_STATE/gh.jsonl (with stdin for comments and PR bodies), and exits 2 on anything else.
-// $FAKE_MERGED_PR (a JSON PR) is the answer to merged-PR lookups (#87); label writes (tracker.advance) succeed.
 import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
@@ -16,7 +12,8 @@ const ticket = { number: 7, title: "Fix login", body: process.env.FAKE_TICKET_BO
 const changed = existsSync(join(state, 'changed'));
 if (changed && process.env.FAKE_MUTATION === 'title') ticket.title += ' edited';
 if (changed && process.env.FAKE_MUTATION === 'closed') ticket.state = 'CLOSED';
-const out = (v) => { process.stdout.write(typeof v === "string" ? v : JSON.stringify(v)); process.exit(0); };
+// Flush synchronously: large context fixtures must reach the transport bound, not exit with truncated JSON.
+const out = (v) => { writeFileSync(1, typeof v === "string" ? v : JSON.stringify(v)); process.exit(0); };
 const [a, b] = args;
 if (a === "label" && b === "list") out(["ready-for-agent", "blocked", "needs-human", "wontfix", "merged", "model:sonnet", "model:opus"].map((name) => ({ name })));
 if (a === "issue" && b === "list") out([ticket]);
@@ -43,7 +40,15 @@ if (a === 'api' && /^repos\/(?:owner\/repo|other\/project)\/issues\/\d+$/.test(b
 if (a === 'api' && /repos\/(?:owner\/repo|other\/project)\/issues\/\d+\/comments\?/.test(b)) {
   if (b.includes('/90/')) {
     if (process.env.SCENARIO === 'parent-read-failed') process.exit(2);
-    out([{id:2,body:changed && process.env.SCENARIO === 'parent-plan' ? 'Changed parent plan' : '<details>Agreed parent decisions and implementation plan</details>',user:{login:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'}]);
+    if (process.env.SCENARIO === 'parent-page-failed') {
+      if (b.includes('&page=2')) process.exit(2);
+      out(Array.from({length:100}, (_, i) => ({id:i + 100,body:`Synthetic parent plan page one decision ${i}`,user:{login:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'})));
+    }
+    if (process.env.SCENARIO === 'parent-size-failed') out([{id:2,body:'Synthetic plan '.repeat(400000),user:{login:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'}]);
+    const plan = process.env.SCENARIO === 'readiness-acceptance'
+      ? '<details><summary>Agreed parent decisions and implementation plan</summary>\nDecision: ship a self-contained package.\n1. Audit the existing form.\n2. Add validation and keyboard tests.\n3. Record package evidence.\n</details>'
+      : '<details>Agreed parent decisions and implementation plan</details>';
+    out([{id:2,body:changed && process.env.SCENARIO === 'parent-plan' ? 'Changed parent plan' : plan,user:{login:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'}]);
   }
   out(changed && process.env.SCENARIO === 'comment' ? [{id:1,body:'Human added requirements',user:{login:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'}] : []);
 }
