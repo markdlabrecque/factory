@@ -1,6 +1,6 @@
 // V2 TOML metadata identifies refresh targets; unrelated invalid registry entries cannot block discovery.
 // Board-triggered refresh resolves one complete workflow from a trusted descriptor without importing project code,
-// then runs --refresh-only in a bounded process group. No scheduler, timer service, admission or ticket execution.
+// applies the host-owned project gate, then runs --refresh-only in a bounded process group. No scheduler, timer service, admission or ticket execution.
 // One worker per card in this server; assessment attempt tokens fence overlaps with other servers/scheduled passes.
 // Kill this worker's group on exit, close, spawn error and timeout, even when descendants redirect their stdio.
 // Missing/ambiguous projects, invalid runtimes and timeouts become fenced assessment failures without changing run records.
@@ -60,6 +60,11 @@ async function perform(key: string, timeout: number): Promise<void> {
     const workflowHelper = existsSync(new URL('./workflow.mts', import.meta.url)) ? './workflow.mts' : '../orchestrator/workflow.mts';
     const { resolveWorkflow } = await import(workflowHelper);
     const workflow = resolveWorkflow(root, process.env.FACTORY_RUNTIME_DESCRIPTOR);
+    const readinessHelper = existsSync(new URL('./launch-readiness.mts', import.meta.url)) ? './launch-readiness.mts' : '../orchestrator/launch-readiness.mts';
+    const { projectLaunchReadiness, readinessReason } = await import(readinessHelper);
+    const hold = readinessReason(await projectLaunchReadiness({ projectRoot: root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id,
+      runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: dir, base: run.base ?? 'main' }));
+    if (hold) throw Error(`Factory project held: ${hold}`);
     await new Promise<void>((accept, reject) => {
       const child = spawn(process.execPath, [workflow.entrypoints.refresh, "--refresh-only", "--ticket", run.iid, "--base", run.base ?? "main"], {
         cwd: root, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...workflow.env, SANDCASTLE_STATE_DIR: dir,

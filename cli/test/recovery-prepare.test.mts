@@ -1,4 +1,5 @@
 // Fixture-owned Node helpers exercise the real bounded subprocess/group protocol, without agents or trackers.
+import { execFileSync } from 'node:child_process';
 import { projectFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
 import {test} from 'node:test';
@@ -19,6 +20,9 @@ function fixture(t:TestContext){
   mkdirSync(join(root,'.sandcastle'),{recursive:true});
   writeFileSync(join(root,'.sandcastle/factory.toml'),factoryToml('proj'));
   writeFileSync(join(sc,'main.mts'),'"attempt-record": { type: "string" }');
+  const git = (args:string[]) => execFileSync('git', args, {cwd:root,stdio:'pipe'});
+  git(['init','-b','main']); git(['-c','user.name=Fixture','-c','user.email=fixture@example.test','commit','--allow-empty','-m','base']);
+  git(['update-ref','refs/remotes/origin/main','HEAD']);
   const o={root,tracker:'proj',ticket:7,base:'main',dir:p.state,setupTimeoutMs:2000};
   const prepared=preparedFixture(o);
   const helper=(code:string,minutes='1')=>{writeFileSync(join(sc,'recovery-analysis.mts'),code);writeFileSync(join(sc,'config-read.mts'),`process.stdout.write(${JSON.stringify(minutes)});`);projectFixture(p,root);recordReview(p,root);};

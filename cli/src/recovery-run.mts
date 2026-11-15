@@ -1,6 +1,9 @@
-// Recovery requires current execution preparation and asynchronous image readiness before admission.
+// Recovery requires fresh host/filesystem, complete input matching preparation, and image readiness before admission.
 // Only typed read-only ticket refusals permit scanning. Environment holds stop the pass without spending attempts.
 // Settlement stays explicit; any preparation or admission failure stops the pass.
+import { freezeTicketInput, TicketInputHold } from '../../orchestrator/ticket-input.mts';
+import { commandContextSource } from '../../orchestrator/ticket-context-source.mts';
+import type { TicketContextSource } from '../../orchestrator/ticket-context.mts';
 import type { checkImageCapabilities } from '../../orchestrator/capabilities.mts';
 import { readImageConfig } from './image-config.mts';
 // #150: carry host-recorded execution and historical implementation baseline into attempt/ownership metadata.
@@ -205,7 +208,7 @@ export function inspectRecoveryCandidate(p:Paths,o:Common & {ticket:number;cap?:
 
 /** Start one prepared repair attempt on `ticket`, or say why not; see the file comment. */
 export async function launchRecovery(p: Paths, o: Common & { ticket: number; preparation?: Preparation; cap?: number; spawn?: Spawner; worktreeDir?: string; npx?: string;
-  signal?: AbortSignal; mayLaunch?: () => Promise<boolean>; capabilities?: typeof checkImageCapabilities;
+  signal?: AbortSignal; mayLaunch?: () => Promise<boolean>; capabilities?: typeof checkImageCapabilities; contextSource?: TicketContextSource;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
   afterCommit?: () => void }): Promise<Launch> {
   const dir = o.dir ?? runStateDir(p);
@@ -220,6 +223,8 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   try {
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped.');
   const workflow = projectWorkflow(p, o.root, o.workflowEnv);
+  const hostInput = { projectRoot: o.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id, runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: dir, base: o.preparation.base, signal: o.signal };
+  const { projectLaunchReadiness, readinessReason, recordTicketInput } = await import('../../orchestrator/launch-readiness.mts');
   const config = workflow.config;
   const cap = o.cap ?? config?.dispatch.maxConcurrent ?? DEFAULT_CAP;
   if (!Number.isSafeInteger(cap) || cap <= 0) return stop('capacity-invalid', 'Recovery cap must be a positive safe integer');
@@ -251,6 +256,9 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   let receipt: Receipt | null;
   try { receipt = readReceipt(receiptPath); } catch (e) { return stop('ownership-unreadable', `#${o.ticket}: ${(e as Error).message}`); }
   let target = resumeTarget(o.root, run, { worktreeDir: o.worktreeDir, receipt });
+  if (!target.ok && !target.remoteOnly) return { ...target, admitted: false };
+  const hostHold = readinessReason(await projectLaunchReadiness(hostInput));
+  if (hostHold) return stop('host-readiness', hostHold, 'environment');
   if (!target.ok && target.remoteOnly && run.branch) {
     // Fetch the exact recorded branch, under a receipt saying so, unless a claim protects the ticket.
     const held = readAdmission(dir).claims[keyFor(String(o.ticket), o.tracker)];
@@ -285,6 +293,23 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   if (!readiness.ok) return stop('image-readiness', readiness.reason, 'environment');
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped during readiness.');
 
+  const lateReport = await projectLaunchReadiness(hostInput);
+  const lateHostHold = readinessReason(lateReport);
+  if (lateHostHold) return stop('host-readiness', lateHostHold, 'environment');
+  if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped during host readiness.');
+  const tracker = config.TRACKER;
+  const source = o.contextSource ?? commandContextSource({ kind: tracker.kind, host: tracker.host ?? tracker.gitlabHost!, project: tracker.project }, tracker.projectId,
+    { ...process.env, ...o.workflowEnv, PATH: o.path ?? process.env.PATH });
+  try {
+    const input = freezeTicketInput(source, o.ticket);
+    recordTicketInput(dir, lateReport, input, o.preparation.requirementsHash);
+    if (input.hash !== o.preparation.requirementsHash) return stop('ticket-input', 'Included ticket or parent sources changed since recovery preparation; prepare again on the next pass.', 'ticket');
+  } catch (error) {
+    if (!(error instanceof TicketInputHold)) throw error;
+    recordTicketInput(dir, lateReport, error);
+    return stop('ticket-input', error.message, 'ticket');
+  }
+  if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped during ticket input readiness.');
   const log = join(o.root, '.sandcastle/logs', `recover-${o.ticket}.log`);
   const container = containerFor(id);
   const record = join(attemptsDir(p), `${id}.json`);

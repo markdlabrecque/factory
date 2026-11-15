@@ -21,6 +21,11 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
   if (copy) return held('config',copy,'project');
   let workflow;
   try { workflow = projectWorkflow(p, o.root, o.workflowEnv); } catch (error) { return held('config', String(error), 'project'); }
+  if (o.signal?.aborted) return held('timeout','Preparation cancelled','project');
+  const { projectLaunchReadiness, readinessReason } = await import('../../orchestrator/launch-readiness.mts');
+  const hostHold = readinessReason(await projectLaunchReadiness({ projectRoot: o.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id, runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: o.dir, base: o.base, signal: o.signal }));
+  if (o.signal?.aborted) return held('timeout','Preparation cancelled','project');
+  if (hostHold) return held('config', hostHold, 'project');
   const helper = workflow.entrypoints.preparation;
   if (o.signal?.aborted) return held('timeout','Preparation cancelled','project');
   const owner = join(p.recovery,`prepare-${digest(resolve(o.root))}.json`);

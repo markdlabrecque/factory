@@ -2,7 +2,7 @@
 // Project manifests bind included child/parent sources and the frozen execution policy.
 // Analysis uses the family's fixed Mid policy model and validated v2 graph settings.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { keyFor, stateDir } from "./board.mts";
 import { context, GRAPH } from "./runtime-config.mts";
@@ -27,9 +27,13 @@ export function analysisWorktree(project: string, base: string, ownedPath?: stri
   const path = ownedPath ?? resolve(stateDir(), "worktrees", keyFor(base.replace(/[^A-Za-z0-9._-]+/g, "_"), project));
   if (ownedPath && existsSync(path)) throw new Error(`Invocation analysis workspace already exists; preserved at ${path}`);
   const sha = git(["rev-parse", `origin/${base}`]);
+  const registrations = git(['worktree', 'list', '--porcelain', '-z']).split('\0\0');
+  const registration = registrations.find(record => record.split('\0').includes(`worktree ${path}`));
+  if (registration && !existsSync(path)) throw Error(`Analysis worktree registration is missing its directory: ${path}; preserved without pruning`);
+  if (existsSync(path) && (!registration || !registration.split('\0').includes('detached') || realpathSync(path) !== path)) throw Error(`Unsafe or unregistered analysis worktree: ${path}; preserved without adoption`);
   if (!existsSync(path)) {
     mkdirSync(dirname(path), { recursive: true });
-    if (!ownedPath) git(["worktree", "prune"]); // recovery cleans only its own invocation workspace
+    if (realpathSync(dirname(path)) !== dirname(path)) throw Error(`Unsafe analysis worktree parent: ${dirname(path)}; launch held`);
     git(["worktree", "add", "--detach", path, sha]);
   } else {
     git(["checkout", "--detach", "--force", sha], path);

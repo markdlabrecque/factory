@@ -104,13 +104,20 @@ async function main(): Promise<Preparation> {
   const { dependencyState } = await import('./dependencies.mts');
   const { readRuns, stateDir } = await import('./board.mts');
   const project = runtime.TRACKER.project;
+  const { projectLaunchReadiness, readinessReason, recordTicketInput } = await import('./launch-readiness.mts');
+  const hostReport = await projectLaunchReadiness({ projectRoot: root, runtimeRoot: runtime.context.runtimeRoot, runtimeIdentity: runtime.context.manifest.id, runtimeDependencies: runtime.context.manifest.dependencies, config: runtime.effectiveConfig, stateRoot: stateDir(), base });
+  const hostHold = readinessReason(hostReport);
+  if (hostHold) return held('config', hostHold, 'project');
   const git = (args: string[], cwd = root) => execFileSync('git',args,{cwd,encoding:'utf8',timeout:20_000,killSignal:'SIGKILL',stdio:['ignore','pipe','pipe']}).trim();
   let workspace: {path:string;sha:string} | undefined;
   // Tracker calls have individual deadlines and the parent process owns the total preparation deadline.
   const read = (): Inputs => {
     runtime.context.assertCurrent();
     tracker.setDeliveryDeadline(Date.now()+20_000);
-    const input = freezeTicketInput(tracker.contextSource, ticket);
+    let input: FrozenTicketInput;
+    try { input = freezeTicketInput(tracker.contextSource, ticket); }
+    catch (error) { if (error instanceof TicketInputHold) recordTicketInput(stateDir(), hostReport, error); throw error; }
+    recordTicketInput(stateDir(), hostReport, input);
     const t = { ...tracker.ticket(ticket), title: input.context.child.title, description: input.context.child.description }, parent = input.context.parent?.iid;
     if (parent !== undefined) { const p = input.context.parent!; t.parent = {iid:p.iid,title:p.title,description:p.description}; }
     const notes = input.context.child.notes, catalogue = tracker.workCatalogue(runtime.SUBTASKS.enabled).tickets;

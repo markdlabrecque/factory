@@ -52,10 +52,10 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     const install = () => execFileSync('bash', [script], { cwd: home, env, encoding: 'utf8' });
     install();
     // #153: standalone imports need the checkpoint schema on fresh installs and updates.
-    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'readiness.mts', 'readiness-view.mts', 'readiness-schema.mts', 'project-config.mts', 'model-policy.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor', 'workflow.mts', 'runtime-assets.mts', 'runtime-bundle.mts'].sort();
+    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'readiness.mts', 'readiness-view.mts', 'readiness-schema.mts', 'readiness-probe.mts', 'readiness-identity.mts', 'launch-readiness.mts', 'instructions.mts', 'project-config.mts', 'model-policy.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor', 'workflow.mts', 'runtime-assets.mts', 'runtime-bundle.mts'].sort();
     assert.deepEqual(readdirSync(app).sort(), files);
     // Simulate a partial/outdated install. Updating must restore every runtime dependency too.
-    for (const file of ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'readiness.mts', 'readiness-view.mts', 'readiness-schema.mts', 'refresh-worker.mts', 'tickets.mts']) rmSync(join(app, file));
+    for (const file of ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'readiness.mts', 'readiness-view.mts', 'readiness-schema.mts', 'readiness-probe.mts', 'readiness-identity.mts', 'launch-readiness.mts', 'instructions.mts', 'refresh-worker.mts', 'tickets.mts']) rmSync(join(app, file));
     install();
     const descriptor = join(home, '.local/share/sandcastle-board-runtime/runtime.json');
     const selected = JSON.parse(readFileSync(descriptor, 'utf8'));
@@ -64,7 +64,7 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     assert.deepEqual(readdirSync(app).sort(), files);
     assert.deepEqual(readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(s => JSON.parse(s)), expected);
     execFileSync(process.execPath, ['--input-type=module', '-e',
-      "import { buildBoardData } from './board.mts'; import { loadTomlConfig } from './project-config.mts'; let rejected = false; try { loadTomlConfig('./missing-scaffold'); } catch (e) { if (!String(e).includes('factory.toml')) throw e; rejected = true; } if (!rejected || buildBoardData('http').runs.length) process.exit(1);"], { cwd: app, env });
+      "import { projectLaunchReadiness, readinessReason } from './launch-readiness.mts'; const held = await projectLaunchReadiness({projectRoot:process.cwd(), runtimeRoot:process.cwd(), runtimeIdentity:'fixture', runtimeDependencies:'fixture', config:{}, stateRoot:process.env.SANDCASTLE_STATE_DIR}); if(!readinessReason(held)) throw Error('Missing config must hold'); import { buildBoardData } from './board.mts'; import { loadTomlConfig } from './project-config.mts'; let rejected = false; try { loadTomlConfig('./missing-scaffold'); } catch (e) { if (!String(e).includes('factory.toml')) throw e; rejected = true; } if (!rejected || buildBoardData('http').runs.length) process.exit(1);"], { cwd: app, env });
 
     const server = spawn(process.execPath, ['board-server.mts'], { cwd: app, env, stdio: ['ignore', 'pipe', 'pipe'] });
     t.after(async () => {

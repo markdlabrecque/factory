@@ -7,8 +7,10 @@
 // scheduled/manual passes cannot publish over newer facts. The board worker passes its token to its child; neither
 // path takes admission locks. The caller gives the remaining per-pass budget; analyze.mts enforces its own timeout.
 // #149: assessment uses the same fail-closed dependency evaluator as execution.
-import { freezeTicketInput, type FrozenTicketInput } from './ticket-input.mts';
+import { freezeTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
+import { recordTicketInput } from './launch-readiness.mts';
+import type { ReadinessReport } from './readiness-schema.mts';
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { readRuns, stateDir } from "./board.mts";
 import { assessed, beginAssessment, pickRefreshes, publishAssessment, readAssessment, readAssessments, refreshCards, writeAssessment, pendingRequests, clearRequest } from "./assessment.mts";
@@ -21,7 +23,7 @@ import * as tracker from "./tracker.mts";
 import type { Select, Ticket } from "./tracker.mts";
 
 export function refreshProject(o: { base: string; ticket?: string; budget?: number; subtasks?: boolean; select?: Select & { excludeAssignees?: string[] };
-  log?: (m: string) => void }): void {
+  log?: (m: string) => void; readiness?: ReadinessReport }): void {
   const log = o.log ?? console.log, dir = stateDir();
   const allRuns = readRuns(dir, false);
   const runs = allRuns.filter((r) => r.project === TRACKER.project && (!o.ticket || r.iid === o.ticket));
@@ -48,7 +50,10 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
     refreshCards(runs.filter((r) => attempts.has(r.key)), {
       dir, attempts, project: TRACKER.project, root: process.cwd(), now: () => new Date().toISOString(),
       read: (iid) => {
-        const input = freezeTicketInput(tracker.contextSource, iid);
+        let input: FrozenTicketInput;
+        try { input = freezeTicketInput(tracker.contextSource, iid); }
+        catch (error) { if (error instanceof TicketInputHold && o.readiness) recordTicketInput(dir, o.readiness, error); throw error; }
+        if (o.readiness) recordTicketInput(dir, o.readiness, input);
         inputs.set(iid, input);
         const t = { ...tracker.ticket(iid), title: input.context.child.title, description: input.context.child.description }, parent = input.context.parent?.iid;
         if (parent === undefined) return t;

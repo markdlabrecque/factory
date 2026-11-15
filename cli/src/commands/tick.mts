@@ -83,7 +83,7 @@ import { findRun, projectRuns } from '../runs.mts';
 import { cleanProject } from '../clean.mts';
 import type { SpawnOptions } from './dispatch.mts';
 /** Runs one pass for a project; resolves to dispatch.sh's exit code. The default is runDispatchSh. */
-export type Pass = (ctx: ProjectContext, args: string[], o: Required<Pick<SpawnOptions, 'env' | 'onSpawn'>> & { group: true }) => Promise<number>;
+export type Pass = (ctx: ProjectContext, args: string[], o: Required<Pick<SpawnOptions, 'env' | 'onSpawn'>> & Pick<SpawnOptions, 'signal' | 'mayLaunch'> & { group: true }) => Promise<number>;
 export type TickOptions = {
   backend: ScheduleBackend; pass?: Pass; log?: (line: string) => void; signal?: AbortSignal; cancel?: CancelOptions;
   /** Wall clock (UTC timestamps) and monotonic clock (durations). */
@@ -146,8 +146,16 @@ export function refreshProblem(root: string, exists: boolean, branch: string | n
 }
 /** Runs the project's `dispatch.mts` with `args` under the saved Node, from its root, as the leader of its own process
  *  group; stdin is closed. Resolves to its exit code. */
-export const runRefreshOnly = (node: string, p: Paths = paths()): Pass => (ctx, args, o) => {
+export const runRefreshOnly = (node: string, p: Paths = paths()): Pass => async (ctx, args, o) => {
+  if (o.signal?.aborted) return 1;
   const workflow = projectWorkflow(p, ctx.root, o.env);
+  const { projectLaunchReadiness, readinessReason } = await import('../../../orchestrator/launch-readiness.mts');
+  const base = args.indexOf('--base');
+  const hold = readinessReason(await projectLaunchReadiness({ projectRoot: ctx.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id,
+    runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: o.env.SANDCASTLE_STATE_DIR ?? p.state,
+    base: base >= 0 ? args[base + 1] : undefined, signal: o.signal }));
+  if (hold) { console.error(`factory: project held: ${hold}`); return 1; }
+  if (o.signal?.aborted || (o.mayLaunch && !(await o.mayLaunch())) || o.signal?.aborted) return 1;
   const child = spawn(node, [workflow.entrypoints.refresh, ...args], { cwd: ctx.root, stdio: ['ignore', 'inherit', 'inherit'], detached: true, env: { ...o.env, ...workflow.env } });
   if (child.pid !== undefined) {
     try { o.onSpawn(child.pid); }
@@ -278,13 +286,19 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       const from = mono();
       state.currentRoot = root;
       record({ attemptedAt: attempt, result: 'running', ...(refreshing ? { reason: `${reason}; read-only refresh` } : {}) });
+      const mayLaunch = async () => {
+        if (signal.aborted || (await schedulingState(o.backend)).state !== 'on' || signal.aborted) return false;
+        const current = readRegistry(p).projects.find(x => x.root === root);
+        return !!current && (refreshing ? !current.schedule && !refreshProblem(root, existsSync(root), currentBranch(root), p)
+          : !scheduleBlocker({ state: 'on' }, current, existsSync(root), currentBranch(root)));
+      };
       const passId = randomUUID();
       const report = join(p.schedulerState, 'jam', `${passId}.json`);
       const result = refreshing
-        ? await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.refresh ?? runRefreshOnly(config.node, p))(ctx, refreshArgs(branch!), { ...spawnOptions, env: { ...refreshEnv(p, config), ...workflow.env } }))
+        ? await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.refresh ?? runRefreshOnly(config.node, p))(ctx, refreshArgs(branch!), { ...spawnOptions, mayLaunch, env: { ...refreshEnv(p, config), ...workflow.env } }))
         : (mkdirSync(dirname(report), { recursive: true }),
           await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.pass ?? ((c, args, so) => runDispatchSh(p, c, args, so)))(ctx, SCHEDULED_ARGS,
-            { ...spawnOptions, env: { ...scheduledEnv(p, config), ...workflow.env, FACTORY_PASS_ID: passId, FACTORY_JAM_REPORT: report } })));
+            { ...spawnOptions, mayLaunch, env: { ...scheduledEnv(p, config), ...workflow.env, FACTORY_PASS_ID: passId, FACTORY_JAM_REPORT: report } })));
       const entry = state.projects[root];
       entry.finishedAt = wall().toISOString();
       entry.durationMs = Math.max(0, Math.round(mono() - from));
@@ -350,11 +364,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
             const current = readRegistry(p).projects.find(x => x.root === root);
             return !current ? 'Project is no longer registered.' : !current.schedule?.enabled ? 'Project scheduling is paused or not opted in.' : undefined;
           },
-          mayLaunch: async () => {
-            if (signal.aborted || (await schedulingState(o.backend)).state !== 'on' || signal.aborted) return false;
-            const current = readRegistry(p).projects.find(x => x.root === root);
-            return !!current && !scheduleBlocker({ state: 'on' }, current, existsSync(root), currentBranch(root));
-          } });
+          mayLaunch });
       }
       rmSync(report, { force: true });
       if (result.cancelled) cancelled = true;
@@ -373,7 +383,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
 }
 
 type PassOutcome = { code?: number; error?: string; unconfirmed?: number; cancelled?: boolean; leftover?: { escalated: boolean } };
-type Launch = (o: { onSpawn: (pid: number) => void; group: true }) => Promise<number>;
+type Launch = (o: { onSpawn: (pid: number) => void; group: true; signal: AbortSignal }) => Promise<number>;
 /** Runs one pass (or a refresh) through `launch` and cancels it if `signal` aborts. The process group is recorded in the
  *  lock and the state file at spawn. */
 async function runPass(p: Paths, o: TickOptions, lock: HeldLock, project: Project, root: string,
@@ -391,10 +401,11 @@ async function runPass(p: Paths, o: TickOptions, lock: HeldLock, project: Projec
     lock.recordPass(root, spawned);
     state.projects[root].pid = spawned;
     writeTickState(p, state);
+    if (signal.aborted) cancel(); // a host readiness await may have delayed spawn beyond cancellation
   };
   signal.addEventListener('abort', cancel, { once: true });
   try {
-    const done = launch({ onSpawn, group: true });
+    const done = launch({ onSpawn, group: true, signal });
     if (signal.aborted) cancel();
     const code = await done;
     if (cancelling) return (await cancelling).confirmed ? { code, cancelled: true } : { code, unconfirmed: pid, cancelled: true };

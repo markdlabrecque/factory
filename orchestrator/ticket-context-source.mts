@@ -1,9 +1,25 @@
 // Import-safe GitHub/GitLab structured context adapters. Each request is bounded by the collector.
 // Read only the selected child, its immediate hierarchy parent and ordered comment pages; never follow URLs.
+import { execFileSync } from 'node:child_process';
 import { ContextReadError } from './ticket-context.mts';
 import type { ContextIdentity, ContextNote, ContextRead, ContextTicket, ReadBudget, TicketContextSource } from './ticket-context.mts';
 export interface ContextRequest { args: string[] }
 export type ContextTransport = (request: ContextRequest, budget: ReadBudget) => string;
+/** Shared bounded command transport for selected-runtime adapters and host-owned pre-charge checks. */
+export function commandContextSource(identity: ContextIdentity, gitlabProjectId?: number, env: NodeJS.ProcessEnv = process.env): TicketContextSource {
+  const github = identity.kind === 'github';
+  return structuredContextSource(identity, ({ args }, budget) => {
+    try {
+      return execFileSync(github ? 'gh' : 'glab', github ? args : [...args, '--hostname', identity.host], {
+        encoding: 'utf8', timeout: budget.timeoutMs, maxBuffer: budget.maxBytes, killSignal: 'SIGKILL',
+        env: { ...env, ...(github ? { GH_HOST: identity.host } : { GITLAB_HOST: identity.host }) }, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      throw new ContextReadError(code === 'ETIMEDOUT' ? 'timeout' : code === 'ENOBUFS' ? 'byte-limit' : 'read-failed');
+    }
+  }, gitlabProjectId);
+}
 const PAGE_SIZE = 100;
 function record(v: unknown): Record<string, any> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new ContextReadError('malformed');

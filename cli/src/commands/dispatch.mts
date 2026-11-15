@@ -1,4 +1,4 @@
-// #137: reject unsafe cap overrides before shell preflight, matching TOML and dispatcher validation.
+// Shared host readiness precedes standard or opaque override execution; cap overrides remain validated before preflight.
 // `factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]`: one dispatcher pass for one
 // project. Resolves one complete workflow and runs its dispatch.sh from the checkout root, preserving
 // preflight, argv, exit codes and project logs without project dependency installs. SANDCASTLE_STATE_DIR is set to
@@ -9,6 +9,7 @@
 // nested children and nothing else) and learn the pid at spawn; manual callers pass none and keep the inherited
 // environment, stdin and process group.
 import { spawn } from 'node:child_process';
+import { projectLaunchReadiness, readinessReason } from '../../../orchestrator/launch-readiness.mts';
 import { projectWorkflow } from '../workflow.mts';
 import type { Paths } from '../paths.mts';
 import { resolveProject, runStateDir } from '../runs.mts';
@@ -41,11 +42,17 @@ export function dispatchScript(ctx: ProjectContext, p: Paths): string {
 
 /** `env` replaces the default environment; `group` starts dispatch.sh in a new process group led by it (its pid is the
  *  group id); `onSpawn` gets the pid synchronously after spawn. If `onSpawn` throws, the new group is killed. */
-export type SpawnOptions = { env?: NodeJS.ProcessEnv; group?: boolean; onSpawn?: (pid: number) => void };
+export type SpawnOptions = { env?: NodeJS.ProcessEnv; group?: boolean; onSpawn?: (pid: number) => void; signal?: AbortSignal; mayLaunch?: () => Promise<boolean> };
 
 /** Runs selected dispatch.sh from the project root against shared state; resolves to its exit code. */
-export function runDispatchSh(p: Paths, ctx: ProjectContext, args: string[], o: SpawnOptions = {}): Promise<number> {
+export async function runDispatchSh(p: Paths, ctx: ProjectContext, args: string[], o: SpawnOptions = {}): Promise<number> {
+  if (o.signal?.aborted) return 1;
   const workflow = projectWorkflow(p, ctx.root, o.env);
+  const reason = readinessReason(await projectLaunchReadiness({ projectRoot: ctx.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id, runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: o.env?.SANDCASTLE_STATE_DIR ?? runStateDir(p), signal: o.signal }));
+  if (o.signal?.aborted) return 1;
+  if (o.mayLaunch && !(await o.mayLaunch())) { console.error('factory: scheduled launch held after readiness; scheduling eligibility changed'); return 1; }
+  if (o.signal?.aborted) return 1;
+  if (reason) { console.error(`factory: project held: ${reason}`); return 1; }
   const child = spawn(workflow.entrypoints.dispatch, args, { cwd: ctx.root, stdio: 'inherit', detached: o.group, env: { ...(o.env ?? process.env), ...workflow.env, SANDCASTLE_STATE_DIR: o.env?.SANDCASTLE_STATE_DIR ?? runStateDir(p) } });
   if (child.pid !== undefined && o.onSpawn) {
     try { o.onSpawn(child.pid); }

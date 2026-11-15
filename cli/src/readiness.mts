@@ -1,16 +1,16 @@
 // Passive CLI readiness reads and explicit doctor probes. Never import selected workflow executables.
 import * as fs from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { resolveWorkflow } from '../../orchestrator/workflow.mts';
 import { loadInstructions } from '../../orchestrator/instructions.mts';
+import { readinessIdentity } from '../../orchestrator/readiness-identity.mts';
 import { observeReadiness, probeFilesystem } from '../../orchestrator/readiness.mts';
 import type { ReadinessInput, ReadinessPath } from '../../orchestrator/readiness.mts';
 import { readReadiness, readStoredReadiness } from '../../board/readiness.mts';
 import type { ReadinessRead } from '../../board/readiness.mts';
 import type { Paths } from './paths.mts';
 import { runStateDir } from './runs.mts';
-const hash = (s: string | Buffer) => createHash('sha256').update(s).digest('hex');
 function gitPointer(path: string): string {
   const fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   try {
@@ -30,12 +30,11 @@ function ancestor(path: string): string {
 export function diagnosticContext(p: Paths, root: string) {
   const workflow = resolveWorkflow(root, p.runtimeDescriptor);
   const configPath = join(root, '.sandcastle/factory.toml');
-  const configIdentity = hash(fs.readFileSync(configPath));
+  const configBytes = fs.readFileSync(configPath);
   const assets: Record<string, string> = {};
   for (const role of ['implementation', 'verification', 'analysis', 'recovery'] as const)
     Object.assign(assets, loadInstructions(root, workflow.config.instructions, role).hashes);
-  const identity = { projectRoot: root, runtimeIdentity: workflow.id, configIdentity,
-    contextFingerprint: hash(JSON.stringify({ dependencies: workflow.manifest.dependencies, assets })) };
+  const identity = readinessIdentity(root, workflow.id, workflow.manifest.dependencies, configBytes, assets);
   return { workflow, assets, identity };
 }
 export function diagnosticInput(p: Paths, root: string): ReadinessInput {

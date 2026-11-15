@@ -794,3 +794,50 @@ test("assessment read, write/rename and request-removal failures preserve eligib
   }
   for (const r of results) assert.deepEqual(r, results[0]);
 });
+
+test('project hold precedes tracker reads, analysis, queue and admission for manual and scheduled passes; fresh success resumes without retrying stopped work', t => {
+  const f = fixture(t);
+  f.data.tickets.push(ticket(8, { description: 'No dependencies' })); f.data.ready.push(8);
+  f.record(8, 'stopped'); const stopped = f.bytes(join(f.dir, f.key(8) + '.json'));
+  const logs = join(f.root, '.sandcastle/logs');
+  symlinkSync(f.fake, logs);
+  f.save();
+  for (const scheduled of [false, true]) {
+    const r = spawnSync(f.node, [join(f.runtime.directory, 'dispatch.mts'), '--base', 'main'], { cwd: f.root, encoding: 'utf8', env: { ...f.env, ...(scheduled ? { FACTORY_SCHEDULED: '1' } : {}) } });
+    assert.equal(r.status, 1); assert.match(r.stdout + r.stderr, /project held/);
+    assert.equal(existsSync(join(f.fake, 'tracker.jsonl')), false);
+    assert.equal(existsSync(join(f.fake, 'analysis.jsonl')), false);
+    assert.equal(existsSync(join(f.fake, 'launches')), false);
+    assert.equal(existsSync(join(f.dir, f.key(7) + '.json')), false);
+    assert.equal(existsSync(join(f.dir, 'admission/state.json')), false);
+    assert.equal(f.bytes(join(f.dir, f.key(8) + '.json')), stopped);
+  }
+  rmSync(logs); f.manifest(7); f.pass(['--dry-run']);
+  assert.equal(f.bytes(join(f.dir, f.key(8) + '.json')), stopped);
+  assert.equal(existsSync(join(f.fake, 'tracker.jsonl')), true);
+});
+
+test('a branch created during the final fresh context read is held before admission without deletion, then a fresh pass can succeed', t => {
+  const f = fixture(t); f.data.tickets[0].description = 'No dependencies'; f.manifest(7); f.data.workspaceRace = true;
+  const raced = f.pass(); assert.match(raced.stdout, /#7 held before admission: Branch already exists/);
+  assert.equal(existsSync(join(f.dir, f.key(7) + '.json')), false);
+  assert.equal(existsSync(join(f.dir, 'admission/state.json')), false);
+  assert.equal(git(f.root, 'branch', '--list', '7-ticket-7'), '7-ticket-7');
+  // Stand in for an operator resolving this synthetic conflict, not an automatic Factory repair.
+  git(f.root, 'branch', '-D', '7-ticket-7'); f.data.workspaceRace = false;
+  assert.match(f.pass().stdout, /#7 Ticket 7: launching/);
+});
+
+for (const conflict of ['input', 'workspace']) test(`one ${conflict} hold preserves the ticket and admits an unrelated ticket`, t => {
+  const f = fixture(t);
+  f.data.tickets[0].description = 'No dependencies';
+  f.data.tickets.push(ticket(8, { description: 'No dependencies' })); f.data.ready.push(8);
+  f.manifest(7); f.manifest(8);
+  if (conflict === 'input') f.data.contextErrors = [7];
+  else git(f.root, 'branch', '7-ticket-7');
+  const result = f.pass();
+  assert.match(result.stdout, /#7 held:/); assert.match(result.stdout, /#8 Ticket 8: launching/);
+  assert.equal(existsSync(join(f.dir, f.key(7) + '.json')), false);
+  const admission = JSON.parse(f.bytes(join(f.dir, 'admission/state.json')));
+  assert.equal(Object.keys(admission.claims).length, 1); assert.ok(admission.claims[f.key(8)]);
+});

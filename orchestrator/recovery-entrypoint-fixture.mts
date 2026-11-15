@@ -1,6 +1,7 @@
 // Shared recovery lifecycle fixture: copied-install acceptance and legacy regression scenarios use isolated fake external boundaries.
 import { bindExecution } from '../cli/test/execution-fixture.mts';
 import {preparedFixture} from '../cli/test/prepared-fixture.mts';
+import { commandContextSource } from './ticket-context-source.mts';
 import {prepareRecovery} from '../cli/src/recovery-prepare.mts';
 // Real launcher, selected runtime entrypoint, preparation, verification and settlement run with local Git and fixture-owned SDK, tracker, pi and Docker.
 import { verificationCommand } from './fixtures/verification.mts';
@@ -180,6 +181,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   }
   let readinessChecked = false;
   const launch = await launchRecovery(p, { root, preparation, tracker: "owner/repo", ticket: 7, dir: state,
+    contextSource: commandContextSource({kind:'github',host:'github.com',project:'owner/repo'}, undefined, {...process.env,...env}),
     capabilities: o => {
       readinessChecked = true;
       assert.equal(readRecovery(p, root).attempts.length, 0, 'readiness precedes admission and charge');
@@ -291,7 +293,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const normal = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "7", "--base", "main"],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   assert.equal(normal.status, 1);
-  assert.match(normal.stderr, /Branch 7-fix-login already exists locally or on origin/);
+  assert.match(normal.stderr, /held: Worktree location already exists: .*7-fix-login/);
   assert.equal(readFileSync(join(fake, "docker.jsonl"), "utf8").trim().split("\n").length, before);
 
   if (copied) {

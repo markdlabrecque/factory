@@ -5,8 +5,7 @@ import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
 import { ciGate, missingChecks } from "./ci.mts";
-import { structuredContextSource } from './ticket-context-source.mts';
-import { ContextReadError } from './ticket-context.mts';
+import { commandContextSource } from './ticket-context-source.mts';
 import type { Child, Note } from "./graph.mts";
 import type { Delivered, Delivery, DeliveryIdentity, DeliveryObservation, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
 
@@ -22,15 +21,7 @@ const { gitlabHost: HOST = "", projectId: ID = 0 } = TRACKER as { gitlabHost?: s
 const enc = encodeURIComponent;
 
 /** Bounded structured ticket/notes/parentOf contract for ticket-context.mts. Retains Task-only hierarchy. */
-export const contextSource = structuredContextSource({ kind: 'gitlab', host: HOST, project: TRACKER.project }, ({ args }, budget) => {
-  try {
-    return execFileSync('glab', [...args, '--hostname', HOST], { encoding: 'utf8', timeout: budget.timeoutMs,
-      maxBuffer: budget.maxBytes, killSignal: 'SIGKILL', env: { ...process.env, GITLAB_HOST: HOST }, stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    throw new ContextReadError(code === 'ETIMEDOUT' ? 'timeout' : code === 'ENOBUFS' ? 'byte-limit' : 'read-failed');
-  }
-}, ID);
+export const contextSource = commandContextSource({ kind: 'gitlab', host: HOST, project: TRACKER.project }, ID);
 
 let deliveryDeadline: number | undefined;
 export function setDeliveryDeadline(deadline: number | undefined): void { deliveryDeadline = deadline; }

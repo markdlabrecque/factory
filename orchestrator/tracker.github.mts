@@ -5,8 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { ciGate, missingChecks } from "./ci.mts";
-import { structuredContextSource } from './ticket-context-source.mts';
-import { ContextReadError } from './ticket-context.mts';
+import { commandContextSource } from './ticket-context-source.mts';
 import type { Gate } from "./ci.mts";
 import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
 import type { Child, Note } from "./graph.mts";
@@ -25,15 +24,7 @@ const HOST = (TRACKER as { host?: string }).host ?? "github.com";
 const [OWNER, NAME] = REPO.split("/");
 
 /** Bounded structured ticket/notes/parentOf contract for ticket-context.mts. No human CLI rendering. */
-export const contextSource = structuredContextSource({ kind: 'github', host: HOST, project: REPO }, ({ args }, budget) => {
-  try {
-    return execFileSync('gh', args, { encoding: 'utf8', timeout: budget.timeoutMs, maxBuffer: budget.maxBytes,
-      killSignal: 'SIGKILL', env: { ...process.env, GH_HOST: HOST }, stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    throw new ContextReadError(code === 'ETIMEDOUT' ? 'timeout' : code === 'ENOBUFS' ? 'byte-limit' : 'read-failed');
-  }
-});
+export const contextSource = commandContextSource({ kind: 'github', host: HOST, project: REPO });
 
 let deliveryDeadline: number | undefined;
 export function setDeliveryDeadline(deadline: number | undefined): void { deliveryDeadline = deadline; }
