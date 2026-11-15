@@ -11,7 +11,7 @@ const repository = fileURLToPath(new URL('../../', import.meta.url));
 export function executionSnapshot(runtime: { directory: string; env: NodeJS.ProcessEnv }, root: string) {
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `const {executionContext}=await import(${JSON.stringify(join(runtime.directory, 'context.mts'))}); const c=await executionContext(); console.log(JSON.stringify({identity:c.identity,policyIdentity:c.policyIdentity,config:c.config}));`], { cwd: root, env: runtime.env, encoding: 'utf8' }));
 }
-export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env, options: { overlays?: boolean; install?: (dir: string) => void; paths?: import('../src/paths.mts').Paths } = {}) {
+export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env, options: { overlays?: boolean; install?: (dir: string) => void; sdk?: string; paths?: import('../src/paths.mts').Paths } = {}) {
   const staging = mkdtempSync(join(dirname(root), 'execution-'));
   const source = join(staging, 'source'), data = options.paths?.data ?? join(staging, 'data'), runtimes = options.paths?.runtimes ?? join(data, 'runtimes');
   const descriptor = options.paths?.runtimeDescriptor ?? join(data, 'runtime.json');
@@ -24,7 +24,7 @@ export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env
     installPackages(dir);
     // tsx fixture only imports the selected absolute entrypoint; it performs no package resolution.
     writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {pathToFileURL} from 'node:url'; const entry=process.argv[2]; process.argv.splice(1,1); await import(pathToFileURL(entry).href);\n`);
-    const sdk = join(root, 'node_modules/@ai-hero/sandcastle');
+    const sdk = options.sdk ?? join(root, 'node_modules/@ai-hero/sandcastle');
     if (existsSync(sdk)) {
       const pkg = JSON.parse(readFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), 'utf8'));
       cpSync(sdk, join(dir, 'node_modules/@ai-hero/sandcastle'), { recursive: true });

@@ -82,7 +82,8 @@ for (const { scenario, tier } of [
   const configPath = join(root, '.sandcastle/factory.toml');
   writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"') + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nanalysis = ["analysis.md"]\nverification = ["verify.md"]\nrecovery = ["repair.md"]\n');
   for (const [file, text] of Object.entries({ 'common.md': 'COMMON {{TICKET}} !`literal`', 'impl.md': 'IMPLEMENTATION ONLY', 'analysis.md': 'ANALYSIS ONLY', 'verify.md': 'VERIFICATION ONLY', 'repair.md': 'RECOVERY ONLY' })) writeFileSync(join(root, file), text);
-  cpSync(join(FIXTURES, "sandcastle"), join(root, "node_modules/@ai-hero/sandcastle"), { recursive: true });
+  const sdk = join(home, 'fixture-sdk');
+  cpSync(join(FIXTURES, "sandcastle"), sdk, { recursive: true });
   const evidence = join(root, ".sandcastle/evidence/7");
   mkdirSync(evidence, { recursive: true });
   writeFileSync(join(evidence, "verdict.md"), "VERDICT: FAIL\nold\n");
@@ -118,7 +119,8 @@ for (const { scenario, tier } of [
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
   observePass(p, root, { pass: "b", at: at(5), jam: [7] });
 
-  const runtime = bindExecution(root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state }, { paths: p });
+  const runtime = bindExecution(root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state }, { paths: p, sdk, overlays: false });
+  assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
   recordReview(p, root, { by: 'init' });
   Object.assign(env, runtime.env);
   // Legacy review gate remains independent of the selected runtime; fixture-only reviewed copy.

@@ -15,6 +15,7 @@ import { MODEL_POLICY } from './model-policy.mts';
 const cases = [
   ...['pass', 'instruction-edit', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt', 'image-bad', 'setup-bad', 'image-changed', 'config-family', 'config-setup', 'runtime-template', 'tier-edit'].map(scenario => ({ scenario, family: 'openai' as const, tier: undefined as string | undefined })),
   ...(['openai', 'anthropic'] as const).flatMap(family => ['small', 'mid', 'large'].map(tier => ({ scenario: 'pass', family, tier }))),
+  { scenario: 'pass', family: 'anthropic' as const, tier: undefined },
 ];
 for (const { scenario, family, tier } of cases) {
   test(`normal entrypoint ${scenario} ${family}/${tier ?? 'default'}: only the proven tip may leave`, t => {
@@ -38,7 +39,7 @@ for (const { scenario, family, tier } of cases) {
       writeFileSync(join(root, 'verify.md'), 'verification only');
       writeFileSync(config, readFileSync(config, 'utf8') + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nverification = ["verify.md"]\n');
     }
-    const sdk = join(root, 'node_modules/@ai-hero/sandcastle');
+    const sdk = join(home, 'fixture-sdk');
     cpSync(join(import.meta.dirname, 'fixtures/entrypoint/sandcastle'), sdk, { recursive: true });
     writeFileSync(join(sdk, 'index.mjs'), `
 import { execFileSync } from 'node:child_process';
@@ -123,9 +124,9 @@ if (!fs.existsSync(path.join(process.env.FAKE_STATE,'live'))) { console.error('N
 console.log('sha256:'+'a'.repeat(64));
 `, { mode: 0o755 });
     writeFileSync(join(bin, 'pi'), '#!/bin/sh\n[ "$1" = auth ] || exit 90\nprintf "fixture-token\\n"\n', { mode: 0o755 });
-    const runtime = bindExecution(root);
+    const runtime = bindExecution(root, process.env, { sdk, overlays: false });
     for (const name of ['main.mts', 'dispatch.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
-    rmSync(join(root, 'node_modules'), { recursive: true });
+    assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
       cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,

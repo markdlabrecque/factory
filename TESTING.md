@@ -53,8 +53,10 @@ node --test orchestrator/verification-entrypoint.test.mts orchestrator/recovery-
 single runtime inventory with fake private dependencies. The tsx stand-in imports
 only the supplied absolute entrypoint; no package manager or real agent runs.
 Fixtures stage any test-specific workflow/provider changes before publication,
-then validate the same manifest and dependency hashes as production. They never
-write settings into the source checkout or modify an installed app.
+then validate the same manifest and dependency hashes as production. The normal
+and recovery entrypoint fixtures stage their SDK outside the project and assert
+that the project has no `node_modules`. They never write settings into the source
+checkout or modify an installed app.
 
 Context tests reject missing/noncanonical roots, wrong cwd, missing/mismatched
 runtime identity, escaped settings and changed dependency/template bytes. Two
