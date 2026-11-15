@@ -30,7 +30,7 @@ Turn this repo from a set of skills and patterns into a software factory with on
 ```
 factory install              set up the CLI, write the manifest (the bootstrap script runs this)
 factory doctor               check node, docker, glab/gh, claude/pi, logins, linger
-factory update               refresh copies inside projects (--dry-run classifies; --apply creates missing and replaces unedited outdated files)
+factory update               report project-owned data (--dry-run and --apply do not repair files)
 factory workflow status      compare an explicit source, invoking/installed apps and registered project copy; read-only (--json)
 factory uninstall            stop and remove everything in the manifest
     --dry-run                show what would go, touch nothing
@@ -507,7 +507,12 @@ Journal output in `logs` (`logs` reads no journalctl; scheduler health and timin
 
 ## Init
 
-`factory init [path] --profile personal|client --repo <ns/project> --image <image>` (client also `--host` and `--project-id`). Inputs are validated before any write. Missing files from an explicit allowlist are created exclusively (never overwritten) in `.sandcastle/`; symlinked scaffold paths and file/directory conflicts fail before the first write. Existing files are reported as skipped; an existing `config.mts` or `main.mts` is authoritative. The project is registered only after all writes succeed; a partial copy leaves a repairable scaffold and a rerun fills the gaps. `config.mts`/`main.mts` are generated from the reference files via `// factory:<tag>` markers (project, host, project id, milestone, image, empty `sandboxSetup`). `factory-dispatch.sh` sets `SANDCASTLE_STATE_DIR` to Factory's state folder unless the caller set it. No tracker calls, logins, image builds, package installs or services.
+`factory init [path] --profile personal|client --repo <ns/project> --image <image>` (client also `--host` and `--project-id`) creates v2 `factory.toml`, `.env`, `.env.example`, `.gitignore` and a convenience wrapper only. Both profiles default to Pi with the OpenAI family; tracker, selection and merge defaults differ. No workflow modules, prompts, parser or dependencies are copied into the project. The wrapper calls `factory dispatch --project` with the canonical root and forwards arguments literally. Runtime routing is being integrated separately; this scaffold change alone does not make every launch path work.
+
+Inputs and existing v2 configuration are validated before writes. Creation is exclusive, existing files are preserved, symlinks and type conflicts are refused, and registration follows successful writes. A partial write can be completed by rerunning init. Unsupported existing configuration requires manual migration; init does not convert it. No tracker calls, logins, image builds, package installs or services are performed. Authenticate Pi and the tracker separately and provision the configured sandbox image. Runtime dependencies are installed with Factory, not in the project.
+
+`factory update --dry-run` and `--apply` report project-owned assets without creating or replacing project data or workflow overrides. Upgrade the shared runtime through `factory install`.
+
 
 ## Uninstall
 

@@ -160,11 +160,7 @@ the sandbox's shell interprets them only at normal startup.
 
 Version 1 and missing configuration are unsupported by the v2 loader. The owner
 must migrate existing projects manually before running the upgraded workflow.
-No deployed project is changed automatically. Stop scheduling, review `factory update
---dry-run`, and upgrade customized main/dispatch/shell code together with runtime,
-model-policy, parser and selection helpers. Adding TOML to an old workflow alone is
-not sufficient. Init does not overwrite existing settings or create TOML in a legacy
-scaffold, so transcribe the old settings into a reviewed v2 profile yourself.
+No deployed project is changed automatically. Stop scheduling and transcribe old settings into a reviewed v2 profile yourself. Init refuses unsupported existing configuration and does not overwrite settings or migrate a legacy scaffold. Update does not repair project data or workflow overrides.
 
 Replace custom agent providers, model IDs, aliases and thinking settings with
 `[agent] family = "openai"` or `"anthropic"`. Remove `graph.model`. Replace ticket
@@ -178,8 +174,7 @@ the copied workflow. Scheduling never resumes automatically.
 
 The pinned published **smol-toml 1.9.1** ESM parser is vendored, unmodified, under
 `orchestrator/vendor/smol-toml/` with its BSD-3-Clause license, package scope and
-[upstream/update notes](../orchestrator/vendor/smol-toml/UPSTREAM.md). It ships in
-scaffolds, installed apps and standalone Board copies. `.gitattributes` exempts
+[upstream/update notes](../orchestrator/vendor/smol-toml/UPSTREAM.md). It ships in the Factory runtime, installed apps and standalone Board copies, not new project scaffolds. `.gitattributes` exempts
 these generated JS files from trailing-space checks to preserve upstream bytes.
 Updating it requires review
 of the published archive and coordinated replacement of all ESM modules/license,

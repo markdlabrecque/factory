@@ -1,24 +1,4 @@
-// execution-events.mts inherits FROM_BOARD classification, catalog history and customized-copy protection.
-// Read-only workflow reports can classify selected files independently so unreadable facts stay unknown.
-// scaffoldSources inherits the observer/checkpoint module pair; customized workflow stays protected.
-// #137: TOML is project-owned even when absent; shared offline-parser assets remain Factory-owned.
-// Project copy classification for `factory update` (slice 4.5, #91). Compares each file Factory scaffolds into a
-// project's `.sandcastle/` with Factory's own copy and sorts it into one class:
-//   current  - matches Factory's current copy; nothing to do.
-//   missing  - a Factory-owned file the copy lacks; it can be created.
-//   outdated - a Factory-owned file that matches an earlier Factory version exactly, so nobody edited it; it can be replaced.
-//   modified - a Factory-owned file that matches no Factory version (edited locally, or not a regular file); merge by hand.
-//   project  - a project-owned file (PROJECT_OWNED: config.mts, main.mts, dispatch.sh, prompt.md, prompt.verify.md) that
-//              differs from Factory's copy, is templated, or is missing. `factory update` never writes these; merge by hand.
-// `.env` is never read. "Earlier Factory versions" are the Git blob ids of every committed version of each source file: from
-// the app's own Git history when the app is a checkout (a --link install, or running from a checkout), else from the
-// catalog `factory install` writes into a copied app (HISTORY_FILE, built from the source checkout's history). With
-// neither, nothing counts as outdated and every differing file is `modified`, so an edited file is never mistaken for an
-// old one. factory-dispatch.sh is templated with the state folder: it is compared after putting the placeholder back.
-// classifyCopy is read-only. applyCopy (#92, `factory update --apply`) writes only `missing` and `outdated` files: each is
-// re-classified just before its write, written to a temporary file beside it and then linked into place (a missing file,
-// so a file that appeared meanwhile is never overwritten) or renamed over it (an outdated file). `modified` and `project`
-// files are never written. A missing .env.example takes the profile's template: client when config.mts has gitlabHost.
+// Read-only reporting of project-owned assets; updates never repair project data or workflow overrides.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 // #137: TOML is always project-owned; runtime/vendor files ship together, even before npm install.
@@ -99,99 +79,17 @@ export function factoryHistory(app = appRoot): History {
   return { kind: 'none', blobs: new Map() };
 }
 
-/** Classify every scaffolded file in `root`'s copy. Read-only. */
-export function classifyCopy(p: Paths, root: string, o: { app?: string; history?: History; files?: string[] } = {}): FileStatus[] {
-  const app = o.app ?? appRoot;
-  const history = o.history ?? factoryHistory(app);
-  const read = (rel: string) => readFileSync(join(app, rel));
-  const known = (src: string, content: Buffer) => {
-    const ids = history.blobs.get(src);
-    if (!ids?.size) return false;
-    const algorithm = [...ids][0].length === 64 ? 'sha256' : 'sha1';
-    return ids.has(blobId(content, algorithm));
-  };
-  return Object.entries(scaffoldSources()).filter(([file]) => !o.files || o.files.includes(file)).sort(([a], [b]) => a.localeCompare(b)).map(([file, sources]): FileStatus => {
-    const target = join(root, scaffoldName, file);
-    const owned = PROJECT_OWNED.includes(file);
-    const st = (() => { try { return lstatSync(target); } catch { return undefined; } })();
-    if (!st) return owned
-      ? { file, class: 'project', source: sources[0], detail: 'missing; Factory never writes this file for you, add it by hand' }
-      : { file, class: 'missing', source: file === '.env.example' ? envExampleSource(root, sources) : sources[0], detail: 'would create' };
-    if (!st.isFile()) return { file, class: owned ? 'project' : 'modified', source: sources[0], detail: 'not a regular file; resolve by hand' };
-    const content = readFileSync(target);
-    if (file === 'factory.toml' || file === 'config.mts' || file === 'main.mts') {
-      return { file, class: 'project', source: sources.join(' or '), detail: 'templated with your settings; compare with Factory\'s copy and merge by hand' };
-    }
-    if (file === 'factory-dispatch.sh') {
-      const tpl = read(sources[0]).toString('utf8');
-      const rendered = tpl.replace(PLACEHOLDER, () => shq(p.state));
-      if (content.toString('utf8') === rendered) return { file, class: 'current', source: sources[0] };
-      const text = content.toString('utf8');
-      const generic = text.includes(shq(p.state)) ? Buffer.from(text.replace(shq(p.state), () => PLACEHOLDER)) : null;
-      return generic && known(sources[0], generic)
-        ? { file, class: 'outdated', source: sources[0], detail: 'unmodified earlier Factory copy; would replace' }
-        : { file, class: 'modified', source: sources[0], detail: 'edited locally; merge by hand' };
-    }
-    const exact = sources.find(s => existsSync(join(app, s)) && read(s).equals(content));
-    if (exact) return { file, class: 'current', source: exact };
-    if (owned) return { file, class: 'project', source: sources[0], detail: 'differs from Factory\'s copy; merge by hand' };
-    const old = sources.find(s => known(s, content));
-    return old
-      ? { file, class: 'outdated', source: old, detail: 'unmodified earlier Factory copy; would replace' }
-      : { file, class: 'modified', source: sources[0], detail: 'edited locally; merge by hand' };
-  });
-}
-
-/** The .env.example template for the project's profile: the client one when its config.mts names a GitLab host. */
-function envExampleSource(root: string, sources: string[]) {
-  const toml = loadTomlConfig(join(root, scaffoldName));
-  if (toml) return toml.TRACKER.kind === 'gitlab' ? sources.find(s => s.includes('client')) ?? sources[0] : sources[0];
-  let config = '';
-  try { config = readFileSync(join(root, scaffoldName, 'config.mts'), 'utf8'); } catch { /* personal */ }
-  return /^\s*gitlabHost:/m.test(config) ? sources.find(s => s.includes('client')) ?? sources[0] : sources[0];
+/** Report only project-owned data; workflow implementation belongs to Factory or the project override. */
+export function classifyCopy(_p: Paths, root: string, o: { app?: string; history?: History; files?: string[] } = {}): FileStatus[] {
+  loadTomlConfig(join(root, scaffoldName));
+  const assets = ['factory.toml', '.env.example', '.gitignore', 'factory-dispatch.sh'];
+  return assets.filter(file => !o.files || o.files.includes(file)).map(file => ({
+    file, class: 'project' as const, source: 'project-owned',
+    detail: existsSync(join(root, scaffoldName, file)) ? 'never modified by update' : 'absent; never created by update',
+  }));
 }
 
 export type Applied = { files: FileStatus[]; created: string[]; replaced: string[] };
-
-/** Create `missing` and replace `outdated` files in `root`'s copy with Factory's current version. Never touches other classes. */
 export function applyCopy(p: Paths, root: string, o: { app?: string; history?: History } = {}): Applied {
-  const app = o.app ?? appRoot;
-  const history = o.history ?? factoryHistory(app);
-  const dir = join(root, scaffoldName);
-  const dst = lstatSync(dir);
-  if (dst.isSymbolicLink() || !dst.isDirectory()) throw new Error(`Refusing to update ${dir}: not a directory`);
-  const files = classifyCopy(p, root, { app, history });
-  const created: string[] = [], replaced: string[] = [];
-  for (const f of files) {
-    if (f.class !== 'missing' && f.class !== 'outdated') continue;
-    // Re-check just before writing: a file edited or created since the first pass is left alone.
-    const now = classifyCopy(p, root, { app, history }).find(x => x.file === f.file);
-    if (now?.class !== f.class) { Object.assign(f, now); continue; }
-    const src = join(app, f.source);
-    let content = readFileSync(src);
-    if (f.file === 'factory-dispatch.sh') content = Buffer.from(content.toString('utf8').replace(PLACEHOLDER, () => shq(p.state)));
-    const mode = f.file === 'factory-dispatch.sh' ? 0o755 : statSync(src).mode & 0o777;
-    const target = join(dir, f.file);
-    // Nested vendor assets need directories; refuse symlinked parents before writing through them.
-    let parent = dir;
-    for (const part of relative(dir, dirname(target)).split('/').filter(Boolean)) {
-      parent = join(parent, part);
-      if (existsSync(parent)) { const st = lstatSync(parent); if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`Unsafe update directory: ${parent}`); }
-      else mkdirSync(parent);
-    }
-    const tmp = join(dirname(target), `.${basename(f.file)}.factory-update-${process.pid}`);
-    rmSync(tmp, { force: true }); // a leftover from an interrupted update
-    const fd = openSync(tmp, 'wx', mode);
-    try {
-      try { fchmodSync(fd, mode); writeSync(fd, content); } finally { closeSync(fd); }
-      if (f.class === 'missing') linkSync(tmp, target); // fails if the file appeared meanwhile
-      else renameSync(tmp, target);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'EEXIST') { Object.assign(f, { class: 'modified', detail: 'appeared while updating; kept' }); continue; }
-      throw e;
-    } finally { rmSync(tmp, { force: true }); }
-    (f.class === 'missing' ? created : replaced).push(f.file);
-    f.detail = f.class === 'missing' ? 'created' : 'replaced';
-  }
-  return { files, created, replaced };
+  return { files: classifyCopy(p, root, o), created: [], replaced: [] };
 }
