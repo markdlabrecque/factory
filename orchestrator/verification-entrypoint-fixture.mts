@@ -42,6 +42,7 @@ const git = (cwd, args) => execFileSync('git', args, {cwd, encoding:'utf8'}).tri
 const readFileSyncBarrier = () => { try { return readFileSync(join(fake, 'release'), 'utf8') === 'yes'; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 export const pi = (model, options) => ({model, thinking: options.thinking});
 export async function createSandbox(o) {
+  if (scenario === 'shared-projects') writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
   const worktree = join(root, '.sandcastle/worktrees', o.branch); mkdirSync(join(root, '.sandcastle/worktrees'), {recursive:true});
   git(root, ['worktree', 'add', '-b', o.branch, worktree, o.baseBranch]);
   writeFileSync(join(fake, 'live'), 'yes');
@@ -52,7 +53,7 @@ export async function createSandbox(o) {
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
     run: async o => {
-      if (scenario === 'publication') {
+      if (scenario === 'publication' || scenario === 'shared-projects') {
         const { executionContext } = await import(process.env.FACTORY_RUNTIME_ROOT + '/context.mts');
         const c = await executionContext();
         writeFileSync(join(fake, o.name + '-identity.json'), JSON.stringify({root:c.runtimeRoot, identity:c.identity, templates:c.templates, additive:c.additive}));
@@ -83,7 +84,7 @@ export async function createSandbox(o) {
       writeFileSync(join(fake,'verifier-started'),'yes');
       writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\\nSynthetic checks');
       if (scenario !== 'legacy-prompt') writeFileSync(join(evidence,'verification.json'),${JSON.stringify(JSON.stringify(fixtureReport()))});
-      writeFileSync(join(evidence,'check.txt'),'Assertions passed');
+      writeFileSync(join(evidence,'check.txt'),process.env.FIXTURE_ARTIFACT ?? 'Assertions passed');
       if (scenario === 'dirty') writeFileSync(join(worktree,'app.txt'),'verifier changed tracked output');
       writeFileSync(join(fake,'changed'),'yes');
       return {commits:[]};
@@ -154,6 +155,63 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
     }
     assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
+    if (scenario === 'shared-projects') {
+      assert.ok(copied);
+      const second = join(home, 'second'), secondOrigin = join(home, 'second.git'), secondFake = join(home, 'second-fake'), secondBin = join(home, 'second-bin');
+      mkdirSync(secondFake); mkdirSync(secondBin);
+      git(home, 'init', '-q', '--bare', '-b', 'main', secondOrigin); git(home, 'clone', '-q', secondOrigin, second);
+      git(second, 'config', 'user.name', 't'); git(second, 'config', 'user.email', 't@t');
+      writeFileSync(join(second, 'app.txt'), 'before second'); git(second, 'add', '.'); git(second, 'commit', '-qm', 'init'); git(second, 'push', '-q', 'origin', 'main');
+      const { init } = await import(pathToFileURL(join(p.app, 'cli/src/commands/init.mts')).href);
+      await init(p, second, { profile: 'personal', repo: 'other/project', image: 'second-image' });
+      assert.deepEqual(readdirSync(join(second, '.sandcastle')).sort(), ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml'].sort());
+      const secondConfig = join(second, '.sandcastle/factory.toml');
+      writeFileSync(secondConfig, readFileSync(secondConfig, 'utf8').replace('family = "openai"', 'family = "anthropic"'));
+      for (const [project, label] of [[root, 'first'], [second, 'second']]) {
+        const file = join(project, '.sandcastle/factory.toml');
+        writeFileSync(file, readFileSync(file, 'utf8').replace('setup = []', `setup = [{command="echo ${label}-setup"}]`) + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nverification = ["verify.md"]\n');
+        for (const [name, text] of [['common.md', 'common'], ['impl.md', 'implementer'], ['verify.md', 'verifier']]) writeFileSync(join(project, name), `${label}-${text}`);
+        for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(project, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
+      }
+      for (const name of ['docker', 'pi']) cpSync(join(bin, name), join(secondBin, name));
+      writeFileSync(join(secondBin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(secondFake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
+      writeFileSync(join(secondBin, 'gh'), readFileSync(join(bin, 'gh'), 'utf8').replaceAll('owner/repo', 'other/project'), { mode: 0o755 });
+      const launch = (project: string, fakeDir: string, binDir: string, ticket: string, label: string) => {
+        const child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], { cwd: project, env: { ...runtime.env, FACTORY_PROJECT_ROOT: project, PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fakeDir, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: ticket, FIXTURE_ARTIFACT: `${label}-artifact` }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
+        t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+        return once(child, 'exit').then(([code]) => assert.equal(code, 0, output));
+      };
+      // The readiness probe uses a shared lock, so run the two asynchronous launches in order.
+      await launch(root, fake, bin, 'Model tier: small\nThe login form must work.', 'first');
+      await launch(second, secondFake, secondBin, 'The login form must work.', 'second');
+      for (const [project, fakeDir, repo, label, modelFamily, modelTier, image] of [[root, fake, 'owner/repo', 'first', 'openai', 'small', 'img'], [second, secondFake, 'other/project', 'second', 'anthropic', 'mid', 'second-image']] as const) {
+        const run = JSON.parse(readFileSync(join(state, `${repo.replace('/', '_')}--7.json`), 'utf8'));
+        const proof = JSON.parse(readFileSync(join(proofRoot(state, repo, '7', run.verification.id), 'proof.json'), 'utf8'));
+        for (const role of ['implementer', 'verifier']) {
+          const identity = JSON.parse(readFileSync(join(fakeDir, `${role}-identity.json`), 'utf8'));
+          assert.equal(identity.root, runtime.directory); assert.equal(identity.identity.runtime.id, runtime.id);
+          assert.equal(readFileSync(join(fakeDir, `${role}-instructions.txt`), 'utf8'), `${label}-common\n\n${label}-${role}`);
+          assert.deepEqual(JSON.parse(readFileSync(join(fakeDir, `${role}-agent.json`), 'utf8')), { model: MODEL_POLICY[modelFamily][role === 'implementer' ? modelTier : 'large'], thinking: 'high' });
+        }
+        assert.equal(run.modelChoice.family, modelFamily); assert.equal(run.modelChoice.tier, modelTier);
+        assert.equal(run.modelChoice.source, label === 'first' ? 'ticket-tier' : 'factory-default');
+        assert.equal(proof.provenance.settings.image, image);
+        assert.equal(run.implementationModel, label === 'first' ? 'openai/gpt-6-luna' : 'pi-claude-subscription/claude-sonnet-5-5');
+        assert.ok(JSON.stringify(proof.provenance.settings).includes(`${label}-setup`));
+        assert.ok(readFileSync(join(fakeDir, 'sandbox-options.json'), 'utf8').includes(`${label}-setup`));
+        const calls = readFileSync(join(fakeDir, 'gh.jsonl'), 'utf8');
+        assert.ok(calls.includes(repo));
+        assert.ok(!calls.includes(label === 'first' ? 'other/project' : 'owner/repo'));
+        assert.equal(proof.report.verdict, 'PASS');
+        assert.ok(run.evidenceDir.startsWith(join(project, '.sandcastle/evidence') + '/'));
+        assert.equal(readFileSync(join(run.evidenceDir, 'check.txt'), 'utf8'), `${label}-artifact`);
+        assert.ok(proof.artifacts.some((a: { path: string }) => a.path === 'check.txt'));
+        assert.equal(existsSync(join(project, 'node_modules')), false); assert.equal(existsSync(join(project, '.sandcastle/node_modules')), false);
+        assert.equal(existsSync(join(fakeDir, 'npm-called')), false);
+      }
+      return;
+    }
     if (scenario === 'publication') {
       assert.ok(copied);
       const env = { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: mid\nThe login form must work.', FIXTURE_BARRIER: 'yes' };
