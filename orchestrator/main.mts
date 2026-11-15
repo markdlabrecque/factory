@@ -1,7 +1,9 @@
 // Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
-// Image readiness pins sandbox construction; setup and independent verifier probes remain mandatory.
+// Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute bounded Pi session replies without delivery authority, then exit after owned teardown.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
+import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup, closeSandbox } from './sandbox-readiness.mts';
+import type { ReadinessReport } from './readiness-schema.mts';
 // #153: proofs also bind continuation, checkpoint and admission code; upgrades require fresh verification.
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
 // Project-root v2 TOML owns sandbox/CI settings. Ticket choice and runtime/template inputs stay fixed per attempt.
@@ -78,7 +80,7 @@ function openaiCredential(): string {
     const res = spawnSync("pi", ["auth", ...cmd, "--provider", "openai"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     if (res.status === 0 && res.stdout.trim()) return res.stdout.trim();
   }
-  fail("pi on the host has no usable OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT.");
+  throw Error("pi on the host has no usable OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT.");
 }
 // Called as each run starts.
 const agent = (model: string) =>
@@ -249,6 +251,7 @@ if (recovering) {
     });
   };
   runtimeLease.pendingCleanup();
+  let recoveryReport: ReadinessReport | undefined;
   const result = await runRecoveryAttempt({
     root: context.projectRoot, record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
@@ -271,6 +274,15 @@ if (recovering) {
       uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, proc: realProc, root: process.cwd(),
     }),
     containerGone: (name) => ownedContainerGone(name, realDocker),
+    sandboxReadiness: async (sb) => {
+      recoveryReport = await probeSandbox({ container: sb.id, state: stateDir(),
+        identity: { projectRoot: context.projectRoot, runtimeIdentity: context.manifest.id, configIdentity: context.policyIdentity, contextFingerprint: context.policyIdentity },
+        invocationId: rec.id, ticket: iid, baseline: baseSha, tip: rec.startSha, evidence: evidenceBox,
+        uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
+        files: { ...context.additive.recovery.hashes }, signal: cancel.signal });
+      return sandboxReadinessHold(recoveryReport);
+    },
+    sandboxCleanup: (confirmed) => { if (recoveryReport) recordSandboxCleanup(stateDir(), recoveryReport, confirmed); },
     workspace: gitWorkspace,
     recheck, host,
     setStage: (patch) => setStage(iid!, patch),
@@ -370,14 +382,6 @@ const sandbox = await createSandbox({
   },
 });
 
-try {
-  const actualBase = sh('git', ['rev-parse', `refs/heads/${branch}`]);
-  if (actualBase !== baseSha) { await sandbox.close(); fail('Branch creation baseline changed; refusing unverifiable implementation'); }
-  fillReceipt(receipt, { branchSha: actualBase, worktreeAt: new Date().toISOString() });
-} catch (e) {
-  console.warn(`Ownership receipt ${receipt} not filled in (${(e as Error).message}); a later repair reconciles it with Git.`);
-}
-
 const promptArgs = {
   ISSUE_IID: iid,
   ISSUE_TITLE: String(issue.title),
@@ -408,14 +412,29 @@ let verifierContainer = '';
 let verificationRefusal: string | undefined;
 let tip = "";
 let blockers: ImplementerBlocker[] | undefined;
+let sandboxReport: ReadinessReport | undefined;
+let sandboxFailure: string | undefined;
+const sandboxCancel = new AbortController();
+const cancelSandbox = () => sandboxCancel.abort();
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelSandbox);
 let noCommitMessage: string | undefined;
 let noCommitSuperseded = false;
-let primaryError: unknown;
 const diagnosticSessions = resolve('.sandcastle/diagnostic-sessions', executionId);
 try {
+  const actualBase = sh('git', ['rev-parse', `refs/heads/${branch}`]);
+  if (actualBase !== baseSha) throw Error('Branch creation baseline changed; refusing unverifiable implementation');
+  fillReceipt(receipt, { branchSha: actualBase, worktreeAt: new Date().toISOString() });
   // Custom setup may break a previously good image. This log is not verifier evidence.
   const setupHold = await browserPreflight(sandbox, evidenceHost, 30000, 'setup-browser-preflight.log');
   if (setupHold) { lastMessage = setupHold; throw Error(setupHold); }
+  sandboxReport = await probeSandbox({ container: sandbox.sandboxId ?? '', state: stateDir(),
+    identity: { projectRoot: context.projectRoot, runtimeIdentity: context.manifest.id, configIdentity: context.policyIdentity, contextFingerprint: context.policyIdentity },
+    invocationId: executionId, ticket: iid, baseline: baseSha, tip: baseSha, evidence: evidenceBox,
+    uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
+    files: { ...context.additive.implementation.hashes }, signal: sandboxCancel.signal });
+  const sandboxHold = sandboxReadinessHold(sandboxReport);
+  if (sandboxHold) throw Error(sandboxHold);
+  sandboxCancel.signal.throwIfAborted();
   // ---- 1. implementer ----------------------------------------------------------
   setStage(iid, { stage: "implementing" });
   const impl = await sandbox.run({
@@ -424,7 +443,7 @@ try {
     promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.implementation.text },
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
-    name: "implementer",
+    name: "implementer", signal: sandboxCancel.signal,
   });
   if (!impl.commits.length) {
     diagnosticExecutionId = executionId;
@@ -460,26 +479,19 @@ try {
     }
   }
 } catch (error) {
-  primaryError = error;
+  sandboxFailure = error instanceof Error ? error.message : String(error);
 } finally {
-  try { await sandbox.close(); }
-  catch (cleanupError) {
-    lastMessage = [noCommitMessage, primaryError ? sanitizeReply(String(primaryError)) : undefined, `Sandbox cleanup failed: ${sanitizeReply(String(cleanupError))}`].filter(Boolean).join(' ');
-    throw new AggregateError([...(primaryError ? [primaryError] : []), cleanupError], lastMessage);
+  const cleanup = await closeSandbox(sandbox);
+  if (cleanup.confirmed) runtimeLease.confirmedCleanup();
+  if (cleanup.reason) sandboxFailure = [sandboxFailure, noCommitMessage ? sanitizeReply(cleanup.reason) : cleanup.reason].filter(Boolean).join('; ');
+  if (sandboxReport) {
+    try { recordSandboxCleanup(stateDir(), sandboxReport, cleanup.confirmed); }
+    catch (error) { sandboxFailure = [sandboxFailure, `Readiness cleanup publication failed: ${(error as Error).message}`].filter(Boolean).join('; '); }
   }
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelSandbox);
 }
-if (primaryError) throw primaryError;
-
+if (sandboxFailure) fail([noCommitMessage, sandboxFailure].filter(Boolean).join(' '));
 if (verificationRefusal) fail(verificationRefusal);
-if (tip || noCommitMessage) {
-  const container = verifierContainer || sandbox.sandboxId;
-  if (!container) fail(`${noCommitMessage ?? ''} Sandbox container identity unavailable; cleanup is unconfirmed.`);
-  const gone = spawnSync('docker', ['container', 'inspect', container], { encoding: 'utf8' });
-  if (gone.status === null || gone.status === 0 || !/No such (object|container)/i.test(gone.stderr)) {
-    fail(noCommitMessage ? `${noCommitMessage} Sandbox teardown is unconfirmed; cleanup ownership retained.` : 'Verifier container teardown is unconfirmed; not freezing or delivering evidence');
-  }
-}
-runtimeLease.confirmedCleanup();
 if (noCommitMessage) {
   const current = readRuns().find(r => r.project === PROJECT && r.iid === iid);
   noCommitSuperseded ||= current?.executionId !== executionId || current.claim !== claimToken;

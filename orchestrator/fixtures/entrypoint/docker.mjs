@@ -44,5 +44,5 @@ if (args[0] === "run") {
   if (!existsSync(file(name))) fail(`Error: No such container: ${name}`, 1);
   process.stdout.write(args.includes('{{.Image}}') ? `sha256:${'a'.repeat(64)}\n` : `/${name}\n`);
 } else if (args[0] === "rm" && args[1] === "-f") {
-  rmSync(file(args.at(-1)), { force: true });
+  if (process.env.FAKE_SANDBOX_FAULT !== 'cleanup') rmSync(file(args.at(-1)), { force: true });
 } else fail(`fake docker: unexpected call: ${args.join(" ")}`);

@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from 'node:url';
-// Setup readiness runs before repair and does not replace the later independent verifier probe or refund admission.
+// Setup browser and actual-user filesystem readiness run before repair, preserving verifier gates and admitted charges.
 import { browserPreflight } from './capabilities.mts';
 // #150: a repair binds fresh proof to its execution, historical baseline and exact attempt UUID after teardown.
 import { postAndDeliver, runVerifier } from "./handoff.mts";
@@ -13,7 +13,7 @@ import type { Provenance } from './verification.mts';
 import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 
 // One bounded recovery attempt (slice four, #60, continued by #74): the production lifecycle main.mts's
-// `--recover <attempt>` mode runs in the project's copy, and what Factory's launcher (cli/src/recovery-run.mts) reads back
+// `--recover <attempt>` mode runs in the selected complete runtime, and what Factory's launcher (cli/src/recovery-run.mts) reads back
 // when it settles an attempt. Import-safe: no Sandcastle, tracker, config or board import and nothing runs at import
 // time. Every effect outside this file comes through RecoveryDeps (sandbox provider, workspace Git, clock, exact-container
 // cleanup, host board/tracker, requirement/ownership recheck), so tests drive this same function against stubbed
@@ -251,6 +251,10 @@ export interface RecoveryDeps {
   createSandbox(spec: SandboxSpec): Promise<RecoverySandbox>;
   /** Remove the exact owned container and confirm it is gone. */
   containerGone(name: string): Gone;
+  /** Actual-agent-identity filesystem gate, after the mandatory browser preflight. */
+  sandboxReadiness(sandbox: RecoverySandbox): Promise<string | undefined>;
+  /** Publish cleanup facts without replacing a primary readiness cause. */
+  sandboxCleanup?(confirmed: boolean): void;
   workspace: {
     /** HEAD, porcelain status (untracked included) and binary diffs of the worktree, read on the host. */
     snapshot(worktree: string): { head: string; status: string; staged: string; unstaged: string };
@@ -327,6 +331,8 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
     let cleanupPending = false;
     if (created || rec.phase !== "claimed") {
       const gone = deps.containerGone(rec.container);
+      try { deps.sandboxCleanup?.(gone.ok); }
+      catch (error) { reason += `; readiness cleanup publication failed: ${(error as Error).message}`; outcome = 'failed'; }
       if (!gone.ok) {
         cleanupPending = true;
         save("cleanup-pending", { intended: outcome, reason: `${reason}; container ${rec.container} not confirmed gone: ${gone.reason}` });
@@ -388,6 +394,14 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   const setupHold = await browserPreflight(sandbox, dir, 30000, 'setup-browser-preflight.log');
   if (ctx.cancel.aborted) return finish('interrupted', `cancelled during readiness; ${preserved}`);
   if (setupHold) return finish('failed', `${setupHold}; ${preserved}`);
+
+  try {
+    const hold = await deps.sandboxReadiness(sandbox);
+    if (ctx.cancel.aborted) return finish('interrupted', `cancelled during sandbox readiness; ${hold ?? ''}; ${preserved}`);
+    if (hold) return finish('failed', `${hold}; ${preserved}`);
+  } catch (error) {
+    return finish(ctx.cancel.aborted ? 'interrupted' : 'failed', `sandbox readiness failed: ${(error as Error).message}; ${preserved}`);
+  }
 
   // 4. the repair agent, bounded from here.
   const ms = ctx.deadlineMs ?? REPAIR_DEADLINE_MS;
