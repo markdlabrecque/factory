@@ -299,6 +299,19 @@ test('dispatch incomplete parent input creates no run or analysis; the next comp
   assert.match(f.bytes(join(f.fake,'launches')),/--issue 7/);
 });
 
+test('unknown stopped-ticket input cannot count a jam, renew budgets or block an unrelated launch', t => {
+  const f = fixture(t); f.record(7, 'stopped');
+  f.data.parents[7] = 90;
+  f.data.tickets.push(ticket(90, {description:'Parent plan',contextOnly:true}), ticket(8, {description:'Model tier: mid\nSelf-contained work'}));
+  f.data.ready = [7,8]; f.data.errors = [90];
+  const report = join(f.home,'jam.json');
+  const result = f.pass([], {FACTORY_JAM_REPORT:report,FACTORY_PASS_ID:'fixture-pass'});
+  assert.match(result.stdout,/jam observation not counted/);
+  assert.equal(existsSync(report),false,'no partial recovery fingerprint is published');
+  assert.match(f.bytes(join(f.fake,'launches')),/--issue 8/);
+  assert.doesNotMatch(f.bytes(join(f.fake,'launches')),/--issue 7/);
+});
+
 test('analysis includes frozen complete child/parent plan bytes and parent edits revoke cache, generated notes do not', t => {
   const f = fixture(t); f.record(7, 'stopped');
   f.data.parents[7] = 90;

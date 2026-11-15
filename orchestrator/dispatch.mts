@@ -372,15 +372,19 @@ if (jamReport && !dry) {
   const ours = new Set([...LABELS.ready, LABELS.needsHuman, LABELS.done]);
   const jammed = new Set<number>(jam.tickets);
   const watched = issues.filter((i) => jammed.has(i.iid) || ["stopped", "done"].includes(runOf.get(i.iid)?.stage ?? ""));
-  const tickets = watched.map((t) => ({
-    iid: t.iid,
-    content: hashOf.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid).hash,
-    labels: (t.labels ?? []).filter((l) => !ours.has(l)),
-  }));
+  const tickets = watched.map((t) => {
+    try {
+      return { iid: t.iid, content: hashOf.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid).hash,
+        labels: (t.labels ?? []).filter((l) => !ours.has(l)) };
+    } catch (e) { log(`#${t.iid}: ${(e as Error).message}; jam observation not counted`); return undefined; }
+  });
   log(jam.tickets.length ? `jam: ${jam.tickets.map((t) => `#${t}`).join(", ")}` : `no jam: ${"none" in jam ? jam.none : ""}`);
-  const temp = `${jamReport}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify({ version: 1, pass: process.env.FACTORY_PASS_ID ?? "", project: PROJECT, at: new Date().toISOString(), ...jam, observed: tickets }, null, 2) + "\n", { mode: 0o600 });
-  renameSync(temp, jamReport);
+  // An unreadable stopped ticket must neither reset its budget nor prevent unrelated normal launches.
+  if (tickets.every(t => t !== undefined)) {
+    const temp = `${jamReport}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify({ version: 1, pass: process.env.FACTORY_PASS_ID ?? "", project: PROJECT, at: new Date().toISOString(), ...jam, observed: tickets }, null, 2) + "\n", { mode: 0o600 });
+    renameSync(temp, jamReport);
+  }
 }
 
 // ---- launch ------------------------------------------------------------------
