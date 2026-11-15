@@ -4,9 +4,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { resolveWorkflow } from '../../orchestrator/workflow.mts';
 import { loadInstructions } from '../../orchestrator/instructions.mts';
-import { observeReadiness, probeFilesystem, safeErrno } from '../../orchestrator/readiness.mts';
+import { observeReadiness, probeFilesystem } from '../../orchestrator/readiness.mts';
 import type { ReadinessInput, ReadinessPath } from '../../orchestrator/readiness.mts';
-import { readReadiness } from '../../board/readiness.mts';
+import { readReadiness, readStoredReadiness } from '../../board/readiness.mts';
 import type { ReadinessRead } from '../../board/readiness.mts';
 import type { Paths } from './paths.mts';
 import { runStateDir } from './runs.mts';
@@ -70,8 +70,8 @@ export function diagnosticInput(p: Paths, root: string): ReadinessInput {
   return { identity, paths, owner: { invocationId: `doctor-${randomUUID()}`, ownerId: `cli-${process.pid}`, generation: randomUUID() } };
 }
 export function savedReadiness(p: Paths, root: string, now = Date.now()): ReadinessRead {
-  try { return readReadiness(runStateDir(p), diagnosticContext(p, root).identity, now); }
-  catch (e) { return { state: 'invalid', reason: 'Current project/runtime identity could not be established; saved readiness is unknown', errno: safeErrno(e) }; }
+  // Same registered-root projection as Board: identity belongs to the observation, not current config authorization.
+  return readStoredReadiness(runStateDir(p), root, now);
 }
 /** Never publish doctor observations over launch reports, even in explicit probe mode. */
 export async function doctorReadiness(p: Paths, root: string, active: boolean) {

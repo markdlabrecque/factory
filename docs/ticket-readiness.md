@@ -152,7 +152,7 @@ Current project readiness: blocked | active | checked 2026-11-15T12:00:00Z
 No runs yet.
 ```
 
-A stale success instead starts with `Current project readiness: unknown (stale)`. The old operation remains an observation, not a claim about current write ability. Missing, pending and invalid reports name their state and safe errno when known; no cached success is substituted. Invalid current configuration/runtime identity also yields unknown rather than displaying a mismatched green report.
+A stale success instead starts with `Current project readiness: unknown (stale)`. The old operation remains an observation, not a claim about current write ability. Missing, pending and invalid reports name their state and safe errno when known; no cached success is substituted. Status and ticket show use the same registered-root `readStoredReadiness` projection as Board. Freshness there describes the stored observation's age, not a revalidation of current configuration/runtime. Doctor separately resolves current identity before crediting any saved write observation.
 
 Doctor first explains that `--probe-filesystem` creates, writes, renames and removes private files, and can create ordinary missing artifact directories, then prints the explicit recheck command using the existing `--project` selector. Default doctor retains write-unproven checks. A matching recent saved active observation can be displayed separately, but doctor never overwrites it. Host checks cannot establish access as the actual sandbox user.
 

@@ -3,7 +3,8 @@
 // process is gone without finishing shows as stopped (read-only; its record is left alone). `--json` prints the same
 // data as `{version:1, project, board, runs, readiness}`, plus `scheduler` and `schedule` when a scheduler backend is given (the CLI
 // always gives one). Only one project. Readiness is a passive bounded report read, with separate scopes above runs.
-// Missing or unmatched identities remain unknown; no probes or executable workflow imports run here.
+// Missing/invalid/stale observations remain unknown. Identity is the recorded observation, as on Board;
+// current config/runtime is not revalidated and no probes or executable workflow imports run here.
 // Scheduler health and timings (#37, scheduler-health.mts): the service manager's answer (on, off or unknown with the
 // reason; a failed query is never on), whether a tick is running, the last tick and tick timings from the history, health
 // problems and enabled legacy timers; then this project's switch and branch, why it would not get a pass (or `ready`), its
