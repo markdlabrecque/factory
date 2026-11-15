@@ -87,7 +87,7 @@ test('only reset and review --confirm emit controls, including missing-workflow 
   await recovery(f.p,'status',f.o); await recovery(f.p,'review',f.o); assert.equal(f.controls().length,0);
   assert.equal(await recovery(f.p,'review',{...f.o,confirm:true}),0);
   assert.equal(await recovery(f.p,'reset',f.o),0);
-  rmSync(join(f.sc,'execution-events.mts'));
+  rmSync(join(f.root,'.factory-workflow/execution-events.mts'));
   assert.equal(await recovery(f.p,'review',{...f.o,confirm:true}),1);
   pairs(f.controls()); assert.deepEqual(f.controls().filter(e=>e.result).map(e=>[e.action,e.result]),[['recovery-review','changed'],['recovery-reset','changed'],['recovery-review','refused']]);
 });

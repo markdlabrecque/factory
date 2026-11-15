@@ -14,9 +14,10 @@ A trusted launcher selects a prepared runtime once and supplies:
 | --- | --- |
 | `FACTORY_PROJECT_ROOT` | Existing canonical absolute checkout root |
 | `FACTORY_RUNTIME_ROOT` | Existing canonical absolute selected workflow directory. Installed bundles are named by content ID; explicit project overrides need not be. |
-| `FACTORY_RUNTIME_ID` | The selected manifest's content ID |
+| `FACTORY_RUNTIME_ID` | The selected manifest's source content ID |
+| `FACTORY_RUNTIME_DEPENDENCIES` | Selected private dependency snapshot hash, pinned for descendants |
 | `FACTORY_WORKFLOW_MODE` | Resolver-selected `factory` or `project` |
-| `FACTORY_HOST_RUNTIME_ROOT`, `FACTORY_HOST_RUNTIME_ID` | Validated installed host bundle whose runtime-store lease protects launcher dependencies, including for project mode |
+| `FACTORY_HOST_RUNTIME_ROOT`, `FACTORY_HOST_RUNTIME_ID`, `FACTORY_HOST_RUNTIME_DEPENDENCIES` | Validated installed host bundle and dependency snapshot whose runtime-store lease protects launcher dependencies, including for project mode |
 | cwd | The project root, not the runtime directory or a checkout subdirectory |
 | `SANDCASTLE_STATE_DIR` | Absolute shared state directory. Omission uses `$HOME/.local/state/factory`. |
 
@@ -105,14 +106,19 @@ registered checkout and data-only tracker identity, not executable paths.
 Factory mode uses the descriptor's validated content-addressed bundle. Project
 mode uses only the explicit repository-relative `workflow.directory`. It requires
 the same versioned complete inventory, package/lock metadata and private dependency
-snapshot. Missing/unknown inventories, stale hashes, illegal paths, source symlinks
+snapshot. The source tree is closed: only inventoried files, their parent directories,
+`runtime-manifest.json` and private `node_modules` are permitted. Additional helpers
+or metadata files are rejected, including symlinks outside the listed inventory.
+Missing/unknown inventories, stale hashes, illegal paths, source symlinks
 and missing dependencies fail without fallback. Dependency links must remain inside
 private `node_modules` and resolve to existing entries. No installed helper or
 prompt fills a hole in an override. Project overrides are trusted custom code, not
 a sandbox or permission to bypass installed host admission/review contracts.
 
 A fresh invocation reads the current descriptor. Its children inherit the selected
-root, ID, mode and host identity rather than rediscovering a newer descriptor.
+root, source ID, private dependency hash, mode and host identity rather than
+rediscovering a newer descriptor. Regenerating a manifest after a dependency-only
+edit does not authorize inherited children to use those new bytes.
 Scheduler recovery preparation and launch retain their completed pass's selection
 and saved Node/PATH. Changing workflow mode/root/identity within an invocation
 fails and requires a fresh invocation. Active processes keep independent runtime

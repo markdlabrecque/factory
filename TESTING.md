@@ -86,9 +86,21 @@ node --test orchestrator/workflow.test.mts orchestrator/context.test.mts cli/tes
 
 Resolver tests reject missing/unknown inventories, stale hashes, missing transitive
 helpers/dependencies, illegal directories and source/dependency symlinks without
-importing project code or falling back. Manifest regeneration is read-only until
+importing project code or falling back. The selected source tree is closed to the
+runtime inventory, its parent directories, manifest and private dependencies.
+Unknown helpers cannot sit outside the hashed inventory. Children pin both selected
+and host dependency roots along with their runtime identities. Manifest regeneration is read-only until
 the caller writes the returned value. Explicit override review binds complete source,
 dependency and location identity; edits require regeneration and renewed review.
+
+`cli/test/workflow-fixture.mts` publishes complete project overrides in
+`.factory-workflow`, separate from mutable `.sandcastle` configuration, logs,
+evidence and environment files. Tests edit selected code there and explicitly
+regenerate its manifest before renewed review. Initial scaffold fixtures copy only
+inventory assets across the data/code boundary. Re-publishing never restores a
+removed mandatory helper. `cli/test/workflow-fixture.test.mts` checks those fixture
+boundaries, including unchanged identity after data writes and refusal of unknown
+code helpers or missing mandatory files.
 
 `cli/test/workflow-routing.test.mts` records actual selected entrypoints and context
 for both Factory and complete-project modes across CLI run/dispatch, scheduled

@@ -13,10 +13,11 @@ import {recordReview,WORKFLOW} from '../src/recovery-review.mts';
 import {preparedFixture} from './prepared-fixture.mts';
 import {groupAlive} from '../src/tick-lock.mts';
 function fixture(t:TestContext){
-  const home=mkdtempSync(join(tmpdir(),'factory-preparation-')),root=join(home,'project'),sc=join(root,'.sandcastle'),p=paths(home);
+  const home=mkdtempSync(join(tmpdir(),'factory-preparation-')),root=join(home,'project'),sc=join(root,'.factory-workflow'),p=paths(home);
   t.after(()=>rmSync(home,{recursive:true,force:true}));
   for(const f of WORKFLOW.filter(f=>!['package.json','package-lock.json'].includes(f))){mkdirSync(dirname(join(sc,f)),{recursive:true});writeFileSync(join(sc,f),'');}
-  writeFileSync(join(sc,'factory.toml'),factoryToml('proj'));
+  mkdirSync(join(root,'.sandcastle'),{recursive:true});
+  writeFileSync(join(root,'.sandcastle/factory.toml'),factoryToml('proj'));
   writeFileSync(join(sc,'main.mts'),'"attempt-record": { type: "string" }');
   const o={root,tracker:'proj',ticket:7,base:'main',dir:p.state,setupTimeoutMs:2000};
   const prepared=preparedFixture(o);

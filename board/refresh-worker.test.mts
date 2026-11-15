@@ -46,7 +46,8 @@ for (const stdio of ["ignore", "inherit"] as const) {
         fs.writeFileSync(${JSON.stringify(resolve(root, "child"))}, String(process.pid));
         require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: ${JSON.stringify(stdio)} });
         setInterval(() => {}, 1000);`;
-      writeFileSync(resolve(root, ".sandcastle/dispatch.mts"), `
+      mkdirSync(resolve(root, ".factory-workflow"));
+      writeFileSync(resolve(root, ".factory-workflow/dispatch.mts"), `
         import { spawn } from 'node:child_process';
         import { existsSync, writeFileSync } from 'node:fs';
         import { clearRequest, pendingRequests } from ${JSON.stringify(new URL("./assessment.mts", import.meta.url).href)};

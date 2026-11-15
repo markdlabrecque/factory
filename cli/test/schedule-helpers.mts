@@ -35,13 +35,14 @@ export function repo(p: ReturnType<typeof paths>, name: string, o: RepoOptions =
     git(root, 'remote', 'add', 'origin', origin);
     git(root, 'push', '-q', 'origin', 'main');
   }
-  writeFileSync(join(root, '.sandcastle/dispatch.sh'), o.script ?? '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  mkdirSync(join(root, '.factory-workflow'), { recursive: true });
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), o.script ?? '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`${name}/${name}`));
   const current = o.current !== false;
-  writeFileSync(join(root, '.sandcastle/dispatch.mts'), current ? 'reserveRun(iid, pid);\n' : 'spawn();\n');
-  writeFileSync(join(root, '.sandcastle/board.mts'), current ? 'export function reserveRun() {}\n' : '');
+  writeFileSync(join(root, '.factory-workflow/dispatch.mts'), current ? 'reserveRun(iid, pid);\n' : 'spawn();\n');
+  writeFileSync(join(root, '.factory-workflow/board.mts'), current ? 'export function reserveRun() {}\n' : '');
   projectFixture(p, root);
-  if (!current) rmSync(join(root, '.sandcastle/runtime-manifest.json'));
+  if (!current) rmSync(join(root, '.factory-workflow/runtime-manifest.json'));
   const real = realpathSync(root);
   if (o.register !== false) addProject(p, real);
   return real;
@@ -122,7 +123,7 @@ ticket.unref();
 writeFileSync(dir + 'held.json', JSON.stringify({ dispatcher: process.pid, shell: shell.pid, analysis: analysis.pid, ticket: ticket.pid }));
 setInterval(() => {}, 1000);
 `;
-export const QUICK = `#!/bin/sh\necho "$@" > "$(dirname "$0")/quick.args"\npwd > "$(dirname "$0")/quick.cwd"\n: > "$(dirname "$0")/ran"\nexit "\${QUICK_EXIT:-0}"\n`;
-export const heldScript = (root: string) => { writeFileSync(join(root, '.sandcastle/held.mjs'), HELD); return `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/held.mjs" "$@"\n`; };
+export const QUICK = `#!/bin/sh\necho "$@" > "$PWD/.sandcastle/quick.args"\npwd > "$PWD/.sandcastle/quick.cwd"\n: > "$PWD/.sandcastle/ran"\nexit "\${QUICK_EXIT:-0}"\n`;
+export const heldScript = (root: string) => { writeFileSync(join(root, '.sandcastle/held.mjs'), HELD); return `#!/bin/sh\nexec "${process.execPath}" "$PWD/.sandcastle/held.mjs" "$@"\n`; };
 
 export const held = (root: string): Record<'dispatcher' | 'shell' | 'analysis' | 'ticket', number> => JSON.parse(readFileSync(join(root, '.sandcastle/held.json'), 'utf8'));

@@ -28,7 +28,8 @@ function fixture(t: TestContext) {
     mkdirSync(join(root, '.sandcastle'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
     writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`me/${dir}`));
-    writeFileSync(join(root, '.sandcastle/dispatch.sh'), script, { mode: 0o755 });
+    mkdirSync(join(root, '.factory-workflow'), { recursive: true });
+    writeFileSync(join(root, '.factory-workflow/dispatch.sh'), script, { mode: 0o755 });
     projectFixture(p, root);
     addProject(p, realpathSync(root));
     return realpathSync(root);
@@ -54,7 +55,7 @@ test('bad tickets and a stale complete override fail before anything runs', asyn
   const a = project('a', `#!/usr/bin/env bash\ntouch "$PWD/called"\n`);
   await assert.rejects(run(p, 'abc', { cwd: a }), /Expected a ticket number/);
   await assert.rejects(run(p, undefined, { cwd: a }), /Expected a ticket number/);
-  writeFileSync(join(a, '.sandcastle/dispatch.sh'), '#!/bin/sh\nexit 99\n');
+  writeFileSync(join(a, '.factory-workflow/dispatch.sh'), '#!/bin/sh\nexit 99\n');
   await assert.rejects(run(p, '15', { cwd: a }), /identity mismatch/);
   assert.throws(() => readFileSync(join(a, 'called')));
 });

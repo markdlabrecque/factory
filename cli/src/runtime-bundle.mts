@@ -49,6 +49,27 @@ function entries(root: string, assets: readonly RuntimeAsset[], assemble = false
   }).sort((a, b) => order(a.path, b.path));
 }
 
+// The versioned source inventory is closed. Overrides may edit listed assets, not add unreviewed helpers.
+function validateSourceTree(root: string, assets: readonly RuntimeAsset[]) {
+  const files = new Set([...assets.map(asset => asset.destination), RUNTIME_MANIFEST]);
+  const directories = new Set<string>();
+  for (const file of files) {
+    let parent = dirname(file);
+    while (parent !== '.') { directories.add(parent); parent = dirname(parent); }
+  }
+  function walk(directory: string, prefix = '') {
+    for (const name of readdirSync(directory)) {
+      const path = prefix ? `${prefix}/${name}` : name;
+      if (path === 'node_modules') continue; // Validated recursively by dependencyHash.
+      const stat = lstatSync(join(root, path));
+      if (stat.isSymbolicLink()) throw new Error(`Symlink in runtime asset: ${path}`);
+      if (stat.isDirectory() && directories.has(path)) walk(join(root, path), path);
+      else if (!stat.isFile() || !files.has(path)) throw new Error(`Unknown runtime source entry: ${path}`);
+    }
+  }
+  walk(root);
+}
+
 // Hash every installed file and link, so reuse detects missing or modified transitive dependencies.
 function dependencyHash(root: string): string {
   const base = join(root, 'node_modules');
@@ -110,6 +131,7 @@ export function regenerateRuntimeManifest(directory: string, node: RuntimeManife
   checkNode(node);
   const root = resolve(directory);
   if (realpathSync(root) !== root || lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) throw new Error('Invalid canonical workflow directory');
+  validateSourceTree(root, RUNTIME_ASSETS);
   const files = entries(root, RUNTIME_ASSETS.map(a => ({ source: a.destination, destination: a.destination })));
   return { version: 1, inventoryVersion: RUNTIME_INVENTORY_VERSION, node, files, id: identity(node, files), dependencies: dependencyHash(root) };
 }
@@ -119,6 +141,7 @@ export function validateRuntimeBundle(directory: string, assets: readonly Runtim
   validateRuntimeInventory(assets);
   const root = resolve(directory);
   if (lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) throw new Error('Invalid runtime directory');
+  validateSourceTree(root, assets);
   const manifest = JSON.parse(readFileSync(regularFile(root, RUNTIME_MANIFEST), 'utf8')) as RuntimeManifest;
   if (manifest.version !== 1 || manifest.inventoryVersion !== RUNTIME_INVENTORY_VERSION || !Array.isArray(manifest.files)) throw new Error('Invalid runtime manifest');
   checkNode(manifest.node);

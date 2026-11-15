@@ -180,7 +180,8 @@ test('logs --recovery shows the ticket\'s repair log, or the newest one', async 
 
 test('review lists the workflow, refuses an incomplete copy, and --confirm activates recovery until a file changes', async t => {
   const { p, root, out, err, clear } = fixture(t);
-  const sc = (f: string) => join(root, '.sandcastle', f);
+  const sc = (f: string) => join(root, '.factory-workflow', f);
+  mkdirSync(sc(''), { recursive: true });
   // A hand upgrade in progress: everything but the repair prompt.
   writeFileSync(sc('main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
   // #137: reviewed runtime/parser assets include nested paths.

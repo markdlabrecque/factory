@@ -35,5 +35,5 @@ export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env
   } });
   const p = { data, runtimes, runtimeDescriptor: descriptor } as any;
   withRuntimeLock(p, () => { recordRuntimeOwnership(p, bundle.id); writeRuntimeDescriptor(p, bundle.id); });
-  return { ...bundle, env: { ...env, FACTORY_RUNTIME_DESCRIPTOR: descriptor, FACTORY_PROJECT_ROOT: root, FACTORY_RUNTIME_ROOT: bundle.directory, FACTORY_RUNTIME_ID: bundle.id }, staging };
+  return { ...bundle, env: { ...env, FACTORY_RUNTIME_DESCRIPTOR: descriptor, FACTORY_PROJECT_ROOT: root, FACTORY_RUNTIME_ROOT: bundle.directory, FACTORY_RUNTIME_ID: bundle.id, FACTORY_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies, FACTORY_HOST_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies }, staging };
 }

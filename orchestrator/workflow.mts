@@ -24,7 +24,8 @@ export function resolveWorkflow(projectRoot: string, descriptor: string, inherit
   if (inherited?.FACTORY_PROJECT_ROOT === projectRoot && inherited.FACTORY_RUNTIME_ROOT && inherited.FACTORY_RUNTIME_ID) {
     hostRoot = canonical(inherited.FACTORY_HOST_RUNTIME_ROOT ?? inherited.FACTORY_RUNTIME_ROOT, 'Inherited Factory runtime');
     hostId = inherited.FACTORY_HOST_RUNTIME_ID ?? inherited.FACTORY_RUNTIME_ID;
-    if (bundle(hostRoot).id !== hostId) throw Error('Inherited Factory runtime identity mismatch');
+    const host = bundle(hostRoot);
+    if (host.id !== hostId || inherited.FACTORY_HOST_RUNTIME_DEPENDENCIES !== host.dependencies) throw Error('Inherited Factory runtime identity mismatch');
   } else {
     if (!isAbsolute(descriptor) || lstatSync(descriptor).isSymbolicLink() || !lstatSync(descriptor).isFile()) throw Error('A trusted installed runtime descriptor is required');
     const d = JSON.parse(readFileSync(descriptor, 'utf8'));
@@ -38,10 +39,12 @@ export function resolveWorkflow(projectRoot: string, descriptor: string, inherit
   canonical(root, 'Workflow root');
   const manifest = mode === 'factory' ? bundle(root) : bundle(root, true);
   if (inherited?.FACTORY_PROJECT_ROOT === projectRoot && inherited.FACTORY_RUNTIME_ROOT &&
-      (inherited.FACTORY_RUNTIME_ROOT !== root || inherited.FACTORY_RUNTIME_ID !== manifest.id || inherited.FACTORY_WORKFLOW_MODE && inherited.FACTORY_WORKFLOW_MODE !== mode))
+      (inherited.FACTORY_RUNTIME_ROOT !== root || inherited.FACTORY_RUNTIME_ID !== manifest.id || inherited.FACTORY_RUNTIME_DEPENDENCIES !== manifest.dependencies || inherited.FACTORY_WORKFLOW_MODE && inherited.FACTORY_WORKFLOW_MODE !== mode))
     throw Error('Selected workflow changed during invocation; start a fresh Factory invocation');
   const env = { FACTORY_PROJECT_ROOT: projectRoot, FACTORY_RUNTIME_ROOT: root, FACTORY_RUNTIME_ID: manifest.id,
-    FACTORY_WORKFLOW_MODE: mode, FACTORY_HOST_RUNTIME_ROOT: hostRoot, FACTORY_HOST_RUNTIME_ID: hostId };
+    FACTORY_RUNTIME_DEPENDENCIES: manifest.dependencies,
+    FACTORY_WORKFLOW_MODE: mode, FACTORY_HOST_RUNTIME_ROOT: hostRoot, FACTORY_HOST_RUNTIME_ID: hostId,
+    FACTORY_HOST_RUNTIME_DEPENDENCIES: bundle(hostRoot).dependencies };
   return { mode, root, id: manifest.id, manifest, config, env,
     entrypoints: { dispatch: join(root, 'dispatch.sh'), refresh: join(root, 'dispatch.mts'), main: join(root, 'main.mts'), preparation: join(root, 'recovery-analysis.mts'), config: join(root, 'config-read.mts'), capabilities: join(root, 'capabilities.mts') },
     tsx: join(root, 'node_modules/tsx/dist/cli.mjs') };

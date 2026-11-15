@@ -69,9 +69,10 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('proj'));
   writeFileSync(join(evidence, 'before-1.png'), 'old evidence');
   if (o.copy !== false) {
-    writeFileSync(join(root, '.sandcastle/main.mts'), 'const CONFIG = { image: "fixture-image" }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
+    mkdirSync(join(root, '.factory-workflow'), { recursive: true });
+    writeFileSync(join(root, '.factory-workflow/main.mts'), 'const CONFIG = { image: "fixture-image" }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
     // #137: runtime/parser workflow review includes nested assets.
-    for (const f of WORKFLOW.filter(f => f !== 'main.mts' && !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(root, '.sandcastle', f, '..'), { recursive: true }); writeFileSync(join(root, '.sandcastle', f), ''); }
+    for (const f of WORKFLOW.filter(f => f !== 'main.mts' && !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(root, '.factory-workflow', f, '..'), { recursive: true }); writeFileSync(join(root, '.factory-workflow', f), ''); }
   }
   const p = paths(home);
   if (o.copy !== false) { projectFixture(p, root); recordReview(p, root); }
@@ -165,7 +166,7 @@ test('a repair runs detached on the recorded branch with its identity fixed firs
   const r = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, true, (r as { reason?: string }).reason);
   const [l] = f.launched;
-  assert.deepEqual([l.cmd, ...l.args], [process.execPath, join(f.root, '.sandcastle/node_modules/tsx/dist/cli.mjs'), join(f.root, '.sandcastle/main.mts'), '--issue', '7', '--base', 'main', '--recover', '1', '--attempt-record', f.record(0)]);
+  assert.deepEqual([l.cmd, ...l.args], [process.execPath, join(f.root, '.factory-workflow/node_modules/tsx/dist/cli.mjs'), join(f.root, '.factory-workflow/main.mts'), '--issue', '7', '--base', 'main', '--recover', '1', '--attempt-record', f.record(0)]);
   assert.equal(l.cwd, f.root);
   assert.equal(l.env.SANDCASTLE_STATE_DIR, f.dir);
   // Identity recorded before the process started: recovery state, run record and host-owned attempt record agree.
@@ -395,7 +396,7 @@ test('paused/off/cancelled recovery probes nothing; a pause during readiness sti
 test('missing TOML is held without executing legacy configuration or charging', async t => {
   const f = fixture(t); let probes = 0;
   rmSync(join(f.root, '.sandcastle/factory.toml'));
-  writeFileSync(join(f.root, '.sandcastle/main.mts'), 'const CONFIG = { image: getSecretImage() }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });');
+  writeFileSync(join(f.root, '.factory-workflow/main.mts'), 'const CONFIG = { image: getSecretImage() }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });');
   refreshManifest(f.root);
   assert.throws(() => recordReview(f.p, f.root), /factory.toml/);
   const r = await launchRecovery(f.p, { ...f.common, ticket: 7, capabilities: async () => { probes++; return f.common.capabilities(); } });
@@ -451,7 +452,7 @@ for (const problem of ['malformed-run', 'unreadable-run', 'malformed-receipt', '
       mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, '{');
     }
     if (problem === 'identity') writeFileSync(join(f.root, '.sandcastle/factory.toml'), 'version = 2\n');
-    if (problem === 'workflow') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed');
+    if (problem === 'workflow') writeFileSync(join(f.root, '.factory-workflow/recovery.mts'), 'changed');
     if (problem === 'git-error') writeFileSync(join(f.root, '.git/config'), 'not a valid Git config\n');
     if (problem === 'capacity') claimRun({ dir: f.dir, project: 'elsewhere', iid: '8', pid: process.pid, cap: 99 });
     const before = snapshot(f.home);
@@ -495,7 +496,7 @@ for (const change of ['done', 'generation', 'review', 'capacity'] as const) {
         writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stage: 'done' }));
       }
       if (change === 'generation') withAdmission(f.dir, tx => { tx.state.generations.proj++; tx.commit(); });
-      if (change === 'review') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed after validation');
+      if (change === 'review') writeFileSync(join(f.root, '.factory-workflow/recovery.mts'), 'changed after validation');
       if (change === 'capacity') claimRun({ dir: f.dir, project: 'elsewhere', iid: '8', pid: process.pid, cap: 99 });
       return IDS[0];
     } });

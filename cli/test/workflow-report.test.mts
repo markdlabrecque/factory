@@ -147,7 +147,7 @@ test('existing schedule and recovery observations remain separate, incomplete an
   const f = fixture(t);
   let caps = capabilityObservations(f.p, f.root);
   for (const name of ['schedulerCopy', 'recoveryWorkflow', 'recoveryReview'] as const) assert.equal(caps[name].state, 'met');
-  appendFileSync(join(f.sc, 'handoff.mts'), '// helper drift\n');
+  appendFileSync(join(f.root, '.factory-workflow/handoff.mts'), '// helper drift\n');
   caps = capabilityObservations(f.p, f.root);
   assert.equal(caps.schedulerCopy.state, 'blocked');
   assert.equal(caps.recoveryWorkflow.state, 'blocked');
@@ -159,13 +159,13 @@ test('existing schedule and recovery observations remain separate, incomplete an
   assert.equal(capabilityObservations(f.p, f.root).recoveryReview.state, 'unknown');
   rmSync(reviewFile(f.p, f.root));
   assert.match(capabilityObservations(f.p, f.root).recoveryReview.reason, /no recorded/);
-  chmodSync(join(f.sc, 'dispatch.sh'), 0o644);
+  chmodSync(join(f.root, '.factory-workflow/dispatch.sh'), 0o644);
   assert.equal(capabilityObservations(f.p, f.root).schedulerCopy.state, 'blocked');
-  writeFileSync(join(f.sc, 'dispatch.mts'), '// lacks reservations'); chmodSync(join(f.sc, 'dispatch.sh'), 0o755);
+  writeFileSync(join(f.root, '.factory-workflow/dispatch.mts'), '// lacks reservations'); chmodSync(join(f.root, '.factory-workflow/dispatch.sh'), 0o755);
   assert.equal(capabilityObservations(f.p, f.root).schedulerCopy.state, 'blocked');
-  rmSync(join(f.sc, 'handoff.mts'));
+  rmSync(join(f.root, '.factory-workflow/handoff.mts'));
   assert.match(capabilityObservations(f.p, f.root).recoveryWorkflow.evidence.join(' '), /handoff.mts/);
-  writeFileSync(join(f.sc, 'main.mts'), '// no recovery entrypoint');
+  writeFileSync(join(f.root, '.factory-workflow/main.mts'), '// no recovery entrypoint');
   assert.equal(capabilityObservations(f.p, f.root).recoveryWorkflow.state, 'blocked', 'missing transitive helper still holds the entire workflow');
 });
 

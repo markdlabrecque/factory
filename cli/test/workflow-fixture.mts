@@ -15,27 +15,35 @@ export function installedFixture(p: Paths) {
   withRuntimeLock(p,()=>{recordRuntimeOwnership(p,bundle.id);writeRuntimeDescriptor(p,bundle.id);});
   record(p,{kind:'dir',path:p.runtimes}); record(p,{kind:'file',path:p.runtimeDescriptor});
 }
-/** Complete the intentionally stubbed workflow and explicitly publish its reviewed manifest. */
+/** Assemble code separately from mutable project data, then publish the reviewed manifest. */
 export function projectFixture(p: Paths, root: string) {
   installedFixture(p);
-  const sc=join(root,'.sandcastle');
-  const source=join(p.home,'workflow-source');
-  if(!existsSync(source)) copyRuntimeSources(source);
-  // Existing tests supply narrow executable stubs; fill every other mandatory file from source.
-  for(const a of RUNTIME_ASSETS) {
-    const target=join(sc,a.destination);
-    if(!existsSync(target) || ['package.json','package-lock.json'].includes(a.destination)) {
-      mkdirSync(dirname(target),{recursive:true});cpSync(join(source,a.source),target);
+  const code=join(root,'.factory-workflow');
+  // Once published, never restore a removed mandatory helper on a later review.
+  if(!existsSync(join(code,'runtime-manifest.json'))) {
+    const source=join(p.home,'workflow-source');
+    if(!existsSync(source)) copyRuntimeSources(source);
+    // Existing tests supply narrow executable stubs; fill other mandatory files once.
+    for(const a of RUNTIME_ASSETS) {
+      const target=join(code,a.destination);
+      if(!existsSync(target) || ['package.json','package-lock.json'].includes(a.destination)) {
+        // Scaffold fixtures may stage their initial executable stubs beside project data.
+        // Only inventory assets cross this boundary, never config, logs or arbitrary helpers.
+        const staged=join(root,'.sandcastle',a.destination);
+        const from=existsSync(staged) && !['package.json','package-lock.json'].includes(a.destination)
+          ? staged : join(source,a.source);
+        mkdirSync(dirname(target),{recursive:true});cpSync(from,target);
+      }
     }
+    if(!existsSync(join(code,'node_modules'))) installPackages(code);
   }
-  if(!existsSync(join(sc,'node_modules'))) installPackages(sc);
-  const config=join(sc,'factory.toml');
+  const config=join(root,'.sandcastle','factory.toml');
   let text=readFileSync(config,'utf8');
-  if(!/^\[workflow\]/m.test(text)) text+='\n[workflow]\nmode = "project"\ndirectory = ".sandcastle"\n';
+  if(!/^\[workflow\]/m.test(text)) text+='\n[workflow]\nmode = "project"\ndirectory = ".factory-workflow"\n';
   writeFileSync(config,text);
   refreshManifest(root);
 }
 export function refreshManifest(root: string) {
-  const sc=join(root,'.sandcastle');
-  writeFileSync(join(sc,'runtime-manifest.json'),JSON.stringify(regenerateRuntimeManifest(sc))+'\n');
+  const code=join(root,'.factory-workflow');
+  writeFileSync(join(code,'runtime-manifest.json'),JSON.stringify(regenerateRuntimeManifest(code))+'\n');
 }

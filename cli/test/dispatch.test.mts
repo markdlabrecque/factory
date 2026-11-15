@@ -26,7 +26,8 @@ function fixture(t: TestContext) {
     mkdirSync(join(root, '.sandcastle'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
     writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`me/${dir}`));
-    writeFileSync(join(root, '.sandcastle/dispatch.sh'),
+    mkdirSync(join(root, '.factory-workflow'), { recursive: true });
+    writeFileSync(join(root, '.factory-workflow/dispatch.sh'),
       `#!/usr/bin/env bash\nprintf '%s\\n' "$PWD" "$SANDCASTLE_STATE_DIR" "$*" > "$PWD/called"\nexit ${exit}\n`, { mode: 0o755 });
     projectFixture(p, root);
     addProject(p, realpathSync(root));

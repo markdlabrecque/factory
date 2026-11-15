@@ -77,8 +77,8 @@ test('cutover rehearsal: report legacy timers, retire them, refresh the copy, op
   assert.equal(existsSync(join(legacy.units, 'sandcastle-dispatch@.timer')), true, 'template units stay for slice six');
 
   // 4. The developer refreshes the copy from this checkout's shipped files, then opts the projects in.
-  copyFileSync(join(repoRoot, 'orchestrator/dispatch.mts'), join(alpha, '.sandcastle/dispatch.mts'));
-  copyFileSync(join(repoRoot, 'board/board.mts'), join(alpha, '.sandcastle/board.mts'));
+  copyFileSync(join(repoRoot, 'orchestrator/dispatch.mts'), join(alpha, '.factory-workflow/dispatch.mts'));
+  copyFileSync(join(repoRoot, 'board/board.mts'), join(alpha, '.factory-workflow/board.mts'));
   refreshManifest(alpha);
   for (const name of ['alpha', 'beta']) { const r = await cli(w, ['schedule', 'on', '--project', name]); assert.equal(r.code, 0, r.err); }
   assert.equal(w.stub.unit('factory-tick.timer').enabled, false, 'opting projects in never arms the timer');

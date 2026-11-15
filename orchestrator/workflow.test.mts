@@ -124,6 +124,35 @@ for (const descriptor of ['unknown-version', 'invalid-id', 'missing-bundle', 'sy
   });
 }
 
+test('additional imported helpers cannot escape inventory identity or recovery review', t => {
+  const f = fixture(t); f.selectProject();
+  writeFileSync(join(f.override, 'main.mts'), 'import "./custom.mts";');
+  f.publish(); recordReview(f.p, f.root);
+  writeFileSync(join(f.override, 'custom.mts'), 'export const value = 1;');
+  assert.throws(() => f.select(), /Unknown runtime source entry: custom.mts/);
+  assert.throws(() => regenerateRuntimeManifest(f.override), /Unknown runtime source entry/);
+  assert.ok(recoveryCopyProblem(f.p, f.root));
+  writeFileSync(join(f.override, 'custom.mts'), 'export const value = 2;');
+  assert.ok(recoveryCopyProblem(f.p, f.root));
+  rmSync(join(f.override, 'custom.mts'));
+  symlinkSync(join(f.factory.root, 'main.mts'), join(f.override, 'custom.mts'));
+  assert.throws(() => f.select(), /Symlink in runtime asset: custom.mts/);
+  assert.throws(() => regenerateRuntimeManifest(f.override), /Symlink in runtime asset/);
+});
+
+test('inherited project selection pins private dependency bytes after manifest regeneration', t => {
+  const f = fixture(t); f.selectProject();
+  const a = f.select(); recordReview(f.p, f.root);
+  writeFileSync(join(f.override, 'node_modules/tsx/dist/cli.mjs'), 'changed dependency snapshot');
+  f.publish();
+  const b = f.select();
+  assert.equal(a.id, b.id, 'source content identity is unchanged');
+  assert.notEqual(a.manifest.dependencies, b.manifest.dependencies);
+  assert.throws(() => f.select(a.env), /changed during invocation/);
+  assert.match(recoveryCopyProblem(f.p, f.root)!, /changed since recovery review/);
+  assert.equal(f.select(b.env).manifest.dependencies, b.manifest.dependencies);
+});
+
 test('manifest regeneration rejects aliased roots and never repairs an incomplete override', t => {
   const f = fixture(t), alias = join(f.root, 'alias');
   symlinkSync(f.override, alias); assert.throws(() => regenerateRuntimeManifest(alias), /canonical workflow directory/);

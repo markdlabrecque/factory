@@ -62,8 +62,9 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   writeFileSync(join(sc, 'factory.toml'), factoryToml(TRACKER));
   if (o.copy !== false) {
     // #137: reviewed workflow includes nested vendored parser assets.
-    for (const f of WORKFLOW.filter(f => !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }
-    writeFileSync(join(sc, 'main.mts'), '"attempt-record": { type: "string" }\n');
+    const code = join(root, '.factory-workflow');
+    for (const f of WORKFLOW.filter(f => !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(code, f, '..'), { recursive: true }); writeFileSync(join(code, f), ''); }
+    writeFileSync(join(code, 'main.mts'), '"attempt-record": { type: "string" }\n');
     projectFixture(p, root); recordReview(p, root);
   }
   const dir = p.state;
@@ -186,7 +187,7 @@ for (const stop of ['project-stopped', 'admitted-failed', 'throw', 'off', 'gener
         if (o.ticket === 2) {
           if (stop === 'off') allowed = false;
           if (stop === 'generation') withAdmission(f.dir, tx => { tx.state.generations[TRACKER] = 1; tx.commit(); });
-          if (stop === 'review') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed');
+          if (stop === 'review') writeFileSync(join(f.root, '.factory-workflow/recovery.mts'), 'changed');
           if (stop === 'active') beginAttempt(f.p, f.root, { ticket: 2, at: at(10), replay: true });
           if (stop === 'changed-run') f.record(10, 'done');
           if (stop === 'malformed-store') writeFileSync(join(f.dir, 'broken.json'), '{');

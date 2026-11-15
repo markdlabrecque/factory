@@ -69,7 +69,7 @@ async function armed(w: World, projects: string[] = []) {
 }
 function heldProject(w: World, name: string) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
-  writeFileSync(join(root, '.sandcastle/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), heldScript(root), { mode: 0o755 });
   refreshManifest(root);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* not started or gone */ } });
   return root;
@@ -350,7 +350,7 @@ test('off disables, then boots out: the supervisor cancels its held pass and nes
   await w.stub.using(() => uninstall(w.p, w.service, { schedule: w.backend }));
   assert.deepEqual(changes(w.stub).slice(m), [`disable ${SVC}`], 'nothing left to boot out');
   for (const path of [w.p.tickPlist, w.p.manifest]) assert.equal(existsSync(path), false, path);
-  for (const keep of [w.p.projects, w.p.scheduleConfig, join(a, '.sandcastle/dispatch.sh')]) assert.equal(existsSync(keep), true, keep);
+  for (const keep of [w.p.projects, w.p.scheduleConfig, join(a, '.factory-workflow/dispatch.sh')]) assert.equal(existsSync(keep), true, keep);
   assert.equal(up(pids.ticket), true, 'uninstall preserved the detached ticket run');
   assert.deepEqual(w.stub.rejected(), []);
 });
