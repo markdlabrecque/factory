@@ -94,6 +94,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const env = {
     PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, FAKE_TICKET_BODY: `Model tier: ${tier}\nThe login form must work.`,
     FAKE_SETUP_BROWSER_BAD: scenario === 'setup-bad' ? 'yes' : '',
+    FAKE_SANDBOX_FAULT: scenario.startsWith('sandbox-') ? scenario.slice(8) : '',
     FAKE_DEPENDENCY_ERROR: scenario === 'dependency-unknown' ? 'yes' : '',
     FAKE_MUTATION: scenario === 'closed-before' ? 'closed' : scenario === 'title' ? 'title' : '',
     FAKE_REPAIR: `printf 'fixed\\n' > fix.txt && git add -A && git commit -qm repair && printf '%s' '${JSON.stringify({ cause: "missing fix", filesChanged: ["fix.txt", "untracked.txt"], tests: [{ command: "true", result: "pass" }], canProceed: true, remainingBlockers: [], requiresHostUpdate: false })}' > "$EVIDENCE/recovery-report.json" && echo ok > "$EVIDENCE/recovery-report.md"`,
@@ -187,9 +188,26 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.notEqual(code, 0, log);
     assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
     const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
-    assert.match(log, expected);
+    assert.match(log, scenario.startsWith('sandbox-') ? /[Ss]andbox readiness/ : expected);
     const calls = existsSync(join(fake, 'docker.jsonl')) ? readFileSync(join(fake, 'docker.jsonl'), 'utf8') : '';
     if (scenario === 'missing-baseline') assert.ok(!calls.includes('"run"'), log);
+    if (scenario.startsWith('sandbox-')) {
+      assert.equal(readRecovery(p, root).budgets[7].used, 1, 'post-container readiness spends exactly the admitted attempt');
+      assert.equal(existsSync(join(fake, 'models.log')), false, 'no repair or verifier provider starts');
+      const r = readAttemptRecord(join(p.recovery, 'attempts', `${ID}.json`));
+      assert.ok(r.ok);
+      if (r.ok) {
+        assert.equal(r.record.deadline, undefined);
+        assert.equal(r.record.phase, scenario === 'sandbox-cleanup' ? 'cleanup-pending' : 'finished');
+        assert.equal(existsSync(join(fake, 'containers', `${r.record.container}.json`)), scenario === 'sandbox-cleanup');
+        assert.ok(existsSync(join(r.record.evidence, 'input/status.txt')), 'input work preserved');
+        assert.ok(existsSync(join(r.record.evidence, 'setup-browser-preflight.log')), 'browser gate still runs first');
+        if (scenario === 'sandbox-cleanup') assert.match(r.record.reason!, /evidence-create-write-rename-remove.*not confirmed gone/s);
+      }
+      const probe = JSON.parse(readFileSync(join(fake,'sandbox-probe-input.json'),'utf8'));
+      assert.equal(probe.uid, process.getuid!()); assert.equal(probe.gid, process.getgid!());
+      assert.equal(probe.tip, git(worktree, 'rev-parse', 'HEAD'));
+    }
     if (scenario === 'setup-bad') {
       assert.equal(readRecovery(p, root).budgets[7].used, 1, 'post-admission setup failures are never refunded');
       assert.equal(existsSync(join(fake, 'models.log')), false, 'no repair or verifier provider starts');

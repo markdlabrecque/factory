@@ -1,0 +1,18 @@
+# Sandbox probe boundary evidence
+
+Inspected before launch wiring for ticket 181. The root lock pins `@ai-hero/sandcastle` 0.14.0. Read-only inspection of that installed version's `dist/index.js` and `dist/chunk-GCLEXPXG.js` established these contracts. No installed files were changed or executed.
+
+| Boundary | Normal Sandcastle 0.14.0 | Owned recovery adapter |
+| --- | --- | --- |
+| Agent identity | Docker `--user` defaults to host `getuid():getgid()`, fallback 1000:1000. Ordinary exec inherits it; only `sudo: true` supplies 0:0. | `runArgs` sets the same explicit UID:GID. Ordinary repair and probe exec inherit it; setup alone may request root. |
+| Workspace | SDK maps the selected host worktree into `/home/agent/workspace`; public `worktreePath` is the host path, not a container-path API. | Recorded existing worktree mounted at `/home/agent/workspace`. |
+| Probe workspace resolution | Node `cwd` plus `realpath`; confirm Git's actual top-level. Do not derive container paths from the public host `worktreePath`. | Same resolution, using the owned container's configured working directory. |
+| Git metadata | SDK mounts resolved Git directories at their required paths and configures `safe.directory` during setup. Resolve metadata/index with Git inside that arrangement, without adding another safe-directory override. | Read-only `.git` file points to `/home/agent/.factory-git`, an attempt-private writable metadata copy. No host common Git mount. Resolve the real index through Git here too. |
+| Evidence | Explicit per-execution writable evidence mount supplied by main. | Explicit per-attempt writable evidence mount, with previous evidence/input overmounted read-only. Probe only its writable root. |
+| Exec result | Public exec returns `stdout`, `stderr`, `exitCode`. Nonzero commands need explicit checking. SDK exec has no abort support in the Docker implementation. | Adapter converts `Proc.status` to `exitCode`; exec observes the attempt cancellation signal. |
+| Bounded probe | Host-owned `Proc` executes Node directly via `docker exec <exact-id> node -e ...`, without root override, shell interpolation or credentials. Timeout/cancellation terminates the client and requires exact-container teardown. | Same. The helper verifies effective UID/GID inside the container before any probe mutation. |
+| Teardown | Public `close` calls provider close, then may remove the clean worktree. Docker provider stop/rm failures can be swallowed. Public `sandboxId` gives the exact identity needed for independent absence confirmation. | `finish` always uses `ownedContainerGone` on the pre-recorded exact name, including partial creation. Unconfirmed removal retains cleanup-pending and the charged attempt. |
+
+The probe creates only exclusive mode-0700 private directories. Workspace/evidence tests create, write, fsync, rename and remove private files. The Git test puts a disposable alternate index in a private directory next to the actual resolved index, then uses `read-tree` on the exact baseline. It never writes the real index, refs or real locks. No ownership change is needed.
+
+`orchestrator/sandbox-readiness.test.mts` executes the same embedded program as the runner's actual UID in disposable local Git fixtures. It checks the resolved identity/path map, a staged plus unstaged plus untracked checkout, unchanged index/HEAD/refs/status/diffs, permission failures even under root, missing baseline, and removal of all private paths. Entrypoint/runner fixtures cover the normal and recovery mount/command contracts and teardown/accounting. These are offline contract tests, not observations of a live Docker image or an agent.

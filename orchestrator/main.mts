@@ -1,6 +1,8 @@
 // Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
-// Image readiness pins sandbox construction; setup and independent verifier probes remain mandatory.
+// Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
+import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup, closeSandbox } from './sandbox-readiness.mts';
+import type { ReadinessReport } from './readiness-schema.mts';
 // #153: proofs also bind continuation, checkpoint and admission code; upgrades require fresh verification.
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
 // Project-root v2 TOML owns sandbox/CI settings. Ticket choice and runtime/template inputs stay fixed per attempt.
@@ -76,7 +78,7 @@ function openaiCredential(): string {
     const res = spawnSync("pi", ["auth", ...cmd, "--provider", "openai"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     if (res.status === 0 && res.stdout.trim()) return res.stdout.trim();
   }
-  fail("pi on the host has no usable OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT.");
+  throw Error("pi on the host has no usable OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT.");
 }
 // Called as each run starts.
 const agent = (model: string) =>
@@ -244,6 +246,7 @@ if (recovering) {
     });
   };
   runtimeLease.pendingCleanup();
+  let recoveryReport: ReadinessReport | undefined;
   const result = await runRecoveryAttempt({
     root: context.projectRoot, record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
@@ -266,6 +269,15 @@ if (recovering) {
       uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, proc: realProc, root: process.cwd(),
     }),
     containerGone: (name) => ownedContainerGone(name, realDocker),
+    sandboxReadiness: async (sb) => {
+      recoveryReport = await probeSandbox({ container: sb.id, state: stateDir(),
+        identity: { projectRoot: context.projectRoot, runtimeIdentity: context.manifest.id, configIdentity: context.policyIdentity, contextFingerprint: context.policyIdentity },
+        invocationId: rec.id, baseline: baseSha, tip: rec.startSha, evidence: evidenceBox,
+        uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
+        files: { ...context.additive.recovery.hashes }, signal: cancel.signal });
+      return sandboxReadinessHold(recoveryReport);
+    },
+    sandboxCleanup: (confirmed) => { if (recoveryReport) recordSandboxCleanup(stateDir(), recoveryReport, confirmed); },
     workspace: gitWorkspace,
     recheck, host,
     setStage: (patch) => setStage(iid!, patch),
@@ -365,14 +377,6 @@ const sandbox = await createSandbox({
   },
 });
 
-try {
-  const actualBase = sh('git', ['rev-parse', `refs/heads/${branch}`]);
-  if (actualBase !== baseSha) { await sandbox.close(); fail('Branch creation baseline changed; refusing unverifiable implementation'); }
-  fillReceipt(receipt, { branchSha: actualBase, worktreeAt: new Date().toISOString() });
-} catch (e) {
-  console.warn(`Ownership receipt ${receipt} not filled in (${(e as Error).message}); a later repair reconciles it with Git.`);
-}
-
 const promptArgs = {
   ISSUE_IID: iid,
   ISSUE_TITLE: String(issue.title),
@@ -403,10 +407,26 @@ let verifierContainer = '';
 let verificationRefusal: string | undefined;
 let tip = "";
 let blockers: ImplementerBlocker[] | undefined;
+let sandboxReport: ReadinessReport | undefined;
+let sandboxFailure: string | undefined;
+const sandboxCancel = new AbortController();
+const cancelSandbox = () => sandboxCancel.abort();
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelSandbox);
 try {
+  const actualBase = sh('git', ['rev-parse', `refs/heads/${branch}`]);
+  if (actualBase !== baseSha) throw Error('Branch creation baseline changed; refusing unverifiable implementation');
+  fillReceipt(receipt, { branchSha: actualBase, worktreeAt: new Date().toISOString() });
   // Custom setup may break a previously good image. This log is not verifier evidence.
   const setupHold = await browserPreflight(sandbox, evidenceHost, 30000, 'setup-browser-preflight.log');
   if (setupHold) { lastMessage = setupHold; throw Error(setupHold); }
+  sandboxReport = await probeSandbox({ container: sandbox.sandboxId ?? '', state: stateDir(),
+    identity: { projectRoot: context.projectRoot, runtimeIdentity: context.manifest.id, configIdentity: context.policyIdentity, contextFingerprint: context.policyIdentity },
+    invocationId: executionId, baseline: baseSha, tip: baseSha, evidence: evidenceBox,
+    uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
+    files: { ...context.additive.implementation.hashes }, signal: sandboxCancel.signal });
+  const sandboxHold = sandboxReadinessHold(sandboxReport);
+  if (sandboxHold) throw Error(sandboxHold);
+  sandboxCancel.signal.throwIfAborted();
   // ---- 1. implementer ----------------------------------------------------------
   setStage(iid, { stage: "implementing" });
   const impl = await sandbox.run({
@@ -415,11 +435,11 @@ try {
     promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.implementation.text },
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
-    name: "implementer",
+    name: "implementer", signal: sandboxCancel.signal,
   });
   if (!impl.commits.length) {
     blockers = readBlocked();
-    if (!blockers) fail(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
+    if (!blockers) throw Error(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
   } else {
     tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
     if ([baseSha, tip].some(sha => spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`]).status !== 0)) throw Error('Missing historical verification baseline or tip Git object; verifier not started. Preserve work for restored-baseline verification or explicit human review.');
@@ -436,16 +456,20 @@ try {
       verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip });
     }
   }
+} catch (error) {
+  sandboxFailure = (error as Error).message;
 } finally {
-  await sandbox.close();
+  const cleanup = await closeSandbox(sandbox);
+  if (cleanup.confirmed) runtimeLease.confirmedCleanup();
+  if (cleanup.reason) sandboxFailure = [sandboxFailure, cleanup.reason].filter(Boolean).join('; ');
+  if (sandboxReport) {
+    try { recordSandboxCleanup(stateDir(), sandboxReport, cleanup.confirmed); }
+    catch (error) { sandboxFailure = [sandboxFailure, `Readiness cleanup publication failed: ${(error as Error).message}`].filter(Boolean).join('; '); }
+  }
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelSandbox);
 }
-
+if (sandboxFailure) fail(sandboxFailure);
 if (verificationRefusal) fail(verificationRefusal);
-if (tip) {
-  const gone = spawnSync('docker', ['container', 'inspect', verifierContainer], { encoding: 'utf8' });
-  if (gone.status === null || gone.status === 0 || !/No such (object|container)/i.test(gone.stderr)) fail('Verifier container teardown is unconfirmed; not freezing or delivering evidence');
-}
-runtimeLease.confirmedCleanup();
 
 // ---- implementer reported a missing prerequisite ----------------------------------
 if (blockers) {

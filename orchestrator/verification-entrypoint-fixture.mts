@@ -91,6 +91,8 @@ export async function createSandbox(o) {
       return {commits:[]};
     },
     close: async () => {
+      writeFileSync(join(fake,'cleanup-attempted'),'yes');
+      if (scenario === 'sandbox-cleanup') throw Error('fixture teardown failed');
       rmSync(join(fake,'live'));
       if (scenario === 'branch') git(worktree,['reset','--hard','HEAD~1']);
       if (scenario === 'claim') {
@@ -374,6 +376,19 @@ console.log('sha256:'+'a'.repeat(64));
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.verification).sort(), ['common.md', 'verify.md']);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.templates).sort(), ['prompt.analyze.md','prompt.md','prompt.recover.md','prompt.verify.md']);
       assert.deepEqual(proof.provenance.code, Object.fromEntries(runtime.manifest.files.map(file => [file.path,file.sha256])));
+    } else if (scenario.startsWith('sandbox-')) {
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.equal(existsSync(join(fake, 'implementer-started')), false, 'no implementer invocation');
+      assert.equal(existsSync(join(fake, 'verifier-started')), false, 'no verifier invocation');
+      assert.ok(existsSync(join(fake, 'cleanup-attempted')), 'owned cleanup ran before child exited');
+      assert.equal(existsSync(join(fake, 'live')), scenario === 'sandbox-cleanup');
+      assert.match(result.stderr, /Sandbox readiness/);
+      assert.doesNotMatch(result.stderr, /Implementer made no commit/);
+      const probe = JSON.parse(readFileSync(join(fake, 'sandbox-probe-input.json'), 'utf8'));
+      assert.equal(probe.uid, process.getuid!()); assert.equal(probe.gid, process.getgid!());
+      assert.equal(probe.baseline, baseline); assert.equal(probe.tip, baseline);
+      assert.ok(probe.evidence.startsWith('/home/agent/evidence/7/'));
+      if (scenario === 'sandbox-cleanup') assert.match(result.stderr, /evidence-create-write-rename-remove.*Sandbox close failed: fixture teardown failed.*fixture-container teardown unconfirmed/s);
     } else if (['image-bad', 'setup-bad', 'image-changed'].includes(scenario)) {
       assert.notEqual(result.status, 0, result.stdout + result.stderr);
       assert.equal(existsSync(join(fake, 'implementer-started')), false);

@@ -169,6 +169,8 @@ function fixture(t: TestContext, s: Scenario = {}) {
     createSandbox: (spec) => createOwnedSandbox(spec, { image: "img", setup: s.setup ?? [{ command: "true" }], helpers: join(root, ".sandcastle/sandbox"),
       env: { CLAUDE_CODE_OAUTH_TOKEN: "secret-token" }, uid: 1000, gid: 1000, proc: world.proc, root }),
     containerGone: (name) => ownedContainerGone(name, world.docker),
+    // This suite tests recovery lifecycle; embedded actual-UID probe behavior is fixture-tested separately.
+    sandboxReadiness: async () => undefined,
     workspace,
     recheck: s.recheck ?? (() => undefined),
     host,
