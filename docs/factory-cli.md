@@ -526,13 +526,65 @@ Readiness appears once above the runs, including projects with no runs. Project 
 
 `factory ticket show <ticket> [--project <name|path>] [--json]` adds current project `readiness`, explicitly attributed `ticketReadiness`, `input` and `executionReadiness` to its version-1 JSON. It works without a run or journal so a project hold remains visible. A colliding foreign run is still refused. Only checks with an explicit matching `ticket` are associated with this ticket; paths, IDs and owner names are never used to infer attribution. Historical execution stage/note stays separate from current project readiness. Standard workflow `input.state:"frozen"` projects the saved execution/attempt's bounded host-owned source manifest, with coverage, content/rendered hashes and source references. It does not establish current tracker freshness. Missing or invalid input evidence and missing execution-specific producers are explicit unknowns, with empty coverage/references and a null hash, not a reason to collect tracker content. Neither command follows arbitrary links, reads log bodies or environment values, imports executable override modules or starts agents/containers. Existing service-manager status queries remain read-only.
 
-### Explicit project doctor
+### Readiness diagnosis
 
+Start passively, then opt into write probes only when appropriate. These commands use a synthetic registered project named `project with spaces`; substitute your registered name or checkout path. `ticket show` is passive too, even without a run.
+
+<!-- readiness-command-fixture -->
 ```sh
-factory doctor --project "project with spaces"
-factory doctor --project "project with spaces" --probe-filesystem
+factory doctor --project "project with spaces" --json
+factory status --project "project with spaces" --json
+factory ticket show 7 --project "project with spaces" --json
 factory doctor --project "project with spaces" --probe-filesystem --json
 ```
+
+Names, paths inside registered checkouts and the current registered checkout are supported selectors. Quote spaces. A linked worktree uses its own versioned settings/workflow; ambiguous registration requires an explicit registered name. An unregistered path is not an invitation to register or initialize it automatically.
+
+| Command/result | Exit | Interpretation |
+| --- | --- | --- |
+| Passive project doctor, required writes unproven but no blocked read | 0 | Write capability is untested, not ready. |
+| Active project doctor, all required checks ready | 0 | Observed host access only; no report publication or launch. |
+| Active doctor blocked/required unknown, timeout or collection failure | 1 | Inspect the reported operation; no repair was attempted. |
+| Status or ticket show successfully displays blocked/unknown readiness | 0 | Diagnostic display succeeded; this is not launch eligibility. |
+| Bad arguments, unknown/ambiguous project | 1 | Selection/argument error, not a filesystem diagnosis. |
+
+These JSON subsets are fixture-checked, not complete responses. Immediately after creating an isolated project/runtime with no saved launch report, passive doctor includes:
+
+<!-- readiness-passive-json -->
+```json
+{
+  "version": 1,
+  "readiness": { "state": "current", "report": { "phase": "passive", "status": "unknown" } },
+  "saved": { "state": "missing" },
+  "writeCapability": "untested"
+}
+```
+
+Here `current` identifies the newly made passive observation, while `unknown` says required write access is unproven. A successful explicit probe instead includes:
+
+<!-- readiness-active-json -->
+```json
+{
+  "version": 1,
+  "readiness": { "state": "current", "report": { "phase": "active", "status": "ready" } },
+  "saved": { "state": "missing" },
+  "writeCapability": "ready"
+}
+```
+
+It still leaves status's stored report missing. For ticket 7 with no run, journal or attributed input report, `ticket show` includes:
+
+<!-- readiness-ticket-json -->
+```json
+{
+  "version": 1,
+  "readiness": { "state": "missing" },
+  "input": { "state": "unknown", "coverage": [], "contentHash": null, "references": [] },
+  "executionReadiness": { "state": "unknown" }
+}
+```
+
+Do not test JSON truthiness or exit 0 as a launch gate. Consumers must interpret report/check scope, state, required status and freshness. `status.readiness.report.status` can be blocked by a ticket check even when project-scope checks are ready. Human status separates these scopes. See the [safe next-action examples](ticket-readiness.md#safe-next-actions-by-example) for missing parent context, denied evidence access, unavailable reports, branch collisions and container-only failures.
 
 Project selection follows the existing registered name/path rules. Explicit project mode checks only the project filesystem, not installation services or Board HTTP. With no flags, doctor retains its installation checks and adds passive filesystem observation when run inside a registered checkout. `--json` or `--probe-filesystem` without a selector uses the current registered checkout.
 
