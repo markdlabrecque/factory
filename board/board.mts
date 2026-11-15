@@ -1,4 +1,7 @@
-// #153: delivery claims retain proof/execution history and fence single-observation checkpoint writes.
+// Run storage, admission and Board assembly. Browser/snapshot reads never reconcile records or inspect logs.
+// Readiness is a separate passive registered-project snapshot; execution history stays independent.
+import { buildReadinessData } from './readiness-view.mts';
+export { buildReadinessData } from './readiness-view.mts';
 import { validDelivery } from './delivery.mts';
 import type { DeliveryCheckpoint } from './delivery.mts';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -501,7 +504,7 @@ function presentationJournal(run: BoardRun) {
  *  service's /evidence route; "file" links the folder directly. */
 export function buildBoardData(mode: "file" | "http"): { runs: BoardRun[]; generatedAt: string } {
   const assessments = readAssessments(stateDir());
-  const runs = readRuns().flatMap((r) => {
+  const runs = readRuns(stateDir(), false).flatMap((r) => {
     const view = presentationJournal(r);
     if (view?.archived) return [];
     const assessment = assessments.get(r.key);
@@ -515,7 +518,7 @@ export function buildBoardData(mode: "file" | "http"): { runs: BoardRun[]; gener
       manuallyCorrected: !!view?.correction,
       assessment,
       evidenceUrl: !r.evidenceDir ? undefined : mode === "http" ? `/evidence/${encodeURIComponent(r.key)}/` : `file://${r.evidenceDir}/`,
-      ...latestActivity(r),
+      // Agent logs are not browser data. Historical evidence remains available through its explicit route.
     }];
   });
   return { runs, generatedAt: now() };
@@ -532,7 +535,7 @@ const embed = (data: unknown) =>
   readFileSync(templateFile, "utf8").replace("/*__DATA__*/null", () => JSON.stringify(data).replace(/</g, "\\u003c"));
 
 export function buildPage(mode: "file" | "http"): string {
-  return embed(buildBoardData(mode));
+  return embed({ ...buildBoardData(mode), readiness: buildReadinessData(stateDir()) });
 }
 
 /** Render evidence using the board's shell. Evidence pages never poll, so media keeps playing. */

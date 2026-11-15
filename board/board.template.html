@@ -1,5 +1,8 @@
 <!doctype html>
-<!-- #140: cards show only compact current blockers; assessment facts and refresh controls stay off the Board.
+<!-- Registered-project readiness is separate from historical cards, including projects with no runs.
+     Live readiness polls stored reports only; file snapshots embed timestamped observations without requests.
+     All readiness fields render as text. Missing identity coverage and unattributed ticket checks stay explicit.
+     Cards show only compact current blockers; assessment facts and refresh controls stay off the Board.
      #141: recorded blocker episodes show bounded summaries only; persisted reasons are unchanged.
      Factory tracker board/evidence shell: per-ticket dots and centered connectors, solid green/red current dots
      with halos and sonar pulses, explicit queue reasons, latest-ten collapsible Shipped and real-history stats.
@@ -140,7 +143,12 @@
   .seg-group button:hover { color: var(--ink); background: var(--panel-2); }
   .seg-group button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
   .seg-group button b { font: 600 11px/1 var(--mono); margin-left: 6px; opacity: .75; }
-  .project-filter { display: inline-flex; align-items: center; gap: 8px; font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }
+  .readiness { padding: 20px; margin-block: 16px; overflow-wrap: anywhere; }
+.readiness h2, .readiness h3, .readiness h4 { margin-block: 8px; }
+.readiness p { font-size: 13px; margin-block: 8px; }
+.readiness-project { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.readiness-check { border-left: 3px solid var(--line); padding-left: 12px; }
+.project-filter { display: inline-flex; align-items: center; gap: 8px; font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }
   .project-filter[hidden] { display: none; }
   .project-filter select { font: 500 13px/1.2 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-height: 36px; max-width: 60vw; text-transform: none; letter-spacing: 0; }
 
@@ -758,9 +766,45 @@
     if (was !== state && (state === 'offline' || was === 'offline')) announcer.textContent = state === 'offline' ? 'Board connection lost. Showing the last good data.' : 'Board connection restored.';
   }
 
+  // readiness-render:start
+  // Stored observation only. No project code, log, setup command or active probe is fetched here.
+  function validReadiness(d) { return d && typeof d.generatedAt === 'string' && Array.isArray(d.projects) && d.projects.length <= 256; }
+  function paintReadiness(container, snapshot, project, now) {
+    container.replaceChildren();
+    container.appendChild(el('h2', null, 'Current readiness observations'));
+    container.appendChild(el('p', null, 'Separate from historical execution stops. Stored observations do not authorize launch; current configuration is not revalidated by this page.'));
+    if (!snapshot || snapshot.reason) container.appendChild(el('p', null, snapshot && snapshot.reason || 'Readiness unknown. No stored snapshot available.'));
+    if (!snapshot) return;
+    container.appendChild(el('p', 'mono', 'Snapshot checked ' + snapshot.generatedAt));
+    snapshot.projects.filter(function (p) { return !project || p.name === project; }).forEach(function (p) {
+      var section = el('section', 'readiness-project');
+      add(section, el('h3', null, p.name), el('p', 'mono', p.root));
+      var o = p.observation, r = o.report;
+      if (!r) { section.appendChild(el('p', null, 'Project readiness unknown (' + o.state + '). ' + (o.reason || '') + (o.errno ? ' ' + o.errno : ''))); container.appendChild(section); return; }
+      var age = now - time(r.observedAt), current = o.state === 'current' && age >= 0 && age <= 60000;
+      var projectChecks = r.checks.filter(function (c) { return c.scope === 'project'; });
+      var status = !projectChecks.length || projectChecks.some(function (c) { return c.required && c.status === 'unknown'; }) ? 'unknown' : 'ready';
+      if (projectChecks.some(function (c) { return c.required && c.status === 'blocked'; })) status = 'blocked';
+      section.dataset.state = current ? status : 'stale';
+      section.appendChild(el('p', null, current ? 'Project observation: ' + status : 'Project readiness unknown (stale observation, previously ' + status + ')'));
+      section.appendChild(el('p', 'mono', 'Checked ' + r.observedAt + ' · phase ' + r.phase + ' · runtime ' + r.identity.runtimeIdentity + ' · config ' + r.identity.configIdentity + ' · context ' + r.identity.contextFingerprint + ' · generation ' + r.owner.generation));
+      r.checks.filter(function (c) { return c.status !== 'ready'; }).forEach(function (c) {
+        var row = el('div', 'readiness-check');
+        var scope = c.scope === 'project' ? 'Project' : c.ticket ? 'Ticket #' + c.ticket : 'Unattributed ticket/sandbox check (not a project hold)';
+        add(row, el('h4', null, scope + ' · ' + c.scope + '/' + c.phase + ' · ' + (current ? c.status : 'stale evidence')),
+          el('p', null, c.operation + (c.path ? ' · ' + c.path : '') + (c.errno ? ' · ' + c.errno : '') + ' · ' + c.reason),
+          el('p', null, 'Checked ' + c.observedAt + ' · Next actor: ' + c.nextActor + ' · ' + c.nextAction + ' · Automatic recheck: ' + c.automaticRecheck));
+        section.appendChild(row);
+      });
+      container.appendChild(section);
+    });
+  }
+  // readiness-render:end
+
   // ---------- board ----------
   var board = {
     runs: Array.isArray(data.runs) ? data.runs : [],
+    readiness: data.readiness || null,
     now: time(data.generatedAt) || Date.now(),
     syncedAt: time(data.generatedAt) || Date.now(),
     filter: 'all',
@@ -829,6 +873,9 @@
     projectWrap.appendChild(select);
     refs.project = { wrap: projectWrap, select: select };
     app.appendChild(add(toolbar, group, projectWrap));
+    refs.readiness = el('section', 'panel readiness');
+    refs.readiness.setAttribute('aria-label', 'Current readiness observations');
+    app.appendChild(refs.readiness);
 
     var ops = el('div', 'ops');
     GROUPS.forEach(function (g, i) {
@@ -1106,6 +1153,7 @@
       ref.button.setAttribute('aria-pressed', String(board.filter === f[0]));
     });
     var names = projects(board.runs), select = board.refs.project.select;
+    if (board.readiness) board.readiness.projects.forEach(function (p) { if (names.indexOf(p.name) < 0) names.push(p.name); });
     if (board.project && names.indexOf(board.project) < 0) names.push(board.project);
     var wanted = JSON.stringify(names);
     if (select.dataset.names !== wanted) {
@@ -1192,6 +1240,7 @@
     else if (active && active !== document.body && active.isConnected && document.activeElement !== active) active.focus({ preventScroll: true });
     if (active && active.isConnected && active.closest('details:not([open])')) active.closest('details').querySelector('summary').focus({ preventScroll: true });
     updateCounts(animate);
+    paintReadiness(board.refs.readiness, board.readiness, board.project, board.now);
     renderStats();
     if (!animate) return;
     cards.forEach(function (c, key) {
@@ -1247,6 +1296,25 @@
     document.addEventListener('visibilitychange', poller.visibilityChanged);
     poller.start();
     startTimers();
+    startReadiness();
+  }
+
+  function startReadiness() {
+    var poller = createPoller({
+      url: '/api/readiness', interval: 10000,
+      fetch: function (u, o) { return fetch(u, o); },
+      setTimeout: function (f, ms) { return setTimeout(f, ms); },
+      clearTimeout: function (t) { clearTimeout(t); },
+      isHidden: function () { return document.visibilityState === 'hidden'; },
+      valid: validReadiness,
+      onData: function (d) { board.readiness = d; board.now = Date.now(); patch(false); },
+      onError: function () {
+        board.readiness = { generatedAt: new Date().toISOString(), projects: [], reason: 'Readiness unknown. Could not refresh stored observations.' };
+        board.now = Date.now(); patch(false);
+      }
+    });
+    document.addEventListener('visibilitychange', poller.visibilityChanged);
+    poller.start();
   }
 
   // The strip lives only on the polling board. `offset` is the server's clock minus this browser's, so the countdown follows the server.
