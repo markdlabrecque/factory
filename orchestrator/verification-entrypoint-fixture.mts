@@ -137,6 +137,8 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(runtime.env.FACTORY_RUNTIME_ROOT, runtime.directory);
       assert.equal(runtime.env.FACTORY_RUNTIME_ID, runtime.id);
       for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md', 'node_modules']) assert.equal(existsSync(join(root, '.sandcastle', name)), false, name);
+      for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
+      writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
     }
     assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
@@ -144,6 +146,11 @@ console.log('sha256:'+'a'.repeat(64));
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
+    if (copied) {
+      assert.equal(existsSync(join(fake, 'npm-called')), false, 'execution must not invoke npm');
+      assert.equal(existsSync(join(root, 'node_modules')), false, 'execution must not create project dependencies');
+      assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false, 'execution must not fall back to project dependencies');
+    }
     if (scenario === 'pass') {
       assert.equal(result.status, 0, result.stdout + result.stderr);
       const tip = git(origin, 'rev-parse', '7-fix-login');

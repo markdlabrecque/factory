@@ -3,4 +3,4 @@ import { test } from 'node:test';
 import { normalEntrypointFixture } from '../../orchestrator/verification-entrypoint-fixture.mts';
 
 test('copied install runs Pi Terra implementation and independent verification', t =>
-  normalEntrypointFixture(t, 'pass', 'openai', undefined, true));
+  normalEntrypointFixture(t, 'pass', 'openai', 'mid', true));
