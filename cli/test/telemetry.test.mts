@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exportEvents, startAction, streamKey } from '../../board/execution-events.mts';
 import { writeRecord, markMergedOutside, setProject } from '../../board/board.mts';
+import { populateCopiedWorkflow } from './copied-workflow-fixture.mts';
 import { paths } from '../src/paths.mts';
 import { addProject } from '../src/projects.mts';
 import { retry } from '../src/commands/retry.mts';
@@ -34,6 +35,7 @@ function fixture(t: any) {
   mkdirSync(root); execFileSync('git',['init','-qb','main'],{cwd:root});
   execFileSync('git',['-c','user.name=t','-c','user.email=t@t','commit','-qm','init','--allow-empty'],{cwd:root});
   writeScaffold(root,buildAssets({profile:'personal',repo:'owner/repo',image:'fake'},p.state));
+  populateCopiedWorkflow(root, appRoot);
   addProject(p,root); mkdirSync(p.state,{recursive:true});
   t.mock.method(console,'log',()=>{}); t.mock.method(console,'error',()=>{}); t.mock.method(console,'warn',()=>{});
   const run=(stage: any='done')=>writeRecord(p.state,'owner_repo--1',{iid:'1',project:'owner/repo',stage,pid:process.pid,startedAt:at,stageSince:at,updatedAt:at,executionId:'execution-one',verdict:'FAIL',note:secret});
@@ -106,12 +108,13 @@ test('explicit schedule global/project on/off pairs exclude shared automatic hel
   assert.doesNotMatch(JSON.stringify(f.controls()),new RegExp(secret));
 });
 
-test('update --apply changed/no-op controls do not turn dry-run or scaffold helpers into operator actions',t=>{
+test('update --apply no-op controls do not turn dry-run or scaffold helpers into operator actions',t=>{
   const f=fixture(t); addProject(f.p,f.root);
   update(f.p,{...f.o,dryRun:true,app:appRoot}); assert.equal(f.controls().length,0);
   rmSync(join(f.sc,'execution-events.mts'));
   update(f.p,{...f.o,apply:true,app:appRoot}); update(f.p,{...f.o,apply:true,app:appRoot});
-  pairs(f.controls()); assert.deepEqual(f.controls().filter(e=>e.result).map(e=>e.result),['changed','no-op']);
+  pairs(f.controls()); assert.deepEqual(f.controls().filter(e=>e.result).map(e=>e.result),['no-op','no-op']);
+  assert.equal(existsSync(join(f.sc,'execution-events.mts')),false);
 });
 
 test('an interrupted request has unknown outcome, CLI/board origin never establishes a human',t=>{

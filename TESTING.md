@@ -32,6 +32,14 @@ node scripts/test-runtime-packages.mts /path/to/npm-cache /path/to/npm/bin/npm-c
 
 The implementation was smoke-tested with Node 22.23.2 and 24.20.0. This is not an execution test of the exact 22.18.0 patch release.
 
+## Data-only projects and workflow diagnostics
+
+```sh
+node --test cli/test/init.test.mts cli/test/update.test.mts cli/test/project-config.test.mts cli/test/workflow-report.test.mts cli/test/telemetry.test.mts
+```
+
+Init and update fixtures verify data-only assets and preserve project bytes and modes. Workflow diagnostics use explicit synthetic historical copies for comparison, alongside a data-only regression. They do not restore runtime files to new projects or authorize repairs. Socket tests use fixture-owned Unix sockets.
+
 ## Shared workflow execution
 
 ```sh

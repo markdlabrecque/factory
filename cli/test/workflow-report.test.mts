@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { populateCopiedWorkflow } from './copied-workflow-fixture.mts';
 import { paths } from '../src/paths.mts';
 import { appRoot, buildAssets, writeScaffold } from '../src/scaffold.mts';
 import { addProject } from '../src/projects.mts';
@@ -26,6 +27,7 @@ function fixture(t: TestContext) {
   git(source, 'init', '-q'); git(source, 'add', '.'); git(source, 'commit', '-qm', 'v1');
   mkdirSync(root); git(root, 'init', '-q');
   writeScaffold(root, buildAssets({ profile: 'personal', repo: 'test/project', image: 'test/image:local' }, p.state, source));
+  populateCopiedWorkflow(root, source);
   addProject(p, root); recordReview(p, root);
   const v1 = git(source, 'rev-parse', 'HEAD');
   // Installed v2 is ahead of the project; the selected source v3 is ahead of both.
@@ -294,4 +296,16 @@ test('CLI reports text/JSON with exit 0 for drift, resolves current/name/path pr
   const missingProject = await child([...args, '--project', 'project', '--json'], f.base, f.p.home, env);
   assert.equal(missingProject.code, 0, missingProject.stderr);
   assert.equal(JSON.parse(missingProject.stdout).projectCopy.status, 'missing');
+});
+
+
+test('data-only workflow report is complete and does not advise executable repair', async t => {
+  const f = fixture(t);
+  rmSync(f.sc, { recursive: true });
+  writeScaffold(f.root, buildAssets({ profile: 'personal', repo: 'test/project', image: 'test/image:local' }, f.p.state, f.source));
+  const before = snapshot(f.base), report = await f.collect();
+  assert.ok(report.projectCopy.files.every(row => row.againstSource && row.againstInstalled));
+  assert.doesNotMatch(JSON.stringify(report), /would create|would replace/);
+  assert.doesNotMatch(formatWorkflowReport(report), /would create|would replace/);
+  assert.deepEqual(snapshot(f.base), before);
 });

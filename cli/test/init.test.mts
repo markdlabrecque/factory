@@ -1,10 +1,4 @@
-// #153: copied scaffolds include continuation/checkpoint helpers and admission-fenced writers.
-// #149: fresh and repaired copies include dependency evaluation.
-// #150: fresh and repaired scaffolds include the required verification proof helper.
-// V2 TOML/parser and policy assets ship together. Ticket tiers never require model tracker labels.
-// Init tests: scaffold contents, no-clobber, rerun repair, failure-doesn't-register, wrapper quoting, shared
-// state, uninstall's treatment of projects, and that every module a scaffolded file imports is scaffolded,
-// including refresh.mts, the independent assessment store (#78) and journal projection (#101-#102).
+// Data-only init tests cover validation, no-clobber reruns, partial failures, wrapper quoting and registration.
 // Disposable HOME and Git repos; no network, service manager or credentials.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -111,9 +105,12 @@ test('rerun keeps existing bytes and modes, fills gaps, reports skips, never dup
   const s = (f: string) => join(root, '.sandcastle', f);
   writeFileSync(s('factory.toml'), readFileSync(s('factory.toml'), 'utf8') + '\n# retained\n');
   writeFileSync(s('.gitignore'), 'node_modules\n');
+  chmodSync(s('factory.toml'), 0o640); chmodSync(s('.gitignore'), 0o600);
+  const before = ['factory.toml', '.gitignore', '.env', 'factory-dispatch.sh'].map(f => [f, readFileSync(s(f)), mode(s(f))]);
   rmSync(s('.env.example'));
   const { out, error } = await quiet(() => init(p, root, { ...client }));
   assert.equal(error, undefined);
+  assert.deepEqual(before.map(([f]) => [f, readFileSync(s(f as string)), mode(s(f as string))]), before);
   assert.match(readFileSync(s('factory.toml'), 'utf8'), /# retained/);
   assert.ok(existsSync(s('.env.example')));
   assert.match(out, /Created 1 file/);

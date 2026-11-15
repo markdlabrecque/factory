@@ -1,10 +1,9 @@
-// Read-only reporting of project-owned assets; updates never repair project data or workflow overrides.
+// Read-only project asset reports and historical inventory diagnostics; updates never repair project files.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-// #137: TOML is always project-owned; runtime/vendor files ship together, even before npm install.
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
-import { closeSync, mkdirSync, existsSync, fchmodSync, linkSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
-import { basename, dirname, join, relative } from 'node:path';
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Paths } from './paths.mts';
 import { scaffoldName, shq } from './paths.mts';
 import { appRoot, FROM_BOARD, FROM_ORCHESTRATOR } from './scaffold.mts';
@@ -88,6 +87,50 @@ export function classifyCopy(_p: Paths, root: string, o: { app?: string; history
     detail: existsSync(join(root, scaffoldName, file)) ? 'never modified by update' : 'absent; never created by update',
   }));
 }
+
+/** Compare historical inventory for diagnostics only. This never authorizes or performs repairs. */
+export function classifyInventory(p: Paths, root: string, o: { app?: string; history?: History; files?: string[] } = {}): FileStatus[] {
+  const app = o.app ?? appRoot;
+  const history = o.history ?? factoryHistory(app);
+  const read = (rel: string) => readFileSync(join(app, rel));
+  const known = (src: string, content: Buffer) => {
+    const ids = history.blobs.get(src);
+    if (!ids?.size) return false;
+    const algorithm = [...ids][0].length === 64 ? 'sha256' : 'sha1';
+    return ids.has(blobId(content, algorithm));
+  };
+  return Object.entries(scaffoldSources()).filter(([file]) => !o.files || o.files.includes(file)).sort(([a], [b]) => a.localeCompare(b)).map(([file, sources]): FileStatus => {
+    const target = join(root, scaffoldName, file);
+    const owned = PROJECT_OWNED.includes(file);
+    const st = (() => { try { return lstatSync(target); } catch { return undefined; } })();
+    if (!st) return owned
+      ? { file, class: 'project', source: sources[0], detail: 'absent from project' }
+      : { file, class: 'missing', source: sources[0], detail: 'absent from historical copy' };
+    if (!st.isFile()) return { file, class: owned ? 'project' : 'modified', source: sources[0], detail: 'not a regular file; not followed' };
+    const content = readFileSync(target);
+    if (file === 'factory.toml' || file === 'config.mts' || file === 'main.mts') {
+      return { file, class: 'project', source: sources.join(' or '), detail: 'templated with your settings; compare with Factory\'s copy and merge by hand' };
+    }
+    if (file === 'factory-dispatch.sh') {
+      const tpl = read(sources[0]).toString('utf8');
+      const rendered = tpl.replace(PLACEHOLDER, () => shq(p.state));
+      if (content.toString('utf8') === rendered) return { file, class: 'current', source: sources[0] };
+      const text = content.toString('utf8');
+      const generic = text.includes(shq(p.state)) ? Buffer.from(text.replace(shq(p.state), () => PLACEHOLDER)) : null;
+      return generic && known(sources[0], generic)
+        ? { file, class: 'outdated', source: sources[0], detail: 'unmodified earlier Factory copy; historical copy differs' }
+        : { file, class: 'modified', source: sources[0], detail: 'edited locally' };
+    }
+    const exact = sources.find(s => existsSync(join(app, s)) && read(s).equals(content));
+    if (exact) return { file, class: 'current', source: exact };
+    if (owned) return { file, class: 'project', source: sources[0], detail: 'differs from Factory\'s copy' };
+    const old = sources.find(s => known(s, content));
+    return old
+      ? { file, class: 'outdated', source: old, detail: 'unmodified earlier Factory copy; historical copy differs' }
+      : { file, class: 'modified', source: sources[0], detail: 'edited locally' };
+  });
+}
+
 
 export type Applied = { files: FileStatus[]; created: string[]; replaced: string[] };
 export function applyCopy(p: Paths, root: string, o: { app?: string; history?: History } = {}): Applied {
