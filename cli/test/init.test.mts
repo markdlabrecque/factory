@@ -1,8 +1,7 @@
 // #153: copied scaffolds include continuation/checkpoint helpers and admission-fenced writers.
 // #149: fresh and repaired copies include dependency evaluation.
 // #150: fresh and repaired scaffolds include the required verification proof helper.
-// #137: TOML/offline parser assets and explicit legacy migration compatibility.
-// #126: personal scaffolds ship description aliases and never require model tracker labels.
+// V2 TOML/parser and policy assets ship together. Ticket tiers never require model tracker labels.
 // Init tests: scaffold contents, no-clobber, rerun repair, failure-doesn't-register, wrapper quoting, shared
 // state, uninstall's treatment of projects, and that every module a scaffolded file imports is scaffolded,
 // including refresh.mts, the independent assessment store (#78) and journal projection (#101-#102).
@@ -10,6 +9,7 @@
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import { loadTomlConfig } from '../../orchestrator/project-config.mts';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +27,7 @@ import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
 // Fresh and repaired scaffolds ship both dependency evaluation and delivery continuation.
-const EXPECTED = ['capabilities.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts', 'factory.toml', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
+const EXPECTED = ['capabilities.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts', 'factory.toml', 'project-config.mts', 'model-policy.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(f => `vendor/smol-toml/${f}`), '.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
   'dispatch.sh', 'execution-events.mts', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
   'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'].sort();
@@ -65,8 +65,10 @@ test('clean personal init creates exactly the allowlist, no client bootstrap, sa
   assert.equal(mode(s('dispatch.sh')) & 0o111, 0o111);
   assert.equal(mode(s('factory-dispatch.sh')) & 0o111, 0o111);
   const main = readFileSync(s('main.mts'), 'utf8');
-  assert.match(main, /image: "sandcastle-site"/);
-  assert.match(main, /sandboxSetup: \[\] as/);
+  assert.match(main, /const CONFIG = effectiveConfig.config/);
+  const settings = loadTomlConfig(join(root, '.sandcastle'));
+  assert.equal(settings.config.image, 'sandcastle-site');
+  assert.deepEqual(settings.config.sandboxSetup, []);
   for (const f of EXPECTED.filter(f => f.endsWith('.mts') || f.endsWith('.md') || f.endsWith('.example'))) {
     assert.doesNotMatch(readFileSync(s(f), 'utf8'), /islandhealth|composer install|start-web\.sh \/home|\/opt\/sandcastle\/bootstrap-site/, f);
   }
@@ -78,25 +80,29 @@ test('clean personal init creates exactly the allowlist, no client bootstrap, sa
   assert.equal(existsSync(join(root, '.sandcastle/sandbox')), false, 'no Drupal sandbox helpers copied');
 });
 
-test('generated configs import with the right tracker, agent and merge policy; personal inherits the subscription models', async t => {
+test('generated runtimes derive model tiers and preserve tracker and merge policy', async t => {
   const { p, repo } = fixture(t);
   const a = repo('a'); const b = repo('b');
   await quiet(() => init(p, a, personal));
   await quiet(() => init(p, b, client));
-  const pc = await import(pathToFileURL(join(a, '.sandcastle/config.mts')).href);
+  const pc = await import(pathToFileURL(join(a, '.sandcastle/runtime-config.mts')).href);
   assert.equal(pc.TRACKER.kind, 'github');
   assert.equal(pc.TRACKER.project, 'me/site');
   assert.equal(pc.TRACKER.milestone, undefined);
   assert.equal(pc.AGENT.provider, 'pi');
-  assert.equal(pc.AGENT.modelAliases['Sonnet 5.5'], 'pi-claude-subscription/claude-sonnet-5-5');
-  assert.equal(pc.AGENT.modelAliases['Opus 5.5'], 'pi-claude-subscription/claude-opus-5-5');
+  assert.equal(pc.AGENT.family, 'openai');
+  assert.equal(pc.AGENT.thinking, 'high');
+  assert.deepEqual(pc.AGENT.modelAliases, { small: 'openai/gpt-6-luna', mid: 'openai/gpt-6.1-terra', large: 'openai/gpt-6.1-sol' });
   assert.ok(!pc.allLabels().some((l: string) => l.startsWith('model:')));
-  assert.equal(pc.AGENT.model, 'pi-claude-subscription/claude-opus-5-5');
-  assert.equal(pc.GRAPH.model, 'pi-claude-subscription/claude-sonnet-5-5');
+  assert.equal(pc.AGENT.model, 'openai/gpt-6.1-sol');
+  assert.equal(pc.GRAPH.model, 'openai/gpt-6.1-terra');
   assert.equal(pc.MERGE.auto, true);
-  const cc = await import(pathToFileURL(join(b, '.sandcastle/config.mts')).href);
+  const cc = await import(pathToFileURL(join(b, '.sandcastle/runtime-config.mts')).href);
   assert.deepEqual([cc.TRACKER.kind, cc.TRACKER.gitlabHost, cc.TRACKER.project, cc.TRACKER.projectId, cc.TRACKER.milestone], ['gitlab', 'git.example.com', 'group/sub/site', 42, undefined]);
-  assert.equal(cc.AGENT.provider, 'claude');
+  assert.equal(cc.AGENT.provider, 'pi');
+  assert.equal(cc.AGENT.family, 'openai');
+  assert.deepEqual(cc.AGENT, pc.AGENT);
+  assert.equal(cc.GRAPH.model, pc.GRAPH.model);
   assert.equal(cc.MERGE.auto, false);
   assert.match(readFileSync(join(b, '.sandcastle/.env.example'), 'utf8'), /CLAUDE_CODE_OAUTH_TOKEN=\n/);
 });

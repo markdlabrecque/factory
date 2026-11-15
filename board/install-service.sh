@@ -21,7 +21,7 @@ NODE="$(command -v node)" || { echo "node not found on PATH" >&2; exit 1; }
 mkdir -p "$APP" "$(dirname "$UNIT")" "$HOME/.local/state/sandcastle"
 cp "$HERE/execution-events.mts" "$HERE/delivery.mts" "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/journal.mts" "$HERE/tickets.mts" "$HERE/refresh-worker.mts" \
   "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
-cp "$HERE/../orchestrator/project-config.mts" "$APP/"
+cp "$HERE/../orchestrator/project-config.mts" "$HERE/../orchestrator/model-policy.mts" "$APP/"
 mkdir -p "$APP/vendor"
 cp -R "$HERE/../orchestrator/vendor/smol-toml" "$APP/vendor/"
 sed "s#__NODE__#$NODE#" "$HERE/sandcastle-board.service" > "$UNIT"

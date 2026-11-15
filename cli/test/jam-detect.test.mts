@@ -7,6 +7,7 @@
 // when the project's copy has the recovery workflow and new work is still allowed; a running attempt or a normal
 // admission between passes keeps the jam from confirming; a person's label change renews a spent budget. Real recovery
 // state, admission record and run records in a disposable folder; the launcher is a recording stub. No tracker or Docker.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -57,6 +58,7 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   const root = join(home, 'site');
   const sc = join(root, '.sandcastle');
   mkdirSync(sc, { recursive: true });
+  writeFileSync(join(sc, 'factory.toml'), factoryToml(TRACKER));
   if (o.copy !== false) {
     // #137: reviewed workflow includes nested vendored parser assets.
     for (const f of WORKFLOW) { mkdirSync(join(sc, f, '..'), { recursive: true }); writeFileSync(join(sc, f), ''); }

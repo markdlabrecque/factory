@@ -14,6 +14,7 @@ import { exportEvents } from '../../board/execution-events.mts';
 // two attempts; the recovery claim in the admission record outlives the worker until settled (#75); a pre-upgrade run is
 // adopted into an ownership receipt; a remote-only branch is fetched exactly, and ambiguous or mismatched refs refused. Disposable Git repo, run-state folder and recovery record; a sleeping process stands in for the repair
 // process and a fake docker (exact-name inspect and rm -f only; anything else throws). No tracker, agent or real Docker.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,7 +65,7 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   const evidence = join(root, '.sandcastle/evidence/7');
   mkdirSync(evidence, { recursive: true });
   // The tracker identity the project's ownership receipts are keyed by.
-  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  kind: "github",\n  host: "github.com",\n  project: "proj",\n};\n');
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('proj'));
   writeFileSync(join(evidence, 'before-1.png'), 'old evidence');
   if (o.copy !== false) {
     writeFileSync(join(root, '.sandcastle/main.mts'), 'const CONFIG = { image: "fixture-image" }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
@@ -391,12 +392,13 @@ test('paused/off/cancelled recovery probes nothing; a pause during readiness sti
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0);
 });
 
-test('unknown dynamic legacy image is held without executing configuration or charging', async t => {
+test('missing TOML is held without executing legacy configuration or charging', async t => {
   const f = fixture(t); let probes = 0;
+  rmSync(join(f.root, '.sandcastle/factory.toml'));
   writeFileSync(join(f.root, '.sandcastle/main.mts'), 'const CONFIG = { image: getSecretImage() }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });');
   recordReview(f.p, f.root);
   const r = await launchRecovery(f.p, { ...f.common, ticket: 7, capabilities: async () => { probes++; return f.common.capabilities(); } });
-  assert.equal(r.ok, false); if (!r.ok) { assert.equal(r.scope, 'environment'); assert.match(r.reason, /unknown/); }
+  assert.equal(r.ok, false); if (!r.ok) { assert.equal(r.scope, 'project'); assert.match(r.reason, /factory.toml/); }
   assert.equal(probes, 0); assert.equal(readRecovery(f.p, f.root).attempts.length, 0);
 });
 
@@ -447,7 +449,7 @@ for (const problem of ['malformed-run', 'unreadable-run', 'malformed-receipt', '
       const path = receiptFile(f.dir, projectId(f.root, { kind: 'github', host: 'github.com', project: 'proj' }), '7');
       mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, '{');
     }
-    if (problem === 'identity') writeFileSync(join(f.root, '.sandcastle/config.mts'), '');
+    if (problem === 'identity') writeFileSync(join(f.root, '.sandcastle/factory.toml'), 'version = 2\n');
     if (problem === 'workflow') writeFileSync(join(f.root, '.sandcastle/recovery.mts'), 'changed');
     if (problem === 'git-error') writeFileSync(join(f.root, '.git/config'), 'not a valid Git config\n');
     if (problem === 'capacity') claimRun({ dir: f.dir, project: 'elsewhere', iid: '8', pid: process.pid, cap: 99 });

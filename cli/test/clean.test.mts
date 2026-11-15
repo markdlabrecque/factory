@@ -2,6 +2,7 @@
 // worktree, when every commit is in the base or on origin and the worktree is clean; unpushed work, a dirty worktree,
 // a checkout Factory does not own and unmerged runs are kept; remote branches stay; --dry-run deletes nothing.
 // Disposable HOME, Git repos with a bare origin, and run records; no tracker, Docker or service manager.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,7 +34,7 @@ function fixture(t: TestContext) {
   git('commit', '-q', '-m', 'init');
   git('remote', 'add', 'origin', origin);
   git('push', '-q', 'origin', 'main');
-  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  project: "me/site",\n};\n');
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   const record = (iid: number, extra: Record<string, unknown>) => {

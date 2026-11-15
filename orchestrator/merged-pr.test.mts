@@ -1,5 +1,6 @@
 // #86: the tracker adapters' mergedPr lookup, against recording gh/glab stubs on PATH (no tracker is contacted).
 // The run's branch wins; otherwise only a title starting with `#N:` counts (not `#860:` or a mention), newest first.
+import { copyTestRuntime, factoryToml } from '../cli/test/config-fixture.mts';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -20,8 +21,9 @@ esac
 `, { mode: 0o755 });
 }
 process.env.PATH = `${dir}:${process.env.PATH}`;
-const github = await import("./tracker.github.mts");
-const gitlab = await import("./tracker.gitlab.mts");
+const moduleUrl = copyTestRuntime(join(dir, 'runtime'), factoryToml('owner/repo', { kind: 'gitlab', projectId: 42 }));
+const github = await import(moduleUrl('tracker.github.mts'));
+const gitlab = await import(moduleUrl('tracker.gitlab.mts'));
 const serve = (tool: string, branch: unknown[], title: unknown[]) => {
   writeFileSync(join(dir, `${tool}.branch.json`), JSON.stringify(branch));
   writeFileSync(join(dir, `${tool}.title.json`), JSON.stringify(title));

@@ -32,7 +32,7 @@ import { writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 const root = process.cwd(), scenario = process.env.SCENARIO, fake = process.env.FAKE_STATE;
 const git = (cwd, args) => execFileSync('git', args, {cwd, encoding:'utf8'}).trim();
-export const pi = model => ({model}); export const claudeCode = pi;
+export const pi = (model, options) => ({model, thinking: options.thinking});
 export async function createSandbox(o) {
   const worktree = join(root, '.sandcastle/worktrees', o.branch); mkdirSync(join(root, '.sandcastle/worktrees'), {recursive:true});
   git(root, ['worktree', 'add', '-b', o.branch, worktree, o.baseBranch]);
@@ -44,6 +44,7 @@ export async function createSandbox(o) {
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
     run: async o => {
+      writeFileSync(join(fake, o.name + '-agent.json'), JSON.stringify(o.agent));
       const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.sandcastle/evidence'));
       if (o.name === 'implementer') {
         writeFileSync(join(fake,'implementer-started'),'yes');
@@ -94,6 +95,7 @@ if (a[0] !== 'container' || a[1] !== 'inspect') process.exit(90);
 if (!fs.existsSync(path.join(process.env.FAKE_STATE,'live'))) { console.error('No such container'); process.exit(1); }
 console.log('sha256:'+'a'.repeat(64));
 `, { mode: 0o755 });
+    writeFileSync(join(bin, 'pi'), '#!/bin/sh\n[ "$1" = auth ] || exit 90\nprintf "fixture-token\\n"\n', { mode: 0o755 });
     const result = spawnSync(process.execPath, ['.sandcastle/main.mts', '--issue', '7', '--base', 'main'], {
       cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state,
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
@@ -106,6 +108,13 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(run.verification.tip, tip);
       assert.equal(run.implementationBaseSha, baseline);
       assert.ok(run.executionId);
+      assert.equal(run.implementationModel, 'openai/gpt-6.1-terra');
+      assert.equal(run.modelChoice.family, 'openai');
+      assert.equal(run.modelChoice.tier, 'mid');
+      assert.equal(run.modelChoice.policyIdentity, 'factory-model-policy-v1');
+      assert.equal(run.modelChoice.resolvedModel, run.implementationModel);
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: 'openai/gpt-6.1-terra', thinking: 'high' });
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: 'openai/gpt-6.1-sol', thinking: 'high' });
       const proof = JSON.parse(readFileSync(join(proofRoot(state, 'owner/repo', '7', run.verification.id), 'proof.json'), 'utf8'));
       assert.equal(proof.provenance.imageId, `sha256:${'a'.repeat(64)}`);
       assert.equal(proof.provenance.settings.image, 'img', 'configured settings stay comparable for existing-delivery continuation');

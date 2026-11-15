@@ -2,7 +2,7 @@
 // Read validated TOML tracker identity for run commands without executing any project modules.
 // Shared project and run lookup for the slice 3 commands (dispatch, run, retry, status, logs). Picks the
 // registered project a command is for (`--project <name|path>`, else the registered checkout the caller is
-// standing in), reads its tracker name from `.sandcastle/config.mts` (the name its run records carry), and
+// standing in), reads its tracker name from v2 `.sandcastle/factory.toml` (the name its run records carry), and
 // finds its run records in the shared run-state folder and its run and repair (recover-<n>.log, #62) log files. Read-only: it never writes a
 // record, the registry or a project file. A run whose process is gone without finishing is reported as
 // stopped (as the board does) but its record is left for the board and dispatcher to update. A launch the
@@ -67,13 +67,7 @@ export function resolveProject(p: Paths, options: { project?: string; cwd?: stri
   if (!existsSync(found.root)) throw new Error(`Checkout missing for project ${found.name}: ${found.root}`);
   const scaffold = join(found.root, scaffoldName);
   const toml = tomlIdentity(scaffold);
-  if (toml) return { ...found, scaffold, tracker: toml.project };
-  const config = join(scaffold, 'config.mts');
-  if (!existsSync(config)) throw new Error(`No ${scaffoldName}/config.mts in ${found.root}. Run: factory init ${found.root}`);
-  // Same reading as dispatch.sh: the first `project: "..."` line is TRACKER.project.
-  const tracker = readFileSync(config, 'utf8').match(/^\s*project:\s*"([^"]+)"/m)?.[1];
-  if (!tracker) throw new Error(`Couldn't read TRACKER.project from ${config}.`);
-  return { ...found, scaffold, tracker };
+  return { ...found, scaffold, tracker: toml.project };
 }
 
 /** The shared run-state folder: SANDCASTLE_STATE_DIR when set (as factory-dispatch.sh honours it), else Factory's state folder. */

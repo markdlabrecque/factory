@@ -36,7 +36,7 @@ export type PlannedFile = { path: string; content: string | Buffer; mode: number
 // Preparation and its import-safe protocol ship together; old copies must upgrade and be reviewed before recovery.
 export const FROM_ORCHESTRATOR = ['recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'delivery-followup.mts', 'verification.mts', // #150: structured proof is a required runtime dependency.
-  'capabilities.mts', 'ci.mts', 'models.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
+  'capabilities.mts', 'ci.mts', 'models.mts', 'model-policy.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
   'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];
 // journal.mts is a mandatory board projection import, including in project dispatcher copies.
@@ -94,11 +94,7 @@ export function buildAssets(s: Settings, stateDir: string, root = appRoot): Plan
   }).join('\n');
   add('factory.toml', toml);
 
-  let main = read('orchestrator/main.mts').toString('utf8');
-  main = fillTags(main, [{ tag: 'image', line: /^(\s*image:\s*)"[^"]*"/, value: m => `${m[1]}${JSON.stringify(s.image)}` }]);
-  main = replaceBlock(main, 'sandbox-setup',
-    '  sandboxSetup: [] as { command: string; sudo?: boolean; timeoutMs?: number }[], // add environment setup commands here (see the sandcastle-setup skill)');
-  add('main.mts', main, modeOf('orchestrator/main.mts'));
+  copy('main.mts', 'orchestrator/main.mts');
 
   for (const name of FROM_ORCHESTRATOR) copy(name, `orchestrator/${name}`);
   for (const name of FROM_BOARD) copy(name, `board/${name}`);

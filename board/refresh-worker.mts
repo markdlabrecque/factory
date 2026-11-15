@@ -1,4 +1,4 @@
-// #137: TOML metadata is authoritative; standalone installs ship the same parser beside this worker.
+// V2 TOML metadata identifies refresh targets; unrelated invalid registry entries cannot block discovery.
 // Board-triggered refresh (#78): find the project's copy without loading tracker adapters into the server, then run
 // its --refresh-only command in a bounded process group. No scheduler, timer service, admission or ticket execution.
 // One worker per card in this server; assessment attempt tokens fence overlaps with other servers/scheduled passes.
@@ -41,14 +41,18 @@ async function perform(key: string, timeout: number): Promise<void> {
     } catch { /* Standalone board/copy need not have a Factory registry. */ }
     const helper = existsSync(new URL('./project-config.mts', import.meta.url)) ? './project-config.mts' : '../orchestrator/project-config.mts';
     const { tomlIdentity } = await import(helper);
+    const configErrors: Error[] = [];
     const matches = [...roots].filter((root) => {
-      const identity = tomlIdentity(resolve(root, '.sandcastle'));
-      if (identity) return identity.project === run.project && existsSync(resolve(root, '.sandcastle/dispatch.mts'));
+      // Discovery examines several roots. Validate the selected copy again in its dispatcher.
       try {
-        const config = readFileSync(resolve(root, ".sandcastle/config.mts"), "utf8");
-        return config.match(/^\s*project:\s*"([^"]+)"/m)?.[1] === run.project && existsSync(resolve(root, ".sandcastle/dispatch.mts"));
-      } catch { return false; }
+        const identity = tomlIdentity(resolve(root, '.sandcastle'));
+        return identity.project === run.project && existsSync(resolve(root, '.sandcastle/dispatch.mts'));
+      } catch (error) {
+        configErrors.push(error as Error);
+        return false;
+      }
     });
+    if (!matches.length && configErrors.length) throw configErrors[0];
     if (matches.length !== 1) throw new Error(matches.length ? "Several project roots match this card; cannot safely refresh" : "Project root not found. Register its checkout with factory project add, or run a dispatch pass from it.");
     const root = matches[0];
     await new Promise<void>((accept, reject) => {

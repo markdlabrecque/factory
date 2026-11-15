@@ -5,6 +5,7 @@
 // recorded as delivered, pending (the CLI never ran) or uncertain (it ran and failed); sync delivers what is left, and
 // searches for an uncertain event's marker before posting so nothing is posted twice. Disposable HOME, project and state
 // folder; the tracker CLI is an injected fake, or a test-owned `gh` stub first on PATH for the end-to-end run. No tracker.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,8 +21,8 @@ import { buildBoardData, claimRun, readRuns } from '../../board/board.mts';
 import { keyFor, ownerOf, withAdmission } from '../../board/admission.mts';
 import type { Exec } from '../src/commands/ticket.mts';
 
-const GITHUB = 'export const TRACKER = {\n  kind: "github" as "gitlab" | "github",\n  host: "github.com",\n  project: "me/site",\n};\n';
-const GITLAB = 'export const TRACKER = {\n  kind: "gitlab" as "gitlab" | "github",\n  gitlabHost: "git.example.com",\n  project: "group/site",\n  projectId: 7,\n};\n';
+const GITHUB = factoryToml('me/site');
+const GITLAB = factoryToml('group/site', { kind: 'gitlab', host: 'git.example.com', projectId: 7 });
 
 function fixture(t: TestContext, config = GITHUB) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'factory-ticket-')));
@@ -32,7 +33,7 @@ function fixture(t: TestContext, config = GITHUB) {
   const root = join(home, 'site');
   mkdirSync(join(root, '.sandcastle'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  writeFileSync(join(root, '.sandcastle/config.mts'), config);
+  writeFileSync(join(root, '.sandcastle/factory.toml'), config);
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   t.mock.method(console, 'log', () => {});

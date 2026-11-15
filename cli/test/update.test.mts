@@ -1,4 +1,4 @@
-// Legacy upgrades ship execution-events from board/, preserve customization and require a new workflow review.
+// Updates ship model policy and execution events, preserve customization and require a new workflow review.
 // #153: explicit legacy upgrades ship both continuation helpers without replacing custom prompts.
 // #149: legacy upgrades install dependency evaluation without overwriting project customization.
 // #150: executable tracker changes invalidate recovery review; project-owned prompts remain protected.
@@ -60,8 +60,8 @@ test('classifies missing, outdated, edited, project-owned and current files from
   assert.equal(c['board.template.html'], 'outdated');
   assert.equal(c['factory-dispatch.sh'], 'outdated');
   assert.equal(c['ci.mts'], 'modified');
-  for (const f of ['prompt.md', 'dispatch.sh', 'config.mts', 'main.mts']) assert.equal(c[f], 'project', f);
-  for (const f of ['dispatch.mts', 'board.mts', 'prompt.verify.md', '.gitignore', '.env.example']) assert.equal(c[f], 'current', f);
+  for (const f of ['prompt.md', 'dispatch.sh', 'config.mts', 'factory.toml', 'main.mts']) assert.equal(c[f], 'project', f);
+  for (const f of ['dispatch.mts', 'board.mts', 'model-policy.mts', 'prompt.verify.md', '.gitignore', '.env.example']) assert.equal(c[f], 'current', f);
   assert.equal(c['.env'], undefined);
 });
 

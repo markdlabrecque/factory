@@ -15,7 +15,7 @@ import { selectCandidates, unitEligibility } from "./selection.mts";
 import { effectiveConfig, AGENT, GRAPH, LABELS, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { contentHash, expandUnits, unitHash } from "./graph.mts";
 import { readManifests } from "./manifests.mts";
-import { ticketModel } from "./models.mts";
+import { resolveTicketModel } from "./models.mts";
 import * as tracker from "./tracker.mts";
 import type { Select, Ticket } from "./tracker.mts";
 
@@ -51,7 +51,7 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
         const p = tracker.ticket(parent);
         return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
       },
-      notes: tracker.notes, hash: unitHash, model: (description) => ticketModel(description, AGENT.modelAliases),
+      notes: tracker.notes, hash: unitHash, model: (description) => resolveTicketModel(description, AGENT.family),
       selection: (t) => {
         const result = unitEligibility(t, selected.has(t.iid), LABELS.exclude);
         return { selected: result.status === 'selected', selectionReason: result.reasons[0]?.message };

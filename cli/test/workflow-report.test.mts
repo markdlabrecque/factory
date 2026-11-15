@@ -166,7 +166,7 @@ test('existing schedule and recovery observations remain separate, incomplete an
   assert.ok(capabilityObservations(f.p, f.root).recoveryWorkflow.evidence.includes('main.mts --recover --attempt-record'));
 });
 
-test('safe TOML and conservative legacy image parsing never execute project modules or fallback on invalid TOML', async t => {
+test('invalid, v1 and missing TOML never execute project modules or use legacy image fallback', async t => {
   const f = fixture(t); let requests = 0;
   await socketServer(t, f.socket, (_req, res) => { requests++; res.end('{}'); });
   assert.equal(configuredImage(f.sc).reference, 'test/image:local');
@@ -184,11 +184,15 @@ test('safe TOML and conservative legacy image parsing never execute project modu
   assert.equal(report.image.inspection.state, 'unknown');
   assert.equal(requests, 0);
   assert.deepEqual(snapshot(f.base), before);
-  writeFileSync(join(f.sc, 'factory.toml'), toml); rmSync(join(f.sc, 'factory.toml'));
-  assert.equal(configuredImage(f.sc).reference, 'test/image:local');
+  writeFileSync(join(f.sc, 'factory.toml'), toml.replace('version = 2', 'version = 1'));
+  assert.equal(configuredImage(f.sc).reference, null);
+  assert.equal(configuredImage(f.sc).state, 'invalid-config');
+  rmSync(join(f.sc, 'factory.toml'));
+  assert.equal(configuredImage(f.sc).reference, null);
+  assert.equal(configuredImage(f.sc).state, 'invalid-config');
   writeFileSync(join(f.sc, 'main.mts'), sideEffect + 'const CONFIG = {image: process.env.IMAGE};');
   report = await f.collect();
-  assert.equal(report.image.configuration.state, 'unknown');
+  assert.equal(report.image.configuration.state, 'invalid-config');
   assert.equal(requests, 0);
   assert.equal(readdirSync(f.base).includes('EXECUTED'), false);
   for (const text of [

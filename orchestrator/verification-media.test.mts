@@ -8,10 +8,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { buildAssets } from '../cli/src/scaffold.mts';
+import { copyTestRuntime, factoryToml } from '../cli/test/config-fixture.mts';
 
-const source = dirname(fileURLToPath(import.meta.url));
 for (const generated of [false, true]) for (const kind of ['github', 'gitlab']) {
   for (const origin of ['implemented', 'repaired']) for (const verdict of ['PASS', 'FAIL', 'INCONCLUSIVE']) {
     test(`${generated ? 'generated' : 'canonical'} ${kind} ${origin} ${verdict}: one verification comment even with --no-push`, t => {
@@ -31,7 +31,7 @@ for (const generated of [false, true]) for (const kind of ['github', 'gitlab']) 
       assert.equal(post.body.includes('Repaired by Factory recovery attempt 2'), origin === 'repaired');
       assert.doesNotMatch(post.body, /undefined|sandcastle-evidence/);
       if (kind === 'github') {
-        assert.deepEqual(post.args.slice(0, 7), ['issue', 'comment', '7', '-R', generated ? 'test/media' : 'islandhealth/public-site', '--body-file', '-']);
+        assert.deepEqual(post.args.slice(0, 7), ['issue', 'comment', '7', '-R', 'test/media', '--body-file', '-']);
         const attachments = post.args.slice(7).filter((_, i) => i % 2 === 1);
         assert.deepEqual(attachments.map(p => basename(p)), f.media.map(p => basename(p)));
         assert.ok(attachments.every(p => p.includes('/proof-state/verification/')));
@@ -105,7 +105,8 @@ if (${JSON.stringify(cmd)} === 'glab') {
 } else if (${JSON.stringify(cmd)} !== 'gh' || args[0] !== 'issue' || args[1] !== 'comment') process.exit(92);
 `, { mode: 0o755 });
   }
-  let modules = source;
+  let modules = join(root, 'canonical-runtime');
+  if (!generated) copyTestRuntime(modules, factoryToml('test/media', { kind: kind as 'github' | 'gitlab', host: kind === 'github' ? 'github.com' : 'git.example.test', projectId: kind === 'gitlab' ? 42 : undefined }));
   if (generated) {
     for (const file of buildAssets({ profile: kind === 'github' ? 'personal' : 'client', repo: 'test/media', image: 'unused', host: 'git.example.test', projectId: 42 }, join(root, 'state'))) {
       const p = join(root, file.path); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, file.content);

@@ -91,16 +91,9 @@ const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.include
 
 // #137: validate TOML identity without executing legacy project code.
 import { loadTomlConfig, tomlIdentity } from '../../orchestrator/project-config.mts';
-/** The project's tracker identity from TOML, else safe legacy text. */
-export function trackerIdentity(root: string): TrackerIdentity | string {
-  const toml = tomlIdentity(join(root, '.sandcastle'));
-  if (toml) return toml;
-  let text: string;
-  try { text = readFileSync(join(root, '.sandcastle/config.mts'), 'utf8'); } catch { return `no readable .sandcastle/config.mts in ${root}`; }
-  const kind = text.match(/^\s*kind:\s*"([^"]+)"/m)?.[1];
-  const host = text.match(/^\s*(?:gitlabHost|host):\s*"([^"]+)"/m)?.[1];
-  const project = text.match(/^\s*project:\s*"([^"]+)"/m)?.[1];
-  return kind && host && project ? { kind, host, project } : `couldn't read TRACKER kind, host and project from ${root}/.sandcastle/config.mts`;
+/** Validate the complete v2 configuration before using its tracker identity. */
+export function trackerIdentity(root: string): TrackerIdentity {
+  return tomlIdentity(join(root, '.sandcastle'));
 }
 const recordFile = (dir: string, tracker: string, ticket: number) => join(dir, `${keyFor(String(ticket), tracker)}.json`);
 /** Merge `patch` into the ticket's run record (temp file + rename). */

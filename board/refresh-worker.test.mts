@@ -1,6 +1,7 @@
 // Refresh worker lifecycle (#78): real synthetic child/grandchild groups with inherited or redirected stdio.
 // Check success, failed leaders and timeout cleanup after the leader is gone; unrelated detached work survives.
 // Only temporary local commands run. No trackers, agents, Docker, schedulers or real services.
+import { factoryToml } from '../cli/test/config-fixture.mts';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -32,7 +33,7 @@ for (const stdio of ["ignore", "inherit"] as const) {
         Object.assign(process.env, saved);
         rmSync(root, { recursive: true, force: true });
       });
-      writeFileSync(resolve(root, ".sandcastle/config.mts"), 'project: "p"\n');
+      writeFileSync(resolve(root, ".sandcastle/factory.toml"), factoryToml('p'));
       const record = JSON.stringify({ iid: "7", project: "p", stage: "stopped", pid: process.pid, verdict: "FAIL", branch: "7-topic" });
       writeFileSync(resolve(dir, `${key}.json`), record);
       requestRefresh(dir, key, "7", "p");

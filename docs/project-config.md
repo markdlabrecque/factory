@@ -1,4 +1,4 @@
-<!-- Version 2 data contract and intermediate runtime integration status. -->
+<!-- Version 2 configuration authority, runtime model policy and manual migration. -->
 # Project settings: `.sandcastle/factory.toml`
 
 New Factory projects use versioned TOML, not edits to Factory implementation files.
@@ -12,10 +12,9 @@ Both profiles default to the OpenAI family and have empty sandbox setup. They re
 The v2 data loader requires `factory.toml` and never imports project code. Missing
 or version 1 configuration fails with manual migration guidance. There is no
 converter or per-field legacy fallback. Syntax errors identify the file and location
-without echoing source text. This is an intermediate contract: existing runtime,
-dispatch, analysis, recovery, refresh, scaffold and selection callers still expect
-v1 agent/model fields or legacy behavior. They are not wired to v2 yet. Do not use
-these profiles for execution until the downstream runtime work is integrated.
+without echoing source text. Runtime, dispatch, analysis, recovery, refresh,
+scaffolding and selection use v2. The runtime derives all agent settings from the
+selected family's Factory policy. It never imports `config.mts` as a fallback.
 
 Unknown keys (including nested keys), duplicate keys/tables, unsupported versions,
 wrong types/enums/ranges, empty optional strings and unsupported tracker options
@@ -91,7 +90,14 @@ respectively to OpenAI gpt-6-luna, gpt-6.1-terra and gpt-6.1-sol, or Anthropic
 claude-haiku-5-5, claude-sonnet-5-5 and claude-opus-5-5. Analysis uses Mid;
 verification and recovery use Large. Tickets may declare `Model tier: small`,
 `mid` or `large`; absent declarations default to Mid. Old Model and Pi model
-fields are rejected by the new tier parser. No automatic fallback is provided.
+fields are rejected by dispatch, refresh and direct runs. No automatic fallback is
+provided. Host analysis explicitly passes `--thinking high`; sandbox implementation,
+verification and recovery also use Pi with high thinking. The current description's
+resolution includes family, tier, source, model, description revision and policy
+identity. Normal startup freezes this as `modelChoice` alongside `implementationModel`
+in the run record. Later refreshes change current assessments, not that attempt.
+Delivery proofs bind the model-policy and resolver files, so policy drift requires
+fresh verification.
 
 Path shape is checked while parsing. Consumers must call the exported checkout
 path resolver before use to reject missing paths, escaping symlinks and wrong file
@@ -142,8 +148,20 @@ the sandbox's shell interprets them only at normal startup.
 ## Existing projects
 
 Version 1 and missing configuration are unsupported by the v2 loader. The owner
-must migrate existing projects manually after the shared runtime work is complete.
-No migration or deployed-project change is performed by this schema change.
+must migrate existing projects manually before running the upgraded workflow.
+No deployed project is changed automatically. Stop scheduling, review `factory update
+--dry-run`, and upgrade customized main/dispatch/shell code together with runtime,
+model-policy, parser and selection helpers. Adding TOML to an old workflow alone is
+not sufficient. Init does not overwrite existing settings or create TOML in a legacy
+scaffold, so transcribe the old settings into a reviewed v2 profile yourself.
+
+Replace custom agent providers, model IDs, aliases and thinking settings with
+`[agent] family = "openai"` or `"anthropic"`. Remove `graph.model`. Replace ticket
+`Model:` / `Pi model:` fields with `Model tier: small|mid|large`, or omit the field
+for Mid. Review the schema table above for selection, sandbox and CI settings;
+move old executable `SELECT` and `CONFIG` values into the corresponding TOML tables.
+Prompts and script bodies stay separate. Reconfirm recovery review after checking
+the copied workflow. Scheduling never resumes automatically.
 
 ## Parser maintenance
 

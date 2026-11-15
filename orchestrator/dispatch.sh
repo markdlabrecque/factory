@@ -7,10 +7,9 @@
 # Extra arguments go to dispatch.mts. With --issue N it runs that one ticket now instead, in the
 # foreground (main.mts --issue N, extra arguments to main.mts), after the same checks; the output also
 # goes to .sandcastle/logs/run-N.log, where a dispatched run's log goes. `factory run N` uses this.
-# Checks the tools, logins and .sandcastle/.env first (which ones
-# follows TRACKER.kind and AGENT.provider in config.mts: glab or gh, claude or pi; with the personal
-# config's pi-claude-subscription provider, claude's login, the provider extension and the models, see
-# preflight.mts, and the container's CLAUDE_CODE_OAUTH_TOKEN), then the image: from a
+# Checks tools, logins and .sandcastle/.env from validated v2 tracker and agent-family data.
+# Both families run Pi. Anthropic also checks Claude's login, the subscription extension and
+# policy models (preflight.mts), plus the container's CLAUDE_CODE_OAUTH_TOKEN. Then checks the image: from a
 # terminal a missing or mismatched image is built; without one (the timer) the pass stops and says
 # how to build it, so a background pass never starts a long build.
 set -euo pipefail
@@ -40,33 +39,21 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "not inside a git re
 cd "$root"
 [ -f .sandcastle/dispatch.mts ] || fail "no .sandcastle/dispatch.mts in $root."
 
-toml=0
-if [ -e .sandcastle/factory.toml ] || [ -L .sandcastle/factory.toml ]; then
-  node .sandcastle/config-read.mts "$root/.sandcastle" validate || exit 1
-  toml=1
-fi
+# Validate before tools, credentials or project npm installation. No executable-config fallback.
+node .sandcastle/config-read.mts "$root/.sandcastle" validate || exit 1
+toml=1
 
 base="$(git branch --show-current)"
 [ -n "$base" ] || fail "detached HEAD. Check out the integration branch first."
 git ls-remote --exit-code --heads origin "$base" >/dev/null || fail "branch $base isn't on origin. Push it, or check out the integration branch."
 
-# Read from the project's own config so the checks match what the runs use. A config without these
-# fields is the GitLab + Claude Code one.
-cfg_value() { sed -nE "s/^[[:space:]]*$1:[[:space:]]*\"([^\"]+)\".*/\\1/p" .sandcastle/config.mts | head -n 1; }
-if [ "$toml" = 1 ]; then
-  toml_value() { node .sandcastle/config-read.mts "$root/.sandcastle" "$1"; }
-  kind="$(toml_value kind)"
-  agent="$(toml_value agent)"
-  image="$(toml_value image)"
-  host="$(toml_value host)"
-  uses_subscription="$(toml_value subscription)"
-else
-  kind="$(cfg_value kind)"; kind="${kind:-gitlab}"
-  agent="$(cfg_value provider)"; agent="${agent:-claude}"
-  image="$(sed -nE 's/^[[:space:]]*image:[[:space:]]*"([^"]+)".*/\1/p' .sandcastle/main.mts | head -n 1)"
-  uses_subscription=false
-  if grep -q '"pi-claude-subscription/' .sandcastle/config.mts; then uses_subscription=true; fi
-fi
+# Read validated, allowlisted data only.
+toml_value() { node .sandcastle/config-read.mts "$root/.sandcastle" "$1"; }
+kind="$(toml_value kind)"
+agent="$(toml_value agent)"
+image="$(toml_value image)"
+host="$(toml_value host)"
+uses_subscription="$(toml_value subscription)"
 [ -n "$image" ] || fail "couldn't read CONFIG.image from .sandcastle/main.mts."
 case "$kind" in gitlab) tracker_cli=glab ;; github) tracker_cli=gh ;; *) fail "unknown TRACKER.kind \"$kind\" in .sandcastle/config.mts." ;; esac
 case "$agent" in claude | pi) ;; *) fail "unknown AGENT.provider \"$agent\" in .sandcastle/config.mts." ;; esac

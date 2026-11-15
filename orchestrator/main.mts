@@ -2,13 +2,12 @@
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 // #153: proofs also bind continuation, checkpoint and admission code; upgrades require fresh verification.
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
-// #137: authoritative TOML sandbox/CI settings; legacy CONFIG remains unchanged only when absent.
-// #126: resolve description models once at attempt start; refresh never changes that model.
+// V2 TOML owns sandbox/CI settings. Resolve the ticket tier once at attempt start; refresh cannot change it.
 // Provenance covers the copied local-observation helper along with its board/admission imports.
 // #149: unknown dependency reads hold implementer and recovery work without needs-human labels.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
 import { recordModelResolution } from "./assessment.mts";
-import { createSandbox, claudeCode, pi } from "@ai-hero/sandcastle";
+import { createSandbox, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -20,7 +19,7 @@ import { readAdmission } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { parentText } from "./analyze.mts";
 import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
-import { disallowedModels, piEnvFor, ticketModel } from "./models.mts";
+import { piEnvFor, resolveTicketModel } from "./models.mts";
 import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest, readManifest } from "./manifests.mts";
@@ -41,8 +40,8 @@ import * as tracker from "./tracker.mts";
 //    Both trackers support MERGE.auto with required named checks on the pushed SHA (ci.mts).
 // Never closes the ticket (the dispatcher closes a Task/sub-issue, or moves a ticket on, once its work
 // merges). Every tracker call runs on the host with your glab/gh login; the container has no tracker token.
-// The agent (Claude Code or Pi) comes from AGENT in config.mts. Description fields resolve the implementer's
-// model through AGENT.modelAliases (models.mts); the verifier always uses AGENT.model.
+// Factory policy fixes Pi and thinking. Description tiers select the implementer's model;
+// verification and recovery use the family's large model independently of the ticket tier.
 //
 // Recovery mode (slice four, #60/#74): `main.mts --issue <n> --base <b> --recover <seq> --attempt-record <file>` is
 // started only by Factory's recovery launcher (cli/src/recovery-run.mts) after it claimed the ticket and wrote the
@@ -62,23 +61,8 @@ import * as tracker from "./tracker.mts";
 // superseded. Before Sandcastle creates the branch and worktree it writes the ticket's ownership receipt
 // (ownership.mts) and fills in the branch's commit once they exist. The normal path keeps its branch-exists protection.
 
-// ---- Legacy CONFIG fallback: used ONLY when factory.toml is absent --------------------
-// TOML projects edit sandbox/ci tables, never this block. Legacy tracker/agent/labels live in config.mts. (Also adapt sandbox/bootstrap-site.sh, the
-// Environment section of prompt.md, and the fixture advice in prompt.verify.md. See ADAPTING.md.)
-const CONFIG = effectiveConfig ? effectiveConfig.config : {
-  image: "sandcastle-islandhealth", // factory:image - `factory init --image` replaces the value
-  ciWaitMinutes: 30, // give up waiting for CI after this long
-  // No CI seen in this time: GitLab opens the MR anyway; with MERGE.auto the PR is not merged.
-  noPipelineMinutes: 5,
-  // Runs in order inside the container once it is up; the working directory is the worktree.
-  // factory:sandbox-setup:start - `factory init` replaces everything up to the :end tag with an empty list
-  sandboxSetup: [
-    { command: "cd /home/agent/workspace && composer install --no-interaction --prefer-dist", timeoutMs: 20 * 60_000 },
-    { command: "start-web.sh /home/agent/workspace/web", sudo: true },
-    { command: "/opt/sandcastle/bootstrap-site.sh", timeoutMs: 10 * 60_000 },
-  ],
-  // factory:sandbox-setup:end
-};
+// Sandbox and CI settings are data, never executable project configuration.
+const CONFIG = effectiveConfig.config;
 const PROJECT = TRACKER.project;
 // What the container's Pi run needs depends on its model's provider (models.mts). pi-claude-subscription (the
 // personal config) needs nothing from here: the image's Claude Code CLI logs in with CLAUDE_CODE_OAUTH_TOKEN,
@@ -93,7 +77,7 @@ function openaiCredential(): string {
 }
 // Called as each run starts.
 const agent = (model: string) =>
-  AGENT.provider === "pi" ? pi(model, { thinking: AGENT.thinking, env: piEnvFor(model, openaiCredential) }) : claudeCode(model);
+  pi(model, { thinking: AGENT.thinking, env: piEnvFor(model, openaiCredential) });
 
 let currentIid: string | undefined;
 let finished = false;
@@ -149,8 +133,6 @@ if (recovering) {
   if (opts["no-push"]) fail("--recover always delivers normally; --no-push is not allowed with it.");
 }
 const base = opts.base;
-const badModels = disallowedModels(AGENT.modelAliases, [AGENT.model, GRAPH.model]);
-if (badModels) fail(badModels);
 await tracker.ensureLabels(allLabels());
 
 // ---- pick the ticket -------------------------------------------------------
@@ -173,7 +155,7 @@ setProject(PROJECT);
 let startTicket!: tracker.Ticket;
 const picked = recordModelResolution(stateDir(), keyFor(iid, PROJECT), { iid, project: PROJECT }, () => {
   startTicket = withParent(tracker.ticket(Number(iid)));
-  return ticketModel(startTicket.description, AGENT.modelAliases);
+  return resolveTicketModel(startTicket.description, AGENT.family);
 });
 const issue = startTicket;
 if ("error" in picked && !recovering) {
@@ -193,7 +175,7 @@ const provenance = async (sandbox: { exec(cmd: string): Promise<{ stdout: string
   const imageId = sh('docker', ['container', 'inspect', '--format', '{{.Image}}', name]);
   if (imageId !== IMAGE) throw Error('Sandbox image differs from admitted immutable image; fresh readiness required');
   return { imageId, nodeVersion: (await sandbox.exec('node --version')).stdout.trim(),
-    code: Object.fromEntries([...(effectiveConfig ? ['factory.toml'] : ['config.mts']), 'graph.mts', 'config-read.mts', 'delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'capabilities.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
+    code: Object.fromEntries(['factory.toml', 'model-policy.mts', 'models.mts', 'graph.mts', 'config-read.mts', 'delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'capabilities.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
     settings: { image: CONFIG.image, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: CONFIG.ciWaitMinutes, noPipelineMinutes: CONFIG.noPipelineMinutes } };
 };
 const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);
@@ -310,7 +292,8 @@ currentIid = iid;
 const executionId = claimToken ?? randomUUID();
 setStage(iid, {
   title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
-  implementationModel: implementerModel, implementationBaseSha: baseSha, verification: undefined,
+  implementationModel: implementerModel, modelChoice: 'error' in picked ? undefined : picked.choice,
+  implementationBaseSha: baseSha, verification: undefined,
   executionId,
   evidenceDir: resolve('.sandcastle/evidence', iid, executionId), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
   parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,

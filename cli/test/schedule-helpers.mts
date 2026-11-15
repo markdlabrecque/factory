@@ -2,6 +2,7 @@
 // a bare local `origin` and a pushed `main`, a project dispatcher that is an executable script the test supplies, and a
 // stateful `systemctl` or `launchctl` stub (stubs/) to put first on PATH. Nothing here touches a real service manager, tracker,
 // Docker or credential; every path is under the temporary HOME.
+import { factoryToml } from './config-fixture.mts';
 import type { TestContext } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -34,7 +35,7 @@ export function repo(p: ReturnType<typeof paths>, name: string, o: RepoOptions =
     git(root, 'push', '-q', 'origin', 'main');
   }
   writeFileSync(join(root, '.sandcastle/dispatch.sh'), o.script ?? '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(root, '.sandcastle/config.mts'), `export const TRACKER = {\n  project: "${name}/${name}",\n};\n`);
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`${name}/${name}`));
   const current = o.current !== false;
   writeFileSync(join(root, '.sandcastle/dispatch.mts'), current ? 'reserveRun(iid, pid);\n' : 'spawn();\n');
   writeFileSync(join(root, '.sandcastle/board.mts'), current ? 'export function reserveRun() {}\n' : '');

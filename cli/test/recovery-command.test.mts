@@ -8,6 +8,7 @@
 // `factory logs --recovery`. Disposable HOME, Git repo and run-state folder; recovery state is set up through
 // recovery-state.mts and the admission record; no tracker, Docker or service manager. Recovery review also gates
 // assessment.mts, board.mts's mandatory import, on presence and changes since review (#78).
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,7 +35,7 @@ function fixture(t: TestContext) {
   const root = join(home, 'site');
   mkdirSync(join(root, '.sandcastle/logs'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  project: "me/site",\n};\n');
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   const lines: string[] = [], errors: string[] = [];

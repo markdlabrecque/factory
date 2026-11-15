@@ -2,6 +2,7 @@
 // #135: GitLab readyList reads every page; GitHub rejects capped search results rather than publish false
 // deselection. Recording gh/glab stubs model Search's hard 1000-result cap and later-page failures.
 // All calls stay on fixture-owned PATH boundaries; no tracker is contacted.
+import { copyTestRuntime, factoryToml } from '../cli/test/config-fixture.mts';
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -30,8 +31,9 @@ for (const tool of ["gh", "glab"]) {
   writeFileSync(join(dir, tool), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${dir}/${tool}.log"\nexec "${process.execPath}" "${serve}" ${tool} "$@"\n`, { mode: 0o755 });
 }
 process.env.PATH = `${dir}:${process.env.PATH}`;
-const github = await import("./tracker.github.mts");
-const gitlab = await import("./tracker.gitlab.mts");
+const moduleUrl = copyTestRuntime(join(dir, 'runtime'), factoryToml('owner/repo', { kind: 'gitlab', projectId: 42 }));
+const github = await import(moduleUrl('tracker.github.mts'));
+const gitlab = await import(moduleUrl('tracker.gitlab.mts'));
 const calls = (tool: string) => readFileSync(join(dir, `${tool}.log`), "utf8").trim().split("\n").filter(Boolean);
 const reset = (total: number) => { process.env.READY_TOTAL = String(total); for (const t of ["gh", "glab"]) writeFileSync(join(dir, `${t}.log`), ""); };
 

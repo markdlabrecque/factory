@@ -1,8 +1,8 @@
-// Description-only tier resolution and Pi provider utilities. Legacy callers remain until runtime rewiring.
+// Description-only tier resolution, frozen model choices and Pi provider utilities.
 
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import { MODEL_POLICY_ID, modelForRole, type ModelFamily, type ModelTier } from './model-policy.mts';
+import { AGENT_POLICY, MODEL_POLICY_ID, modelForRole, type ModelFamily, type ModelTier } from './model-policy.mts';
 export type TierResolution = { declarations: string[]; revision: string } & ({ status: 'resolved'; tier: ModelTier; source: 'factory-default' | 'ticket-tier' } | { status: 'unsupported' | 'conflicting'; error: string });
 import type { ModelResolution } from "./assessment.mts";
 
@@ -154,7 +154,7 @@ export function piEnvFor(model: string, openaiCredential: () => string): Record<
 
 /** Arguments for the read-only host analysis. Only the provider extension is loaded, by an explicit -e. */
 export function piAnalysisArgs(model: string, env: Record<string, string | undefined>, exists: (path: string) => boolean): string[] {
-  const args = ["-p", "--model", model, "--tools", "read,grep,find,ls", "--no-extensions", "--no-skills", "--no-context-files", "--no-session"];
+  const args = ["-p", "--model", model, "--thinking", AGENT_POLICY.thinking, "--tools", "read,grep,find,ls", "--no-extensions", "--no-skills", "--no-context-files", "--no-session"];
   if (!isSubscriptionModel(model)) return args;
   const extension = subscriptionExtensionPath(env);
   if (!exists(extension)) throw new Error(`${SUBSCRIPTION_PROVIDER} extension not found at ${extension}. Install it (see orchestrator/ADAPTING.md) or set FACTORY_PI_SUBSCRIPTION_EXTENSION.`);

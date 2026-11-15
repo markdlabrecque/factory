@@ -1,17 +1,10 @@
-// Shared data-only image discovery for workflow reports and pre-charge recovery. Never execute customized main.mts.
-// TOML is authoritative; the conservative legacy lexer rejects ambiguous expressions and CONFIG mutation.
-import { readFileSync } from 'node:fs';
+// V2 data-only image discovery for pre-charge recovery. The legacy lexer is diagnostic only.
 import { join } from 'node:path';
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
 export type ImageConfig = { ok: true; image: string } | { ok: false; reason: string };
 export function readImageConfig(root: string): ImageConfig {
   const toml = loadTomlConfig(join(root, '.sandcastle'));
-  if (toml) return { ok: true, image: toml.config.image };
-  try {
-    const image = legacyImage(readFileSync(join(root, '.sandcastle/main.mts'), 'utf8'));
-    if (image) return { ok: true, image };
-  } catch { /* unreadable configuration is unknown, never executable fallback */ }
-  return { ok: false, reason: 'Image configuration is unknown. Provide explicit reviewed sandbox.image TOML or an unambiguous literal CONFIG.image; project code was not executed.' };
+  return { ok: true, image: toml.config.image };
 }
 
 /** Conservative lexer for a literal legacy CONFIG object, not a TypeScript evaluator. */

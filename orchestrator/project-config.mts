@@ -161,6 +161,6 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
 }
 /** Identity lookup does not execute a project module; malformed TOML deliberately propagates. */
 export function tomlIdentity(scaffoldDir: string) {
-  const c = loadTomlConfig(scaffoldDir); if (!c) return;
+  const c = loadTomlConfig(scaffoldDir);
   return { kind: c.TRACKER.kind, host: c.TRACKER.gitlabHost ?? c.TRACKER.host!, project: c.TRACKER.project };
 }
