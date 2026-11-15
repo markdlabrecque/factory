@@ -128,6 +128,7 @@ export function analyse(args: {
 }): Manifest {
   const { ticket: t, catalogue: cat } = args;
   const vars: Record<string, string> = {
+    ADDITIVE_INSTRUCTIONS: context.additive.analysis.text,
     ISSUE_IID: String(t.iid),
     ISSUE_TITLE: t.title,
     BASE_BRANCH: args.base,

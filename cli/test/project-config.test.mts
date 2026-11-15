@@ -132,17 +132,17 @@ test('missing TOML explanation fails closed without executing config or tracker 
   assert.doesNotMatch(r.stdout+r.stderr,/EXECUTED_LEGACY/);
   assert.equal(existsSync(f.calls),false);
 });
-test('init repair and update never migrate legacy or overwrite TOML; vendor ships without node_modules', t => {
+test('init repair and update never migrate legacy or overwrite TOML; no runtime is copied', t => {
   const f = fixture(t); const original = readFileSync(f.toml);
   writeScaffold(f.root,buildAssets({profile:'client',repo:'other/project',image:'other',host:'other.host',projectId:4},f.p.state));
   assert.deepEqual(readFileSync(f.toml),original);
   rmSync(f.toml);
-  writeScaffold(f.root,buildAssets({profile:'personal',repo:'other/project',image:'other'},f.p.state));
+  assert.throws(() => writeScaffold(f.root,buildAssets({profile:'personal',repo:'other/project',image:'other'},f.p.state)), /manual.*migrat/i);
   assert.equal(existsSync(f.toml),false);
-  assert.equal(classifyCopy(f.p,f.root).find(f=>f.file==='factory.toml')!.class,'project');
-  applyCopy(f.p,f.root); assert.equal(existsSync(f.toml),false);
+  assert.throws(() => classifyCopy(f.p,f.root), /manual|version 2|factory.toml/i);
+  assert.throws(() => applyCopy(f.p,f.root), /manual|version 2|factory.toml/i); assert.equal(existsSync(f.toml),false);
   assert.equal(existsSync(join(f.root,'node_modules')),false);
-  assert.ok(existsSync(join(f.sc,'vendor/smol-toml/LICENSE')));
+  assert.equal(existsSync(join(f.sc,'vendor/smol-toml/LICENSE')),false);
 });
 test('shell preflight uses TOML tracker/agent/image, not conflicting legacy code, before project npm install', t => {
   const f = fixture(t,'client');

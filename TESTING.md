@@ -12,6 +12,8 @@ Requires Node 22.18+; CI uses Node 24. From the repository root:
 node --test orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 ```
 
+CI sets `--test-concurrency=4` to overlap independent fixture subprocess waits on small runners. It still runs the complete inventory above with the 180-second suite deadline and 120-second per-test deadline. A two-CPU Node 24.20.0 fixture run completed all 714 tests in 99 seconds at this concurrency, compared with 172 seconds using the CPU-derived default. This is a scheduling choice, not a skipped-test or timeout waiver.
+
 Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
@@ -31,6 +33,14 @@ node scripts/test-runtime-packages.mts /path/to/npm-cache /path/to/npm/bin/npm-c
 ```
 
 The implementation was smoke-tested with Node 22.23.2 and 24.20.0. This is not an execution test of the exact 22.18.0 patch release.
+
+## Data-only projects and workflow diagnostics
+
+```sh
+node --test cli/test/init.test.mts cli/test/update.test.mts cli/test/project-config.test.mts cli/test/workflow-report.test.mts cli/test/telemetry.test.mts
+```
+
+Init and update fixtures verify data-only assets and preserve project bytes and modes. Workflow diagnostics use explicit synthetic historical copies for comparison, alongside a data-only regression. They do not restore runtime files to new projects or authorize repairs. Socket tests use fixture-owned Unix sockets.
 
 ## Shared workflow execution
 
@@ -61,9 +71,13 @@ claim, dependency, readiness, recovery-budget and exact-SHA delivery assertions.
 Settings/template changes revoke authority without changing the running model
 snapshot. The recovery fixture checks Large repair/verification regardless of
 Small/Mid/Large implementation tier. Existing CLI/Board callers use fixture-only
-bridges where top-level routing is still owned by #164; no production resolver or
-instruction-file loader is implied by these tests. Instruction loading is #165.
-Run the full suite above after these focused tests.
+bridges where top-level routing is still owned by #164. Instruction loader and
+context tests cover role ordering and containment. Refresh exercises analysis prompt
+composition and cache invalidation after instruction edits, and existing-delivery
+continuation refuses an old proof after an edit. Normal entrypoint tests check frozen
+invocation text and refusal before verification; recovery captures composed repair and
+independent verifier prompts. The normal SDK boundary is a one-pass substitution
+contract stub, not a test of the real SDK. Run the full suite above after these focused tests.
 
 ## Local event observations
 

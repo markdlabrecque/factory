@@ -1,0 +1,50 @@
+// Instruction loading uses only temporary checkout files and no agent or service boundaries.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadInstructions } from './instructions.mts';
+
+test('common and role instructions freeze in order, deduplicating canonical aliases', t => {
+  const root = mkdtempSync(join(tmpdir(), 'factory-instructions-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'common.md'), 'literal {{TICKET}} $(echo nope)');
+  writeFileSync(join(root, 'impl.md'), 'implement');
+  writeFileSync(join(root, 'verify.md'), 'verify');
+  symlinkSync('common.md', join(root, 'alias.md'));
+  const lists = { common: ['common.md'], implementation: ['alias.md', 'impl.md'], verification: ['verify.md'], analysis: [], recovery: [] };
+  const frozen = loadInstructions(root, lists, 'implementation');
+  assert.equal(frozen.text, 'literal {{TICKET}} $(echo nope)\n\nimplement');
+  assert.deepEqual(Object.keys(frozen.hashes), ['common.md', 'impl.md']);
+  assert.equal(loadInstructions(root, lists, 'verification').text, 'literal {{TICKET}} $(echo nope)\n\nverify');
+  writeFileSync(join(root, 'impl.md'), 'changed');
+  assert.equal(frozen.text, 'literal {{TICKET}} $(echo nope)\n\nimplement');
+  assert.notEqual(frozen.hashes['impl.md'], loadInstructions(root, lists, 'implementation').hashes['impl.md']);
+  assert.ok(Object.isFrozen(frozen) && Object.isFrozen(frozen.hashes));
+});
+
+test('unreadable instruction fails closed', t => {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) return t.skip('root can read mode-000 files');
+  const root = mkdtempSync(join(tmpdir(), 'factory-unreadable-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, 'private.md');
+  writeFileSync(path, 'private');
+  chmodSync(path, 0);
+  const lists = { common: ['private.md'], implementation: [], verification: [], analysis: [], recovery: [] };
+  assert.throws(() => loadInstructions(root, lists, 'analysis'), /Cannot load instruction file/);
+});
+
+test('empty lists and invalid, missing, directory, and escaping paths', t => {
+  const root = mkdtempSync(join(tmpdir(), 'factory-instructions-'));
+  const outside = mkdtempSync(join(tmpdir(), 'factory-instructions-outside-'));
+  t.after(() => { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });
+  mkdirSync(join(root, 'dir.md'));
+  writeFileSync(join(outside, 'outside.md'), 'outside');
+  symlinkSync(join(outside, 'outside.md'), join(root, 'escape.md'));
+  const lists = { common: [] as string[], implementation: [] as string[], verification: [] as string[], analysis: [] as string[], recovery: [] as string[] };
+  assert.equal(loadInstructions(root, lists, 'analysis').text, '');
+  for (const path of ['/absolute.md', '../outside.md', 'missing.md', 'dir.md', 'escape.md', 'plain.txt']) {
+    assert.throws(() => loadInstructions(root, { ...lists, analysis: [path] }, 'analysis'), undefined, path);
+  }
+});

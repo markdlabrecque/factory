@@ -1,10 +1,4 @@
-// #153: copied scaffolds include continuation/checkpoint helpers and admission-fenced writers.
-// #149: fresh and repaired copies include dependency evaluation.
-// #150: fresh and repaired scaffolds include the required verification proof helper.
-// V2 TOML/parser and policy assets ship together. Ticket tiers never require model tracker labels.
-// Init tests: scaffold contents, no-clobber, rerun repair, failure-doesn't-register, wrapper quoting, shared
-// state, uninstall's treatment of projects, and that every module a scaffolded file imports is scaffolded,
-// including refresh.mts, the independent assessment store (#78) and journal projection (#101-#102).
+// Data-only init tests cover validation, no-clobber reruns, partial failures, wrapper quoting and registration.
 // Disposable HOME and Git repos; no network, service manager or credentials.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -26,11 +20,7 @@ import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
-// Fresh and repaired scaffolds ship both dependency evaluation and delivery continuation.
-const EXPECTED = ['context.mts', 'context-process.mts', 'capabilities.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts', 'factory.toml', 'project-config.mts', 'model-policy.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
-  ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(f => `vendor/smol-toml/${f}`), '.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
-  'dispatch.sh', 'execution-events.mts', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
-  'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'].sort();
+const EXPECTED = ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml'].sort();
 
 function fixture(t: TestContext, homeName = 'home') {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'factory-init-')));
@@ -62,17 +52,14 @@ test('clean personal init creates exactly the allowlist, no client bootstrap, sa
   const s = (f: string) => join(root, '.sandcastle', f);
   assert.equal(mode(s('.env')), 0o600);
   assert.equal(readFileSync(s('.env'), 'utf8'), '');
-  assert.equal(mode(s('dispatch.sh')) & 0o111, 0o111);
   assert.equal(mode(s('factory-dispatch.sh')) & 0o111, 0o111);
-  const main = readFileSync(s('main.mts'), 'utf8');
-  assert.match(main, /const CONFIG = effectiveConfig.config/);
   const settings = loadTomlConfig(join(root, '.sandcastle'));
   assert.equal(settings.config.image, 'sandcastle-site');
   assert.deepEqual(settings.config.sandboxSetup, []);
   for (const f of EXPECTED.filter(f => f.endsWith('.mts') || f.endsWith('.md') || f.endsWith('.example'))) {
     assert.doesNotMatch(readFileSync(s(f), 'utf8'), /islandhealth|composer install|start-web\.sh \/home|\/opt\/sandcastle\/bootstrap-site/, f);
   }
-  assert.match(readFileSync(s('.gitignore'), 'utf8'), /^\.env\nevidence\/\nstate\/\nlogs\/\nboard\.html\n$/);
+  assert.match(readFileSync(s('.gitignore'), 'utf8'), /worktrees\//);
   const example = readFileSync(s('.env.example'), 'utf8');
   assert.doesNotMatch(example, /OPENAI|sk-/);
   assert.deepEqual(readRegistry(p).projects.map(x => x.root), [root]);
@@ -108,7 +95,7 @@ test('generated runtimes derive model tiers and preserve tracker and merge polic
   assert.deepEqual(cc.AGENT, pc.AGENT);
   assert.equal(cc.GRAPH.model, pc.GRAPH.model);
   assert.equal(cc.MERGE.auto, false);
-  assert.match(readFileSync(join(b, '.sandcastle/.env.example'), 'utf8'), /CLAUDE_CODE_OAUTH_TOKEN=\n/);
+  assert.match(readFileSync(join(b, '.sandcastle/.env.example'), 'utf8'), /Authenticate Pi/);
 });
 
 test('rerun keeps existing bytes and modes, fills gaps, reports skips, never duplicates the registry', async t => {
@@ -116,21 +103,17 @@ test('rerun keeps existing bytes and modes, fills gaps, reports skips, never dup
   const root = repo();
   await quiet(() => init(p, root, personal));
   const s = (f: string) => join(root, '.sandcastle', f);
-  writeFileSync(s('config.mts'), '// my custom config\n');
-  writeFileSync(s('main.mts'), '// my custom main\n');
+  writeFileSync(s('factory.toml'), readFileSync(s('factory.toml'), 'utf8') + '\n# retained\n');
   writeFileSync(s('.gitignore'), 'node_modules\n');
-  chmodSync(s('prompt.md'), 0o640);
-  const keep = readFileSync(s('prompt.md'));
-  rmSync(s('ci.mts'));
-  const { out } = await quiet(() => init(p, root, { ...client }));
-  assert.equal(readFileSync(s('config.mts'), 'utf8'), '// my custom config\n');
-  assert.equal(readFileSync(s('main.mts'), 'utf8'), '// my custom main\n');
-  assert.deepEqual(readFileSync(s('prompt.md')), keep);
-  assert.equal(mode(s('prompt.md')), 0o640);
-  assert.ok(existsSync(s('ci.mts')), 'missing file recreated');
-  assert.match(out, new RegExp(`Created 1 file\\(s\\), skipped ${EXPECTED.length - 1}`));
-  assert.match(out, /skipped .*config\.mts/);
-  assert.match(out, /nothing was reconfigured/);
+  chmodSync(s('factory.toml'), 0o640); chmodSync(s('.gitignore'), 0o600);
+  const before = ['factory.toml', '.gitignore', '.env', 'factory-dispatch.sh'].map(f => [f, readFileSync(s(f)), mode(s(f))]);
+  rmSync(s('.env.example'));
+  const { out, error } = await quiet(() => init(p, root, { ...client }));
+  assert.equal(error, undefined);
+  assert.deepEqual(before.map(([f]) => [f, readFileSync(s(f as string)), mode(s(f as string))]), before);
+  assert.match(readFileSync(s('factory.toml'), 'utf8'), /# retained/);
+  assert.ok(existsSync(s('.env.example')));
+  assert.match(out, /Created 1 file/);
   assert.match(out, /Add: \.env evidence\/ state\/ logs\/ board\.html/);
   assert.equal(readRegistry(p).projects.length, 1);
 });
@@ -151,9 +134,9 @@ test('invalid input, symlink escape and type conflicts fail before any write or 
   assert.deepEqual(readdirSync(outside), []);
   rmSync(join(root, '.sandcastle'));
 
-  mkdirSync(join(root, '.sandcastle/config.mts'), { recursive: true });
+  mkdirSync(join(root, '.sandcastle/.env'), { recursive: true });
   assert.match(String((await quiet(() => init(p, root, personal))).error), /in the way/);
-  assert.deepEqual(readdirSync(join(root, '.sandcastle')), ['config.mts'], 'preflight failed before the first write');
+  assert.deepEqual(readdirSync(join(root, '.sandcastle')), ['.env'], 'preflight failed before the first write');
   rmSync(join(root, '.sandcastle'), { recursive: true });
 
   writeFileSync(join(root, '.sandcastle'), 'a file');
@@ -173,37 +156,21 @@ test('a mid-copy failure leaves a repairable scaffold and does not register; rer
   assert.equal(ok.error, undefined);
   assert.deepEqual(files(root), EXPECTED);
   assert.equal(readRegistry(p).projects.length, 1);
-  rmSync(join(root, '.sandcastle/ci.mts'));
+  rmSync(join(root, '.sandcastle/.env.example'));
   assert.ok((await quiet(() => init(p, root, personal, { beforeWrite: () => { throw new Error('again'); } }))).error);
   assert.equal(readRegistry(p).projects.length, 1, 'stays registered');
 });
 
-test('factory-dispatch.sh cds to the root, forwards argv exactly and sets the state dir, with spaces and apostrophes', async t => {
-  const { p, repo, base } = fixture(t, "ho'me dir");
+test('wrapper forwards canonical project and literal arguments', async t => {
+  const { p, repo, base } = fixture(t);
   const root = repo("pro j'ect");
   await quiet(() => init(p, root, personal));
-  const dispatch = join(root, '.sandcastle/dispatch.sh');
-  writeFileSync(dispatch, '#!/usr/bin/env bash\nnode -e \'console.log(JSON.stringify({cwd: process.cwd(), state: process.env.SANDCASTLE_STATE_DIR, argv: process.argv.slice(1)}))\' -- "$@"\n');
-  const wrapper = join(root, '.sandcastle/factory-dispatch.sh');
-  const elsewhere = join(base, 'elsewhere'); mkdirSync(elsewhere);
-  const run = (env: Record<string, string>) => JSON.parse(spawnSync(wrapper, ['--dry-run', "a b", "it's"], { cwd: elsewhere, encoding: 'utf8', env: { PATH: process.env.PATH!, HOME: p.home, ...env } }).stdout);
-  const got = run({});
-  assert.deepEqual(got, { cwd: root, state: p.state, argv: ['--dry-run', 'a b', "it's"] });
-  assert.equal(run({ SANDCASTLE_STATE_DIR: "/custom/st ate's" }).state, "/custom/st ate's");
-});
-
-test('shared state: a run written through the generated board module is read by the installed board from the configured folder', async t => {
-  const { p, repo, base } = fixture(t);
-  const root = repo();
-  await quiet(() => init(p, root, personal));
-  const state = join(base, 'shared state');
-  const script = `import { setProject, setStage } from './.sandcastle/board.mts'; setProject('me/site'); setStage('7', { stage: 'done', title: 'Hello' });`;
-  const res = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, SANDCASTLE_STATE_DIR: state } });
+  const bin = join(base, 'bin'); mkdirSync(bin);
+  writeFileSync(join(bin, 'factory'), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+  const res = spawnSync(join(root, '.sandcastle/factory-dispatch.sh'), ['--ticket', 'a b', "$(touch nope)"], { cwd: base, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
   assert.equal(res.status, 0, res.stderr);
-  assert.deepEqual(readdirSync(state), ['admission', 'me_site--7.json', 'telemetry']);
-  const read = spawnSync(process.execPath, ['--input-type=module', '-e', `import { readRuns } from './board/board.mts'; console.log(JSON.stringify(readRuns().map(r => [r.iid, r.title, r.stage])));`],
-    { cwd: join(import.meta.dirname, '../..'), encoding: 'utf8', env: { ...process.env, SANDCASTLE_STATE_DIR: state } });
-  assert.deepEqual(JSON.parse(read.stdout), [['7', 'Hello', 'done']]);
+  assert.deepEqual(res.stdout.trimEnd().split('\n'), ['dispatch', '--project', root, '--ticket', 'a b', '$(touch nope)']);
+  assert.equal(existsSync(join(base, 'nope')), false);
 });
 
 test('uninstall lists project scaffolds but never deletes them; purge removes only Factory config and state', async t => {
@@ -239,34 +206,21 @@ test('scaffold assets resolve from the installed app, not the working directory'
   } finally { process.chdir(cwd); rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test('every workflow module a scaffolded file imports is scaffolded too', () => {
-  const files = buildAssets({ profile: 'personal', repo: 'a/b', image: 'x' }, '/s');
-  const names = new Set(files.map(f => f.path.split('/').pop()));
-  for (const f of files.filter(f => f.path.endsWith('.mts'))) {
-    for (const [, dep] of String(f.content).matchAll(/from "\.\/([\w.-]+\.mts)"/g)) {
-      assert.ok(names.has(dep), `${f.path} imports ./${dep}, which init does not write`);
-    }
-  }
+test('unsupported existing config is not rewritten or registered', async t => {
+  const { p, repo } = fixture(t); const root = repo();
+  mkdirSync(join(root, '.sandcastle'));
+  writeFileSync(join(root, '.sandcastle/factory.toml'), 'version = 1\n');
+  assert.match(String((await quiet(() => init(p, root, personal))).error), /manually migrate/);
+  assert.deepEqual(readdirSync(join(root, '.sandcastle')), ['factory.toml']);
+  assert.equal(existsSync(p.projects), false);
 });
 
-test('a new scaffold ships the recovery workflow as reviewed; an existing copy stays inactive until it is reviewed', async t => {
-  const { p, repo } = fixture(t);
-  const fresh = repo('fresh');
-  const r1 = await quiet(() => init(p, fresh, personal));
-  assert.equal(r1.error, undefined);
-  assert.equal(readFileSync(join(fresh, '.sandcastle/prompt.recover.md'), 'utf8'), readFileSync(new URL('../../orchestrator/prompt.recover.md', import.meta.url), 'utf8'));
-  assert.equal(recoveryCopyProblem(p, fresh), null, 'active');
-  assert.match(r1.out, /Self-recovery: active/);
-  writeFileSync(join(fresh, '.sandcastle/main.mts'), readFileSync(join(fresh, '.sandcastle/main.mts'), 'utf8') + '// customized\n');
-  assert.match(recoveryCopyProblem(p, fresh) ?? '', /main\.mts changed since the recovery workflow was reviewed/);
-
-  // An existing project whose own main.mts predates recovery: init fills the gaps but records no review.
-  const old = repo('old');
-  mkdirSync(join(old, '.sandcastle'));
-  writeFileSync(join(old, '.sandcastle/main.mts'), '// pre-recovery main\n');
-  const r2 = await quiet(() => init(p, old, personal));
-  assert.equal(r2.error, undefined);
-  assert.equal(readReview(p, old), null);
-  assert.match(recoveryCopyProblem(p, old) ?? '', /missing main\.mts --recover --attempt-record/);
-  assert.match(r2.out, /Self-recovery: inactive/);
+test('a racing creator is never overwritten or registered', async t => {
+  const { p, repo } = fixture(t); const root = repo();
+  const result = await quiet(() => init(p, root, personal, { beforeWrite: (path, index) => {
+    if (index === 0) { mkdirSync(join(root, '.sandcastle'), { recursive: true }); writeFileSync(join(root, path), 'racer'); }
+  } }));
+  assert.ok(result.error);
+  assert.equal(readFileSync(join(root, '.sandcastle/factory.toml'), 'utf8'), 'racer');
+  assert.equal(existsSync(p.projects), false);
 });

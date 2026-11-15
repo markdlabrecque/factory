@@ -9,7 +9,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
 import type { Paths } from './paths.mts';
 import { appRoot } from './scaffold.mts';
-import { classifyCopy, factoryHistory, PROJECT_OWNED, scaffoldSources } from './update.mts';
+import { classifyInventory, factoryHistory, PROJECT_OWNED, scaffoldSources } from './update.mts';
 import type { History } from './update.mts';
 import { copyProblem } from './schedule.mts';
 import { changedSinceReview, missingWorkflow, readReview, WORKFLOW } from './recovery-review.mts';
@@ -75,7 +75,7 @@ function classifications(p: Paths, root: string, app: ReturnType<typeof identity
     const target = content(join(root, '.sandcastle'), file);
     if (target.status === 'not-regular') return { file, class: PROJECT_OWNED.includes(file) ? 'project' as const : 'modified' as const, reason: 'not a regular file; symlinks are not followed' };
     if (target.status === 'unknown') return { file, class: 'unknown' as const, reason: 'project content is unreadable' };
-    try { return classifyCopy(p, root, { app: app.canonicalPath!, history: h, files: [file] })[0]; }
+    try { return classifyInventory(p, root, { app: app.canonicalPath!, history: h, files: [file] })[0]; }
     catch { return { file, class: 'unknown' as const, reason: 'file classification could not be read' }; }
   });
 }

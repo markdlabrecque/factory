@@ -7,11 +7,13 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {buildAssets} from '../cli/src/scaffold.mts';
+import {appRoot,buildAssets} from '../cli/src/scaffold.mts';
+import {populateCopiedWorkflow} from '../cli/test/copied-workflow-fixture.mts';
 
 test('two execution preparers race the original digest; only one can publish and later writers cannot be overwritten',async t=>{
   const root=mkdtempSync(join(tmpdir(),'factory-manifest-cas-')),state=join(root,'state');t.after(()=>rmSync(root,{recursive:true,force:true}));
   for(const f of buildAssets({profile:'personal',repo:'p/r',image:'fixture'},state)){mkdirSync(dirname(join(root,f.path)),{recursive:true});writeFileSync(join(root,f.path),f.content);}
+  populateCopiedWorkflow(root, appRoot);
   const module=pathToFileURL(join(root,'.sandcastle/manifests.mts')).href;
   const manifest={iid:7,project:'p/r',hash:'h',analyzedAt:'fixture',base:'main',baseSha:'a'.repeat(40),provides:[],requires:[],footprint:[],catalogueIids:[],blockerHashes:{},actualFootprint:['saved.ts']};
   const env={...process.env,SANDCASTLE_STATE_DIR:state};

@@ -281,6 +281,7 @@ export interface RecoveryContext {
   provenance: (sandbox: RecoverySandbox) => Promise<Provenance>;
   parentIid?: number;
   promptArgs: Record<string, string>;
+  verificationInstructions?: string;
   repairPrompt?: string;
   verifyPrompt?: string;
   previousRun: unknown;
@@ -430,7 +431,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
     if (!/^[0-9a-f]{40,64}$/.test(ctx.baseSha) || (await sb.exec(`git cat-file -e ${ctx.baseSha}^{commit} && git cat-file -e ${tip}^{commit}`)).exitCode !== 0) return finish('unresolved', 'Missing recorded historical baseline or tip Git object; verifier not started');
     verifiedProvenance = await ctx.provenance(sb);
     const refused = await runVerifier(sb, { setStage: (_iid, patch) => deps.setStage(patch) },
-      { iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), promptArgs: { ...ctx.promptArgs, TIP_SHA: tip }, tip, promptFile: ctx.verifyPrompt ?? VERIFY_PROMPT });
+      { iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), promptArgs: { ...ctx.promptArgs, ADDITIVE_INSTRUCTIONS: ctx.verificationInstructions ?? '', TIP_SHA: tip }, tip, promptFile: ctx.verifyPrompt ?? VERIFY_PROMPT });
     rec.verifier = { tip, ...(refused ? { refused } : {}) };
     if (ctx.cancel.aborted) return finish("interrupted", `cancelled during verification; ${preserved}`);
     if (refused) return finish("failed", `${refused}; ${preserved}`);

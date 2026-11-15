@@ -29,7 +29,7 @@ import { readAdmission } from "../board/admission.mts";
 import { claimRun, readRuns } from "../board/board.mts";
 import { projectId, readReceipt, receiptFile } from "./ownership.mts";
 import { paths } from "../cli/src/paths.mts";
-import { recordReview } from "../cli/src/recovery-review.mts";
+import { recordReview, WORKFLOW } from "../cli/src/recovery-review.mts";
 import { buildAssets } from "../cli/src/scaffold.mts";
 import { checkImageCapabilities } from './capabilities.mts';
 import { launchRecovery, settleRecovery } from "../cli/src/recovery-run.mts";
@@ -80,7 +80,8 @@ for (const { scenario, tier } of [
     writeFileSync(join(root, f.path), f.content, { mode: f.mode });
   }
   const configPath = join(root, '.sandcastle/factory.toml');
-  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"'));
+  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"') + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nanalysis = ["analysis.md"]\nverification = ["verify.md"]\nrecovery = ["repair.md"]\n');
+  for (const [file, text] of Object.entries({ 'common.md': 'COMMON {{TICKET}} !`literal`', 'impl.md': 'IMPLEMENTATION ONLY', 'analysis.md': 'ANALYSIS ONLY', 'verify.md': 'VERIFICATION ONLY', 'repair.md': 'RECOVERY ONLY' })) writeFileSync(join(root, file), text);
   cpSync(join(FIXTURES, "sandcastle"), join(root, "node_modules/@ai-hero/sandcastle"), { recursive: true });
   const evidence = join(root, ".sandcastle/evidence/7");
   mkdirSync(evidence, { recursive: true });
@@ -112,7 +113,7 @@ for (const { scenario, tier } of [
 
   // A stopped run of #7 and a jam confirmed on two passes.
   const p = paths(home);
-  recordReview(p, root, { by: "init" });
+
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
     patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main", implementationBaseSha: scenario === 'missing-baseline' ? undefined : git(root, 'rev-parse', 'main'), evidenceDir: evidence } });
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
@@ -120,6 +121,13 @@ for (const { scenario, tier } of [
 
   const runtime = bindExecution(root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state });
   Object.assign(env, runtime.env);
+  // Legacy review gate remains independent of the selected runtime; fixture-only reviewed copy.
+  for (const file of WORKFLOW) {
+    const path = join(root, '.sandcastle', file);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, file === 'main.mts' ? '"attempt-record": { type: "string" }' : 'fixture review');
+  }
+  recordReview(p, root, { by: "init" });
   const { loadExecutionContext } = await import('./context.mts');
   const policy = (await loadExecutionContext({ env: runtime.env, cwd: root, moduleRoot: runtime.directory })).policyIdentity;
   // The dispatcher's analysis of #7, with the same explicit runtime context.
@@ -187,6 +195,12 @@ for (const { scenario, tier } of [
     return;
   }
   assert.equal(code, 0, log);
+  const prompts = readFileSync(join(fake, 'prompts.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line) as string);
+  assert.equal(prompts.length, 2);
+  for (const prompt of prompts) { assert.ok(prompt.includes('COMMON {{TICKET}} !`literal`')); assert.ok(!prompt.includes('IMPLEMENTATION ONLY')); assert.ok(!prompt.includes('ANALYSIS ONLY')); }
+  assert.ok(prompts[0].includes('RECOVERY ONLY')); assert.ok(!prompts[0].includes('VERIFICATION ONLY'));
+  assert.ok(prompts[1].includes('VERIFICATION ONLY')); assert.ok(!prompts[1].includes('RECOVERY ONLY'));
+  assert.match(prompts[0], /recovery-report\.json/); assert.match(prompts[1], /verification\.json/);
 
   const record = (readAttemptRecord(join(p.recovery, "attempts", `${ID}.json`)) as { record: AttemptRecord }).record;
   assert.equal(record.outcome, "delivered", record.reason);

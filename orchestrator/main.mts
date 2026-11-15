@@ -253,7 +253,9 @@ if (recovering) {
       ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
       EVIDENCE_DIR: evidenceBox, CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
       ATTEMPT: String(seq), ATTEMPT_ID: rec.id, REPAIR_MINUTES: String(REPAIR_MINUTES),
+      ADDITIVE_INSTRUCTIONS: context.additive.recovery.text,
     },
+    verificationInstructions: context.additive.verification.text,
     previousRun: claimed, logs: [resolve(".sandcastle/logs", `recover-${iid}.log`)],
     delivery: { ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto },
     cancel: cancel.signal, deadlineMs: REPAIR_DEADLINE_MS,
@@ -410,7 +412,7 @@ try {
   const impl = await sandbox.run({
     agent: agent(implementerModel),
     promptFile: context.codePath('prompt.md'),
-    promptArgs,
+    promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.implementation.text },
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
     name: "implementer",
@@ -431,7 +433,7 @@ try {
       sh('git', ['cat-file', '-e', `${tip}^{commit}`]);
       verifierContainer = sandbox.sandboxId ?? '';
       verifiedProvenance = await provenance(sandbox, verifierContainer);
-      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs, tip });
+      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip });
     }
   }
 } finally {

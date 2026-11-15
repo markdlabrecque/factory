@@ -99,12 +99,12 @@ Selection explanation can consume an already supplied context; it does not selec
 a runtime itself. Existing copied-launch callers without context fail closed until
 the routing change supplies it. Do not treat a copied scaffold as a prepared bundle.
 
-Issue #165 owns data-only scaffolding and instruction-file validation/loading,
-ordering and composition. `FrozenAdditive` and `freezeAdditive(text, hashes)` are
-the narrow input interface. The current runtime uses the empty value only. Nonempty
-configured instruction lists are held with an explicit diagnostic instead of
-silently ignored. No project file can replace a Factory template. The later
-instruction consumer must bind the bytes it loads through this same hash interface.
+Configured instruction files are validated and frozen separately for implementation,
+verification, analysis and recovery. Common files precede role files and canonical
+aliases are deduplicated. Their role-specific hashes participate in policy identity;
+current-input checks reload them and revoke authority on changes. Frozen text is
+inserted literally in an additive section, never as a replacement Factory template.
+Missing or invalid configured files fail closed.
 
 These changes are source contracts, not deployment or migration instructions.
 They neither install a runtime into a real project nor resume schedules.

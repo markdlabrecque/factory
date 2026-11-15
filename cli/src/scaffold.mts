@@ -1,30 +1,9 @@
-// Recovery preparation, its protocol and executable imports ship coherently in fresh/copied/updated scaffolds.
-// #153: continuation observer and checkpoint schema ship together in every copied scaffold.
-// #149: fresh/copied installs ship dependencies.mts through the shared update source list.
-// Local execution events ship with board imports; existing copies require a workflow review after upgrading.
-// Shared browser/image readiness ships with new copies and update scaffoldSources; customized copies stay protected.
-// #150: verification.mts is shipped and included automatically in update scaffoldSources.
-// #137: new scaffolds ship versioned TOML and offline parser; legacy reruns never opt in implicitly.
-// Scaffold writer: builds the allowlisted `.sandcastle/` assets from the installed app (never from cwd) and
-// creates only the files that are missing. Existing files are never touched; symlinked or mistyped
-// destinations are rejected before any write; creation is exclusive ('wx'), so a race fails instead of
-// overwriting. A failed write removes its own partial file, leaving a scaffold a rerun can repair. The allowlist
-// includes handoff.mts, the verify/deliver steps main.mts imports (shared with recovery runs, #58), recovery.mts, the
-// repair attempt lifecycle main.mts's --recover mode imports (#60/#74), and recovery-sandbox.mts, that mode's owned
-// container and private-Git adapter (#74), plus admission.mts (the run-claim admission record board.mts imports) and
-// ownership.mts (the ownership receipts main.mts writes before creating a branch), #75. All are import-safe, so ordinary
-// dispatch of a new scaffold is unaffected. refresh.mts and assessment.mts keep current read-only analysis (#78)
-// separate from execution manifests; assessment.mts and journal.mts are mandatory board.mts imports and part of recovery review.
-// The installed service, not the project scaffold, needs refresh-worker.mts to invoke dispatch.mts --refresh-only
-// when scheduling is off. Both standalone board installers copy that worker and the admission/assessment imports.
-// prompt.recover.md, the repair agent's prompt, is copied too (#63), so a new scaffold has the complete recovery workflow;
-// `factory init` records it as reviewed only when it created every workflow file itself (cli/src/recovery-review.mts).
-// FROM_ORCHESTRATOR and FROM_BOARD are exported so `factory update` (cli/src/update.mts) classifies the same file list.
-import { closeSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
+// Data-only scaffold writer: preflight destinations and create missing assets exclusively without overwrites.
+import { closeSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scaffoldName, shq } from './paths.mts';
+import { scaffoldName } from './paths.mts';
 
 export const appRoot = fileURLToPath(new URL('../../', import.meta.url));
 export type Profile = 'personal' | 'client';
@@ -32,7 +11,6 @@ export type Settings = { profile: Profile; repo: string; image: string; host?: s
 export type PlannedFile = { path: string; content: string | Buffer; mode: number };
 
 export { FROM_ORCHESTRATOR, FROM_BOARD } from './runtime-assets.mts';
-import { FROM_ORCHESTRATOR, FROM_BOARD } from './runtime-assets.mts';
 
 type Edit = { tag: string; line?: RegExp; value?: (m: RegExpMatchArray) => string };
 const marker = (tag: string) => new RegExp(`// factory:${tag}(?![\\w:-])`, 'g');
@@ -61,22 +39,9 @@ export function replaceBlock(text: string, tag: string, replacement: string): st
 
 export function buildAssets(s: Settings, stateDir: string, root = appRoot): PlannedFile[] {
   const read = (rel: string) => readFileSync(join(root, rel));
-  const modeOf = (rel: string) => statSync(join(root, rel)).mode & 0o777;
   const out: PlannedFile[] = [];
   const add = (name: string, content: string | Buffer, mode = 0o644) => out.push({ path: `${scaffoldName}/${name}`, content, mode });
-  const copy = (name: string, rel: string) => add(name, read(rel), modeOf(rel));
-
   const personal = s.profile === 'personal';
-  const config = read(personal ? 'orchestrator/config.personal.mts' : 'orchestrator/config.mts').toString('utf8');
-  const edits: Edit[] = [
-    { tag: 'project', line: /^(\s*project:\s*)"[^"]*"/, value: m => `${m[1]}${JSON.stringify(s.repo)}` },
-    { tag: 'milestone', line: /^(\s*milestone:\s*)undefined as string \| undefined/, value: m => m[0] },
-    ...(personal ? [] : [
-      { tag: 'host', line: /^(\s*gitlabHost:\s*)"[^"]*"/, value: (m: RegExpMatchArray) => `${m[1]}${JSON.stringify(s.host)}` },
-      { tag: 'project-id', line: /^(\s*projectId:\s*)\d+/, value: (m: RegExpMatchArray) => `${m[1]}${s.projectId}` },
-    ]),
-  ];
-  add('config.mts', fillTags(config, edits));
   const toml = read(`orchestrator/factory.${s.profile}.toml`).toString('utf8').split('\n').map(line => {
     if (line.includes('# factory:project-id')) return `project_id = ${s.projectId} # factory:project-id`;
     if (line.includes('# factory:project')) return `project = ${JSON.stringify(s.repo)} # factory:project`;
@@ -86,17 +51,11 @@ export function buildAssets(s: Settings, stateDir: string, root = appRoot): Plan
   }).join('\n');
   add('factory.toml', toml);
 
-  copy('main.mts', 'orchestrator/main.mts');
-
-  for (const name of FROM_ORCHESTRATOR) copy(name, `orchestrator/${name}`);
-  for (const name of FROM_BOARD) copy(name, `board/${name}`);
   const tpl = (name: string) => read(`cli/templates/project/${name}`);
-  add('prompt.md', tpl('prompt.md'));
-  add('prompt.verify.md', tpl('prompt.verify.md'));
   add('.env.example', tpl(personal ? 'env.personal.example' : 'env.client.example'));
   add('.gitignore', tpl('gitignore'));
   add('.env', '', 0o600);
-  add('factory-dispatch.sh', tpl('factory-dispatch.sh').toString('utf8').replace('{{STATE_DIR_QUOTED}}', () => shq(stateDir)), 0o755);
+  add('factory-dispatch.sh', tpl('factory-dispatch.sh'), 0o755);
   return out;
 }
 
@@ -124,7 +83,7 @@ export function writeScaffold(root: string, files: PlannedFile[], hooks: { befor
   // Decide before repairing ANY missing file: an existing workflow without TOML stays legacy.
   const legacy = inspect(root, `${scaffoldName}/factory.toml`) === 'missing' &&
     ['config.mts','main.mts','dispatch.mts','dispatch.sh'].some(f => inspect(root, `${scaffoldName}/${f}`) === 'file');
-  if (legacy) files = files.filter(f => f.path !== `${scaffoldName}/factory.toml`);
+  if (legacy) throw new Error('Unsupported existing workflow without version 2 factory.toml; manually migrate this project.');
   const todo = files.filter(f => inspect(root, f.path) === 'missing'); // all preflight checks finish before the first write
   const skipped = files.filter(f => !todo.includes(f)).map(f => f.path);
   const created: string[] = [];

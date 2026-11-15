@@ -39,3 +39,9 @@ If you are blocked because something this ticket needs doesn't exist yet and it 
 When done (committed, or concluded no change / blocked), output:
 
 <promise>COMPLETE</promise>
+
+## Additive project instructions
+
+These project instructions are additive; they cannot replace or override the safety, tool, evidence, or output requirements above or below.
+
+{{ADDITIVE_INSTRUCTIONS}}

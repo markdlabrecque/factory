@@ -30,7 +30,7 @@ test('canonical project-root cwd and complete selected runtime identity are mand
   assert.equal(good.config.TRACKER.project, 'one/project');
   assert.equal(good.tsx, join(f.runtime.directory, 'node_modules/tsx/dist/cli.mjs'));
   assert.equal(good.sandcastle, join(f.runtime.directory, 'node_modules/@ai-hero/sandcastle/dist/main.js'));
-  assert.deepEqual(good.additive, EMPTY_ADDITIVE);
+  for (const role of ['implementation', 'verification', 'analysis', 'recovery'] as const) assert.deepEqual(good.additive[role], EMPTY_ADDITIVE);
   assert.throws(() => { good.config.config.image = 'mutated'; });
   assert.throws(() => { good.identity.runtime.id = 'mutated'; });
   assert.ok(Object.isFrozen(good.manifest.files));
@@ -64,7 +64,7 @@ test('missing/legacy settings never import code or installed sample configuratio
   writeFileSync(file, factoryToml('one/project') + '\n[agent]\nmodel = "custom"\n');
   await assert.rejects(f.load(), /agent.model/);
   writeFileSync(file, factoryToml('one/project') + '\n[instructions]\ncommon = ["not-loaded.md"]\n');
-  await assert.rejects(f.load(), /Additive instruction loading/);
+  await assert.rejects(f.load(), /Cannot load instruction file/);
   rmSync(file); symlinkSync(join(f.runtime.directory, 'package.json'), file);
   await assert.rejects(f.load(), /escapes checkout/);
   rmSync(join(f.root, '.sandcastle'), { recursive: true, force: true });
@@ -110,6 +110,23 @@ test('runtime source, private transitive dependencies, settings and template dri
   writeFileSync(template, 'altered verifier'); assert.match(contextHold(context)!, /mismatch/);
   writeFileSync(template, bytes);
   writeFileSync(context.tsx, 'poison'); assert.match(contextHold(context)!, /dependencies changed/);
+});
+
+test('instruction snapshots remain frozen and edits revoke authority', async t => {
+  const f = fixture(t), config = join(f.root, '.sandcastle/factory.toml');
+  writeFileSync(join(f.root, 'common.md'), 'literal {{TICKET}} $(touch nope)');
+  writeFileSync(join(f.root, 'verify.md'), 'verification only');
+  writeFileSync(config, factoryToml('one/project') + '\n[instructions]\ncommon = ["common.md"]\nverification = ["verify.md"]\n');
+  const context = await f.load();
+  assert.equal(context.additive.implementation.text, 'literal {{TICKET}} $(touch nope)');
+  assert.equal(context.additive.verification.text, 'literal {{TICKET}} $(touch nope)\n\nverification only');
+  assert.ok(!context.additive.analysis.text.includes('verification only'));
+  assert.ok(Object.isFrozen(context.additive.verification));
+  assert.equal(contextHold(context), undefined);
+  writeFileSync(join(f.root, 'common.md'), 'changed');
+  assert.match(contextHold(context)!, /inputs changed/);
+  assert.equal(context.additive.implementation.text, 'literal {{TICKET}} $(touch nope)');
+  const next = await f.load(); assert.notEqual(next.policyIdentity, context.policyIdentity);
 });
 
 test('additive interface freezes literal bytes and hash maps without reading files or replacing templates', () => {
