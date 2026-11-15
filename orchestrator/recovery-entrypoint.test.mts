@@ -80,7 +80,8 @@ for (const { scenario, tier } of [
     writeFileSync(join(root, f.path), f.content, { mode: f.mode });
   }
   const configPath = join(root, '.sandcastle/factory.toml');
-  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"'));
+  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"') + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nanalysis = ["analysis.md"]\nverification = ["verify.md"]\nrecovery = ["repair.md"]\n');
+  for (const [file, text] of Object.entries({ 'common.md': 'COMMON {{TICKET}} !`literal`', 'impl.md': 'IMPLEMENTATION ONLY', 'analysis.md': 'ANALYSIS ONLY', 'verify.md': 'VERIFICATION ONLY', 'repair.md': 'RECOVERY ONLY' })) writeFileSync(join(root, file), text);
   cpSync(join(FIXTURES, "sandcastle"), join(root, "node_modules/@ai-hero/sandcastle"), { recursive: true });
   const evidence = join(root, ".sandcastle/evidence/7");
   mkdirSync(evidence, { recursive: true });
@@ -194,6 +195,12 @@ for (const { scenario, tier } of [
     return;
   }
   assert.equal(code, 0, log);
+  const prompts = readFileSync(join(fake, 'prompts.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line) as string);
+  assert.equal(prompts.length, 2);
+  for (const prompt of prompts) { assert.ok(prompt.includes('COMMON {{TICKET}} !`literal`')); assert.ok(!prompt.includes('IMPLEMENTATION ONLY')); assert.ok(!prompt.includes('ANALYSIS ONLY')); }
+  assert.ok(prompts[0].includes('RECOVERY ONLY')); assert.ok(!prompts[0].includes('VERIFICATION ONLY'));
+  assert.ok(prompts[1].includes('VERIFICATION ONLY')); assert.ok(!prompts[1].includes('RECOVERY ONLY'));
+  assert.match(prompts[0], /recovery-report\.json/); assert.match(prompts[1], /verification\.json/);
 
   const record = (readAttemptRecord(join(p.recovery, "attempts", `${ID}.json`)) as { record: AttemptRecord }).record;
   assert.equal(record.outcome, "delivered", record.reason);

@@ -6,7 +6,7 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 const provider = (kind) => (model) => {
   appendFileSync(join(process.env.FAKE_STATE, "models.log"), `${kind} ${model}\n`);
-  return { name: kind, env: {}, buildPrintCommand: ({ prompt }) => ({ command: prompt.startsWith("# Recover ticket") ? process.env.FAKE_REPAIR : process.env.FAKE_VERIFY }) };
+  return { name: kind, env: {}, buildPrintCommand: ({ prompt }) => { appendFileSync(join(process.env.FAKE_STATE, 'prompts.jsonl'), JSON.stringify(prompt) + '\n'); return { command: prompt.startsWith("# Recover ticket") ? process.env.FAKE_REPAIR : process.env.FAKE_VERIFY }; } };
 };
 export const claudeCode = provider("claude");
 export const pi = provider("pi");

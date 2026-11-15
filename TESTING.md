@@ -70,8 +70,12 @@ Settings/template changes revoke authority without changing the running model
 snapshot. The recovery fixture checks Large repair/verification regardless of
 Small/Mid/Large implementation tier. Existing CLI/Board callers use fixture-only
 bridges where top-level routing is still owned by #164. Instruction loader and
-context tests cover role ordering, containment, frozen text and authority invalidation.
-Run the full suite above after these focused tests.
+context tests cover role ordering and containment. Refresh exercises analysis prompt
+composition and cache invalidation after instruction edits, and existing-delivery
+continuation refuses an old proof after an edit. Normal entrypoint tests check frozen
+invocation text and refusal before verification; recovery captures composed repair and
+independent verifier prompts. The normal SDK boundary is a one-pass substitution
+contract stub, not a test of the real SDK. Run the full suite above after these focused tests.
 
 ## Local event observations
 

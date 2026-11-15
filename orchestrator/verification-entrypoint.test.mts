@@ -13,7 +13,7 @@ import { proofRoot } from './verification.mts';
 import { MODEL_POLICY } from './model-policy.mts';
 
 const cases = [
-  ...['pass', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt', 'image-bad', 'setup-bad', 'image-changed', 'config-family', 'config-setup', 'runtime-template', 'tier-edit'].map(scenario => ({ scenario, family: 'openai' as const, tier: undefined as string | undefined })),
+  ...['pass', 'instruction-edit', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt', 'image-bad', 'setup-bad', 'image-changed', 'config-family', 'config-setup', 'runtime-template', 'tier-edit'].map(scenario => ({ scenario, family: 'openai' as const, tier: undefined as string | undefined })),
   ...(['openai', 'anthropic'] as const).flatMap(family => ['small', 'mid', 'large'].map(tier => ({ scenario: 'pass', family, tier }))),
 ];
 for (const { scenario, family, tier } of cases) {
@@ -32,8 +32,8 @@ for (const { scenario, family, tier } of cases) {
     }
     const config = join(root, '.sandcastle/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
-    if (scenario === 'pass') {
-      writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal)');
+    if (scenario === 'pass' || scenario === 'instruction-edit') {
+      writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal) !`shell`');
       writeFileSync(join(root, 'impl.md'), 'implementation only');
       writeFileSync(join(root, 'verify.md'), 'verification only');
       writeFileSync(config, readFileSync(config, 'utf8') + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nverification = ["verify.md"]\n');
@@ -60,10 +60,17 @@ export async function createSandbox(o) {
     run: async o => {
       writeFileSync(join(fake, o.name + '-agent.json'), JSON.stringify(o.agent));
       writeFileSync(join(fake, o.name + '-instructions.txt'), o.promptArgs.ADDITIVE_INSTRUCTIONS);
+      // Contract stub: mark template shell blocks before a single callback substitution.
+      // This deliberately does not claim execution of the real SDK.
+      const template = readFileSync(o.promptFile, 'utf8');
+      const marked = template.replace(/!\x60([^\x60]*)\x60/g, (_m, command) => '!SDK_MARK\x60' + command + '\x60');
+      const rendered = marked.replace(/\\{\\{(\\w+)\\}\\}/g, (match, key) => o.promptArgs[key] ?? match);
+      writeFileSync(join(fake, o.name + '-prompt.txt'), rendered);
       const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.sandcastle/evidence'));
       if (o.name === 'implementer') {
         writeFileSync(join(fake,'implementer-started'),'yes');
         writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
+        if (scenario === 'instruction-edit') { writeFileSync(join(root,'common.md'),'changed after invocation'); writeFileSync(join(fake,'frozen-after-edit.txt'),o.promptArgs.ADDITIVE_INSTRUCTIONS); }
         if (scenario === 'config-family') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
         if (scenario === 'config-setup') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('setup = []','setup = [{command="changed setup"}]')); }
         if (scenario === 'runtime-template') writeFileSync(join(process.env.FACTORY_RUNTIME_ROOT,'prompt.verify.md'),'changed verifier');
@@ -145,8 +152,14 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(proof.provenance.imageId, `sha256:${'a'.repeat(64)}`);
       assert.equal(proof.provenance.settings.image, 'img', 'configured settings stay comparable for existing-delivery continuation');
       assert.deepEqual(proof.provenance.settings.execution.runtime, { id: runtime.id, dependencies: runtime.manifest.dependencies });
-      assert.equal(readFileSync(join(fake, 'implementer-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal)\n\nimplementation only');
-      assert.equal(readFileSync(join(fake, 'verifier-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal)\n\nverification only');
+      assert.equal(readFileSync(join(fake, 'implementer-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nimplementation only');
+      assert.equal(readFileSync(join(fake, 'verifier-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nverification only');
+      const implementationPrompt = readFileSync(join(fake, 'implementer-prompt.txt'), 'utf8');
+      const verifierPrompt = readFileSync(join(fake, 'verifier-prompt.txt'), 'utf8');
+      assert.ok(implementationPrompt.includes('Common {{TICKET}} $(literal) !`shell`\n\nimplementation only'));
+      assert.ok(verifierPrompt.includes('Common {{TICKET}} $(literal) !`shell`\n\nverification only'));
+      assert.ok(!implementationPrompt.includes('verification only')); assert.ok(!verifierPrompt.includes('implementation only'));
+      assert.match(verifierPrompt, /verification\.json/);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.implementation).sort(), ['common.md', 'impl.md']);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.verification).sort(), ['common.md', 'verify.md']);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.templates).sort(), ['prompt.analyze.md','prompt.md','prompt.recover.md','prompt.verify.md']);
@@ -168,13 +181,14 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', result.stdout + result.stderr);
       const log = readFileSync(join(fake, 'gh.jsonl'), 'utf8');
       assert.ok(!log.includes('"merge"'), result.stdout + result.stderr);
-      assert.equal(existsSync(join(fake, 'verifier-started')), !['missing-baseline', 'config-family', 'config-setup', 'runtime-template', 'tier-edit'].includes(scenario), result.stdout + result.stderr);
+      assert.equal(existsSync(join(fake, 'verifier-started')), !['missing-baseline', 'config-family', 'config-setup', 'runtime-template', 'tier-edit', 'instruction-edit'].includes(scenario), result.stdout + result.stderr);
+      if (scenario === 'instruction-edit') assert.equal(readFileSync(join(fake, 'frozen-after-edit.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nimplementation only');
       if (['config-family', 'config-setup', 'runtime-template', 'tier-edit'].includes(scenario)) {
         const record = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
         assert.equal(record.modelChoice.family, 'openai'); assert.equal(record.modelChoice.tier, 'mid');
         assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.mid, thinking: 'high' });
       }
-      const reason = ({'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Requirements changed/,title:/Requirements changed/,body:/Requirements changed/,comment:/Requirements changed/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
+      const reason = ({'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Requirements changed/,title:/Requirements changed/,body:/Requirements changed/,comment:/Requirements changed/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
       assert.match(result.stdout + result.stderr, reason);
     }
   });
