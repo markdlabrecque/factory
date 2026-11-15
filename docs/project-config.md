@@ -106,13 +106,13 @@ in the run record. Later refreshes change current assessments, not that attempt.
 Delivery proofs bind the model-policy and resolver files, so policy drift requires
 fresh verification.
 
-Path shape is checked while parsing. Consumers must call the exported checkout
-path resolver before use to reject missing paths, escaping symlinks and wrong file
-types. Instruction composition and workflow selection belong to later tasks.
-The current shared runtime accepts empty instruction lists only. Nonempty lists
-produce an explicit execution hold until the instruction-file consumer is available;
-the parser still validates their v2 shape. The empty frozen text/hash interface does
-not read files or replace Factory templates.
+Instruction paths are checked while parsing and resolved inside the checkout before
+execution. Missing files, directories and escaping links fail closed. Common files
+precede role-specific files, with canonical duplicates removed at first occurrence.
+Their literal text is additive to Factory's templates, not a replacement for safety
+or output contracts. Frozen role-specific hashes bind analysis and proof authority;
+editing an instruction requires fresh authority while an active snapshot retains its
+original text. Workflow selection remains a separate integration boundary.
 
 Selected parents with children confer eligibility on open children without requiring
 child readiness labels. Child exclusion labels still veto. Parents with all children

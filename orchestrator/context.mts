@@ -4,6 +4,7 @@ import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadTomlConfig, resolveCheckoutPath, type EffectiveConfig } from './project-config.mts';
+import { loadInstructions } from './instructions.mts';
 
 const guidance = 'Use Factory commands with an explicit selected runtime; low-level entrypoints do not discover project context.';
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -52,7 +53,10 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
       throw error;
     }
     const config = freezeSnapshot(loadTomlConfig(assetRoot));
-    if (Object.values(config.instructions).some(files => files.length)) throw Error('Additive instruction loading is not implemented in this runtime; use empty instruction lists until instruction composition is available.');
+    const roles = ['implementation', 'verification', 'analysis', 'recovery'] as const;
+    const readAdditive = () => Object.freeze(Object.fromEntries(roles.map(role => [role, loadInstructions(projectRoot, config.instructions, role)])) as Record<typeof roles[number], FrozenAdditive>);
+    const additive = readAdditive();
+    const additiveHashes = () => Object.fromEntries(roles.map(role => [role, additive[role].hashes]));
     if (!env.SANDCASTLE_STATE_DIR && (!env.HOME || !isAbsolute(env.HOME))) throw Error('An absolute shared state directory or HOME is required');
     if (env.SANDCASTLE_STATE_DIR && !isAbsolute(env.SANDCASTLE_STATE_DIR)) throw Error('SANDCASTLE_STATE_DIR must be absolute');
     const sharedState = resolve(env.SANDCASTLE_STATE_DIR ?? join(env.HOME!, '.local/state/factory'));
@@ -61,15 +65,16 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     const templates = Object.fromEntries(['prompt.md', 'prompt.verify.md', 'prompt.analyze.md', 'prompt.recover.md'].map(name => [name, readFileSync(codePath(name), 'utf8')]));
     const templateHashes = Object.fromEntries(Object.entries(templates).map(([name, text]) => [name, hash(text)]));
     const safetySettings = JSON.parse(JSON.stringify(normalizedSettings(config)));
-    const identity = freezeSnapshot({ runtime: { id: manifest.id, dependencies: manifest.dependencies }, settings: safetySettings, templates: templateHashes, additive: EMPTY_ADDITIVE.hashes });
+    const identity = freezeSnapshot({ runtime: { id: manifest.id, dependencies: manifest.dependencies }, settings: safetySettings, templates: templateHashes, additive: additiveHashes() });
     return Object.freeze({ projectRoot, runtimeRoot, assetRoot, sharedState, config, manifest, codePath, projectPath,
-      templates: Object.freeze(templates), additive: EMPTY_ADDITIVE, identity, policyIdentity: hash(identity),
+      templates: Object.freeze(templates), additive, identity, policyIdentity: hash(identity),
       assertCurrent: () => {
         canonical(projectRoot, 'FACTORY_PROJECT_ROOT');
         canonical(assetRoot, 'Project asset root');
         resolveCheckoutPath(projectRoot, '.sandcastle/factory.toml', 'file');
         const now = validateRuntimeBundle(runtimeRoot);
-        if (now.id !== manifest.id || now.dependencies !== manifest.dependencies || hash(normalizedSettings(loadTomlConfig(assetRoot))) !== hash(safetySettings))
+        const currentAdditive = readAdditive();
+        if (now.id !== manifest.id || now.dependencies !== manifest.dependencies || hash(normalizedSettings(loadTomlConfig(assetRoot))) !== hash(safetySettings) || hash(Object.fromEntries(roles.map(role => [role, currentAdditive[role].hashes]))) !== hash(additiveHashes()))
           throw Error('Runtime, settings or prompt inputs changed; fresh analysis/verification required');
       },
       tsx: codePath('node_modules/tsx/dist/cli.mjs'),

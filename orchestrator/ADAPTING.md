@@ -31,9 +31,9 @@ identity. See the [execution context contract](../docs/execution-context.md).
 The copy/update/install recipes retained below describe the older copied-workflow
 layout, not a supported way to launch the new shared entrypoints. Adding context
 variables to an incomplete copy is not sufficient. Top-level CLI/Board/scheduler
-selection and complete overrides are the separate #164 task; minimal project assets
-and additive instruction loading are #165. Until those callers supply context,
-they fail closed. No existing project is migrated by these source changes.
+selection and complete overrides are the separate #164 task. The shared runtime
+loads configured additive instruction files without replacing Factory templates.
+Until those callers supply context, they fail closed. No existing project is migrated by these source changes.
 
 ## Comparing workflow copies before an upgrade
 

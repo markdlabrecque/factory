@@ -29,7 +29,7 @@ import { readAdmission } from "../board/admission.mts";
 import { claimRun, readRuns } from "../board/board.mts";
 import { projectId, readReceipt, receiptFile } from "./ownership.mts";
 import { paths } from "../cli/src/paths.mts";
-import { recordReview } from "../cli/src/recovery-review.mts";
+import { recordReview, WORKFLOW } from "../cli/src/recovery-review.mts";
 import { buildAssets } from "../cli/src/scaffold.mts";
 import { checkImageCapabilities } from './capabilities.mts';
 import { launchRecovery, settleRecovery } from "../cli/src/recovery-run.mts";
@@ -112,7 +112,7 @@ for (const { scenario, tier } of [
 
   // A stopped run of #7 and a jam confirmed on two passes.
   const p = paths(home);
-  recordReview(p, root, { by: "init" });
+
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
     patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main", implementationBaseSha: scenario === 'missing-baseline' ? undefined : git(root, 'rev-parse', 'main'), evidenceDir: evidence } });
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
@@ -120,6 +120,13 @@ for (const { scenario, tier } of [
 
   const runtime = bindExecution(root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state });
   Object.assign(env, runtime.env);
+  // Legacy review gate remains independent of the selected runtime; fixture-only reviewed copy.
+  for (const file of WORKFLOW) {
+    const path = join(root, '.sandcastle', file);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, file === 'main.mts' ? '"attempt-record": { type: "string" }' : 'fixture review');
+  }
+  recordReview(p, root, { by: "init" });
   const { loadExecutionContext } = await import('./context.mts');
   const policy = (await loadExecutionContext({ env: runtime.env, cwd: root, moduleRoot: runtime.directory })).policyIdentity;
   // The dispatcher's analysis of #7, with the same explicit runtime context.

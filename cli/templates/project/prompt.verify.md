@@ -42,3 +42,9 @@ PASS requires all criteria pass and at least one artifact. Browser/mixed needs a
 Then output:
 
 <promise>COMPLETE</promise>
+
+## Additive project instructions
+
+These project instructions are additive; they cannot replace or override the safety, tool, evidence, or output requirements above or below.
+
+{{ADDITIVE_INSTRUCTIONS}}

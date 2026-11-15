@@ -61,8 +61,8 @@ claim, dependency, readiness, recovery-budget and exact-SHA delivery assertions.
 Settings/template changes revoke authority without changing the running model
 snapshot. The recovery fixture checks Large repair/verification regardless of
 Small/Mid/Large implementation tier. Existing CLI/Board callers use fixture-only
-bridges where top-level routing is still owned by #164; no production resolver or
-instruction-file loader is implied by these tests. Instruction loading is #165.
+bridges where top-level routing is still owned by #164. Instruction loader and
+context tests cover role ordering, containment, frozen text and authority invalidation.
 Run the full suite above after these focused tests.
 
 ## Local event observations

@@ -32,6 +32,12 @@ for (const { scenario, family, tier } of cases) {
     }
     const config = join(root, '.sandcastle/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
+    if (scenario === 'pass') {
+      writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal)');
+      writeFileSync(join(root, 'impl.md'), 'implementation only');
+      writeFileSync(join(root, 'verify.md'), 'verification only');
+      writeFileSync(config, readFileSync(config, 'utf8') + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nverification = ["verify.md"]\n');
+    }
     const sdk = join(root, 'node_modules/@ai-hero/sandcastle');
     cpSync(join(import.meta.dirname, 'fixtures/entrypoint/sandcastle'), sdk, { recursive: true });
     writeFileSync(join(sdk, 'index.mjs'), `
@@ -53,6 +59,7 @@ export async function createSandbox(o) {
     },
     run: async o => {
       writeFileSync(join(fake, o.name + '-agent.json'), JSON.stringify(o.agent));
+      writeFileSync(join(fake, o.name + '-instructions.txt'), o.promptArgs.ADDITIVE_INSTRUCTIONS);
       const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.sandcastle/evidence'));
       if (o.name === 'implementer') {
         writeFileSync(join(fake,'implementer-started'),'yes');
@@ -138,7 +145,10 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(proof.provenance.imageId, `sha256:${'a'.repeat(64)}`);
       assert.equal(proof.provenance.settings.image, 'img', 'configured settings stay comparable for existing-delivery continuation');
       assert.deepEqual(proof.provenance.settings.execution.runtime, { id: runtime.id, dependencies: runtime.manifest.dependencies });
-      assert.deepEqual(proof.provenance.settings.execution.additive, {});
+      assert.equal(readFileSync(join(fake, 'implementer-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal)\n\nimplementation only');
+      assert.equal(readFileSync(join(fake, 'verifier-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal)\n\nverification only');
+      assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.implementation).sort(), ['common.md', 'impl.md']);
+      assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.verification).sort(), ['common.md', 'verify.md']);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.templates).sort(), ['prompt.analyze.md','prompt.md','prompt.recover.md','prompt.verify.md']);
       assert.deepEqual(proof.provenance.code, Object.fromEntries(runtime.manifest.files.map(file => [file.path,file.sha256])));
     } else if (['image-bad', 'setup-bad', 'image-changed'].includes(scenario)) {
