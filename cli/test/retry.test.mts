@@ -2,6 +2,7 @@
 // queued runs and a ticket without a record, and warns about a leftover `<ticket>-*` branch, which it keeps. Since #75 it
 // refuses a card a recovery claim, a live launch claim or an unreadable admission record protects, and keeps receipts.
 // Disposable HOME, Git repo and run-state folder; no tracker, Docker or service manager.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,7 +25,7 @@ function fixture(t: TestContext) {
   const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: root });
   git('init', '-q');
   git('commit', '-q', '--allow-empty', '-m', 'init');
-  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  project: "me/site",\n};\n');
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   const record = (iid: number, stage: string, pid = process.pid) => {

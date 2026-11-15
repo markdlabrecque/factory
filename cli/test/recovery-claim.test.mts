@@ -6,6 +6,7 @@
 // confirmation through the project's activity generation. Disposable state folder; sleeping children stand in for live
 // run processes, and a child that exits mid-claim stands in for a crash; an exited child nobody reaped (a zombie) is a dead
 // owner (#64). The zombie fixture stops its child until the parent has exec'd, preventing shell reaping races. Nothing launches.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,6 +33,8 @@ function fixture(t: TestContext) {
   t.after(() => { sleeper.kill(); rmSync(home, { recursive: true, force: true }); });
   const p = paths(home);
   root = join(home,'project');
+  mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('proj'));
   const dir = join(home, 'runs');
   observePass(p, root, { pass: 'a', at: at(0), jam: [7, 8] });
   observePass(p, root, { pass: 'b', at: at(5), jam: [7, 8] });

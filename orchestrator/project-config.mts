@@ -1,7 +1,7 @@
-// #137: data-only, fail-closed version 1 project configuration. No legacy imports, host evaluation,
-// environment expansion or per-field fallback. All callers supply the project's scaffold directory.
-import { lstatSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+// Data-only v2 project configuration. No project code, environment expansion or fallback.
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
+import type { ModelFamily } from './model-policy.mts';
 import { parse } from './vendor/smol-toml/index.js';
 
 export type Thinking = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -10,17 +10,38 @@ export type Selection = { assignee?: string; author?: string; search?: string; i
 export type EffectiveConfig = {
   source: { mode: 'toml'; path: string }; sources: Record<string, 'explicit' | 'default'>; warnings: string[];
   TRACKER: { kind: 'github' | 'gitlab'; project: string; host?: string; gitlabHost?: string; projectId?: number; milestone?: string };
-  AGENT: { provider: 'pi' | 'claude'; model: string; thinking?: Thinking; modelAliases: Record<string, string> };
+  AGENT: { family: ModelFamily };
+  workflow: { mode: 'factory' | 'project'; directory?: string };
+  instructions: Record<'common' | 'implementation' | 'verification' | 'analysis' | 'recovery', string[]>;
   LABELS: { ready: string[]; exclude: string[]; needsHuman: string; done: string };
   MERGE: { auto: boolean; method: 'merge' | 'squash' | 'rebase'; requiredChecks: string[] };
   SUBTASKS: { enabled: boolean };
-  GRAPH: { model: string; maxAnalysesPerPass: number; analysisTimeoutMinutes: number; conflictIgnore: string[]; pruneAfterDays: number };
+  GRAPH: { maxAnalysesPerPass: number; analysisTimeoutMinutes: number; conflictIgnore: string[]; pruneAfterDays: number };
   selection: Selection; dispatch: { maxConcurrent: number; staggerSeconds: number };
   config: { image: string; ciWaitMinutes: number; noPipelineMinutes: number; sandboxSetup: { command: string; timeoutMs?: number; sudo: boolean }[] };
 };
 type Table = Record<string, any>;
-/** Undefined means ENOENT only. Present but malformed/unreadable files must never fall back. */
-export function loadTomlConfig(scaffoldDir: string): EffectiveConfig | undefined {
+/** Validate lexical repository-relative paths on both Unix and Windows. */
+export function validateRelativePath(path: string): void {
+  if (!path.trim() || path.includes('\0') || isAbsolute(path) || /^[A-Za-z]:/.test(path) || path.includes('\\') || path.split('/').includes('..'))
+    throw new Error('Expected a repository-relative path without parent traversal');
+}
+/** Resolve existing paths through symlinks and enforce containment in the canonical checkout. */
+export function resolveCheckoutPath(checkout: string, path: string, kind: 'file' | 'directory'): string {
+  validateRelativePath(path);
+  const root = realpathSync(checkout);
+  let target = root;
+  for (const component of path.split('/')) {
+    target = realpathSync(resolve(target, component));
+    const rel = relative(root, target);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Path escapes checkout');
+  }
+  const stat = statSync(target);
+  if (kind === 'file' ? !stat.isFile() : !stat.isDirectory()) throw new Error(`Expected ${kind}`);
+  return target;
+}
+/** Missing, malformed and unreadable configurations fail closed. */
+export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
   const path = resolve(scaffoldDir, 'factory.toml');
   let text: string;
   try { text = readFileSync(path, 'utf8'); } catch (e) {
@@ -30,7 +51,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig | undefined
       try { lstatSync(path); present = true; } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${path}: cannot inspect configuration`);
       }
-      if (!present) return;
+      if (!present) throw new Error(`${path}: missing version 2 configuration; manually migrate this project`);
     }
     throw new Error(`${path}: cannot read configuration (${(e as NodeJS.ErrnoException).code})`);
   }
@@ -71,34 +92,32 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig | undefined
     sources[`${p}.${k}`] = Object.hasOwn(t, k) ? 'explicit' : 'default';
     return t[k] === undefined ? undefined : str(t, k, p);
   };
-  table(raw, '', ['version','tracker','agent','labels','graph','sandbox','selection','work','dispatch','merge','ci']);
-  sources.version = 'explicit';
-  if (raw.version !== 1) fail('version', 'required supported version = 1');
+  table(raw, '', ['version','tracker','agent','labels','graph','sandbox','selection','work','dispatch','merge','ci','workflow','instructions']);
+  sources.version = Object.hasOwn(raw, 'version') ? 'explicit' : 'default';
+  if (raw.version !== 2) fail('version', 'unsupported configuration; version = 2 required, manually migrate this project');
   const t = section('tracker', ['kind','project','host','project_id'], true);
   const kind = en(t, 'kind', 'tracker', ['github','gitlab']);
   const tracker: EffectiveConfig['TRACKER'] = { kind, project: str(t, 'project', 'tracker') };
   const host = str(t, 'host', 'tracker', kind === 'github' ? 'github.com' : undefined);
   if (!/^[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(host)) fail('tracker.host', 'expected a hostname (no URL or path)');
   if (kind === 'gitlab') { tracker.gitlabHost = host; tracker.projectId = num(t, 'project_id', 'tracker', undefined, true); }
-  else { tracker.host = host; if ('project_id' in t) fail('tracker.project_id', 'unsupported on GitHub'); }
-  const a = section('agent', ['provider','model','thinking','model_aliases'], true);
-  const provider = en(a, 'provider', 'agent', ['claude','pi']);
-  sources['agent.model_aliases'] = 'explicit';
-  sources['agent.thinking'] = Object.hasOwn(a, 'thinking') ? 'explicit' : 'default';
-  const aliases = table(a.model_aliases, 'agent.model_aliases');
-  if (!Object.keys(aliases).length) fail('agent.model_aliases', 'required nonempty alias map');
-  const seen = new Map<string, string>();
-  for (const [k,v] of Object.entries(aliases)) {
-    if (!nonempty(k) || !nonempty(v)) fail('agent.model_aliases', 'aliases and model IDs must be nonempty strings');
-    const normalized = k.trim().toLowerCase();
-    if (seen.has(normalized) && seen.get(normalized) !== v) fail('agent.model_aliases', 'ambiguous case-insensitive aliases');
-    seen.set(normalized, v);
-  }
-  const model = str(a, 'model', 'agent');
-  let thinking: Thinking | undefined;
-  if ('thinking' in a) {
-    if (provider !== 'pi') fail('agent.thinking', 'supported only for Pi');
-    thinking = en(a, 'thinking', 'agent', ['off','minimal','low','medium','high','xhigh']);
+  else { sources['tracker.project_id'] = 'default'; tracker.host = host; if ('project_id' in t) fail('tracker.project_id', 'unsupported on GitHub'); }
+  const a = section('agent', ['family']);
+  const family = en(a, 'family', 'agent', ['openai','anthropic'], 'openai') as ModelFamily;
+  const wf = section('workflow', ['mode','directory']);
+  const mode = en(wf, 'mode', 'workflow', ['factory','project'], 'factory') as 'factory' | 'project';
+  const directory = optional(wf, 'directory', 'workflow');
+  if (mode === 'project' && !directory) fail('workflow.directory', 'required in project mode');
+  if (mode === 'factory' && directory !== undefined) fail('workflow.directory', 'not allowed in factory mode');
+  if (directory) { try { validateRelativePath(directory); } catch { fail('workflow.directory', 'expected a repository-relative path without parent traversal'); } }
+  const inst = section('instructions', ['common','implementation','verification','analysis','recovery']);
+  const instructions = {} as EffectiveConfig['instructions'];
+  for (const role of ['common','implementation','verification','analysis','recovery'] as const) {
+    instructions[role] = arr(inst, role, 'instructions');
+    for (const p of instructions[role]) {
+      try { validateRelativePath(p); if (!/\.md$/i.test(p)) throw new Error(); }
+      catch { fail(`instructions.${role}`, 'expected repository-relative Markdown paths without parent traversal'); }
+    }
   }
   const l = section('labels', ['needs_human','done'], true);
   const needsHuman = str(l, 'needs_human', 'labels'), done = str(l, 'done', 'labels');
@@ -119,11 +138,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig | undefined
   const w = section('work',['units']);
   const d = section('dispatch',['max_concurrent','stagger_seconds']);
   const m = section('merge',['auto','method','required_checks']);
-  const g = section('graph',['model','max_analyses_per_pass','analysis_timeout_minutes','conflict_ignore','prune_after_days'], true);
-  const graphModel = str(g,'model','graph');
-  const approved = new Set(Object.values(aliases));
-  if (!approved.has(model)) fail('agent.model', 'must be an approved model ID in agent.model_aliases');
-  if (!approved.has(graphModel)) fail('graph.model', 'must be an approved model ID in agent.model_aliases');
+  const g = section('graph',['max_analyses_per_pass','analysis_timeout_minutes','conflict_ignore','prune_after_days']);
   const ci = section('ci',['wait_minutes','no_pipeline_minutes']);
   const sandbox = section('sandbox',['image','setup'],true);
   sources['sandbox.setup'] = Object.hasOwn(sandbox, 'setup') ? 'explicit' : 'default';
@@ -137,15 +152,15 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig | undefined
     return { command: str(st,'command',p), sudo: bool(st,'sudo',p), ...('timeout_ms' in st ? { timeoutMs: num(st,'timeout_ms',p,undefined,true) } : {}) };
   });
   return { source: { mode: 'toml', path }, sources, warnings: exclude.includes(needsHuman) ? [] : ['selection.labels.none does not contain labels.needs_human; add it to prevent human-held tickets from being selected.'],
-    TRACKER: tracker, AGENT: { provider, model, thinking, modelAliases: { ...aliases } }, LABELS: { ready, exclude, needsHuman, done },
+    TRACKER: tracker, AGENT: { family }, workflow: { mode, ...(directory ? { directory } : {}) }, instructions, LABELS: { ready, exclude, needsHuman, done },
     MERGE: { auto: bool(m,'auto','merge'), method: en(m,'method','merge',['merge','squash','rebase'],'squash'), requiredChecks: arr(m,'required_checks','merge') },
     SUBTASKS: { enabled: en(w,'units','work',['issues','subtasks'],'subtasks') === 'subtasks' },
-    GRAPH: { model: graphModel, maxAnalysesPerPass: num(g,'max_analyses_per_pass','graph',5,true), analysisTimeoutMinutes: num(g,'analysis_timeout_minutes','graph',10), conflictIgnore: arr(g,'conflict_ignore','graph'), pruneAfterDays: num(g,'prune_after_days','graph',30) },
+    GRAPH: { maxAnalysesPerPass: num(g,'max_analyses_per_pass','graph',5,true), analysisTimeoutMinutes: num(g,'analysis_timeout_minutes','graph',10), conflictIgnore: arr(g,'conflict_ignore','graph'), pruneAfterDays: num(g,'prune_after_days','graph',30) },
     selection, dispatch: { maxConcurrent: num(d,'max_concurrent','dispatch',3,true), staggerSeconds: value(d,'stagger_seconds','dispatch',v => typeof v === 'number' && Number.isFinite(v) && v >= 0,'expected a nonnegative finite number',20) },
     config: { image: str(sandbox,'image','sandbox'), sandboxSetup, ciWaitMinutes: num(ci,'wait_minutes','ci',30), noPipelineMinutes: num(ci,'no_pipeline_minutes','ci',5) } };
 }
 /** Identity lookup does not execute a project module; malformed TOML deliberately propagates. */
 export function tomlIdentity(scaffoldDir: string) {
-  const c = loadTomlConfig(scaffoldDir); if (!c) return;
+  const c = loadTomlConfig(scaffoldDir);
   return { kind: c.TRACKER.kind, host: c.TRACKER.gitlabHost ?? c.TRACKER.host!, project: c.TRACKER.project };
 }

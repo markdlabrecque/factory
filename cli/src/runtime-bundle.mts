@@ -38,14 +38,9 @@ function checkNode(node: RuntimeManifest['node']) {
   if (major < 22 || (major === 22 && minor < 18)) throw new Error('Runtime requires Node 22.18 or newer');
   if (!node || typeof node.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(node.version) || node.minimum !== '22.18.0' || node.platform !== process.platform || node.arch !== process.arch) throw new Error('Runtime Node metadata is incompatible');
 }
+// V2 entrypoints already require explicit project settings. Preserve source bytes in the bundle.
 function sourceBytes(root: string, asset: RuntimeAsset): Buffer {
-  const data = readFileSync(regularFile(root, asset.source));
-  if (asset.source !== 'orchestrator/main.mts' || asset.destination !== 'main.mts') return data;
-  const text = data.toString('utf8');
-  const start = text.indexOf('// ---- Legacy CONFIG fallback:');
-  const end = text.indexOf('const PROJECT = TRACKER.project;', start);
-  if (start < 0 || end < 0 || text.indexOf('// ---- Legacy CONFIG fallback:', start + 1) !== -1) throw new Error('Cannot remove legacy runtime CONFIG');
-  return Buffer.from(text.slice(0, start) + "// Shared runtime requires explicit project settings.\nconst CONFIG = effectiveConfig?.config ?? (() => { throw new Error('Shared runtime requires project configuration'); })();\n" + text.slice(end));
+  return readFileSync(regularFile(root, asset.source));
 }
 function entries(root: string, assets: readonly RuntimeAsset[], assemble = false): RuntimeFile[] {
   return assets.map(({ source, destination }) => {

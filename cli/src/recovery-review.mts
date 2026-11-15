@@ -22,7 +22,7 @@ import type { Paths } from './paths.mts';
 import { recoveryFile } from './recovery-state.mts';
 // #137: executable TOML/runtime/parser helpers are reviewed with recovery; factory.toml remains project-owned.
 import { appRoot, FROM_ORCHESTRATOR } from './scaffold.mts';
-const CONFIG_WORKFLOW = FROM_ORCHESTRATOR.filter(f => ['runtime-config.mts','project-config.mts','selection.mts'].includes(f) || f.startsWith('vendor/') && (f.endsWith('.js') || f.endsWith('package.json')));
+const CONFIG_WORKFLOW = FROM_ORCHESTRATOR.filter(f => ['runtime-config.mts','project-config.mts','model-policy.mts','selection.mts'].includes(f) || f.startsWith('vendor/') && (f.endsWith('.js') || f.endsWith('package.json')));
 
 /** Every .sandcastle file the repair path runs, as the review covers them. config.mts is project configuration, not workflow. */
 // #150: proof and all executable delivery dependencies must be reviewed as one coherent upgrade.

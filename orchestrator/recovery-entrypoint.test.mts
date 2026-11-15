@@ -75,6 +75,8 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
     mkdirSync(dirname(join(root, f.path)), { recursive: true });
     writeFileSync(join(root, f.path), f.content, { mode: f.mode });
   }
+  const configPath = join(root, '.sandcastle/factory.toml');
+  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"'));
   cpSync(join(FIXTURES, "sandcastle"), join(root, "node_modules/@ai-hero/sandcastle"), { recursive: true });
   const evidence = join(root, ".sandcastle/evidence/7");
   mkdirSync(evidence, { recursive: true });
@@ -244,8 +246,8 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   assert.equal(rec9.implementationModel, "pi-claude-subscription/claude-sonnet-5-5");
 
   // Direct invalid starts preserve actionable internal state, even if dispatched just before a body edit.
-  for (const [n, body, status] of [[10, "No declaration", "missing"], [11, "Model: unknown", "unsupported"],
-    [12, "Model: sonnet\nModel: opus", "conflicting"]] as const) {
+  for (const [n, body, status] of [[10, "Model tier: unknown", "unsupported"], [11, "Model: sonnet", "unsupported"],
+    [12, "Model tier: small\nModel tier: large", "conflicting"]] as const) {
     const pending = claimRun({ dir: state, project: "owner/repo", iid: String(n), pid: process.pid, cap: 99 });
     assert.equal(pending.ok, true);
     const result = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", String(n), "--base", "main"],
@@ -262,8 +264,12 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
     assert.equal(git(root, "branch", "--list", `${n}-*`), "");
   }
   const fixed = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", "10", "--base", "main"],
-    { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model: opus' } });
+    { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: large' } });
   assert.match(fixed.stderr, /docker\(\) must not be used/);
   assert.equal(readRuns(state).find(r => r.iid === '10')?.implementationModel, 'pi-claude-subscription/claude-opus-5-5');
+  const defaulted = spawnSync(process.execPath, ['.sandcastle/main.mts', '--issue', '13', '--base', 'main'],
+    { cwd: root, encoding: 'utf8', env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'No model tier declaration' } });
+  assert.match(defaulted.stderr, /docker\(\) must not be used/);
+  assert.equal(readRuns(state).find(r => r.iid === '13')?.implementationModel, 'pi-claude-subscription/claude-sonnet-5-5');
  });
 }

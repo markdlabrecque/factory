@@ -19,7 +19,7 @@ function fixture() {
   writeFileSync(join(evidence, 'verdict.md'), 'VERDICT: PASS\n');
   writeFileSync(join(evidence, 'verification.json'), JSON.stringify({ version:1, verdict:'PASS', changeKind:'feature', evidenceKind:'command', interactive:false, criteria:[{requirement:'works',result:'pass',evidence:['output.txt']}], artifacts:[{path:'output.txt',kind:'command-output',phase:'check'}], limitations:[] }));
   const identity = { project:'owner/repo',ticket:'1',executionId:'execution',branch:'topic',base:'main',baseline:'b'.repeat(40),tip:'a'.repeat(40),requirementsHash:'c'.repeat(16) };
-  const names = ['delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'capabilities.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'];
+  const names = ['delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'model-policy.mts', 'models.mts', 'selection.mts', 'main.mts', 'capabilities.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'];
   const code = Object.fromEntries(names.map(n => { writeFileSync(join(workflow,n),n); return [n,sha256(n)]; }));
   const settings = { merge:{auto:true}, image:'test' };
   const frozen = createProof(state,evidence,identity,{imageId:`sha256:${'d'.repeat(64)}`,nodeVersion:'v22',code,settings});

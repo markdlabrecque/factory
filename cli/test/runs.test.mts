@@ -1,5 +1,6 @@
 // Run lookup tests: which project a command targets, and which run records and logs are that project's.
 // Disposable HOME, Git repos and state folder; no tracker, Docker or service manager.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +22,7 @@ function fixture(t: TestContext) {
     const root = join(home, dir);
     mkdirSync(join(root, '.sandcastle'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
-    if (tracker) writeFileSync(join(root, '.sandcastle/config.mts'), `export const TRACKER = {\n  kind: "github",\n  project: "${tracker}", // factory:project\n};\n`);
+    if (tracker) writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(tracker));
     addProject(p, realpathSync(root));
     return realpathSync(root);
   };
@@ -46,7 +47,7 @@ test('project is the registered checkout you stand in, or --project by name or p
   assert.throws(() => resolveProject(p, { cwd: home }), /not a registered project.*--project.*Registered: /);
   assert.throws(() => resolveProject(p, { project: 'nope' }), /No registered project nope/);
   const bare = project('bare');
-  assert.throws(() => resolveProject(p, { cwd: bare }), /factory init/);
+  assert.throws(() => resolveProject(p, { cwd: bare }), /factory.toml.*manually migrate/);
 });
 
 test('runs are the project\'s own records; a crashed run reads as stopped without rewriting it; logs follow dispatch.mts', t => {

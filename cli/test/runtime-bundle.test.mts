@@ -38,6 +38,9 @@ test('complete inventory, deterministic identity, private install and validation
   assert.equal(a.id, b.id); assert.deepEqual(validateRuntimeBundle(a.directory), a.manifest);
   assert.deepEqual(a.manifest.files.map(x => x.path), [...RUNTIME_ASSETS.map(x => x.destination)].sort());
   assert(!existsSync(join(a.directory, 'config.mts')));
+  for (const name of ['main.mts', 'model-policy.mts']) {
+    assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
+  }
   assert(!readFileSync(join(a.directory, 'main.mts'), 'utf8').includes('sandcastle-islandhealth'));
   assert(existsSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs')));
   writeFileSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs'), 'poison');

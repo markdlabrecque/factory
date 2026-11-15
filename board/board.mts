@@ -75,6 +75,7 @@ export interface RunState {
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
   delivery?: DeliveryCheckpoint; // host-only current pointer; never reconstructed from note prose
   implementationModel?: string; // chosen once by main.mts, never updated by description refresh
+  modelChoice?: import('./assessment.mts').ModelChoiceMetadata; // attempt snapshot, independent of refreshed assessment
   updatedAt: string;
   pid: number;
   verdict?: string;

@@ -3,6 +3,7 @@
 // real orchestrator/dispatch.sh --issue, with stub tools on the PATH (no tracker, Docker or agent): it runs
 // main.mts for that ticket in the foreground, logs to .sandcastle/logs/run-<n>.log, and rejects pass-only flags.
 // The curl stub drains the piped dummy auth header before returning, avoiding SIGPIPE under dispatch.sh's pipefail.
+import { copyTestRuntime, factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,7 +25,7 @@ function fixture(t: TestContext) {
     const root = join(home, dir);
     mkdirSync(join(root, '.sandcastle'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
-    writeFileSync(join(root, '.sandcastle/config.mts'), `export const TRACKER = {\n  project: "me/${dir}",\n};\n`);
+    writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`me/${dir}`));
     writeFileSync(join(root, '.sandcastle/dispatch.sh'), script, { mode: 0o755 });
     addProject(p, realpathSync(root));
     return realpathSync(root);
@@ -62,7 +63,7 @@ function sandcastleProject(t: TestContext) {
   mkdirSync(bin);
   const tool = (name: string, body: string) => writeFileSync(join(bin, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
   for (const name of ['npm', 'glab']) tool(name, '');
-  tool('claude', `echo '{"loggedIn": true}'`);
+  tool('pi', 'test "$*" = "auth check --provider openai"');
   tool('curl', 'while IFS= read -r _; do :; done; printf 400');
   writeFileSync(join(bin, 'docker'), `#!${process.execPath}\nimport { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, '../../orchestrator/fixtures/capability-docker.mjs'))};\nconst a = process.argv.slice(2); if (a[0] === 'info') process.exit(0); const out = capabilityDocker(a, ${JSON.stringify(home)}); if (out === undefined) process.exit(90); console.log(out);`, { mode: 0o755 });
   tool('npx', `printf '%s\\n' "$*" > "$PWD/npx-called"; echo "run output"; exit 4`);
@@ -70,13 +71,14 @@ function sandcastleProject(t: TestContext) {
   execFileSync('git', ['init', '-q', '--bare', origin]);
   const root = join(home, 'site');
   mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  copyTestRuntime(join(root, '.sandcastle'));
   mkdirSync(join(root, 'node_modules/@ai-hero/sandcastle'), { recursive: true });
   copyFileSync(join(import.meta.dirname, '../../orchestrator/dispatch.sh'), join(root, '.sandcastle/dispatch.sh'));
   copyFileSync(join(import.meta.dirname, '../../orchestrator/capabilities.mts'), join(root, '.sandcastle/capabilities.mts'));
   copyFileSync(join(import.meta.dirname, '../../board/admission.mts'), join(root, '.sandcastle/admission.mts'));
   copyFileSync(join(import.meta.dirname, '../../board/execution-events.mts'), join(root, '.sandcastle/execution-events.mts'));
   writeFileSync(join(root, '.sandcastle/dispatch.mts'), '');
-  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  gitlabHost: "gitlab.example",\n  project: "me/site",\n};\n');
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site', { kind: 'gitlab', host: 'gitlab.example' }));
   writeFileSync(join(root, '.sandcastle/main.mts'), 'const CONFIG = {\n  image: "site-image",\n};\n');
   writeFileSync(join(root, '.sandcastle/.env'), 'CLAUDE_CODE_OAUTH_TOKEN=x\n');
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });

@@ -29,7 +29,8 @@ export interface Facts {
   hash: string;
   checkedAt: string;
 }
-export type ModelResolution = { declarations: string[]; revision: string } & (
+export type ModelChoiceMetadata = { family: 'openai' | 'anthropic'; tier: 'small' | 'mid' | 'large'; source: 'factory-default' | 'ticket-tier'; resolvedModel: string; descriptionRevision: string; policyIdentity: string };
+export type ModelResolution = { declarations: string[]; revision: string; choice?: ModelChoiceMetadata } & (
   { status: "resolved"; model: string } |
   { status: "missing" | "unsupported" | "conflicting"; error: string }
 );

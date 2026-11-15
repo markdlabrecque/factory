@@ -4,6 +4,7 @@
 // an unreadable manager, a malformed file and an overdue tick.
 // Disposable HOME, Git repo and run-state folder; fake service and schedule backends (the CLI test puts the systemctl
 // stub first on PATH), no tracker or Docker.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,7 +31,7 @@ function fixture(t: TestContext) {
   const root = join(home, 'site');
   mkdirSync(join(root, '.sandcastle'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  project: "me/site",\n};\n');
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   const record = (project: string, iid: number, stage: string, extra: object = {}) => {

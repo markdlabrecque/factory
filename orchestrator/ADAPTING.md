@@ -128,17 +128,17 @@ For development in this repository, follow [AGENTS.md](../AGENTS.md): prepare ti
 
 The optional [Factory CLI](../README.md#install-the-factory-cli) installs a manifest-owned `factory-board` user service, from the Factory checkout it is run from (run `factory install` inside an updated checkout to refresh the installed copy; it leaves the scheduler off and ends by reminding you to run `factory schedule on`). It does not replace the project installation steps below. On Linux, `factory schedule` replaces the per-project dispatcher timers (`factory legacy status` lists the enabled ones and `factory legacy retire` disables them and removes their env files), and on macOS it gives scheduled passes for the first time (see "On a schedule" below). When using it, the dispatcher unit and `dispatch.sh` now default `SANDCASTLE_STATE_DIR` to `$HOME/.local/state/factory`, so runs reach its board. Do not also install the legacy board service on port 4444. Existing Sandcastle services and state are only warned about, never migrated.
 
-`factory init` (see the [README](../README.md#projects-factory-project-and-factory-init)) adds the missing minimal workflow files to a project's `.sandcastle` without overwriting customizations, and `factory project` records the checkout. It replaces the manual copy under "Install into a project" but not the environment layers (image, web runtime, CMS, Playwright) from the `sandcastle-setup` skill. `.sandcastle` is kept; a later migration to `.factory` is recorded in the [CLI roadmap](../docs/factory-cli.md#roadmap). The personal profile's models are `model:sonnet` → `pi-claude-subscription/claude-sonnet-5-5` and `model:opus` → `pi-claude-subscription/claude-opus-5-5`, with Opus verification and Sonnet analysis. `config.mts`, `config.personal.mts` and `main.mts` carry `// factory:<tag>` markers that `factory init` fills; keep each exactly once.
+`factory init` (see the [README](../README.md#projects-factory-project-and-factory-init)) adds the missing minimal workflow files to a project's `.sandcastle` without overwriting customizations, and `factory project` records the checkout. It replaces the manual copy under "Install into a project" but not the environment layers (image, web runtime, CMS, Playwright) from the `sandcastle-setup` skill. `.sandcastle` is kept; a later migration to `.factory` is recorded in the [CLI roadmap](../docs/factory-cli.md#roadmap). Both profiles default to OpenAI with Factory-owned Small/Mid/Large models. Select `agent.family = "anthropic"` for subscription models. Model IDs and thinking are not project settings.
 
 ## Project settings in TOML
 
 New projects edit `.sandcastle/factory.toml`, not implementation code. It is the
-complete ordinary-settings source when present; defaults never merge with legacy
-config/SELECT/CONFIG. Without TOML, custom legacy behavior is unchanged. Invalid
-present TOML fails closed before preflight or workflow side effects.
+complete ordinary-settings source. Version 2 is required; missing, v1 and invalid
+configuration fail closed before preflight or workflow side effects. No executable
+config/SELECT/CONFIG fallback is loaded.
 
-Read [the full v1 schema, every default and tracker capability, startup-command
-quoting, explain behavior and complete manual migration mapping](../docs/project-config.md).
+Read [the v2 schema, defaults, tracker capabilities, startup-command quoting and
+manual migration procedure](../docs/project-config.md).
 Use `factory selection explain <ticket> [--project <name|path>] [--json]` to inspect
 eligibility separately from historical/unknown execution holds, without analysis,
 state writes, label creation or launches. `factory dispatch --max N` requires a
@@ -159,29 +159,32 @@ The generated JS retains upstream whitespace under a scoped `.gitattributes` exe
 ## Two reference configs
 
 Preferred profiles are `factory.client.toml` and `factory.personal.toml`, installed
-as `factory.toml` by init. The settings table below describes their behavior too.
-`config.mts` and `config.personal.mts` remain **legacy compatibility examples**;
-legacy instructions below apply only when TOML is absent.
+as `factory.toml` by init. `config.mts` and `config.personal.mts` are historical
+examples only; the upgraded runtime never imports them, including when TOML is absent.
 
-| | `config.mts`: client and Affinity Bridge work | `config.personal.mts`: personal projects |
+| | `factory.client.toml`: client work | `factory.personal.toml`: personal projects |
 | --- | --- | --- |
 | Tracker | GitLab via `glab` (`tracker.gitlab.mts`) | GitHub via `gh` (`tracker.github.mts`) |
 | Units of work | GitLab Tasks | GitHub sub-issues |
-| Agent | Claude Code, `CLAUDE_CODE_OAUTH_TOKEN` in `.sandcastle/.env` | Pi with the `pi-claude-subscription` provider (drives the Claude Code CLI on a subscription): host `claude auth login`, container `CLAUDE_CODE_OAUTH_TOKEN` in `.sandcastle/.env`; no OpenAI login |
-| Implementer model | description field, `**Model:** opus` or `sonnet` | description field, `**Model:** Sonnet 5.5` or `Opus 5.5`, or an approved full ID |
-| Verifier / analysis model | `AGENT.model` / `GRAPH.model` (`sonnet`) | fixed: `pi-claude-subscription/claude-opus-5-5` / `pi-claude-subscription/claude-sonnet-5-5` |
+| Agent | Pi with high thinking, OpenAI by default | Pi with high thinking, OpenAI by default |
+| Implementer model | `Model tier: small`, `mid` or `large`, default Mid | same |
+| Verifier / analysis model | family Large / Mid from Factory policy | same |
 | After the push | wait for the branch pipeline, open an MR; a person merges | open a PR; merge it once every CI check on the pushed commit passes |
 | Verification media | uploaded to the ticket, then commented | native attachments in one verification comment via `gh --attach` |
 
 Both adapters offer `mergedPr(iid, branch, base)` (#86) for spotting work merged outside Factory: the newest PR/MR merged into the base from the run's recorded branch, else the newest whose title starts with `#N:` (not `#N0:` or a mention elsewhere). It returns the number, title, URL, merge time and which rule matched. A closed issue alone is never treated as a merge. Copy `tracker.mts`, `tracker.gitlab.mts` and `tracker.github.mts` together.
 
-For a new personal project use `factory init --profile personal` and review `factory.toml` (legacy-only manual copy: `config.personal.mts` as `config.mts`). Setup:
+For either profile, review `factory.toml`. OpenAI requires a host Pi login and a
+Pi-capable image. For Anthropic, set `agent.family = "anthropic"` and use this setup:
 
 1. **Host:** `claude auth login`, and install the provider where Pi discovers it and `preflight.mts` looks: `git clone --depth 1 --branch <tag> https://github.com/markdlabrecque/pi-claude-subscription.git ~/.pi/agent/extensions/pi-claude-subscription && cd ~/.pi/agent/extensions/pi-claude-subscription && npm ci --omit=dev --ignore-scripts` (a release tag; v1.6.0 is the one checked here). `pi install git:…` is not used: it runs the package's husky `prepare` hook, which fails. Host analysis loads it with an explicit `-e <extension>/index.ts` next to `--no-extensions`, so no other extension is enabled; the path defaults to `~/.pi/agent/extensions/pi-claude-subscription/index.ts` (override with `FACTORY_PI_SUBSCRIPTION_EXTENSION`).
 2. **Container:** the image needs the Claude Code CLI and the extension: use `layers/agent-pi/pi.Dockerfile.snippet`. Sandcastle's Pi adapter runs `pi -p --mode json --model <provider/id>` in the container, and the extension spawns `claude -p`. Nothing from the host's `~/.claude` or `~/.pi` is copied into the image. The CLI authenticates at run time with `CLAUDE_CODE_OAUTH_TOKEN` from `.sandcastle/.env` (`claude setup-token`), which Sandcastle passes to the container. The extension strips `ANTHROPIC_API_KEY`, so the subscription is what is used.
 3. **Preflight:** `dispatch.sh` runs `preflight.mts` (`subscriptionPreflight` in `models.mts`): the extension file exists, `claude auth status` is logged in, and `pi --list-models` shows the configured models from the provider, then checks the container token with an empty Messages request. No value is printed or put on a command line; OpenAI is never consulted.
 
-Only two models are used; `main.mts` and `dispatch.mts` refuse to run if `AGENT.model` or `GRAPH.model` is anything else (`models.mts`). A custom Pi config on `openai/` models still works: `main.mts` mints a per-run `OPENAI_API_KEY` from the host's pi login only for such models.
+Factory maps Small/Mid/Large to fixed family models in `model-policy.mts`.
+The runtime derives its agent and graph models from that policy, never custom
+aliases. For OpenAI, `main.mts` mints a per-run `OPENAI_API_KEY` from the host's Pi
+login. Anthropic never requests an OpenAI credential.
 
 ### Browser provisioning and upgrades
 
@@ -197,13 +200,23 @@ Before retrying, run a non-root browser smoke check in that image, from an empty
 
 ## Description model declarations
 
-On GitHub and GitLab, put a standalone `**Model:** Sonnet 5.5` or `**Pi model:** pi-claude-subscription/claude-sonnet-5-5` in each unit's description. Plain `Model: sonnet` and `**Model**: sonnet` also work. `AGENT.modelAliases` maps case-insensitive aliases to approved model IDs; its values are the approved full IDs, matched exactly. Client copies ship `opus` and `sonnet` aliases. Personal copies also ship `Sonnet 5.5` and `Opus 5.5`.
-
-Missing, unsupported, empty or conflicting declarations keep the ticket queued with a corrective message, including for `factory run`. Repeated declarations resolving to the same model are accepted. Ordinary prose, fenced/indented code, blockquotes, HTML comments, tracker comments, parent descriptions and model labels do not choose models. Sub-issues and Tasks need their own declaration. Empty alias configuration does not restore a default. Verifier, recovery and analysis models remain `AGENT.model` and `GRAPH.model`.
+On GitHub and GitLab, use a standalone `Model tier: small`, `mid` or `large` in
+the unit's current description. Markdown-bold fields work too. Missing declarations
+default to Mid. Old `Model:` / `Pi model:`, unsupported, empty or conflicting tier
+fields keep the ticket queued with a corrective message, including for `factory run`.
+Repeated identical tiers are accepted. Prose, code, blockquotes, HTML comments,
+tracker comments, parent descriptions and model labels do not choose models.
+Analysis uses Mid; verification and recovery use Large, independent of the ticket tier.
 
 Dispatch, refresh and direct runs share `models.mts`'s resolver. Factory persists `modelResolution` in `<state>/assessment/models/<project>--<iid>.json`, with status, model or error, source declarations and the SHA-256 description revision. Assessment reads merge this model state with other current facts. Model reads have their own generation fence under the assessment lock, so an older read cannot overwrite a newer choice and a model-only update cannot interrupt dependency analysis. Board cards display the current description model or actionable error separately from `implementationModel`, the attempt's fixed choice stored at normal startup. An edit changes future choices, never the model of an attempt already running. Existing historical cards without a recorded attempt model show no invented value.
 
-**Upgrade existing project copies:** replace `AGENT.modelLabels` with `AGENT.modelAliases` in the project-owned `config.mts`. Use human-readable aliases, not label names, mapped to your approved full IDs. Remove model keys from `allLabels()`; keep readiness, exclusion, needs-human and done labels unchanged. Merge `main.mts` by hand and copy `models.mts`, `preflight.mts`, `dispatch.mts`, `refresh.mts`, `assessment.mts`, `board.mts` and `board.template.html` together, including the installed Board's assessment store and template. Run `factory update --dry-run` first to identify local changes, then confirm `factory recovery review --confirm` after reviewing the upgrade. Add declarations to issue/Task descriptions yourself before scheduling again. Factory neither edits descriptions nor deletes old tracker labels; existing labels are ignored for model choice.
+**Upgrade existing project copies:** follow the [manual v2 migration](../docs/project-config.md#existing-projects).
+Merge customized `main.mts` and shell/dispatch code by hand. Copy `model-policy.mts`
+with runtime, resolver, analysis, refresh, parser and board helpers. Normal startup
+freezes policy metadata in `modelChoice`; refresh never overwrites it. Delivery
+proofs bind policy and resolver code, so old proofs require fresh verification.
+Run `factory update --dry-run`, review the changes, then reconfirm recovery review
+before scheduling. Factory neither edits ticket descriptions nor deletes old model labels.
 
 **The CI gate** (`ci.mts`) is deterministic on both trackers. Set `[merge] auto = true` in `factory.toml` (legacy: `MERGE.auto` in `config.mts`) to enable it, or leave it `false` for manual merges. The optional `requiredChecks: ["test", "build"]` names exact GitHub checks or GitLab jobs that must be present and passed. Required checks cannot be skipped. Omit it or use `[]` for the existing all-checks rule: at least one passed, every other check passed or skipped.
 
@@ -219,9 +232,9 @@ npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
 
 ## Install into a project
 
-For new/empty projects, `factory init` also ships `factory.toml`, `runtime-config.mts`, `project-config.mts`, `config-read.mts`, `selection.mts` and the **entire** `vendor/smol-toml/` directory (ESM files, package scope, BSD-3-Clause license and attribution). Keep those assets together, including before npm install. Existing scaffolds require the reviewed migration above; a rerun never silently opts them in.
+For new/empty projects, `factory init` also ships `factory.toml`, `runtime-config.mts`, `project-config.mts`, `model-policy.mts`, `config-read.mts`, `selection.mts` and the **entire** `vendor/smol-toml/` directory (ESM files, package scope, BSD-3-Clause license and attribution). Keep those assets together, including before npm install. Existing scaffolds require the reviewed migration above; a rerun never silently opts them in.
 
-`factory init` does this for the files below (except `sandbox/`, and with neutral `prompt.md`/`prompt.verify.md`, an empty `sandboxSetup` and `preflight.mts` added). By hand, copy into the project's `.sandcastle/`: `config.mts` (or `config.personal.mts`, renamed to `config.mts`), `main.mts`, `dispatch.mts`, `dispatch.sh`, `refresh.mts`, `graph.mts`, `analyze.mts`, `tracker.mts`, `tracker.gitlab.mts`, `tracker.github.mts`, `ci.mts`, `models.mts`, `manifests.mts`, `preflight.mts`, `capabilities.mts`, `handoff.mts`, `verification.mts`, `recovery.mts`, `recovery-sandbox.mts`, `ownership.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `prompt.recover.md`, `sandbox/`, and `board.mts` + `admission.mts` + `execution-events.mts` + `assessment.mts` + `delivery.mts` + `journal.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the tracker and Playwright layers, plus the Pi layer for the personal config; web runtime and CMS layers depend on the stack). The host needs Node 22.18+, Docker, and on the PATH and logged in: `glab` and `claude` (client config) or `gh` and `pi` (personal config).
+`factory init` does this for the files below (except `sandbox/`, and with neutral `prompt.md`/`prompt.verify.md`, an empty `sandboxSetup` and `preflight.mts` added). By hand, copy a v2 `factory.toml` profile and the runtime/parser/policy assets above into the project's `.sandcastle/`, plus `main.mts`, `dispatch.mts`, `dispatch.sh`, `refresh.mts`, `graph.mts`, `analyze.mts`, `tracker.mts`, `tracker.gitlab.mts`, `tracker.github.mts`, `ci.mts`, `models.mts`, `manifests.mts`, `preflight.mts`, `capabilities.mts`, `handoff.mts`, `verification.mts`, `recovery.mts`, `recovery-sandbox.mts`, `ownership.mts`, `prompt.md`, `prompt.verify.md`, `prompt.analyze.md`, `prompt.recover.md`, `sandbox/`, and `board.mts` + `admission.mts` + `execution-events.mts` + `assessment.mts` + `delivery.mts` + `journal.mts` + `board.template.html` from `../board/`. Add `evidence/`, `state/`, `logs/` and `board.html` to `.sandcastle/.gitignore`. The image comes from the `sandcastle-setup` skill (needs the tracker and Playwright layers, plus the Pi layer for the personal config; web runtime and CMS layers depend on the stack). The host needs Node 22.18+, Docker, Pi and the selected tracker CLI. Authenticate Pi for OpenAI, or configure the subscription provider above for Anthropic.
 
 Assessment refresh uses `<state>/assessment/<card>.generation` and a short `<card>.lock`, separate from admission. Allocate an attempt before catalogue, selection or ticket reads. Compare its token under the same lock before publishing pending, success or failure and consuming captured requests. The manual worker passes `FACTORY_REFRESH_KEY` and `FACTORY_REFRESH_ATTEMPT` to its dispatcher child, which reuses that attempt instead of allocating another. Scheduled passes allocate their own attempts, as does `dispatch.mts --refresh-only` without `--ticket`, which reassesses every card of the project (up to `REFRESH_PER_PASS`, oldest assessment first) and exits before tracker writes, run updates or admission; use it to keep a project that is not scheduled current. Keep `refresh.mts`, `assessment.mts` and the installed `refresh-worker.mts` at the same version. Only process-identity helpers come from `admission.mts`; no admission lock or run record is touched. Tracker reads and analysis never hold the assessment lock. Dead-owner reclamation is serialized by `<card>.lock.reap`; a corrupt lock, live owner or abandoned guard fails safely with a logged store error after a bounded wait. Inspect the named process and paths before manually removing an abandoned lock/guard, never remove one by age alone.
 

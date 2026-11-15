@@ -1,21 +1,20 @@
 // Recovery uses invocation-specific worktrees, bounded git operations and the exported schema fingerprint.
-// #137: analysis uses validated TOML models/graph settings, falling back only when TOML is absent.
+// Analysis uses the family's fixed Mid policy model and validated v2 graph settings.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { keyFor, stateDir } from "./board.mts";
-import { AGENT, GRAPH } from "./runtime-config.mts"; // #137: TOML authority before legacy imports
+import { GRAPH } from "./runtime-config.mts";
 import { contentHash, isSandcastleNote, unitHash } from "./graph.mts";
 import { piAnalysisArgs } from "./models.mts";
 import type { Manifest, Note, Requirement } from "./graph.mts";
 import type { Ticket } from "./tracker.mts";
 
 // Ticket analysis: one read-only agent run on the host per ticket, against a detached worktree at
-// origin/<base>, with GRAPH.model. AGENT.provider "claude": `claude -p` with Read, Grep and Glob and a
-// JSON schema. "pi": `pi -p` with read, grep, find and ls, no discovered extensions, skills or context files
-// (the pi-claude-subscription provider is the one extension loaded, by an explicit -e), and the JSON parsed
-// from its reply. Either way no shell, no writes and no MCP servers, because ticket
+// origin/<base>, with GRAPH.model. Pi runs with read, grep, find and ls, no discovered extensions,
+// skills or context files (pi-claude-subscription is loaded explicitly when needed), and JSON parsed
+// from its reply. No shell, writes or MCP servers are allowed, because ticket
 // text is untrusted input. Assessment and recovery preparation may also include reliably read previously named
 // closed providers. Ordinary execution analysis still validates providers against the open catalogue.
 
@@ -70,19 +69,6 @@ const spawnOpts = (cwd: string, input: string) => ({ cwd, input, encoding: "utf8
 const failed = (iid: number, res: { status: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string; error?: Error }) =>
   new Error((res.error as NodeJS.ErrnoException)?.code === 'ETIMEDOUT' ? `analysis of #${iid} failed: timed out` :
     `analysis of #${iid} failed (exit ${res.status ?? res.signal}): ${(res.stderr || res.stdout || "").slice(0, 500)}`);
-
-function runClaude(iid: number, prompt: string, cwd: string): Analysis {
-  const res = spawnSync(
-    "claude",
-    ["-p", "--model", GRAPH.model, "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config",
-      "--no-session-persistence", "--output-format", "json", "--json-schema", JSON.stringify(ANALYSIS_SCHEMA)],
-    spawnOpts(cwd, prompt),
-  );
-  if (res.status !== 0) throw failed(iid, res);
-  const out = JSON.parse(res.stdout);
-  if (out.is_error || !out.structured_output) throw new Error(`analysis of #${iid} returned no result: ${String(out.result ?? "").slice(0, 500)}`);
-  return out.structured_output;
-}
 
 /** pi has no schema flag: ask for bare JSON, take the outermost object from the reply, check its shape. */
 function runPi(iid: number, prompt: string, cwd: string): Analysis {
@@ -157,7 +143,7 @@ export function analyse(args: {
   // One pass, so placeholders inside ticket text are left alone.
   const prompt = readFileSync(resolve(here, "prompt.analyze.md"), "utf8").replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
 
-  const so = AGENT.provider === "pi" ? runPi(t.iid, prompt, args.worktree.path) : runClaude(t.iid, prompt, args.worktree.path);
+  const so = runPi(t.iid, prompt, args.worktree.path);
 
   // Ordinary execution uses the open catalogue; assessment/preparation can retain a known closed provider's identity.
   const open = new Map([...cat, ...(args.knownProviders ?? [])].map((c) => [c.iid, c]));

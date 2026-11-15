@@ -86,11 +86,7 @@ export function buildAssets(s: Settings, stateDir: string, root = appRoot): Plan
   }).join('\n');
   add('factory.toml', toml);
 
-  let main = read('orchestrator/main.mts').toString('utf8');
-  main = fillTags(main, [{ tag: 'image', line: /^(\s*image:\s*)"[^"]*"/, value: m => `${m[1]}${JSON.stringify(s.image)}` }]);
-  main = replaceBlock(main, 'sandbox-setup',
-    '  sandboxSetup: [] as { command: string; sudo?: boolean; timeoutMs?: number }[], // add environment setup commands here (see the sandcastle-setup skill)');
-  add('main.mts', main, modeOf('orchestrator/main.mts'));
+  copy('main.mts', 'orchestrator/main.mts');
 
   for (const name of FROM_ORCHESTRATOR) copy(name, `orchestrator/${name}`);
   for (const name of FROM_BOARD) copy(name, `board/${name}`);

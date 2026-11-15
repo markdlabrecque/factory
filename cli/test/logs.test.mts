@@ -1,5 +1,6 @@
 // `factory logs` tests: which log file is shown, and -f picking up appended and truncated output.
 // Disposable HOME and Git repo; no tracker, Docker, journalctl or service manager.
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +20,7 @@ function fixture(t: TestContext) {
   const root = join(home, 'site');
   mkdirSync(join(root, '.sandcastle/logs'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  writeFileSync(join(root, '.sandcastle/config.mts'), 'export const TRACKER = {\n  project: "me/site",\n};\n');
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   const log = (n: number, text: string, age = 0) => {
     const f = join(root, '.sandcastle/logs', `run-${n}.log`);

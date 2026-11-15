@@ -1,9 +1,12 @@
-// #126: description parsing, approval, failures and reference model configuration regressions.
+// Legacy declarations fail closed; v2 profiles derive Factory-owned model tiers and provider wiring.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AGENT as PERSONAL_AGENT, GRAPH as PERSONAL_GRAPH } from "./config.personal.mts";
-import { AGENT as CLIENT_AGENT } from "./config.mts";
-import { disallowedModels, piAnalysisArgs, piEnvFor, subscriptionPreflight, ticketModel } from "./models.mts";
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { copyTestRuntime } from '../cli/test/config-fixture.mts';
+import { MODEL_POLICY } from './model-policy.mts';
+import { disallowedModels, piAnalysisArgs, piEnvFor, subscriptionPreflight, resolveTicketModel } from "./models.mts";
 
 // Run: node --test 'orchestrator/*.test.mts'
 
@@ -11,28 +14,25 @@ const SONNET = "pi-claude-subscription/claude-sonnet-5-5";
 const OPUS = "pi-claude-subscription/claude-opus-5-5";
 const labels = { sonnet: SONNET, opus: OPUS, "Sonnet 5.5": SONNET };
 
-test("ticket model: explicit aliases and approved IDs, never labels or prose", () => {
+test("legacy ticket model fields fail closed; examples and prose stay excluded", () => {
   for (const body of ["**Model:** Sonnet 5.5", "Model: SONNET", "**Pi model:** `sonnet`", `**Model**: ${SONNET}`, "Model: sonnet\r\nPi model: Sonnet 5.5"]) {
-    const m = ticketModel(body, labels);
-    assert.equal(m.status, "resolved", body);
-    assert.equal("model" in m && m.model, SONNET);
+    const m = resolveTicketModel(body, 'anthropic');
+    assert.equal(m.status, "unsupported", body);
     assert.match(m.revision, /^[a-f0-9]{64}$/);
-    assert.ok(m.declarations.length);
+    assert.equal(m.choice, undefined, 'legacy model declarations cannot select a policy model');
   }
   for (const body of ["Use Sonnet 5.5", "Labels: model:sonnet", "> Model: opus", "    Model: opus", "```md\nModel: opus\n```", "~~~\nModel: opus\n~~~", "<!--\nModel: opus\n-->", "<!-- Model: opus -->"]) {
-    assert.equal(ticketModel(body, labels).status, "missing", body);
+    const resolution = resolveTicketModel(body, 'anthropic');
+    assert.equal(resolution.status, 'resolved', body);
+    assert.equal(resolution.model, SONNET, body);
+    assert.equal(resolution.choice?.tier, 'mid', body);
   }
-  assert.equal(ticketModel("```md\n``` example, not a closing fence\nModel: opus\n```", labels).status, "missing");
-  assert.equal(ticketModel("```html\n<!--\n```\nModel: opus", labels).status, "resolved");
-  assert.equal(ticketModel("~~~html\n<!--\n~~~\nModel: opus", labels).status, "resolved");
-  assert.equal(ticketModel("```html <!--\nexample\n```\nModel: sonnet", labels).status, "resolved");
-  assert.equal(ticketModel("~~~html <!--\nexample\n~~~\nModel: sonnet", labels).status, "resolved");
-  assert.equal(ticketModel("Model: unknown", labels).status, "unsupported");
-  assert.equal(ticketModel("Model:", labels).status, "unsupported");
-  assert.equal(ticketModel("Model: sonnet\nModel: opus", labels).status, "conflicting");
-  assert.equal(ticketModel("Model: openai/gpt-6.1-sol", labels).status, "unsupported");
-  assert.equal(ticketModel("", {}).status, "missing", "no fixed fallback even with no aliases");
-  assert.notEqual(ticketModel("Model: sonnet", labels).revision, ticketModel("Model: sonnet\nEdited requirement", labels).revision);
+  assert.equal(resolveTicketModel("```md\n``` example, not a closing fence\nModel: opus\n```", 'anthropic').status, 'resolved');
+  for (const body of ["```html\n<!--\n```\nModel: opus", "~~~html\n<!--\n~~~\nModel: opus", "```html <!--\nexample\n```\nModel: sonnet", "~~~html <!--\nexample\n~~~\nModel: sonnet", "Model: unknown", "Model:", "Model: sonnet\nModel: opus", "Model: openai/gpt-6.1-sol"]) {
+    assert.equal(resolveTicketModel(body, 'anthropic').status, 'unsupported', body);
+  }
+  assert.equal(resolveTicketModel('', 'anthropic').choice?.source, 'factory-default');
+  assert.notEqual(resolveTicketModel('Model tier: mid', 'anthropic').revision, resolveTicketModel('Model tier: mid\nEdited requirement', 'anthropic').revision);
 });
 
 test("only the approved models may be configured", () => {
@@ -41,20 +41,21 @@ test("only the approved models may be configured", () => {
   assert.equal(disallowedModels({}, ["anything"]), undefined);
 });
 
-test("personal reference config: aliases, verifier and analysis models, provider", () => {
-  assert.equal(PERSONAL_AGENT.modelAliases["Sonnet 5.5"], SONNET);
-  assert.equal(PERSONAL_AGENT.modelAliases["Opus 5.5"], OPUS);
-  assert.equal(PERSONAL_AGENT.model, OPUS);
-  assert.equal(PERSONAL_GRAPH.model, SONNET);
-  assert.equal(PERSONAL_AGENT.provider, "pi");
-  assert.equal(disallowedModels(PERSONAL_AGENT.modelAliases, [PERSONAL_AGENT.model, PERSONAL_GRAPH.model]), undefined);
-  assert.match(disallowedModels(PERSONAL_AGENT.modelAliases, ["openai/gpt-6.1-sol", PERSONAL_GRAPH.model]) ?? "", /gpt-6\.1-sol/, "a stray fixed model is rejected");
-});
-
-test("client reference config keeps Claude Code, fixed verifier and explicit aliases", () => {
-  assert.equal(CLIENT_AGENT.provider, "claude");
-  assert.equal(CLIENT_AGENT.modelAliases.opus, CLIENT_AGENT.model);
-});
+for (const profile of ['personal', 'client']) {
+  test(`${profile} v2 runtime derives agent and analysis models for each family`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factory-models-'));
+    try {
+      const text = readFileSync(new URL(`./factory.${profile}.toml`, import.meta.url), 'utf8');
+      for (const family of ['openai', 'anthropic'] as const) {
+        const moduleUrl = copyTestRuntime(join(dir, family), text.replace('family = "openai"', `family = "${family}"`));
+        const c = await import(moduleUrl('runtime-config.mts'));
+        assert.deepEqual(c.AGENT, { family, provider: 'pi', model: MODEL_POLICY[family].large, thinking: 'high', modelAliases: MODEL_POLICY[family] });
+        assert.equal(c.GRAPH.model, MODEL_POLICY[family].mid);
+        assert.equal(disallowedModels(c.AGENT.modelAliases, [c.AGENT.model, c.GRAPH.model]), undefined);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
 
 test("container env: subscription models need no OpenAI credential; openai models still mint one", () => {
   const mint = () => {
@@ -69,6 +70,10 @@ test("host analysis loads only the provider extension, explicitly", () => {
   const env = { HOME: "/h" };
   const args = piAnalysisArgs(SONNET, env, () => true);
   assert.ok(args.includes("--no-extensions"));
+  for (const model of [SONNET, 'openai/gpt-6.1-terra']) {
+    const fixed = piAnalysisArgs(model, env, () => true);
+    assert.deepEqual(fixed.slice(fixed.indexOf('--thinking'), fixed.indexOf('--thinking') + 2), ['--thinking', 'high']);
+  }
   assert.deepEqual(args.slice(args.indexOf("-e")), ["-e", "/h/.pi/agent/extensions/pi-claude-subscription/index.ts"]);
   assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--model") + 2), ["--model", SONNET]);
   assert.equal(piAnalysisArgs(SONNET, { HOME: "/h", FACTORY_PI_SUBSCRIPTION_EXTENSION: "/x/index.ts" }, () => true).at(-1), "/x/index.ts");

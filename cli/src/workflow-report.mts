@@ -112,8 +112,7 @@ export function capabilityObservations(p: Paths, root: string) {
     limitation: 'These existing string, presence and recorded-hash checks do not establish complete executable compatibility. Helper drift requires review; this report authorizes no repair.' };
 }
 
-// Reporting and pre-charge recovery share the same conservative data-only legacy reader.
-import { legacyImage } from './image-config.mts';
+// The legacy lexer remains available for diagnostics only, never runtime image selection.
 export { legacyImage } from './image-config.mts';
 export function configuredImage(scaffold: string) {
   const tomlContent = content(scaffold, 'factory.toml');
@@ -121,14 +120,8 @@ export function configuredImage(scaffold: string) {
     return { state: 'invalid-config' as const, mode: 'toml', reference: null, reason: 'TOML is unreadable or non-regular; no legacy fallback' };
   try {
     const toml = loadTomlConfig(scaffold);
-    if (toml) return { state: 'known' as const, mode: 'toml', reference: toml.config.image, reason: 'validated TOML sandbox image' };
-  } catch { return { state: 'invalid-config' as const, mode: 'toml', reference: null, reason: 'present TOML is invalid or unreadable; no legacy fallback' }; }
-  try {
-    if (content(scaffold, 'main.mts').status !== 'present') throw new Error('unreadable entrypoint');
-    const image = legacyImage(readFileSync(join(scaffold, 'main.mts'), 'utf8'));
-    if (image) return { state: 'known' as const, mode: 'legacy-literal', reference: image, reason: 'one static CONFIG.image literal; project code was not executed' };
-  } catch { /* unknown */ }
-  return { state: 'unknown' as const, mode: 'legacy', reference: null, reason: 'no unambiguous supported CONFIG.image literal' };
+    return { state: 'known' as const, mode: 'toml', reference: toml.config.image, reason: 'validated TOML sandbox image' };
+  } catch { return { state: 'invalid-config' as const, mode: 'toml', reference: null, reason: 'TOML is missing, invalid or unreadable; manually migrate to version 2; no legacy fallback' }; }
 }
 
 export function localSocket(path = '/var/run/docker.sock'): string {

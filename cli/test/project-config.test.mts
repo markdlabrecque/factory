@@ -1,4 +1,4 @@
-// #137: copied-scaffold authority, explanation, legacy preservation and bootstrap integration.
+// Copied-scaffold v2 authority, fail-closed configuration and bootstrap integration.
 // Strict tracker/launch stubs, temporary Git projects/state; no credentials, Docker, agents or services.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,7 +31,7 @@ import fs from 'node:fs';
 const a = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({args:a,host:process.env.GH_HOST ?? process.env.GITLAB_HOST})+'\\n');
 if (a[0] === 'issue' && a[1] === 'view' && a.includes('--json')) {
- console.log(JSON.stringify({number:7,title:'Ticket',body:'**Model:** sonnet',state:'OPEN',labels:[{name:'ready-for-agent'}],assignees:[],author:{login:'alice'},milestone:null}));
+ console.log(JSON.stringify({number:7,title:'Ticket',body:'Model tier: mid',state:'OPEN',labels:[{name:'ready-for-agent'}],assignees:[],author:{login:'alice'},milestone:null}));
 } else if (a[0] === 'issue' && a[1] === 'list') {
  if (process.env.FAIL_LIST) process.exit(9);
  const count = Number(process.env.COUNT ?? '1');
@@ -54,17 +54,25 @@ function snapshot(dir: string) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir,{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>[join(e.parentPath,e.name),readFileSync(join(e.parentPath,e.name),'utf8')]);
 }
-test('copied runtime ignores executable legacy config; missing TOML retains it; invalid TOML never falls back', t => {
+test('copied runtime ignores executable config; missing, v1 and invalid TOML fail closed', t => {
   const f = fixture(t);
   const code = `import { TRACKER, effectiveConfig } from './.sandcastle/runtime-config.mts'; console.log(JSON.stringify([TRACKER.project,effectiveConfig.source.mode]));`;
   const run = () => spawnSync(process.execPath,['--input-type=module','-e',code],{cwd:f.root,env:f.env,encoding:'utf8'});
   assert.deepEqual(JSON.parse(run().stdout),['new/project','toml']);
-  writeFileSync(f.toml,'version = 999');
-  assert.match(run().stderr,/factory.toml.*version/); assert.doesNotMatch(run().stderr,/EXECUTED_LEGACY/);
-  rmSync(f.toml); assert.match(run().stderr,/EXECUTED_LEGACY/);
+  for (const version of [1, 999]) {
+    writeFileSync(f.toml,`version = ${version}`);
+    const result = run();
+    assert.notEqual(result.status,0); assert.match(result.stderr,/factory.toml.*version/);
+    assert.doesNotMatch(result.stderr,/EXECUTED_LEGACY/);
+  }
+  rmSync(f.toml);
+  const missing = run();
+  assert.notEqual(missing.status,0); assert.match(missing.stderr,/factory.toml/);
+  assert.doesNotMatch(missing.stderr,/EXECUTED_LEGACY/);
   writeFileSync(join(f.sc,'config.mts'),`export const TRACKER={project:'legacy/project'},AGENT={},MERGE={},LABELS={},SUBTASKS={},GRAPH={}; export const allLabels=()=>['custom legacy label'];`);
   const legacy = spawnSync(process.execPath,['--input-type=module','-e',`import { TRACKER, allLabels, effectiveConfig } from './.sandcastle/runtime-config.mts'; console.log(JSON.stringify([TRACKER.project,allLabels(),effectiveConfig ?? null]));`],{cwd:f.root,env:f.env,encoding:'utf8'});
-  assert.equal(legacy.status,0,legacy.stderr); assert.deepEqual(JSON.parse(legacy.stdout),['legacy/project',['custom legacy label'],null]);
+  assert.notEqual(legacy.status,0); assert.match(legacy.stderr,/factory.toml/);
+  assert.equal(legacy.stdout,'');
 });
 test('explain evaluates membership and exclusions without writing state or invoking mutators', t => {
   const f = fixture(t);
@@ -114,12 +122,12 @@ test('copied CLI app outside the source checkout explains without app or project
   assert.equal(existsSync(join(app,'node_modules')),false); assert.equal(existsSync(join(f.root,'node_modules')),false);
 });
 
-test('legacy explanation is honest and never imports customized config/dispatch/main', t => {
+test('missing TOML explanation fails closed without executing config or tracker calls', t => {
   const f = fixture(t); rmSync(f.toml);
   writeFileSync(join(f.sc,'config.mts'),'export const TRACKER = {\n project: "legacy/project",\n};\nthrow new Error("EXECUTED_LEGACY");');
   const r = f.explain(); assert.equal(r.status,1,r.stderr);
-  assert.equal(JSON.parse(r.stdout).source.mode,'legacy');
-  assert.equal(JSON.parse(r.stdout).reasons[0].code,'legacy-unsupported');
+  assert.match(r.stdout+r.stderr,/factory.toml/);
+  assert.doesNotMatch(r.stdout+r.stderr,/EXECUTED_LEGACY/);
   assert.equal(existsSync(f.calls),false);
 });
 test('init repair and update never migrate legacy or overwrite TOML; vendor ships without node_modules', t => {
@@ -148,20 +156,20 @@ import { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, '../
 const tool = path.basename(process.argv[1]), a = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)},JSON.stringify([tool,...a])+'\\n');
 if(tool==='glab' && JSON.stringify(a)===JSON.stringify(['auth','status','--hostname','git.example.com'])) process.exit(0);
-if(tool==='claude' && JSON.stringify(a)===JSON.stringify(['auth','status'])) { console.log('{"loggedIn":true}'); process.exit(0); }
+if(tool==='pi' && JSON.stringify(a)===JSON.stringify(['auth','check','--provider','openai'])) process.exit(0);
 if(tool==='docker' && a[0]==='info') process.exit(0);
 if(tool==='docker') { const out = capabilityDocker(a, ${JSON.stringify(f.base)}); if(out !== undefined) { console.log(out); process.exit(0); } }
 if(tool==='curl' && a.includes('https://api.anthropic.com/v1/messages')) { console.log('400'); process.exit(0); }
 console.error('unexpected '+tool+' '+JSON.stringify(a));process.exit(91);
 `;
-  for(const name of ['glab','claude','docker','curl','npm','npx']) writeFileSync(join(bin,name),script,{mode:0o755});
+  for(const name of ['glab','pi','docker','curl','npm','npx']) writeFileSync(join(bin,name),script,{mode:0o755});
   // Avoid dependency bootstrap without borrowing any source-checkout dependencies.
   mkdirSync(join(f.root,'node_modules/@ai-hero/sandcastle'),{recursive:true});
   writeFileSync(join(f.sc,'.env'),'CLAUDE_CODE_OAUTH_TOKEN=fixture-only\n');
   writeFileSync(join(f.sc,'dispatch.mts'),`import { TRACKER, AGENT, effectiveConfig } from './runtime-config.mts'; console.log(JSON.stringify([TRACKER.project,AGENT.provider,effectiveConfig.config.image]));`);
   const r = spawnSync('bash',[join(f.sc,'dispatch.sh'),'--dry-run'],{cwd:f.root,env:f.env,encoding:'utf8'});
   assert.equal(r.status,0,r.stdout+r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout.trim()),['new/project','claude','sandcastle-test']);
+  assert.deepEqual(JSON.parse(r.stdout.trim()),['new/project','pi','sandcastle-test']);
   assert.ok(!readFileSync(log,'utf8').includes('"npm"'));
   assert.equal(existsSync(f.calls),false);
 });

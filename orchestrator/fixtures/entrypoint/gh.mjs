@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const state = process.env.FAKE_STATE;
 const stdin = args.includes("--body-file") ? readFileSync(0, "utf8") : undefined;
 appendFileSync(join(state, "gh.jsonl"), JSON.stringify({ args, stdin }) + "\n");
-const ticket = { number: 7, title: "Fix login", body: process.env.FAKE_TICKET_BODY ?? "**Model:** Sonnet 5.5\n\nThe login form must work.", state: "OPEN", labels: [{ name: "model:sonnet" }] };
+const ticket = { number: 7, title: "Fix login", body: process.env.FAKE_TICKET_BODY ?? "Model tier: mid\n\nThe login form must work.", state: "OPEN", labels: [{ name: "model:sonnet" }] };
 // #150: mutate live requirements only at an explicitly signalled fixture boundary.
 const changed = existsSync(join(state, 'changed'));
 if (changed && process.env.FAKE_MUTATION === 'title') ticket.title += ' edited';

@@ -23,10 +23,10 @@ test('profiles normalize independently of executable legacy settings', () => {
     assert.equal(c.TRACKER.kind, profile === 'personal' ? 'github' : 'gitlab');
   });
 });
-test('only an absent file permits legacy mode', () => {
+test('absent and v1 configuration require manual migration', () => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-config-'));
-  try { assert.equal(loadTomlConfig(dir), undefined); } finally { rmSync(dir, { recursive: true }); }
-  fixture('version = 2', dir => assert.throws(() => loadTomlConfig(dir), /factory.toml.*version/));
+  try { assert.throws(() => loadTomlConfig(dir), /missing version 2.*manually migrate/); } finally { rmSync(dir, { recursive: true }); }
+  fixture('version = 1', dir => assert.throws(() => loadTomlConfig(dir), /version.*manually migrate/));
 });
 test('present unreadable/dangling files fail rather than opting out', () => {
   const dir = mkdtempSync(join(tmpdir(),'factory-unreadable-'));
@@ -43,21 +43,21 @@ test('GitLab requires identity fields; unsupported capabilities are never ignore
   const client = readFileSync(new URL('./factory.client.toml',import.meta.url),'utf8');
   for (const text of [client.replace(/^host = .*$/m,''),client.replace(/^project_id = .*$/m,''),client.replace('project_id = 699','project_id = 0'),
     personal().replace('[tracker]','[tracker]\nproject_id = 42'),personal().replace('[selection]','[selection]\nissue_type = "issue"'),
-    client.replace('provider = "claude"','provider = "claude"\nthinking = "high"'),
-    personal().replace(/^\[agent.model_aliases\][\s\S]*?\n\[labels\]/m,'[agent.model_aliases]\n[labels]')]) fixture(text,dir=>assert.throws(()=>loadTomlConfig(dir),/factory.toml/));
+    client.replace('[agent]','[agent]\nthinking = "high"'),
+    personal().replace('[agent]','[agent]\nmodel_aliases = {}')]) fixture(text,dir=>assert.throws(()=>loadTomlConfig(dir),/factory.toml/));
   fixture(client.replace('by = "created"','by = "weight"'),dir=>assert.equal(loadTomlConfig(dir)!.selection.order,'weight'));
 });
 
 test('strict schema errors never echo commands or config bodies', () => {
   const cases = [
-    personal().replace('version = 1', 'version = 2'),
-    personal().replace('version = 1', 'version = 1\nunknown = true'),
+    personal().replace('version = 2', 'version = 1'),
+    personal().replace('version = 2', 'version = 2\nunknown = true'),
     personal().replace('max_concurrent = 3', 'max_concurrent = 0'),
     personal().replace('stagger_seconds = 20', 'stagger_seconds = inf'),
     personal().replace('direction = "asc"', 'direction = "sideways"'),
     personal().replace('[selection]', '[selection]\nconfidential = false'),
     personal().replace('by = "created"', 'by = "weight"'),
-    personal().replace('[agent.model_aliases]', '[agent.model_aliases]\n"SONNET 5.5" = "different"'),
+    personal().replace('[agent]', '[agent]\nmodel = "different"'),
     personal().replace(/^setup = .*$/m, '') + '\n[[sandbox.setup]]\ncommand = "PRIVATE_COMMAND"\ntimeout_ms = -1\n',
     personal() + '\n[tracker]\nkind = "github"\n',
   ];
@@ -66,20 +66,13 @@ test('strict schema errors never echo commands or config bodies', () => {
   }));
 });
 test('omitted settings use complete schema defaults, never a per-field legacy fallback', () => {
-  const minimal = `version = 1
+  const minimal = `version = 2
 [tracker]
 kind = "github"
 project = "a/b"
-[agent]
-provider = "pi"
-model = "provider/model"
-[agent.model_aliases]
-alias = "provider/model"
 [labels]
 needs_human = "needs-human"
 done = "done"
-[graph]
-model = "provider/model"
 [sandbox]
 image = "image"
 `;
@@ -90,13 +83,13 @@ image = "image"
     assert.deepEqual(c.selection, {assignee:undefined,author:undefined,search:undefined,excludeAssignees:[],order:'created_at',sort:'asc'});
     assert.deepEqual(c.LABELS, { ready:['ready-for-agent'],exclude:['blocked','needs-human','wontfix'],needsHuman:'needs-human',done:'done' });
     assert.deepEqual(c.MERGE, {auto:false,method:'squash',requiredChecks:[]});
-    assert.deepEqual(c.GRAPH, {model:'provider/model',maxAnalysesPerPass:5,analysisTimeoutMinutes:10,conflictIgnore:[],pruneAfterDays:30});
+    assert.deepEqual(c.GRAPH, {maxAnalysesPerPass:5,analysisTimeoutMinutes:10,conflictIgnore:[],pruneAfterDays:30});
     assert.deepEqual(c.dispatch, {maxConcurrent:3,staggerSeconds:20});
     assert.deepEqual(c.config, {image:'image',sandboxSetup:[],ciWaitMinutes:30,noPipelineMinutes:5});
     assert.deepEqual(c.SUBTASKS,{enabled:true});
     assert.equal(c.sources['dispatch.max_concurrent'],'default');
     assert.equal(c.sources['selection.assignee'],'default');
-    assert.equal(c.sources['agent.model'],'explicit');
+    assert.equal(c.sources['agent.family'],'default');
     assert.equal(c.warnings.length,0);
   });
 });
@@ -105,8 +98,8 @@ test('schema rejects wrong scalar/array/table types, empty filters and invalid n
   const cases: [string,string][] = [
     ['project = "owner/repo"','project = ""'],
     ['kind = "github"','kind = "other"'],
-    ['provider = "pi"','provider = "other"'],
-    ['thinking = "high"','thinking = "invalid"'],
+    ['family = "openai"','family = "other"'],
+    ['[agent]','[agent]\nthinking = "invalid"'],
     ['[selection]','[selection]\nassignee = ""'],
     ['exclude_assignees = []','exclude_assignees = [""]'],
     ['[selection.labels]','[selection.labels]\nunknown = true'],

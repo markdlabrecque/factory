@@ -86,10 +86,11 @@ Seven unfinished fixtures and twelve earlier completions use one deterministic 1
 ## Project configuration
 
 New projects receive a commented **`.sandcastle/factory.toml`**. Configure tracker,
-agent/approved model aliases, AND selection filters, work units, dispatch limits,
-merge policy, labels, graph, CI and sandbox startup steps there—not in Factory code.
-When present it is authoritative with documented defaults and no per-field fallback.
-Without it, legacy config/SELECT/CONFIG behavior is preserved. Invalid TOML fails
+model family, AND selection filters, work units, dispatch limits,
+merge policy, labels, graph, CI and sandbox startup steps there, not in Factory code.
+Version 2 is required. Missing, v1 or invalid TOML fails closed with manual migration
+guidance. Factory fixes Pi, high thinking and each family's tier mapping. Tickets
+select `Model tier: small|mid|large`, defaulting to Mid. Validation runs
 before credentials, Docker/npm, tracker mutations or launch. Credentials, prompts,
 script bodies and machine registry/scheduler files stay separate.
 
@@ -208,9 +209,20 @@ Without `--project` a command is for the global scheduler, even inside a checkou
 - **macOS.** The same commands, with launchd in place of systemd. launchd has no timer that counts from when the last run finished, so `factory schedule on` installs one launch agent, `~/Library/LaunchAgents/com.factory.tick.plist` (ledgered), which runs a supervisor, `factory supervise` (internal). The supervisor waits a minute, runs a tick, then waits 5 minutes after each tick finishes, so ticks never overlap and missed ones are not replayed. While it waits, it saves when the next tick is due to `<state>/scheduler/next-tick.json`, so the Board can show a countdown; the file is ignored unless that supervisor process is still running. Each tick asks launchd itself, and works only while the agent is enabled and running; the supervisor keeps no on/off file. `on` runs `launchctl enable`, then `bootstrap` (or `kickstart` if it is loaded but stopped); a supervisor already running is left alone, so after changing Node run `off` then `on`. `off` runs `launchctl disable` first, so nothing can start it again, then `launchctl bootout`: the supervisor gets SIGTERM, cancels its dispatcher pass group exactly as on Linux, and exits successfully, so `KeepAlive` (restart after a crash only) leaves it stopped. Detached ticket runs keep going. `schedule status` shows the agent's enablement, whether it is loaded and whether it is running separately. The tick log is `<state>/scheduler/tick.log` (`tail -f ~/.local/state/factory/scheduler/tick.log`). Uninstall and reinstall stop it the same way first; reinstall leaves the label disabled. Log in for it to run: a launch agent runs only in your login session.
 - **Health and timings.** `factory status` shows, above the project's runs, whether the scheduler is on, off or `unknown` (with the reason), whether a tick is running, the last tick, and tick timings; then the project's switch and branch, why it would not get a pass (or `ready`), its last pass, and its pass timings (count, last, median, 90th percentile, longest, and how many ended ok, error or interrupted) with its five most recent passes. Problems are listed: an unreadable service manager, a timer (or macOS agent) enabled but not running or running but disabled, a malformed state, history or launch configuration file, and no tick for two intervals while on. `schedule status` shows the same health and per-project timings for every project; both carry it in `--json`. The timings come from `history.json` and are for judging any future timeout; nothing times out.
 
-### Personal profile: Claude subscription models
+### Model families and tiers
 
-The personal config runs Pi through the `pi-claude-subscription` provider (a Pi extension that drives the Claude Code CLI on your Claude subscription). Explicit description fields select the implementation model: `**Model:** Sonnet 5.5` is `pi-claude-subscription/claude-sonnet-5-5`, `**Model:** Opus 5.5` is `pi-claude-subscription/claude-opus-5-5`. `**Pi model:**` and approved full IDs work too. `AGENT.modelAliases` defines aliases and approved IDs; model tracker labels are ignored and no longer required or created. Missing, unsupported or conflicting declarations keep the ticket queued, including direct runs. Each Task/sub-issue needs its own declaration. The backend retains the current resolution or corrective error separately from the running attempt's fixed model; the Board no longer displays these assessment details. Factory stores the resolution, source declarations and description hash in its assessment state. Description edits affect future choices, not running attempts. Existing project copies need the config and workflow upgrade in [Description model declarations](orchestrator/ADAPTING.md#description-model-declarations); Factory does not migrate tracker descriptions or remove labels. The verifier uses Opus, ticket analysis uses Sonnet. Host: `claude auth login` and install the extension (`git clone --depth 1 --branch <tag> https://github.com/markdlabrecque/pi-claude-subscription.git ~/.pi/agent/extensions/pi-claude-subscription && cd ~/.pi/agent/extensions/pi-claude-subscription && npm ci --omit=dev --ignore-scripts`; `pi install git:…` fails on the package's husky hook). Container: the image carries the CLI and extension (`skills/sandcastle-setup/layers/agent-pi/`), and the CLI authenticates with `CLAUDE_CODE_OAUTH_TOKEN` from `.sandcastle/.env` (`claude setup-token`). No OpenAI login is needed. Client config keeps Claude Code and its token as before. Details: `orchestrator/ADAPTING.md`.
+Both profiles default to OpenAI. Set `[agent] family = "anthropic"` to use the
+`pi-claude-subscription` provider instead. Both families run Pi with high thinking.
+Tickets select `Model tier: small`, `mid` or `large`; omission defaults to Mid.
+Analysis uses Mid and verification/recovery use Large. Old `Model:` and `Pi model:`
+fields are rejected, and model tracker labels are ignored. Current assessments
+retain resolution metadata separately from the attempt's frozen `modelChoice` and
+`implementationModel`. Description edits affect future choices, not running attempts.
+
+OpenAI needs a usable host Pi login. Anthropic needs host `claude auth login`, the
+subscription extension on the host and in the image, and `CLAUDE_CODE_OAUTH_TOKEN`
+in `.sandcastle/.env`. See [provider setup and migration](orchestrator/ADAPTING.md#two-reference-configs).
+Factory does not migrate tracker descriptions or remove labels.
 
 ### Running work: `factory dispatch`, `run`, `retry`, `status` and `logs`
 
@@ -251,7 +263,7 @@ factory ticket restore <ticket>                            # return an archived 
 - **`ticket sync [ticket]`** (#100) delivers every comment and verdict correction still undelivered in the project's ticket journals (or one ticket's). Anything that may already have reached the tracker (a post marked uncertain, or a poster that died mid-post) is first looked for by its hidden marker in the ticket's comments (`gh api --paginate` / `glab api --paginate`); if found, the journal records that comment and nothing is posted again, and if the search fails nothing is posted. Pending items are posted directly. Exit 0 when nothing is left undelivered, 1 otherwise; run it again later.
 - **Scheduled recovery across restart and failure** (#64). A running repair is detached: it outlives the tick that started it and `factory schedule off`, and keeps its claim. A repair that crashes is settled by a later tick only once docker confirms its exact container gone; until then the project stays held. Two attempts per jam, then nothing until verified progress, a person's change or `recovery reset`. See [Slice four: scheduled recovery across restart and failure](docs/factory-cli.md#slice-four-scheduled-recovery-across-restart-and-failure).
 
-The project needs `.sandcastle/factory.toml` (or legacy `config.mts`); `tracker.project` (legacy `TRACKER.project`) is the name its run records carry. Not yet: journal output in `logs` (`logs` reads no journalctl; the scheduler's log is `journalctl --user -u factory-tick`, on macOS `<state>/scheduler/tick.log`, a legacy dispatcher timer's `journalctl --user -u sandcastle-dispatch@<name>`), running every registered project in one command, and refreshing `.sandcastle` copies. The [CLI plan](docs/factory-cli.md#roadmap) tracks the remaining slices. `.sandcastle` stays the folder name; migration to `.factory` is deferred to a future slice.
+The project needs version 2 `.sandcastle/factory.toml`; `tracker.project` (legacy `TRACKER.project`) is the name its run records carry. Not yet: journal output in `logs` (`logs` reads no journalctl; the scheduler's log is `journalctl --user -u factory-tick`, on macOS `<state>/scheduler/tick.log`, a legacy dispatcher timer's `journalctl --user -u sandcastle-dispatch@<name>`), running every registered project in one command, and refreshing `.sandcastle` copies. The [CLI plan](docs/factory-cli.md#roadmap) tracks the remaining slices. `.sandcastle` stays the folder name; migration to `.factory` is deferred to a future slice.
 
 ## Setting up a project
 

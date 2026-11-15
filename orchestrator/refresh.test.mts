@@ -1,7 +1,7 @@
 // #153: real copied dispatch observes durable CI waits only on authorized scheduled passes.
 // #149: dispatch retries unknown dependencies for both trackers without labels or launches.
 import { createProof, sha256 } from './verification.mts';
-import { loadTomlConfig } from './project-config.mts';
+import { pathToFileURL } from 'node:url';
 // #137: scaffolded fixtures use authoritative TOML for settings, shared-board capacity and CLI overrides.
 // #126: dispatch/refresh resolve description models on both trackers, preserving running attempt models.
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
@@ -25,8 +25,8 @@ import { unitHash } from "./graph.mts";
 
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-// #126: selected fixtures declare models in descriptions, with no model label required.
-const ticket = (iid: number, extra = {}) => ({ iid, title: `Ticket ${iid}`, description: "**Model:** Sonnet 5.5\nRequirement DEP:20", state: "open", labels: ["ready-for-agent"], ...extra });
+// Selected fixtures use v2 model tiers. No model label is required.
+const ticket = (iid: number, extra = {}) => ({ iid, title: `Ticket ${iid}`, description: "Model tier: mid\nRequirement DEP:20", state: "open", labels: ["ready-for-agent"], ...extra });
 function fixture(t: any, kind = "github") {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-refresh-")));
   t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -39,6 +39,8 @@ function fixture(t: any, kind = "github") {
     mkdirSync(dirname(join(root, f.path)), { recursive: true });
     writeFileSync(join(root, f.path), f.content, { mode: f.mode });
   }
+  const configPath = join(root, '.sandcastle/factory.toml');
+  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"'));
   for (const p of [bin, fake, dir, join(dir, "graph"), join(dir, "admission")]) mkdirSync(p, { recursive: true });
   // A fixture-local Node path makes dispatch select our npx rather than the host's. It records the launch only.
   const node = join(bin, "node");
@@ -79,16 +81,18 @@ function fixture(t: any, kind = "github") {
   return { home, root, dir, fake, env, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
 }
 
-test('scheduled copied dispatch: pending then green uses the same proof/PR; manual and refresh do not observe', t => {
+test('scheduled copied dispatch: pending then green uses the same proof/PR; manual and refresh do not observe', async t => {
   const f = fixture(t), sc = join(f.root, '.sandcastle');
-  f.data.tickets[0].description = '**Model:** Sonnet 5.5\nDeliver this behavior';
+  f.data.tickets[0].description = 'Model tier: mid\nDeliver this behavior';
   f.data.openBranches = ['7-topic']; f.manifest(7);
   git(f.root,'branch','7-topic'); git(f.root,'push','-q','origin','7-topic');
-  const tip = git(f.root,'rev-parse','7-topic'), cfg = loadTomlConfig(sc)!;
+  const tip = git(f.root,'rev-parse','7-topic');
+  const runtime = await import(pathToFileURL(join(sc, 'runtime-config.mts')).href);
+  const cfg = { ...runtime.effectiveConfig, AGENT: runtime.AGENT, MERGE: runtime.MERGE };
   const evidence = join(f.home,'evidence'); mkdirSync(evidence);
   writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\n'); writeFileSync(join(evidence,'out.txt'),'verified');
   writeFileSync(join(evidence,'verification.json'),JSON.stringify({version:1,verdict:'PASS',changeKind:'feature',evidenceKind:'command',interactive:false,criteria:[{requirement:'behavior',result:'pass',evidence:['out.txt']}],artifacts:[{path:'out.txt',kind:'command-output',phase:'check'}],limitations:[]}));
-  const names = ['factory.toml','main.mts','capabilities.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','execution-events.mts','dispatch.mts','runtime-config.mts','project-config.mts','selection.mts'];
+  const names = ['factory.toml','main.mts','capabilities.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','execution-events.mts','dispatch.mts','runtime-config.mts','project-config.mts','model-policy.mts','models.mts','selection.mts'];
   const settings = {image:cfg.config.image,model:cfg.AGENT.model,thinking:cfg.AGENT.thinking??null,merge:{auto:cfg.MERGE.auto,method:cfg.MERGE.method,requiredChecks:cfg.MERGE.requiredChecks??[]},ciWaitMinutes:cfg.config.ciWaitMinutes,noPipelineMinutes:cfg.config.noPipelineMinutes};
   const hash = unitHash(f.data.tickets[0], []);
   const identity = {project:'owner/repo',ticket:'7',executionId:'execution',branch:'7-topic',base:'main',baseline:tip,tip,requirementsHash:hash};
@@ -113,7 +117,7 @@ test('scheduled copied dispatch: pending then green uses the same proof/PR; manu
 for (const kind of ["github", "gitlab"]) {
   test(`${kind}: unknown implementer dependencies hold dispatch and recover without ticket edits`, t => {
     const f = fixture(t, kind);
-    f.data.tickets[0].description = "Model: sonnet\nRequirement DEP:20";
+    f.data.tickets[0].description = "Model tier: mid\nRequirement DEP:20";
     f.record(7, "queued");
     // A provider outside the open catalogue must be read, never presumed satisfied.
     f.data.tickets[1].contextOnly = true;
@@ -139,7 +143,7 @@ for (const kind of ["github", "gitlab"]) {
 
   test(`${kind}: failed merge reads hold an open dependency until a later qualifying merge`, t => {
     const f = fixture(t, kind);
-    f.data.tickets[0].description = "Model: sonnet\nRequirement DEP:20";
+    f.data.tickets[0].description = "Model tier: mid\nRequirement DEP:20";
     f.record(7, "queued"); f.record(20, "waiting"); f.manifest(7);
     const path = join(f.dir, "graph", `${f.key(7)}.json`), manifest = JSON.parse(f.bytes(path));
     manifest.implementerBlockers = [{ iid: 20, what: "provider", evidence: "missing" }];
@@ -155,7 +159,7 @@ for (const kind of ["github", "gitlab"]) {
 
   test(`${kind}: implementer lookup errors persist waitable blockers without needs-human`, t => {
     const f = fixture(t, kind);
-    f.data.tickets[0].description = "Model: sonnet\nRequirement DEP:20";
+    f.data.tickets[0].description = "Model tier: mid\nRequirement DEP:20";
     f.data.tickets[1].contextOnly = true;
     f.data.errors = [20];
     f.save();
@@ -196,7 +200,7 @@ for (const kind of ["github", "gitlab"]) {
 
   test(`${kind}: TOML cap counts other projects and CLI cap/work overrides report their sources`, t => {
     const f = fixture(t, kind);
-    f.data.tickets[0].description = 'Model: sonnet';
+    f.data.tickets[0].description = 'Model tier: mid';
     const path = join(f.root, '.sandcastle/factory.toml');
     writeFileSync(path, f.bytes(path).replace('max_concurrent = 3', 'max_concurrent = 1').replace('units = "subtasks"', 'units = "issues"'));
     writeFileSync(join(f.dir, 'another_project--99.json'), JSON.stringify({
@@ -216,11 +220,11 @@ for (const kind of ["github", "gitlab"]) {
 
   test(`${kind}: description failures queue without model labels, edits refresh the choice but not the attempt`, (t) => {
     const f = fixture(t, kind);
-    f.data.tickets = [ticket(7, { description: "No declaration" }), ticket(8, { description: "Model: unknown" }),
-      ticket(9, { description: "Model: sonnet\nModel: opus" })];
+    f.data.tickets = [ticket(7, { description: "Model tier: unknown" }), ticket(8, { description: "Model: sonnet" }),
+      ticket(9, { description: "Model tier: small\nModel tier: large" })];
     f.data.ready = [7, 8, 9];
     f.pass();
-    for (const [n, status] of [[7, "missing"], [8, "unsupported"], [9, "conflicting"]] as const) {
+    for (const [n, status] of [[7, "unsupported"], [8, "unsupported"], [9, "conflicting"]] as const) {
       assert.equal(JSON.parse(f.bytes(join(f.dir, `${f.key(n)}.json`))).stage, "queued");
       assert.equal(f.assessment(n).modelResolution?.status, status);
       assert.ok(f.assessment(n).modelResolution?.revision);
@@ -229,22 +233,24 @@ for (const kind of ["github", "gitlab"]) {
     const original = JSON.parse(f.record(7, "implementing"));
     original.implementationModel = "attempt-original-model";
     writeFileSync(join(f.dir, `${f.key(7)}.json`), JSON.stringify(original));
-    f.data.tickets[0].description = "**Model:** sonnet\nNew requirements";
+    f.data.tickets[0].description = "Model tier: mid\nNew requirements";
     f.pass(["--refresh-only", "--ticket", "7"]);
     const resolved = f.assessment().modelResolution!;
     assert.equal(resolved.status, "resolved");
-    assert.deepEqual(resolved.declarations, ["sonnet"]);
+    assert.deepEqual(resolved.declarations, ["mid"]);
     assert.notEqual(resolved.revision, undefined);
     assert.deepEqual(JSON.parse(f.bytes(join(f.dir, `${f.key(7)}.json`))), original);
-    f.data.tickets[0].description = "**Model:** opus";
+    f.data.tickets[0].description = "Model tier: large";
     f.pass(["--refresh-only", "--ticket", "7"]);
     assert.notEqual(f.assessment().modelResolution!.revision, resolved.revision);
     assert.notDeepEqual(f.assessment().modelResolution, resolved);
     assert.deepEqual(JSON.parse(f.bytes(join(f.dir, `${f.key(7)}.json`))), original);
-    f.data.tickets[1].description = 'Model: sonnet';
+    f.data.tickets[1].description = 'No declaration defaults to mid';
     f.manifest(8);
     f.pass();
     assert.equal(f.assessment(8).modelResolution?.status, 'resolved');
+    assert.equal(f.assessment(8).modelResolution?.choice?.tier, 'mid');
+    assert.equal(f.assessment(8).modelResolution?.choice?.source, 'factory-default');
     assert.equal(JSON.parse(f.bytes(join(f.dir, `${f.key(8)}.json`))).stage, 'setup', 'an edited valid declaration becomes dispatchable without a model label');
   });
 }
@@ -268,7 +274,7 @@ test("refresh fixtures override a missing inherited Pi extension with their own 
 for (const kind of ["github", "gitlab"]) {
   test(`${kind}: a waiting automatic merge still reserves its open branch footprint`, (t) => {
     const f = fixture(t, kind);
-    f.data.tickets = [ticket(7, { description: "Model: sonnet\nCandidate" }), ticket(8, { description: "Model: sonnet\nParked merge" })];
+    f.data.tickets = [ticket(7, { description: "Model tier: mid\nCandidate" }), ticket(8, { description: "Model tier: mid\nParked merge" })];
     f.data.ready = [7];
     f.data.openBranches = ["8-topic"];
     f.record(8, "waiting");

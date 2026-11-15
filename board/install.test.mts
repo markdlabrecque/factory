@@ -51,7 +51,7 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     const install = () => execFileSync('bash', [script], { cwd: home, env, encoding: 'utf8' });
     install();
     // #153: standalone imports need the checkpoint schema on fresh installs and updates.
-    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'project-config.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor'].sort();
+    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'project-config.mts', 'model-policy.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor'].sort();
     assert.deepEqual(readdirSync(app).sort(), files);
     // Simulate a partial/outdated install. Updating must restore every runtime dependency too.
     for (const file of ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'refresh-worker.mts', 'tickets.mts']) rmSync(join(app, file));
@@ -59,7 +59,7 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     assert.deepEqual(readdirSync(app).sort(), files);
     assert.deepEqual(readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(s => JSON.parse(s)), expected);
     execFileSync(process.execPath, ['--input-type=module', '-e',
-      "import { buildBoardData } from './board.mts'; import { loadTomlConfig } from './project-config.mts'; if (loadTomlConfig('./missing-scaffold') !== undefined || buildBoardData('http').runs.length) process.exit(1);"], { cwd: app, env });
+      "import { buildBoardData } from './board.mts'; import { loadTomlConfig } from './project-config.mts'; let rejected = false; try { loadTomlConfig('./missing-scaffold'); } catch (e) { if (!String(e).includes('factory.toml')) throw e; rejected = true; } if (!rejected || buildBoardData('http').runs.length) process.exit(1);"], { cwd: app, env });
 
     const server = spawn(process.execPath, ['board-server.mts'], { cwd: app, env, stdio: ['ignore', 'pipe', 'pipe'] });
     t.after(async () => {

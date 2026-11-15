@@ -232,7 +232,7 @@ test("board renders without assessments when directory reads fail", async (t) =>
   assert.equal(data.runs[0].assessment, undefined);
 });
 
-test("manual HTTP refresh with scheduling off records a missing-root failure; header gate and run preserved", async (t) => {
+test("manual HTTP refresh with scheduling off records missing v2 config; header gate and run preserved", async (t) => {
   const { spawn } = await import("node:child_process"), { once } = await import("node:events");
   const f = fixture(t);
   const child = spawn(process.execPath, [resolve("board/board-server.mts")], {
@@ -244,7 +244,7 @@ test("manual HTTP refresh with scheduling off records a missing-root failure; he
     assert.equal((await fetch(`${base}/api/refresh/p--7`, { method: "POST" })).status, 405);
     assert.equal((await fetch(`${base}/api/refresh/p--7`, { method: "POST", headers: { "x-factory-refresh": "1" } })).status, 202);
     const api = await (await fetch(`${base}/api/runs`)).json();
-    assert.match(api.runs[0].assessment.error, /Project root not found/);
+    assert.match(api.runs[0].assessment.error, /missing version 2 configuration.*manually migrate/);
     assert.equal(api.runs[0].assessment.pending, false);
     assert.equal(readFileSync(resolve(f.dir, "p--7.json"), "utf8"), f.record);
   } finally { child.kill(); await once(child, "exit"); }

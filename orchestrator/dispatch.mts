@@ -16,7 +16,7 @@ import { analyse, analysisWorktree } from "./analyze.mts";
 import { claimDelivery, finishDelivery, claimRun, markMergedOutside, PARKED, queueModelProblem, readRuns, removeRun, reserveRun, setProject, setStage, stateDir, keyFor, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
 import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
-import { disallowedModels, ticketModel } from "./models.mts";
+import { resolveTicketModel } from "./models.mts";
 import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
@@ -49,7 +49,7 @@ import type { Ticket } from "./tracker.mts";
 // into its base (tracker.mergedPr: from the run's recorded branch, or titled "#N: ...") moves to done with the PR, its
 // merge time and "merged outside Factory", keeping its verdict; it is not launched, and its still-open Task is closed or
 // ticket moved to LABELS.done as for Factory's own merges. A closed issue alone is never taken as a merge.
-// Explicit description declarations resolve through AGENT.modelAliases; unresolved tickets stay queued.
+// Description tiers resolve through Factory policy; unsupported or conflicting declarations stay queued.
 // Existing cards, including deselected parked cards, are retained and reassessed separately (#78, refresh.mts).
 // --refresh-only [--ticket <iid>] is the bounded read-only command: with --ticket the board's one-card check, without it
 // (#93) every card of this project (up to REFRESH_PER_PASS, oldest assessment first, within GRAPH.maxAnalysesPerPass), for
@@ -61,43 +61,8 @@ import type { Ticket } from "./tracker.mts";
 // fingerprint (unitHash and labels minus the ones Sandcastle writes). The tick counts it only once the pass exits 0. Manual
 // passes are not asked for one. The report changes nothing here; the tick decides what to do with it.
 
-// ---- Legacy SELECT fallback: used ONLY when factory.toml is absent --------------------
-// TOML projects edit selection/work/dispatch tables, never this block. Legacy labels live in config.mts. Every option below is optional; leave one unset
-// (or empty) to skip that filter. Filters combine with AND. Each maps to a `glab issue list` flag, or
-// on GitHub to the matching `gh issue list` flag or search qualifier (GitLab-only ones are ignored).
-const SELECT = effectiveConfig ? { ...effectiveConfig.selection, ...effectiveConfig.dispatch } : {
-  // -- People --
-  // Only tickets assigned to this username [--assignee]. "@me" means whoever glab is logged in as.
-  // Examples: "mark" | "@me" | undefined (any assignee, including unassigned)
-  assignee: undefined as string | undefined,
-  // Skip tickets assigned to any of these usernames. Applied after the list comes back, so it also
-  // catches multi-assignee tickets. Example: ["alice", "bob"]
-  excludeAssignees: [] as string[],
-  // Only tickets opened by this username [--author]. Example: "mark"
-  author: undefined as string | undefined,
-
-  // -- Scope --
-  // GitLab only. Ticket type [--issue-type]: "issue" | "incident" | "test_case" | undefined (all types)
-  issueType: "issue" as string | undefined,
-  // GitLab only. true = only confidential tickets [--confidential]; undefined = both.
-  confidential: undefined as boolean | undefined,
-  // Free-text match in title and description [--search]. Example: "language switcher"
-  search: undefined as string | undefined,
-
-  // -- Order: which tickets are tried first when more qualify than there is room for --
-  // [--order] created_at | updated_at | priority | due_date | relative_position | label_priority
-  //           | milestone_due | popularity | weight   (GitHub: created_at, updated_at, popularity)
-  order: "created_at",
-  // [--sort] "asc" (oldest/lowest first) | "desc"
-  sort: "asc",
-
-  // -- Throughput --
-  // Cap on runs in flight at once, counted from the board across ALL projects sharing the state
-  // dir. A pass starts at most (cap - in flight). Overridden by --max.
-  maxConcurrent: 3,
-  // Pause between launches within one pass, so runs don't race on git fetch / docker start.
-  staggerSeconds: 20,
-};
+// All filters and launch limits come from validated v2 data. --max overrides only the cap.
+const SELECT = { ...effectiveConfig.selection, ...effectiveConfig.dispatch };
 
 const { values: opts } = parseArgs({
   options: {
@@ -129,11 +94,6 @@ if (opts["refresh-only"]) {
   process.exit(0);
 }
 
-const badModels = disallowedModels(AGENT.modelAliases, [AGENT.model, GRAPH.model]);
-if (badModels) {
-  console.error(badModels);
-  process.exit(1);
-}
 await tracker.ensureLabels(allLabels());
 setProject(PROJECT);
 
@@ -276,9 +236,9 @@ const unstarted = issues.filter((i) => {
 // Resolve all selected descriptions, including active tickets, without touching their attempt model.
 const noModel = new Map<number, string>();
 for (const i of issues) {
-  const m = dry ? ticketModel(i.description, AGENT.modelAliases) : recordModelResolution(
+  const m = dry ? resolveTicketModel(i.description, AGENT.family) : recordModelResolution(
     stateDir(), keyFor(String(i.iid), PROJECT), { iid: String(i.iid), project: PROJECT },
-    () => ticketModel(tracker.ticket(i.iid).description, AGENT.modelAliases),
+    () => resolveTicketModel(tracker.ticket(i.iid).description, AGENT.family),
   );
   if ("error" in m) noModel.set(i.iid, m.error);
 }
