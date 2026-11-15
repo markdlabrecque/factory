@@ -18,6 +18,14 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Documentation fixture checks
+
+Exercise documentation examples in disposable directories, not a registered project or a real home. Use `factoryToml` in `cli/test/config-fixture.mts` and `loadTomlConfig` for complete TOML fences. Combine labeled fragments with compatible base configurations without duplicate tables. Assert both profiles, both families, defaults and explicit sources, and reject legacy keys and invalid tier declarations. Create real contained Markdown fixtures for instruction ordering, deduplication, missing files and escaping or secret aliases.
+
+Use `bindExecution` from `cli/test/execution-fixture.mts` with a temporary `paths` home and `overlays: false` to publish an inventory-complete fixture runtime with fake private dependencies. Use `projectFixture` and `refreshManifest` from `cli/test/workflow-fixture.mts` for an explicit complete override. Exercise context pinning, missing or unknown inventory, changed code, dependencies and directory, and renewed recovery review. Do not execute arbitrary project modules to explain configuration. `cli/test/config-explain.test.mts` shows how to trap process, network, filesystem mutation and secret reads while checking redaction, source attribution and opaque or unknown policy. Check documentation links and examples as well.
+
+Keep tracker, provider, authentication, Docker and service-manager boundaries fixture-owned and fail on unexpected calls. Do not invoke real npm, install packages, use credentials, contact a registry or service, or start a real agent. Local Git repositories and local Node children are permitted fixture boundaries. `cli/test/shared-runtime.test.mts` covers normal execution, recovery, two data-only projects, override refusal and A/B publication with those stubs.
+
 ## Runtime bundle preparation
 
 ```sh
@@ -204,7 +212,7 @@ node --test orchestrator/verification*.test.mts orchestrator/handoff.test.mts or
 
 `verification.test.mts` checks schema, evidence paths and frozen proof integrity with
 synthetic bytes, not real browser media. `verification-entrypoint.test.mts` runs the
-scaffolded ordinary entrypoint against real temporary Git repositories and fixture-owned
+selected fixture runtime's ordinary entrypoint against real temporary Git repositories and fixture-owned
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
 Recovery entrypoint/runner tests exercise the same proof lifecycle with isolated
@@ -259,6 +267,12 @@ Run these focused tests before the full suite:
 
 ```sh
 node --test orchestrator/capabilities.test.mts orchestrator/browser-provisioning.test.mts orchestrator/verification-entrypoint.test.mts orchestrator/recovery-entrypoint.test.mts cli/test/image-config.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/init.test.mts cli/test/update.test.mts
+```
+
+The CI browser lifecycle isolation command is separate from the full suite and uses fake browser modules, not a Docker image:
+
+```sh
+timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
 ```
 
 ## Optional browser image smoke test

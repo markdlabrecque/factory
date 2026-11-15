@@ -5,11 +5,13 @@ New Factory projects use versioned TOML, not edits to Factory implementation fil
 `factory init --profile personal|client` creates a commented profile with values from
 `--repo`, `--image` and (client) `--host` / `--project-id`. Reference profiles are
 [personal](../orchestrator/factory.personal.toml) and [client](../orchestrator/factory.client.toml).
-Both profiles default to the OpenAI family and have empty sandbox setup. They retain their tracker, selection and merge differences.
+Both profiles explicitly select OpenAI and have empty sandbox setup. Personal uses GitHub, the `merged` done label, one readiness label and automatic merging. Client uses GitLab, the `Internal QA` done label, both `Ready to do` and `ready-for-agent`, issue type `issue` and manual merging. These profile values are not all schema defaults.
 
 ## Inspecting effective settings
 
-Use `factory config explain --project <name|path> --json` to inspect normalized settings, explicit/default sources, instruction hashes and the validated runtime identity without executing project workflow code. Setup bodies are omitted. For project overrides, Factory reports configured intent, not the custom code's actual models or stages. See [Factory CLI](factory-cli.md#configuration-explanation).
+Use `factory config explain [--project <name|path>] [--json]` to inspect normalized settings, per-key `explicit` or `default` sources, instruction hashes, warnings and validated runtime identity. An explicitly supplied value is `explicit` even when it equals the default. An omitted optional value is `default`, including when it remains absent rather than receiving a concrete value. Setup command bodies are omitted. The command reads local configuration and runtime files without executing project workflow code, launching processes or changing state. It exits 1 on validation errors.
+
+Project overrides have opaque behavior: configured values do not prove which models or stages custom code uses. Even in Factory mode, explain reports actual policy unknown when the selected policy file differs from the CLI's policy. See [Factory CLI](factory-cli.md#configuration-explanation).
 
 ## Authority and validation
 
@@ -95,34 +97,94 @@ If `labels.needs_human` is not in `selection.labels.none`, validation returns an
 actionable warning; it does **not** silently add it. Readiness and exclusion labels
 have no second authority under `[labels]`.
 
-Factory owns model IDs and thinking. OpenAI uses `openai`, Anthropic uses
-`pi-claude-subscription`; both use Pi with high thinking. Small, Mid and Large map
-respectively to OpenAI gpt-6-luna, gpt-6.1-terra and gpt-6.1-sol, or Anthropic
-claude-haiku-5-5, claude-sonnet-5-5 and claude-opus-5-5. Analysis uses Mid;
-verification and recovery use Large. Tickets may declare `Model tier: small`,
-`mid` or `large`; absent declarations default to Mid. Old Model and Pi model
-fields are rejected by dispatch, refresh and direct runs. No automatic fallback is
-provided. Host analysis explicitly passes `--thinking high`; sandbox implementation,
-verification and recovery also use Pi with high thinking. The current description's
+## Complete examples
+
+These are complete v2 configurations. The first uses the GitHub personal profile's distinguishing settings and OpenAI. Omitted fields use schema defaults. Replace the project and image with your own values.
+
+```toml
+version = 2
+[tracker]
+kind = "github"
+project = "owner/repo"
+[agent]
+family = "openai"
+[labels]
+needs_human = "needs-human"
+done = "merged"
+[merge]
+auto = true
+[sandbox]
+image = "sandcastle-personal"
+```
+
+This example uses GitLab client selection and Anthropic. Choosing a model family is independent of tracker choice. The host and project ID are examples, not live project details.
+
+```toml
+version = 2
+[tracker]
+kind = "gitlab"
+project = "group/project"
+host = "git.example.com"
+project_id = 42
+[agent]
+family = "anthropic"
+[labels]
+needs_human = "needs-human"
+done = "Internal QA"
+[selection]
+issue_type = "issue"
+[selection.labels]
+all = ["Ready to do", "ready-for-agent"]
+[sandbox]
+image = "sandcastle-client"
+```
+
+## Factory model policy and ticket tiers
+
+In the standard Factory workflow, `model-policy.mts` owns the model mapping. Both families use Pi with high thinking, including host analysis and sandbox roles. Anthropic's Pi subscription provider may invoke Claude Code internally; it is not a selectable direct Claude Code agent.
+
+| Family | Small | Mid | Large |
+| --- | --- | --- | --- |
+| `openai` | `openai/gpt-6-luna` | `openai/gpt-6.1-terra` | `openai/gpt-6.1-sol` |
+| `anthropic` | `pi-claude-subscription/claude-haiku-5-5` | `pi-claude-subscription/claude-sonnet-5-5` | `pi-claude-subscription/claude-opus-5-5` |
+
+Implementation uses the ticket tier, analysis uses Mid, and verification and recovery use Large. Put a standalone `**Model tier:** small`, `mid` or `large` in the current unit's description. Plain `Model tier: mid` also works. Values are case-insensitive; repeated identical tiers are accepted. Omission selects Mid. Empty, unsupported or conflicting tiers are rejected. Standalone legacy `Model:` and `Pi model:` fields are rejected even when their value is an exact model ID or a valid tier appears elsewhere. Prose, code blocks, indented code, blockquotes, HTML comments, tracker comments, parent descriptions and labels do not select a tier.
+
+Old TOML keys `agent.provider`, `agent.model`, `agent.thinking`, `agent.model_aliases` and `graph.model` are rejected, not translated. There are no per-role family or model settings. The current description's
 resolution includes family, tier, source, model, description revision and policy
 identity. Normal startup freezes this as `modelChoice` alongside `implementationModel`
 in the run record. Later refreshes change current assessments, not that attempt.
 Delivery proofs bind the model-policy and resolver files, so policy drift requires
 fresh verification.
 
-Instruction paths are checked while parsing and resolved inside the checkout before
-execution. Missing files, directories and escaping links fail closed. Common files
-precede role-specific files, with canonical duplicates removed at first occurrence.
-Their literal text is additive to Factory's templates, not a replacement for safety
-or output contracts. Frozen role-specific hashes bind analysis and proof authority;
-editing an instruction requires fresh authority while an active snapshot retains its
-original text.
+## Additive instructions
 
-Workflow selection validates the complete versioned runtime inventory, source
-hashes and private dependencies in the configured directory. Broken overrides never
-fall back to installed code, and copied local main/dispatch files never select an
-override implicitly. Project-mode recovery review binds the complete selected
-source/dependency identity. See [workflow selection and manifest maintenance](execution-context.md#workflow-selection).
+Instruction paths are repository-relative Markdown files. Paths cannot be absolute, use backslashes or contain `..`. Each resolved component must stay inside the checkout; missing files, directories, escaping links and secret-path aliases fail closed. For each role, Factory reads common files in order, then that role's files in order, deduplicating canonical paths at their first occurrence. Literal text and hashes are frozen for the invocation. Editing an instruction requires fresh analysis or proof authority; an active snapshot retains its original text.
+
+These instructions add to Factory's templates. They do not override host proof, admission, verification, delivery or recovery gates. Review their contents as trusted project instructions.
+
+The following is a fragment to add to an otherwise complete configuration. The files must exist in the checkout:
+
+```toml
+[instructions]
+common = ["docs/agent-common.md"]
+implementation = ["docs/agent-implementation.md"]
+verification = []
+analysis = []
+recovery = []
+```
+
+## Workflow selection
+
+`workflow.mode` defaults to `factory`, using the installed runtime. In `project` mode, `workflow.directory` is required and names an existing repository-contained directory. It is forbidden in Factory mode. This fragment selects a complete project override, not individual replacement files:
+
+```toml
+[workflow]
+mode = "project"
+directory = ".sandcastle/workflow"
+```
+
+Workflow selection validates the complete versioned runtime inventory, source hashes and private dependencies. The inventory is defined in `cli/src/runtime-assets.mts`. Broken overrides never fall back to installed code, and copied local main/dispatch files never select an override implicitly. Project-mode recovery review binds the selected source and dependency identity. A valid manifest establishes identity and integrity, not that custom code is safe or follows Factory's gates. Custom workflow behavior is opaque and must be reviewed by its owner. See [workflow selection and manifest maintenance](execution-context.md#workflow-selection).
 
 Selected parents with children confer eligibility on open children without requiring
 child readiness labels. Child exclusion labels still veto. Parents with all children
@@ -147,6 +209,8 @@ Commands remain trusted project code, run **inside the sandbox**, in order; TOML
 is not a security boundary. Prefer calling reviewed scripts rather than embedding
 script bodies. Remove an explicit `setup = []` before adding step tables:
 
+This is a sandbox fragment, not a complete configuration:
+
 ```toml
 [sandbox]
 image = "sandcastle-example"
@@ -168,17 +232,14 @@ the sandbox's shell interprets them only at normal startup.
 
 ## Existing projects
 
-Version 1 and missing configuration are unsupported by the v2 loader. The owner
-must migrate existing projects manually before running the upgraded workflow.
-No deployed project is changed automatically. Stop scheduling and transcribe old settings into a reviewed v2 profile yourself. Init refuses unsupported existing configuration and does not overwrite settings or migrate a legacy scaffold. Update does not repair project data or workflow overrides.
+This is a breaking change. Version 1 and missing configuration are unsupported by the v2 loader. The project owner must review and migrate existing settings and customized workflow behavior manually before using the upgraded workflow. There is no automatic converter or general upgrade recipe; adding TOML alone does not establish that an old custom workflow is compatible. Init does not overwrite settings or migrate a legacy scaffold, and update does not repair project data or workflow overrides. No deployed project is changed automatically.
 
 Replace custom agent providers, model IDs, aliases and thinking settings with
 `[agent] family = "openai"` or `"anthropic"`. Remove `graph.model`. Replace ticket
 `Model:` / `Pi model:` fields with `Model tier: small|mid|large`, or omit the field
 for Mid. Review the schema table above for selection, sandbox and CI settings;
 move old executable `SELECT` and `CONFIG` values into the corresponding TOML tables.
-Prompts and script bodies stay separate. Reconfirm recovery review after checking
-the copied workflow. Scheduling never resumes automatically.
+Prompts and script bodies stay separate. Review the selected workflow and its safety behavior before authorizing recovery or resuming scheduling.
 
 ## Parser maintenance
 

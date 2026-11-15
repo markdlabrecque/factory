@@ -6,16 +6,11 @@
 // Scheduled children inherit trusted absolute CLI/Node authorization paths; refreshes never do.
 // One scheduler tick: the internal command `factory tick`, run by factory-tick.service on Linux (not for people to type;
 // it takes no flags), and on macOS called in-process by the launchd supervisor (commands/supervise.mts). It visits the registered projects one after another, in registry order rotated so that a different project
-// goes first each tick (rotation(), with state.json's `nextRoot`), and runs one dispatcher pass, the project's own `.sandcastle/dispatch.sh` through runDispatchSh, for each project that
-// scheduleBlocker() clears. A registered project never opted in (no `schedule` entry; paused projects get maintenance only) instead
-// gets a read-only refresh of its cards (#94): runRefreshOnly runs the saved Node on its `.sandcastle/dispatch.mts
-// --refresh-only --base <current branch>` (#93) as the leader of its own process group, with the saved PATH and the shared
-// state folder but no FACTORY_SCHEDULED or jam report. It is recorded in the lock and cancelled like a pass, takes no
-// turn, adds no pass history, gets no jam confirmation, and is recorded `skipped` (or `interrupted`) with the refresh
-// result in the reason; a failed refresh is in the result's `refreshed`, logged, and never fails the tick. A detached
-// HEAD or a missing dispatch.mts skips it. Each pass runs as `dispatch.sh` with no --max override, with FACTORY_SCHEDULED=1, the saved PATH, and
-// SANDCASTLE_STATE_DIR set to Factory's state folder whatever the caller had set. The project's dispatcher config
-// (SELECT.maxConcurrent in .sandcastle/dispatch.mts) sets the cap across projects, counting launches not yet on the board (#32). Stdin is inherited: the service has
+// goes first each tick (rotation(), with state.json's `nextRoot`), and runs a selected-runtime dispatcher pass for each
+// eligible project. Never-opted-in projects get a read-only selected-runtime refresh; paused projects get maintenance only.
+// Refreshes use the saved Node and PATH, run in their own process group and take no turn or pass history entry.
+// Scheduled passes use the project's TOML dispatch cap across projects and the shared state folder.
+// Stdin is inherited: the service has
 // none, and a tick started by hand from a terminal keeps the dispatcher's interactive behaviour.
 // Global state comes from the service manager only. Before taking the lock, after taking it, and before every
 // project, the tick asks the manager: work needs the timer enabled and active (macOS: the agent enabled and running). A timer that is off ends the tick, and an
