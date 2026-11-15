@@ -1,7 +1,4 @@
-<!-- Deferred recovery tests use fixture-only settlement, exact-container Docker stubs and fake service-manager boundaries.
-Existing delivery tests stub trackers and scheduler authorization; no live CI, agents or managers. -->
-<!-- Factory test policy: fixture-owned boundaries and runtimes for normal tests; browser image and service-manager smoke checks are explicitly opt-in. -->
-<!-- #150: proof/entrypoint tests use synthetic evidence and stub all agent/container/tracker boundaries. -->
+<!-- Regular tests use fixture-owned runtimes and external boundaries. CI partitions the complete inventory across bounded parallel shards and separately checks browser lifecycle isolation. Real browser-image and service-manager smoke checks are opt-in. -->
 # Testing
 
 ## Run the tests
@@ -12,7 +9,20 @@ Requires Node 22.18+; CI uses Node 24. From the repository root:
 node --test orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 ```
 
-CI sets `--test-concurrency=4` to overlap independent fixture subprocess waits on small runners. It still runs the complete inventory above with the 180-second suite deadline and 120-second per-test deadline. A two-CPU Node 24.20.0 fixture run completed all 714 tests in 99 seconds at this concurrency, compared with 172 seconds using the CPU-derived default. This is a scheduling choice, not a skipped-test or timeout waiver.
+CI runs four parallel jobs through `scripts/test-shard.sh`. The runner expands exactly the three globs above, sorts paths with `LC_ALL=C`, and assigns zero-based file position modulo four to shards 1 through 4. New matching files enter the inventory automatically. Each shard retains `--test-concurrency=4`, the hard 180-second deadline and `--test-timeout=120000`. No test-name filters or exclusions apply.
+
+Reproduce CI from the repository root with Node 24 and GNU `timeout`:
+
+```sh
+bash scripts/test-shard.sh 1 4
+bash scripts/test-shard.sh 2 4
+bash scripts/test-shard.sh 3 4
+bash scripts/test-shard.sh 4 4
+```
+
+These commands may run sequentially locally; CI gives each shard its own runner. Add `--list` to print a shard's file assignment without executing tests. `cli/test/ci-shards.test.mts` checks the actual runner output against the current filesystem inventory for deterministic, exact-once coverage and checks the workflow matrix and deadlines. Empty or invalid shards fail rather than silently pass.
+
+The independent browser lifecycle job below remains mandatory. Its file also remains in the complete suite. Matrix fail-fast is disabled so a failing shard does not cancel the others. The existing `test` check succeeds only when all four shards and the browser lifecycle job succeed; failed, cancelled or skipped prerequisites cannot produce a green aggregate.
 
 Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
