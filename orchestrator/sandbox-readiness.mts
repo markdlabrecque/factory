@@ -211,7 +211,7 @@ export async function closeSandbox(sandbox: { sandboxId?: string; close(): Promi
       confirmed = !reason && r.status !== null && r.status !== 0 && /No such (object|container)/i.test(r.stderr);
     } catch { /* Uncertainty retains the runtime cleanup lease. */ }
   }
-  if (!confirmed) reason = [reason, `Container ${sandbox.sandboxId ?? '(unknown)'} teardown unconfirmed; ownership cleanup hold retained`].filter(Boolean).join('; ');
+  if (!confirmed) reason = [reason, `Container ${sandbox.sandboxId ?? '(unknown)'} teardown unconfirmed; cleanup ownership retained`].filter(Boolean).join('; ');
   return { confirmed, ...(reason ? { reason } : {}) };
 }
 

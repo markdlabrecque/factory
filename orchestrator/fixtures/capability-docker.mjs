@@ -5,7 +5,7 @@ export const fixtureImage = `sha256:${'a'.repeat(64)}`;
 export function capabilityDocker(args, dir) {
   // Contract stub only. The actual embedded filesystem program has separate local-Git fixtures.
   if (args[0] === 'exec' && args[2] === 'node' && args[3] === '-e' && args[4]?.includes('const input = JSON.parse(process.argv[1])')) {
-    if (args.length !== 6 || !/^(fixture-container|factory-recovery-[0-9a-f-]{36})$/.test(args[1])) throw Error('Unexpected sandbox probe identity/arguments');
+    if (args.length !== 6 || !/^(fixture-container|fixture-implementer|factory-recovery-[0-9a-f-]{36})$/.test(args[1])) throw Error('Unexpected sandbox probe identity/arguments');
     const input = JSON.parse(args[5]);
     if (input.uid !== process.getuid() || input.gid !== process.getgid() || !/^[0-9a-f]{40}$/.test(input.baseline) || !input.evidence.startsWith('/home/agent/evidence/')) throw Error('Unexpected probe input');
     writeFileSync(join(dir,'sandbox-probe-input.json'), JSON.stringify(input));

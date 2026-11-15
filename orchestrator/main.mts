@@ -1,5 +1,6 @@
 // Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
 // Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
+// Zero-commit diagnostics attribute bounded Pi session replies without delivery authority, then exit after owned teardown.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup, closeSandbox } from './sandbox-readiness.mts';
 import type { ReadinessReport } from './readiness-schema.mts';
@@ -9,6 +10,7 @@ import type { ReadinessReport } from './readiness-schema.mts';
 // Provenance covers the complete selected inventory, including local-observation and admission helpers.
 // #149: unknown dependency reads hold implementer and recovery work without needs-human labels.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
+import { diagnostic, diagnosticText, finalReply, saveDiagnostic, sanitizeReply } from './no-commit.mts';
 import { recordModelResolution } from "./assessment.mts";
 import { createSandbox, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -87,6 +89,7 @@ const agent = (model: string) =>
 let currentIid: string | undefined;
 let finished = false;
 let lastMessage = "";
+let diagnosticExecutionId: string | undefined;
 function fail(msg: string): never {
   lastMessage = msg;
   console.error(msg);
@@ -94,7 +97,9 @@ function fail(msg: string): never {
 }
 // Anything that ends the process before a terminal stage lands on the board as "washed away".
 process.on("exit", (code) => {
-  if (currentIid && !finished) setStage(currentIid, { stage: "stopped", note: lastMessage || `exited with code ${code}` });
+  if (currentIid && !finished && (!diagnosticExecutionId || readRuns().some(r => r.project === PROJECT && r.iid === currentIid && r.executionId === diagnosticExecutionId))) {
+    setStage(currentIid, { stage: "stopped", note: lastMessage || `exited with code ${code}` });
+  }
 });
 const readinessCancel = new AbortController();
 const cancelReadiness = () => readinessCancel.abort();
@@ -412,6 +417,9 @@ let sandboxFailure: string | undefined;
 const sandboxCancel = new AbortController();
 const cancelSandbox = () => sandboxCancel.abort();
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelSandbox);
+let noCommitMessage: string | undefined;
+let noCommitSuperseded = false;
+const diagnosticSessions = resolve('.sandcastle/diagnostic-sessions', executionId);
 try {
   const actualBase = sh('git', ['rev-parse', `refs/heads/${branch}`]);
   if (actualBase !== baseSha) throw Error('Branch creation baseline changed; refusing unverifiable implementation');
@@ -430,7 +438,7 @@ try {
   // ---- 1. implementer ----------------------------------------------------------
   setStage(iid, { stage: "implementing" });
   const impl = await sandbox.run({
-    agent: agent(implementerModel),
+    agent: pi(implementerModel, { thinking: AGENT.thinking, env: piEnvFor(implementerModel, openaiCredential), sessionStorage: { hostSessionsDir: diagnosticSessions } }),
     promptFile: context.codePath('prompt.md'),
     promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.implementation.text },
     maxIterations: 1,
@@ -438,8 +446,22 @@ try {
     name: "implementer", signal: sandboxCancel.signal,
   });
   if (!impl.commits.length) {
+    diagnosticExecutionId = executionId;
     blockers = readBlocked();
-    if (!blockers) throw Error(`Implementer made no commit for #${iid} (no change needed, or blocked). See ${impl.logFilePath ?? "logs"}. Nothing pushed.`);
+    let worktree: 'dirty' | 'clean' | 'unknown' = 'unknown';
+    try {
+      const status = await sandbox.exec('git --no-optional-locks status --porcelain --untracked-files=normal');
+      if (status.exitCode === 0) worktree = status.stdout.trim() ? 'dirty' : 'clean';
+    } catch { /* An unreadable fact stays unknown, not a filesystem diagnosis. */ }
+    const report = diagnostic(executionId, worktree, blockers !== undefined, finalReply(impl, diagnosticSessions), impl.logFilePath);
+    noCommitMessage = diagnosticText(report);
+    try { saveDiagnostic(evidenceHost, report); }
+    catch { noCommitMessage = diagnosticText(report, false) + ' Diagnostic evidence publication unavailable.'; }
+    lastMessage = noCommitMessage;
+    const current = readRuns().find(r => r.project === PROJECT && r.iid === iid);
+    noCommitSuperseded = current?.executionId !== executionId || current.claim !== claimToken;
+    if (noCommitSuperseded) finished = true; // Even an unclaimed manual run must not overwrite a newer execution on exit.
+    else setStage(iid, { note: noCommitMessage });
   } else {
     tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
     if ([baseSha, tip].some(sha => spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`]).status !== 0)) throw Error('Missing historical verification baseline or tip Git object; verifier not started. Preserve work for restored-baseline verification or explicit human review.');
@@ -457,19 +479,25 @@ try {
     }
   }
 } catch (error) {
-  sandboxFailure = (error as Error).message;
+  sandboxFailure = error instanceof Error ? error.message : String(error);
 } finally {
   const cleanup = await closeSandbox(sandbox);
   if (cleanup.confirmed) runtimeLease.confirmedCleanup();
-  if (cleanup.reason) sandboxFailure = [sandboxFailure, cleanup.reason].filter(Boolean).join('; ');
+  if (cleanup.reason) sandboxFailure = [sandboxFailure, noCommitMessage ? sanitizeReply(cleanup.reason) : cleanup.reason].filter(Boolean).join('; ');
   if (sandboxReport) {
     try { recordSandboxCleanup(stateDir(), sandboxReport, cleanup.confirmed); }
     catch (error) { sandboxFailure = [sandboxFailure, `Readiness cleanup publication failed: ${(error as Error).message}`].filter(Boolean).join('; '); }
   }
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelSandbox);
 }
-if (sandboxFailure) fail(sandboxFailure);
+if (sandboxFailure) fail([noCommitMessage, sandboxFailure].filter(Boolean).join(' '));
 if (verificationRefusal) fail(verificationRefusal);
+if (noCommitMessage) {
+  const current = readRuns().find(r => r.project === PROJECT && r.iid === iid);
+  noCommitSuperseded ||= current?.executionId !== executionId || current.claim !== claimToken;
+  if (noCommitSuperseded) { finished = true; fail('No-commit execution was superseded; diagnostic retained only under its original execution.'); }
+}
+if (noCommitMessage && !blockers) fail(noCommitMessage);
 
 // ---- implementer reported a missing prerequisite ----------------------------------
 if (blockers) {
@@ -492,17 +520,17 @@ if (blockers) {
       ...blockers.map((b) => `- ${b.iid != null ? `#${b.iid}` : "No ticket"}: ${b.what}. ${b.evidence}`),
       SANDCASTLE_MARK,
     ].join("\n\n"));
-    fail(`Blocked (${what}); labelled ${LABELS.needsHuman}.`);
+    fail(`${noCommitMessage ?? ''} Blocked (${what}); labelled ${LABELS.needsHuman}.`);
   }
   patchManifest(PROJECT, Number(iid), { implementerBlockers: blockers });
   // Remove the empty branch so the dispatcher can relaunch the ticket once the blocker merges.
   try {
     sh("git", ["branch", "-D", branch]);
   } catch {
-    fail(`Blocked (${what}), but branch ${branch} could not be deleted (worktree left behind?). Delete it to let the ticket run again.`);
+    fail(`${noCommitMessage ?? ''} Blocked (${what}), but branch ${branch} could not be deleted (worktree left behind?). Delete it to let the ticket run again.`);
   }
   finished = true;
-  setStage(iid, { stage: "waiting", note: `implementer: needs ${what}${[...dependencyCache.values()].some((r) => r.state === "unknown") ? "; dependency information unavailable, will retry" : ""}` });
+  setStage(iid, { stage: "waiting", note: `${noCommitMessage ?? ''} implementer: needs ${what}${[...dependencyCache.values()].some((r) => r.state === "unknown") ? "; dependency information unavailable, will retry" : ""}` });
   console.log(`#${iid} waits on ${what}. The dispatcher relaunches it once that is merged.`);
   process.exit(0);
 }
