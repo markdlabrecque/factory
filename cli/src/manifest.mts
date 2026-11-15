@@ -17,8 +17,8 @@ export function readManifest(p: Paths): Manifest | undefined {
 export function validate(p: Paths, entry: ManifestEntry) {
   const units: Record<string, string> = { 'factory-board.service': p.systemd, 'factory-tick.service': p.tickService, 'factory-tick.timer': p.tickTimer };
   const labels: Record<string, string> = { 'com.factory.board': p.launchd, 'com.factory.tick': p.tickPlist };
-  const expected = { file: p.bin, dir: p.app, systemd: units[entry?.unit ?? ''] ?? p.systemd, launchd: labels[entry?.label ?? ''] ?? p.launchd };
-  if (!entry || entry.path !== expected[entry.kind] || !resolve(entry.path).startsWith(p.home + sep))
+  const expected = { file: [p.bin, p.runtimeDescriptor], dir: [p.app, p.runtimes], systemd: [units[entry?.unit ?? ''] ?? p.systemd], launchd: [labels[entry?.label ?? ''] ?? p.launchd] };
+  if (!entry || !expected[entry.kind]?.includes(entry.path) || !resolve(entry.path).startsWith(p.home + sep))
     throw new Error(`Unsafe manifest entry: ${JSON.stringify(entry)}`);
   if (entry.kind === 'systemd' && !Object.hasOwn(units, entry.unit ?? '')) throw new Error('Unexpected unit');
   if (entry.kind === 'launchd' && !Object.hasOwn(labels, entry.label ?? '')) throw new Error('Unexpected launch agent');

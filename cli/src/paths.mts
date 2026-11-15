@@ -13,6 +13,7 @@ export function paths(home = process.env.FACTORY_HOME || homedir()) {
   const data = join(home, '.local/share/factory');
   const state = join(home, '.local/state/factory');
   return { home, data, app: join(data, 'app'), manifest: join(data, 'manifest.json'),
+    runtimes: join(data, 'runtimes'), runtimeDescriptor: join(data, 'runtime.json'),
     bin: join(home, '.local/bin/factory'), config: join(home, '.config/factory'), projects: join(home, '.config/factory/projects.json'),
     scheduleConfig: join(home, '.config/factory/schedule.json'),
     state,

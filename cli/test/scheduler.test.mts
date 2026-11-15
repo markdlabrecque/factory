@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { Fake, FakeSchedule } from '../src/platform/fake.mts';
 import { schedulerUnits } from '../src/platform/scheduler-systemd.mts';
-import { install } from '../src/commands/install.mts';
+import { install } from './runtime-fixture.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { schedulingState, tick, tickExitCode } from '../src/commands/tick.mts';

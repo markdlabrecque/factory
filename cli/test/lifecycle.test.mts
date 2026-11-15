@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { paths } from '../src/paths.mts';
 import { Fake } from '../src/platform/fake.mts';
-import { install, repository } from '../src/commands/install.mts';
+import { repository } from '../src/commands/install.mts';
+import { install, copyRuntimeSources } from './runtime-fixture.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { readManifest } from '../src/manifest.mts';
 import { factoryHistory } from '../src/update.mts';
@@ -45,8 +46,8 @@ test('install twice reuses entries and refreshes copied code', async t => {
   writeFileSync(join(p.app, 'cli/bin/factory.mts'), 'stale');
   await install(p, service);
   const entries = readManifest(p)!.entries;
-  assert.equal(entries.length, 3);
-  assert.equal(new Set(entries.map(e => e.path)).size, 3);
+  assert.equal(entries.length, 5);
+  assert.equal(new Set(entries.map(e => e.path)).size, 5);
   assert.ok(entries.every(e => existsSync(e.path)));
   assert.match(readFileSync(join(p.app, 'cli/bin/factory.mts'), 'utf8'), /parseArgs/);
   // The copied app carries the source checkout's scaffold history for factory update (#91).
@@ -71,7 +72,7 @@ for (const phase of ['unit write', 'enable']) test(`crash recovery after ${phase
   service.failInstall = phase === 'unit write';
   service.failEnable = phase === 'enable';
   await assert.rejects(install(p, service), /Simulated/);
-  assert.equal(readManifest(p)!.entries.length, phase === 'unit write' ? 2 : 3);
+  assert.equal(readManifest(p)!.entries.length, phase === 'unit write' ? 4 : 5);
   await uninstall(p, service);
   for (const path of [p.app, p.bin, p.systemd, p.manifest]) assert.equal(existsSync(path), false);
 });
@@ -90,6 +91,7 @@ function fakeCheckout(t: TestContext, marker: string) {
   mkdirSync(join(dir, 'cli/bin'), { recursive: true });
   writeFileSync(join(dir, 'cli/bin/factory.mts'), marker);
   mkdirSync(join(dir, 'cli/src'));
+  copyRuntimeSources(dir);
   return dir;
 }
 test('the installed factory command installs the checkout it is run from', async t => {
@@ -99,7 +101,7 @@ test('the installed factory command installs the checkout it is run from', async
   // Run as the installed app, from a subfolder of another checkout.
   await install(p, service, { running: p.app, cwd: join(checkout, 'cli/src') });
   assert.equal(readFileSync(join(p.app, 'cli/bin/factory.mts'), 'utf8'), 'updated checkout');
-  assert.equal(readManifest(p)!.entries.length, 3);
+  assert.equal(readManifest(p)!.entries.length, 5);
 });
 test('the installed factory command outside a checkout refuses and leaves the app alone', async t => {
   const { p, service } = fixture(t);

@@ -598,7 +598,9 @@ interface ServiceBackend {
 6. Print what was installed and the board URL.
 7. If install stopped the scheduler, or any registered project is opted in, end with a reminder that the scheduler is off, naming the opted-in projects waiting, and to resume with `factory schedule on`. Install never turns scheduling back on.
 
-Running it again reuses existing entries and refreshes the files. It never duplicates a manifest entry.
+Before replacing the app, install prepares a content-addressed runtime in `~/.local/share/factory/runtimes/` using the checkout's locked package manifests and `npm ci --include=dev --include=optional --ignore-scripts`. Applicable platform dependencies, including esbuild's executable, are mandatory even though npm marks them optional. It atomically updates `runtime.json` only after bundle preparation, app installation and service setup succeed. A failed install leaves the previous descriptor and bundle usable. Runtime ownership is durably reserved before temporary or published directories are created. A later install can remove a recorded temporary directory only when its PID/start identity is confirmed dead, and can reuse a validated published bundle after an interruption. A PID/start-identity transaction fences the entire asynchronous install or uninstall, including service setup. A competing operation fails rather than selecting a descriptor for another operation's app. Atomic metadata writes stage outside the store, so interrupted ledger or lease writes cannot turn known bundles into unrecognized store entries. Copied and linked installs both prepare independent runtime bytes; changes to a linked checkout require another install. Old bundles are retained, not garbage-collected. The existing launch paths do not yet select these bundles.
+
+Running install again reuses existing entries and refreshes the files. It never duplicates a manifest entry.
 
 ## `factory doctor`
 
@@ -619,7 +621,7 @@ Exit code is non-zero if any hard check fails.
 
 ## `factory uninstall`
 
-Follows "Uninstall behaviour" above. For this slice the manifest holds only the app dir, the symlink and the board service, so the run removes those three.
+Follows "Uninstall behaviour" above. The manifest also owns the exact runtime store and descriptor paths. Before removing anything, uninstall checks the runtime ownership ledger and process leases. Live or unidentifiable owners, malformed leases and unrecognized bundles stop removal; a confirmed dead PID/start identity does not. Uninstall never steals ownership based on age. Launchers must acquire and transfer leases for this protection to cover their processes; existing launch paths do not yet do so.
 
 ## Tests
 
