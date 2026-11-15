@@ -51,7 +51,7 @@ test('normal and linked Git checkouts with external common-dir work; dirtiness i
   const git = (...args: string[]) => execFileSync('git', ['-C', f.project, ...args], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
   git('init', '-q'); git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'empty', '--allow-empty');
   const linked = join(f.root, 'linked checkout'); git('worktree', 'add', '-qb', 'fixture-linked', linked);
-  const common = join(f.project, '.git'), gd = join(common, 'worktrees', 'linked-checkout');
+  const common = join(f.project, '.git');
   const actualGit = execFileSync('git', ['-C', linked, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim();
   f.input.identity.projectRoot = linked;
   f.input.paths = [
@@ -82,6 +82,16 @@ for (const method of ['writeSync', 'renameSync', 'unlinkSync'] as const) test(`i
   assert.equal(report.status, 'blocked'); assert.ok(report.checks.some(c => c.errno === 'EACCES'));
   if (method !== 'unlinkSync') assert.deepEqual(fs.readdirSync(f.state), []);
   else assert.ok(report.checks.some(c => c.operation === 'remove'));
+});
+test('read errors and incomplete writes cannot be reported as established access', t => {
+  const f = fixture(t);
+  f.input.paths = [f.input.paths[1]];
+  const unreadable = collectReadiness(f.input, 'passive', inject('readSync', () => { throw error('EIO'); }));
+  assert.equal(unreadable.status, 'blocked'); assert.equal(unreadable.checks[0].operation, 'read');
+  f.input.paths = [{ id: 'state', role: 'state', scope: 'project', path: f.state, trustedRoot: f.state, access: 'write-directory' }];
+  const short = collectReadiness(f.input, 'active', inject('writeSync', () => 1));
+  assert.equal(short.status, 'blocked'); assert.equal(short.checks[0].operation, 'write');
+  assert.deepEqual(fs.readdirSync(f.state), []);
 });
 test('capacity zero blocks, low capacity is advisory, unsupported metrics stay unavailable', t => {
   const f = fixture(t); f.input.paths = [f.input.paths[3]];

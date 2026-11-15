@@ -88,6 +88,7 @@ export function collectReadiness(input: ReadinessInput, phase: 'passive' | 'acti
           const f = io.openSync(child, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
           handles.push(f);
           if (!io.fstatSync(f).isFile()) throw failure('EINVAL');
+          operation = 'read'; io.readSync(f, Buffer.alloc(1), 0, 1, 0);
         } else {
           operation = 'open-directory'; fd = pin(child); current = join(current, parts[i]);
           operation = 'read-directory'; io.accessSync(descriptorPath(fd), fs.constants.R_OK | fs.constants.X_OK);
@@ -104,7 +105,11 @@ export function collectReadiness(input: ReadinessInput, phase: 'passive' | 'acti
           for (const name of [first, second]) {
             operation = 'create'; validate();
             const f = io.openSync(join(descriptorPath(fd), name), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-            try { const s = io.fstatSync(f); owned.set(name, { dev: s.dev, ino: s.ino }); operation = 'write'; io.writeSync(f, Buffer.from('factory readiness\n')); }
+            try {
+              const s = io.fstatSync(f); owned.set(name, { dev: s.dev, ino: s.ino }); operation = 'write';
+              const bytes = Buffer.from('factory readiness\n');
+              if (io.writeSync(f, bytes) !== bytes.length) throw failure('EIO');
+            }
             finally { io.closeSync(f); }
           }
           operation = 'rename'; validate();
