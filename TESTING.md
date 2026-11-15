@@ -49,12 +49,29 @@ node --test orchestrator/context.test.mts orchestrator/models.test.mts orchestra
 node --test orchestrator/verification-entrypoint.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
 ```
 
+`cli/test/shared-runtime.test.mts` exercises a copied install and data-only init
+through the normal Pi Terra implementation and independent verifier happy path,
+and a saved Pi Terra recovery with Large repair and independent verification. The
+recovery case exercises preparation and readiness before charging, preserves prior
+work and evidence, and settles the delivered attempt. These use an explicit ticket
+tier. The normal cases poison project workflow files; the copied recovery checks
+their absence. They trap npm calls
+and checks that execution creates no project dependencies. It uses temporary bare
+Git and fake SDK, tracker, container and authentication boundaries; it does not
+run a real agent or prove semantic verification. A complete project override also
+runs the implementation and verifier with custom code and a marked template. Removing
+its mandatory verification helper makes the CLI refuse before any fixture tracker,
+authentication, Docker or agent call, while saved state and evidence remain unchanged.
+This exercises one override, not a model-policy guarantee for arbitrary custom code.
+
 `cli/test/execution-fixture.mts` assembles complete temporary bundles from the
 single runtime inventory with fake private dependencies. The tsx stand-in imports
 only the supplied absolute entrypoint; no package manager or real agent runs.
 Fixtures stage any test-specific workflow/provider changes before publication,
-then validate the same manifest and dependency hashes as production. They never
-write settings into the source checkout or modify an installed app.
+then validate the same manifest and dependency hashes as production. The normal
+and recovery entrypoint fixtures stage their SDK outside the project and assert
+that the project has no `node_modules`. They never write settings into the source
+checkout or modify an installed app.
 
 Context tests reject missing/noncanonical roots, wrong cwd, missing/mismatched
 runtime identity, escaped settings and changed dependency/template bytes. Two

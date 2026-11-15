@@ -46,7 +46,7 @@ else if(a[0] === 'api' && a[1] === 'graphql') {
 } else { console.error('UNEXPECTED TRACKER CALL: '+JSON.stringify(a)); process.exit(97); }
 `;
   for (const cmd of ['gh','glab']) writeFileSync(join(bin,cmd),stub,{mode:0o755});
-  const runtime = bindExecution(root, { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: p.state, PATH: `${bin}:${process.env.PATH}` });
+  const runtime = bindExecution(root, { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: p.state, PATH: `${bin}:${process.env.PATH}` }, { paths: p });
   const env = runtime.env;
   const run = (args: string[], extra: Record<string,string> = {}) => spawnSync(process.execPath,[cli,...args],{cwd:root,env:{...env,...extra},encoding:'utf8'});
   const explain = (extra: Record<string,string> = {}) => run(['selection','explain','7','--json'],extra);

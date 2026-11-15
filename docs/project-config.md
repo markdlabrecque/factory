@@ -7,6 +7,10 @@ New Factory projects use versioned TOML, not edits to Factory implementation fil
 [personal](../orchestrator/factory.personal.toml) and [client](../orchestrator/factory.client.toml).
 Both profiles default to the OpenAI family and have empty sandbox setup. They retain their tracker, selection and merge differences.
 
+## Inspecting effective settings
+
+Use `factory config explain --project <name|path> --json` to inspect normalized settings, explicit/default sources, instruction hashes and the validated runtime identity without executing project workflow code. Setup bodies are omitted. For project overrides, Factory reports configured intent, not the custom code's actual models or stages. See [Factory CLI](factory-cli.md#configuration-explanation).
+
 ## Authority and validation
 
 The v2 data loader requires `factory.toml` and never imports project code. Missing

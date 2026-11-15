@@ -1,11 +1,11 @@
-// Read-only explanation consumes an already selected explicit runtime; launcher selection remains separate.
+// Read-only selection intent uses validated workflow identity and Factory-owned native tracker reads.
 // Never imports project executables/main/dispatch, creates labels, analyzes, or writes state.
 // Native-filter membership must be complete; uncertain reads produce unknown rather than false reasons.
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { resolveWorkflow } from '../../../orchestrator/workflow.mts';
+import { nativeGithub } from '../../../orchestrator/selection-tracker.github.mts';
+import { nativeGitlab } from '../../../orchestrator/selection-tracker.gitlab.mts';
 import type { Paths } from '../paths.mts';
 import { findRun, resolveProject, runStateDir, ticketId } from '../runs.mts';
-import { loadTomlConfig } from '../../../orchestrator/project-config.mts';
 import { excludedAssignees, membershipEligibility, unitEligibility } from '../../../orchestrator/selection.mts';
 import type { Eligibility } from '../../../orchestrator/selection.mts';
 import { readAssessment } from '../../../board/assessment.mts';
@@ -15,18 +15,16 @@ export async function selectionExplain(p: Paths, action: string | undefined, tic
   if (action !== 'explain' || !ticket) throw new Error('Usage: factory selection explain <ticket> [--project <name|path>] [--json]');
   const iid = Number(ticketId(ticket));
   if (!Number.isSafeInteger(iid) || iid <= 0) throw new Error('Expected a positive ticket number');
-  const ctx = resolveProject(p, o), c = loadTomlConfig(ctx.scaffold);
-  const source = c?.source ?? { mode: 'legacy', path: join(ctx.scaffold, 'config.mts') };
+  const ctx = resolveProject(p, o);
+  const selected = resolveWorkflow(ctx.root, p.runtimeDescriptor);
+  const c = selected.config, source = c.source;
+  const workflow = { mode: selected.mode, root: selected.root, identity: selected.id,
+    dependencies: selected.manifest.dependencies, behavior: selected.mode === 'project' ? 'opaque' : 'factory',
+    actualSelection: selected.mode === 'project' ? 'unknown' : 'factory-native' };
   let eligibility: Eligibility = { status: 'unknown', reasons: [] };
   let inheritedFrom: number | undefined;
-  if (!c) eligibility.reasons.push({ code: 'legacy-unsupported', message: 'Cannot safely infer a customized legacy SELECT block. Review workflow upgrades and manually migrate to factory.toml; no executable legacy config was loaded.' });
-  else try {
-    // Runtime selection belongs to the launcher. Until all CLI paths supply it, refuse rather than execute a project copy.
-    const runtime = process.env.FACTORY_RUNTIME_ROOT;
-    if (!runtime || process.env.FACTORY_PROJECT_ROOT !== ctx.root) throw Error('Explicit execution context required; upgrade Factory launch routing.');
-    const { executionContext } = await import(pathToFileURL(join(runtime, 'context.mts')).href);
-    await executionContext();
-    const tracker: typeof import('../../../orchestrator/tracker.mts') = await import(pathToFileURL(join(runtime, 'tracker.mts')).href);
+  try {
+    const tracker = c.TRACKER.kind === 'github' ? nativeGithub(c) : nativeGitlab(c);
     const t = tracker.ticket(iid);
     const ready = tracker.readyList(c.selection);
     const excluded = excludedAssignees(c.selection, tracker.currentUsername);
@@ -72,12 +70,14 @@ export async function selectionExplain(p: Paths, action: string | undefined, tic
   const executionHolds = { status: 'unknown', message: 'Read-only snapshot; current capacity, conflicts, admission and prerequisite holds are not reevaluated. Missing or stale information is unknown.',
     recordedRun: run ? { stage: run.stage, note: run.note, startedAt: run.startedAt } : null,
     recordedAssessment: assessment ? { checkedAt: assessment.facts?.checkedAt, analysisState: assessment.analysisState, dependencies: assessment.dependencies, retryRequired: assessment.retryRequired, error: assessment.error } : null };
-  const settings = c ? { selection: { ...c.selection, milestone: c.TRACKER.milestone, labels: { all: c.LABELS.ready, none: c.LABELS.exclude } },
-    work: { units: c.SUBTASKS.enabled ? 'subtasks' : 'issues' }, dispatch: c.dispatch, sources: c.sources, warnings: c.warnings } : null;
-  const result = { source, settings, eligibility: eligibility.status, reasons: eligibility.reasons, inheritedFrom: inheritedFrom ?? null, executionHolds };
+  const settings = { selection: { ...c.selection, milestone: c.TRACKER.milestone, labels: { all: c.LABELS.ready, none: c.LABELS.exclude } },
+    work: { units: c.SUBTASKS.enabled ? 'subtasks' : 'issues' }, dispatch: c.dispatch, sources: c.sources, warnings: c.warnings };
+  const result = { source, workflow, settings, eligibilityScope: 'configured-selection-intent', eligibility: eligibility.status, reasons: eligibility.reasons, inheritedFrom: inheritedFrom ?? null, executionHolds };
   if (o.json) console.log(JSON.stringify(result, null, 2));
   else {
     console.log(`Configuration: ${source.mode} (${source.path})`);
+    console.log(`Workflow: ${JSON.stringify(workflow)}`);
+    if (workflow.behavior === 'opaque') console.log('Eligibility describes configured selection intent; actual project workflow selection is unknown.');
     if (settings) console.log(`Effective settings (with explicit/default sources):\n${JSON.stringify(settings, null, 2)}`);
     console.log(`Eligibility: ${result.eligibility}\n${result.reasons.map(r => `  ${r.code}: ${r.message}`).join('\n')}`);
     console.log(`Execution holds (separate): ${JSON.stringify(executionHolds, null, 2)}`);
