@@ -7,6 +7,10 @@ Live read-only scheduler authorization and delivery claims continue existing exa
 
 Dispatch and recovery enforce [image and sandbox readiness](image-readiness.md) before agent work. Recovery awaits readiness before atomic claim-and-charge, reports environment holds without spending attempts, and rechecks scheduling eligibility after the probe. Existing customized project copies require a reviewed workflow upgrade.
 
+## Configuration explanation
+
+`factory config explain [--project <name|path>] [--json]` resolves the registered project or checkout and validates its v2 configuration, instructions and selected runtime without launching it. JSON output has version 1, normalized settings and source attribution, canonical project and config paths, config and instruction hashes, runtime identity and Factory model policy. Setup commands and instruction bodies are not printed. A complete project override reports configured intent and validated identity, but its actual models and behavior are opaque. Invalid inputs exit 1 with sanitized diagnostics; successful validation exits 0. This does not check tracker, image, credentials or service availability.
+
 ## Local observations
 
 `factory telemetry export [--project <name|path>] [--ticket <iid>] [--since <ISO-8601>] [--format json|jsonl]` exports append-only local execution and explicit-control observations. JSONL is the default, with metadata first. The command writes only stdout, does not reconcile state or take writer locks, and reports coverage as `observed-only`. Missing history is not proof of inactivity. See [local execution observations](telemetry.md) for the event schema, supported controls, unknown attribution, diagnostics, retention and project-copy requirements.
@@ -626,7 +630,7 @@ Exit code is non-zero if any hard check fails.
 
 ## `factory uninstall`
 
-Follows "Uninstall behaviour" above. The manifest also owns the exact runtime store and descriptor paths. Before removing anything, uninstall checks the runtime ownership ledger and process leases. Live or unidentifiable owners, malformed leases and unrecognized bundles stop removal; a confirmed dead PID/start identity does not. Uninstall never steals ownership based on age. Launchers must acquire and transfer leases for this protection to cover their processes; existing launch paths do not yet do so.
+Follows "Uninstall behaviour" above. The manifest also owns the exact runtime store and descriptor paths. Before removing anything, uninstall checks the runtime ownership ledger and process leases. Live or unidentifiable owners, malformed leases and unrecognized bundles stop removal; a confirmed dead PID/start identity does not. Uninstall never steals ownership based on age. Launchers acquire and transfer leases to protect selected runtime bundles while processes are active.
 
 ## Tests
 

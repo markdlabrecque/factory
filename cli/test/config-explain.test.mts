@@ -29,17 +29,28 @@ test('explain validates fixture runtime, sources, instructions and explicit over
     writeFileSync(join(root, 'notes.md'), 'SECRET_INSTRUCTION_BODY');
     const runtime = bindExecution(root, {}, { paths: p, overlays: false });
     mkdirSync(p.config, { recursive: true }); writeFileSync(p.projects, JSON.stringify({ version: 1, projects: [{ name: 'fixture', root }] }));
-    const original = { write: fs.writeFileSync, mkdir: fs.mkdirSync, spawn: childProcess.spawn, exec: childProcess.execFileSync, connect: net.connect };
-    const trap = () => { throw Error('forbidden boundary'); };
+    const original = { write: fs.writeFileSync, mkdir: fs.mkdirSync, rename: fs.renameSync, rm: fs.rmSync, read: fs.readFileSync,
+      spawn: childProcess.spawn, spawnSync: childProcess.spawnSync, exec: childProcess.execFileSync, execSync: childProcess.execSync, connect: net.connect };
+    let forbidden = 0;
+    const trap = () => { forbidden++; throw Error('forbidden boundary'); };
     let r: ReturnType<typeof capture>;
     try {
       fs.writeFileSync = trap as typeof fs.writeFileSync; fs.mkdirSync = trap as typeof fs.mkdirSync;
-      childProcess.spawn = trap as typeof childProcess.spawn; childProcess.execFileSync = trap as typeof childProcess.execFileSync;
+      fs.renameSync = trap as typeof fs.renameSync; fs.rmSync = trap as typeof fs.rmSync;
+      fs.readFileSync = ((path: any, ...args: any[]) => {
+        if (typeof path === 'string' && /(?:^|\/)(?:\.env|auth\.json)$/.test(path)) return trap();
+        return (original.read as any)(path, ...args);
+      }) as typeof fs.readFileSync;
+      childProcess.spawn = trap as typeof childProcess.spawn; childProcess.spawnSync = trap as typeof childProcess.spawnSync;
+      childProcess.execFileSync = trap as typeof childProcess.execFileSync; childProcess.execSync = trap as typeof childProcess.execSync;
       net.connect = trap as typeof net.connect; syncBuiltinESMExports();
       r = capture(p, 'fixture');
+      const failure = capture(p, join(tmp, 'missing')); assert.equal(failure.code, 1);
+      assert.equal(forbidden, 0, 'no boundary may be called, including on failure');
     } finally {
-      fs.writeFileSync = original.write; fs.mkdirSync = original.mkdir; childProcess.spawn = original.spawn;
-      childProcess.execFileSync = original.exec; net.connect = original.connect; syncBuiltinESMExports();
+      fs.writeFileSync = original.write; fs.mkdirSync = original.mkdir; fs.renameSync = original.rename; fs.rmSync = original.rm; fs.readFileSync = original.read;
+      childProcess.spawn = original.spawn; childProcess.spawnSync = original.spawnSync;
+      childProcess.execFileSync = original.exec; childProcess.execSync = original.execSync; net.connect = original.connect; syncBuiltinESMExports();
     }
     assert.equal(r.code, 0, r.out);
     const cli = fileURLToPath(new URL('../bin/factory.mts', import.meta.url));
@@ -47,9 +58,18 @@ test('explain validates fixture runtime, sources, instructions and explicit over
     assert.equal(JSON.parse(stdout).version, 1);
     assert.equal(r.value.sources['agent.family'], 'default'); assert.equal(r.value.policy.family, 'openai');
     assert.equal(r.value.settings.sandbox.setup.count, 1); assert.match(r.value.instructions.implementation['notes.md'], /^[a-f0-9]{64}$/);
+    assert.equal(r.value.settings.work.units, 'subtasks');
+    assert.deepEqual(r.value.settings.ci, { waitMinutes: 30, noPipelineMinutes: 5 });
+    assert.equal(r.value.sources['ci.wait_minutes'], 'default');
+    assert.match(r.value.config.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(r.value.config.path, config);
     assert.doesNotMatch(r.out, /SECRET_/);
     writeFileSync(config, factoryToml('owner/repo') + '\n[agent]\nfamily = "anthropic"\n');
     r = capture(p, root); assert.equal(r.code, 0, r.out); assert.equal(r.value.policy.family, 'anthropic'); assert.equal(r.value.sources['agent.family'], 'explicit');
+    writeFileSync(config, factoryToml('owner/repo') + '\n[work]\nunits = "issues"\n[ci]\nwait_minutes = 12\nno_pipeline_minutes = 3\n');
+    r = capture(p, root); assert.equal(r.code, 0, r.out);
+    assert.equal(r.value.settings.work.units, 'issues'); assert.equal(r.value.sources['work.units'], 'explicit');
+    assert.deepEqual(r.value.settings.ci, { waitMinutes: 12, noPipelineMinutes: 3 }); assert.equal(r.value.sources['ci.wait_minutes'], 'explicit');
     cpSync(runtime.directory, join(root, 'override'), { recursive: true });
     writeFileSync(config, factoryToml('owner/repo') + '\n[workflow]\nmode = "project"\ndirectory = "override"\n');
     r = capture(p, root); assert.equal(r.code, 0, r.out); assert.equal(r.value.policy.actual, 'unknown'); assert.equal(r.value.workflow.behavior, 'opaque');

@@ -1,5 +1,6 @@
 // Explain data-only project configuration without executing workflow code or changing state.
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Paths } from '../paths.mts';
 import { readRegistry } from '../projects.mts';
@@ -35,13 +36,13 @@ export function configExplain(p: Paths, action: string | undefined, o: { project
     const root = rootFor(p, o.project, o.cwd);
     result.projectRoot = root;
     phase = 'configuration';
-    resolveCheckoutPath(root, '.sandcastle/factory.toml', 'file');
+    const configPath = resolveCheckoutPath(root, '.sandcastle/factory.toml', 'file');
     const c = loadTomlConfig(join(root, '.sandcastle'));
-    result.config = { path: c.source.path, schema: 2 };
+    result.config = { path: configPath, schema: 2, sha256: createHash('sha256').update(readFileSync(configPath)).digest('hex') };
     result.warnings = c.warnings;
     const { sandboxSetup, ...sandbox } = c.config;
-    result.settings = { tracker: c.TRACKER, agent: c.AGENT, labels: c.LABELS, merge: c.MERGE, work: c.SUBTASKS,
-      graph: c.GRAPH, selection: c.selection, dispatch: c.dispatch, sandbox: { ...sandbox,
+    result.settings = { tracker: c.TRACKER, agent: c.AGENT, labels: c.LABELS, merge: c.MERGE, work: { units: c.SUBTASKS.enabled ? 'subtasks' : 'issues' },
+      graph: c.GRAPH, selection: c.selection, dispatch: c.dispatch, ci: { waitMinutes: sandbox.ciWaitMinutes, noPipelineMinutes: sandbox.noPipelineMinutes }, sandbox: { image: sandbox.image,
         setup: { count: sandboxSetup.length, steps: sandboxSetup.map(({ sudo, timeoutMs }) => ({ sudo, timeoutMs: timeoutMs ?? 'unknown' })) } } };
     result.sources = c.sources;
     phase = 'instruction files';
@@ -62,7 +63,7 @@ export function configExplain(p: Paths, action: string | undefined, o: { project
     const message = error instanceof Error ? error.message : '';
     const key = phase === 'configuration' ? message.match(/: ((?:version|tracker|agent|labels|graph|sandbox|selection|work|dispatch|merge|ci|workflow|instructions)(?:\.[a-z_]+|\[\d+\])*)\: /)?.[1] : undefined;
     const safeKey = key && key.length <= 100 && /^(?:version|tracker\.(?:kind|project|host|project_id)|agent\.family|workflow\.(?:mode|directory)|instructions\.(?:common|implementation|verification|analysis|recovery)|sandbox\.(?:image|setup(?:\[\d+\](?:\.(?:command|sudo|timeout_ms))?)?))$/.test(key) ? key : undefined;
-    result.errors = [{ phase, ...(safeKey ? { key: safeKey } : {}), message: `Cannot validate ${phase}; check the relevant project files and permissions.` }];
+    result.errors = [{ phase, ...(phase === 'configuration' ? { file: '.sandcastle/factory.toml' } : {}), ...(safeKey ? { key: safeKey } : {}), message: `Cannot validate ${phase}; check the relevant project files and permissions.` }];
   }
   const failed = (result.errors as unknown[]).length > 0;
   if (o.json) console.log(JSON.stringify(result, null, 2));

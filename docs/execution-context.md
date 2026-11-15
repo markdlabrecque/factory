@@ -164,9 +164,9 @@ is an error, never a reason to run Factory code instead.
 ## Remaining integration boundaries
 
 Low-level entrypoints consume explicit context; they do not discover descriptors.
-Selection explanation can consume an already supplied context, but its separate
-read-only effective-configuration work does not select a runtime here. Do not treat
-an old copied scaffold as a prepared bundle.
+`factory config explain` resolves and validates the selected runtime without importing
+its executable modules, preparing bundles or acquiring leases. A project override's
+actual behavior remains opaque. Do not treat an old copied scaffold as a prepared bundle.
 
 Configured instruction files are validated and frozen separately for implementation,
 verification, analysis and recovery. Common files precede role files and canonical
