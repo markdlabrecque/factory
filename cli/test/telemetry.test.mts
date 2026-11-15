@@ -36,6 +36,7 @@ function fixture(t: any) {
   mkdirSync(root); execFileSync('git',['init','-qb','main'],{cwd:root});
   execFileSync('git',['-c','user.name=t','-c','user.email=t@t','commit','-qm','init','--allow-empty'],{cwd:root});
   writeScaffold(root,buildAssets({profile:'personal',repo:'owner/repo',image:'fake'},p.state));
+  populateCopiedWorkflow(root, appRoot);
   projectFixture(p,root);
   addProject(p,root); mkdirSync(p.state,{recursive:true});
   t.mock.method(console,'log',()=>{}); t.mock.method(console,'error',()=>{}); t.mock.method(console,'warn',()=>{});
