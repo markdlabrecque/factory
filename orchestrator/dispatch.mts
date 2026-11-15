@@ -27,10 +27,8 @@ import * as tracker from "./tracker.mts";
 import type { Ticket } from "./tracker.mts";
 
 // Dispatcher: list the tickets that qualify, update the ticket graph, then start one detached
-// main.mts run per ticket that is free to go (up to a cap on concurrent runs). Usually started through
-// dispatch.sh (by hand, or by a sandcastle-dispatch@<project>.timer), which checks the tools and image first.
-//   node .sandcastle/dispatch.mts --base sal-develop [--max 3] [--dry-run] [--whole-issues]
-//   node .sandcastle/dispatch.mts --refresh-only [--ticket <iid>] [--base sal-develop]
+// main.mts run per ticket that is free to go (up to a cap on concurrent runs). Factory selects
+// the complete runtime and launches its dispatcher with an explicit project context.
 // A ticket is free to go when its manifest is current, every ticket it depends on is merged into the
 // base or closed, and its files don't overlap a live run (in flight, or MR still open).
 // Open PRs/MRs reserve footprints even when a blocked auto-merge parks the run as waiting.

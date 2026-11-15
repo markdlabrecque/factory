@@ -1,8 +1,9 @@
-# Pi coding agent (pinned). Replaces the init template's `RUN npm install -g @mariozechner/pi-coding-agent`
-# line: that package is deprecated in favour of @earendil-works/pi-coding-agent. Goes before `USER agent`.
+# Pinned Pi coding agent for a project-owned image. Factory init does not generate an image.
+# Add this before `USER agent` in the image's Dockerfile.
 RUN npm install -g @earendil-works/pi-coding-agent@{{PI_VERSION}}
 
-# --- Personal config only (models `pi-claude-subscription/...`): add the rest AFTER the template's `USER agent` line. ---
+# Anthropic family, either tracker profile: add the rest AFTER the image's `USER agent` line.
+# Both profiles default to OpenAI; include this provider when selecting agent.family = "anthropic".
 # The pi-claude-subscription provider is a Pi extension that runs the Claude Code CLI, so the image needs both.
 # Neither step copies host credentials into the image: the CLI logs in at run time with CLAUDE_CODE_OAUTH_TOKEN
 # from .sandcastle/.env (`claude setup-token`), which Sandcastle passes to the container.
