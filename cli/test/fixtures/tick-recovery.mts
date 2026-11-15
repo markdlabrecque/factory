@@ -9,10 +9,10 @@ import { paths } from '../../src/paths.mts';
 import { scheduleBackend } from '../../src/platform/scheduler.mts';
 import { tick, tickExitCode } from '../../src/commands/tick.mts';
 import { afterPass } from '../../src/jam-detect.mts';
-import { launchRecovery } from '../../src/recovery-run.mts';
+import { launchRecovery, spawnDetached } from '../../src/recovery-run.mts';
 const p = paths();
 const abort = new AbortController();
 for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => abort.abort());
 const npx = process.env.RECOVERY_NPX!;
 process.exitCode = tickExitCode(await tick(p, { backend: scheduleBackend(p), signal: abort.signal,
-  recovery: (q, o) => afterPass(q, { ...o, prepare:async (_p,x) => preparedFixture(x), launch: (r, x) => launchRecovery(r, { ...x, npx, capabilities: async () => ({ ok: true, imageId: `sha256:${'a'.repeat(64)}`, cached: false }) }) }) }));
+  recovery: (q, o) => afterPass(q, { ...o, prepare:async (_p,x) => preparedFixture(x), launch: (r, x) => launchRecovery(r, { ...x, spawn: (_node, args, options) => spawnDetached(npx, args, options), capabilities: async () => ({ ok: true, imageId: `sha256:${'a'.repeat(64)}`, cached: false }) }) }) }));

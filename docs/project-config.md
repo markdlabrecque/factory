@@ -112,7 +112,13 @@ precede role-specific files, with canonical duplicates removed at first occurren
 Their literal text is additive to Factory's templates, not a replacement for safety
 or output contracts. Frozen role-specific hashes bind analysis and proof authority;
 editing an instruction requires fresh authority while an active snapshot retains its
-original text. Workflow selection remains a separate integration boundary.
+original text.
+
+Workflow selection validates the complete versioned runtime inventory, source
+hashes and private dependencies in the configured directory. Broken overrides never
+fall back to installed code, and copied local main/dispatch files never select an
+override implicitly. Project-mode recovery review binds the complete selected
+source/dependency identity. See [workflow selection and manifest maintenance](execution-context.md#workflow-selection).
 
 Selected parents with children confer eligibility on open children without requiring
 child readiness labels. Child exclusion labels still veto. Parents with all children

@@ -13,8 +13,10 @@ A trusted launcher selects a prepared runtime once and supplies:
 | Input | Contract |
 | --- | --- |
 | `FACTORY_PROJECT_ROOT` | Existing canonical absolute checkout root |
-| `FACTORY_RUNTIME_ROOT` | Existing canonical absolute bundle directory, named by its content ID |
+| `FACTORY_RUNTIME_ROOT` | Existing canonical absolute selected workflow directory. Installed bundles are named by content ID; explicit project overrides need not be. |
 | `FACTORY_RUNTIME_ID` | The selected manifest's content ID |
+| `FACTORY_WORKFLOW_MODE` | Resolver-selected `factory` or `project` |
+| `FACTORY_HOST_RUNTIME_ROOT`, `FACTORY_HOST_RUNTIME_ID` | Validated installed host bundle whose runtime-store lease protects launcher dependencies, including for project mode |
 | cwd | The project root, not the runtime directory or a checkout subdirectory |
 | `SANDCASTLE_STATE_DIR` | Absolute shared state directory. Omission uses `$HOME/.local/state/factory`. |
 
@@ -90,14 +92,75 @@ PID/start ownership, stale-owner handling and uninstall rules remain those of th
 runtime store; leases add no age-based reclamation or garbage collection. They do
 not replace recovery claims, exact-container cleanup or settlement.
 
-## Deliberate integration boundaries
+## Workflow selection
 
-Issue #164 owns top-level CLI, scheduler and Board selection/routing, complete
-project-workflow overrides and the corresponding recovery review policy. This
-change does not discover descriptors or switch modes in low-level entrypoints.
-Selection explanation can consume an already supplied context; it does not select
-a runtime itself. Existing copied-launch callers without context fail closed until
-the routing change supplies it. Do not treat a copied scaffold as a prepared bundle.
+`orchestrator/workflow.mts` selects one complete workflow using canonical checkout
+identity, v2 TOML and a trusted installed runtime descriptor. Selection reads data
+and hashes files, never importing project executable modules. CLI run/dispatch,
+scheduler readiness and dispatch/refresh, Board refresh, recovery preparation,
+image readiness and recovery launch use this resolver. Copied `.sandcastle`
+main/dispatch files cannot override Factory mode. `cli/src/runs.mts` still resolves
+registered checkout and data-only tracker identity, not executable paths.
+
+Factory mode uses the descriptor's validated content-addressed bundle. Project
+mode uses only the explicit repository-relative `workflow.directory`. It requires
+the same versioned complete inventory, package/lock metadata and private dependency
+snapshot. Missing/unknown inventories, stale hashes, illegal paths, source symlinks
+and missing dependencies fail without fallback. Dependency links must remain inside
+private `node_modules` and resolve to existing entries. No installed helper or
+prompt fills a hole in an override. Project overrides are trusted custom code, not
+a sandbox or permission to bypass installed host admission/review contracts.
+
+A fresh invocation reads the current descriptor. Its children inherit the selected
+root, ID, mode and host identity rather than rediscovering a newer descriptor.
+Scheduler recovery preparation and launch retain their completed pass's selection
+and saved Node/PATH. Changing workflow mode/root/identity within an invocation
+fails and requires a fresh invocation. Active processes keep independent runtime
+lease tokens; the host runtime store remains protected in project mode too.
+
+Factory-mode recovery needs no per-project executable review. Project-mode review
+is host-owned and binds mode, workflow root, complete source ID/file hashes and
+private dependency hash. Edits or a different override directory invalidate review.
+A review cannot repair an invalid manifest, reset history/budgets or authorize
+admission, proof reuse, cleanup or delivery by itself.
+
+Board services receive `FACTORY_RUNTIME_DESCRIPTOR` from trusted installation
+configuration. Standalone Board installation uses the same bundle builder and
+records `~/.local/share/sandcastle-board-runtime/runtime.json`; Factory installation
+supplies its own `runtime.json`. Missing descriptors and missing/ambiguous checkouts
+publish token-fenced assessment failures. Board never falls back to local dispatch
+files. Refresh remains read-only with respect to runs, admission and tracker mutation,
+with bounded process groups and existing request coalescing.
+
+### Maintaining a complete code override
+
+Start with a copy of a prepared bundle in a checkout-contained directory. Review
+all custom executable changes, keep its private dependencies complete, then use
+the trusted Factory checkout's pure helper to calculate a new manifest. For example,
+from the project root, replacing both paths with the intended absolute paths:
+
+```sh
+node --input-type=module -e '
+  import { writeFileSync } from "node:fs";
+  import { regenerateRuntimeManifest } from "/path/to/factory/orchestrator/workflow.mts";
+  const directory = "/path/to/project/workflow";
+  writeFileSync(directory + "/runtime-manifest.json",
+    JSON.stringify(regenerateRuntimeManifest(directory), null, 2) + "\\n");
+'
+```
+
+The helper only reads and hashes files; the caller explicitly writes its result.
+It does not install packages, migrate projects or confer review authority. Configure
+`workflow.mode = "project"` with the repository-relative directory and explicitly
+confirm recovery review after inspecting the complete override. A stale manifest
+is an error, never a reason to run Factory code instead.
+
+## Remaining integration boundaries
+
+Low-level entrypoints consume explicit context; they do not discover descriptors.
+Selection explanation can consume an already supplied context, but its separate
+read-only effective-configuration work does not select a runtime here. Do not treat
+an old copied scaffold as a prepared bundle.
 
 Configured instruction files are validated and frozen separately for implementation,
 verification, analysis and recovery. Common files precede role files and canonical

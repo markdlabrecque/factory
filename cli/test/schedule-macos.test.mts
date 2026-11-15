@@ -8,6 +8,7 @@
 // own cadence and cancellation, and Factory's process handling on synthetic process trees. They do not prove that launchd
 // loads agents at login, honours KeepAlive or ExitTimeOut, or writes the log file; that is trusted. They run on Linux:
 // the adapter's commands are the same, and /proc gives the tick lock its start times.
+import { refreshManifest } from './workflow-fixture.mts';
 import { test as nodeTest } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -69,6 +70,7 @@ async function armed(w: World, projects: string[] = []) {
 function heldProject(w: World, name: string) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
   writeFileSync(join(root, '.sandcastle/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  refreshManifest(root);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* not started or gone */ } });
   return root;
 }

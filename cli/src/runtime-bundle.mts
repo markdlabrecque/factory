@@ -103,6 +103,17 @@ export const installRuntimePackages = (directory: string, run: NpmRunner = spawn
   if (result.status !== 0) throw new Error(`npm ci failed (${result.status ?? result.signal})`);
 };
 
+/** Recompute complete source/dependency metadata without writing files or executing workflow code.
+ * Project override maintainers explicitly write this result after reviewing their edits. */
+export function regenerateRuntimeManifest(directory: string, node: RuntimeManifest['node'] = metadata()): RuntimeManifest {
+  validateRuntimeInventory(RUNTIME_ASSETS);
+  checkNode(node);
+  const root = resolve(directory);
+  if (realpathSync(root) !== root || lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) throw new Error('Invalid canonical workflow directory');
+  const files = entries(root, RUNTIME_ASSETS.map(a => ({ source: a.destination, destination: a.destination })));
+  return { version: 1, inventoryVersion: RUNTIME_INVENTORY_VERSION, node, files, id: identity(node, files), dependencies: dependencyHash(root) };
+}
+
 /** Validate the full inventory and private dependency snapshot. Never repairs a bundle. */
 export function validateRuntimeBundle(directory: string, assets: readonly RuntimeAsset[] = RUNTIME_ASSETS): RuntimeManifest {
   validateRuntimeInventory(assets);

@@ -2,6 +2,7 @@
 // a bare local `origin` and a pushed `main`, a project dispatcher that is an executable script the test supplies, and a
 // stateful `systemctl` or `launchctl` stub (stubs/) to put first on PATH. Nothing here touches a real service manager, tracker,
 // Docker or credential; every path is under the temporary HOME.
+import { projectFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
 import type { TestContext } from 'node:test';
 import { execFileSync } from 'node:child_process';
@@ -39,6 +40,8 @@ export function repo(p: ReturnType<typeof paths>, name: string, o: RepoOptions =
   const current = o.current !== false;
   writeFileSync(join(root, '.sandcastle/dispatch.mts'), current ? 'reserveRun(iid, pid);\n' : 'spawn();\n');
   writeFileSync(join(root, '.sandcastle/board.mts'), current ? 'export function reserveRun() {}\n' : '');
+  projectFixture(p, root);
+  if (!current) rmSync(join(root, '.sandcastle/runtime-manifest.json'));
   const real = realpathSync(root);
   if (o.register !== false) addProject(p, real);
   return real;
@@ -54,6 +57,7 @@ function commandStub(t: TestContext, p: ReturnType<typeof paths>, name: 'systemc
   writeFileSync(join(bin, name), readFileSync(stub));
   chmodSync(join(bin, name), 0o755);
   const env: Record<string, string> = { STUB_DIR: dir, ...extra, PATH: `${bin}:${process.env.PATH}` };
+  writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nconst {installPackages}=await import(${JSON.stringify(new URL('./runtime-fixture.mts', import.meta.url).href)}); if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['ci','--include=dev','--include=optional','--ignore-scripts']))process.exit(99); installPackages(process.cwd());\n`, {mode:0o755});
   const stateFile = join(dir, 'state.json');
   const log = () => existsSync(join(dir, 'calls.jsonl')) ? readFileSync(join(dir, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
   const api = {

@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { admissionFile, emptyAdmission, keyFor, ownerOf, withAdmission } from '../../board/admission.mts';
 import { paths } from '../src/paths.mts';
+import { projectFixture, refreshManifest } from './workflow-fixture.mts';
 import { readReview, recoveryCopyProblem, WORKFLOW } from '../src/recovery-review.mts';
 import { addProject, mutate } from '../src/projects.mts';
 import { beginAttempt, finishAttempt, observePass, readRecovery, recoveryFile, mutateRecovery } from '../src/recovery-state.mts';
@@ -102,7 +103,7 @@ test('recovery status shows inactive copy, confirmed jam, budgets, attempts with
   jam();
   assert.equal(await recovery(p, 'status', { cwd: root, now }), 0);
   const text = out();
-  assert.match(text, /State: inactive: .*no recovery workflow/);
+  assert.match(text, /State: inactive: .*runtime.json/);
   assert.match(text, /Jam: #12, confirmed 25m ago/);
   assert.match(text, /#12 +1 of 2 attempts left/);
   assert.match(text, /1 +#12 +unresolved .*\[12-fix\]\n +needs a credential\n +log: .*recover-12\.log \(missing\)\n +report: .*report\.md$/m);
@@ -113,7 +114,7 @@ test('factory status summarizes recovery; --json carries it', async t => {
   jam();
   const service = { status: async () => 'active' };
   await status(p, service, { cwd: root, now });
-  assert.match(out(), /Recovery: inactive \(no recovery workflow in this copy\), jam: #12, confirmed 25m ago/);
+  assert.match(out(), /Recovery: inactive \(workflow not reviewed as it is\), jam: #12, confirmed 25m ago/);
   assert.match(out(), /Last attempt: attempt 1 on #12 unresolved 10m ago: needs a credential/);
   assert.match(out(), /Attempts left: #12 1\/2/);
   clear();
@@ -183,16 +184,18 @@ test('review lists the workflow, refuses an incomplete copy, and --confirm activ
   // A hand upgrade in progress: everything but the repair prompt.
   writeFileSync(sc('main.mts'), 'parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
   // #137: reviewed runtime/parser assets include nested paths.
-  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'prompt.recover.md')) { mkdirSync(join(sc(f), '..'), { recursive: true }); writeFileSync(sc(f), `// ${f}\n`); }
+  for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'prompt.recover.md' && !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(sc(f), '..'), { recursive: true }); writeFileSync(sc(f), `// ${f}\n`); }
+  projectFixture(p, root);
+  rmSync(sc('prompt.recover.md'));
   assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 1);
-  assert.match(err(), /missing prompt\.recover\.md[^]*Nothing was recorded/);
+  assert.match(err(), /prompt\.recover\.md[^]*Nothing was recorded/);
   assert.equal(readReview(p, root), null);
 
   writeFileSync(sc('prompt.recover.md'), readFileSync(new URL('../../orchestrator/prompt.recover.md', import.meta.url)));
   clear();
   assert.equal(await recovery(p, 'review', { cwd: root }), 0, 'without --confirm it only lists');
-  assert.match(out(), /prompt\.recover\.md +same as Factory's/);
-  assert.match(out(), /recovery\.mts +differs from Factory's copy/);
+  assert.match(out(), /prompt\.recover\.md +project-specific/);
+  assert.match(out(), /recovery\.mts +project-specific/);
   assert.match(out(), /main\.mts +project-specific/);
   assert.match(out(), /Recovery is inactive/);
   assert.equal(readReview(p, root), null);
@@ -208,29 +211,32 @@ test('review lists the workflow, refuses an incomplete copy, and --confirm activ
   await status(p, { status: async () => 'active' }, { cwd: root, now });
   assert.match(out(), /Recovery: inactive \(workflow not reviewed as it is\)/);
   clear();
+  refreshManifest(root);
   await recovery(p, 'review', { cwd: root });
-  assert.match(out(), /handoff\.mts +differs from Factory's copy, changed since review/);
+  assert.match(out(), /handoff\.mts +project-specific, changed since review/);
   assert.match(out(), /main\.mts +project-specific, reviewed/);
 
   // The current board's import must be present and included in the reviewed hashes, not just copied by init.
   rmSync(sc('assessment.mts'));
-  assert.match(recoveryCopyProblem(p, root) ?? '', /missing assessment\.mts/);
+  assert.match(recoveryCopyProblem(p, root) ?? '', /assessment\.mts/);
   writeFileSync(sc('assessment.mts'), readFileSync(new URL('../../board/assessment.mts', import.meta.url)));
   clear();
+  refreshManifest(root);
   assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 0);
-  assert.match(out(), /assessment\.mts +same as Factory's/);
+  assert.match(out(), /assessment\.mts +project-specific/);
   assert.equal(recoveryCopyProblem(p, root), null);
   writeFileSync(sc('assessment.mts'), '// edited after review\n');
-  assert.match(recoveryCopyProblem(p, root) ?? '', /assessment\.mts changed since/);
+  assert.match(recoveryCopyProblem(p, root) ?? '', /identity mismatch/);
   // Partial dependency/observer/checkpoint upgrades never silently renew recovery review.
   for (const name of ['execution-events.mts', 'dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'dispatch.mts', 'verification.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts']) {
+    refreshManifest(root);
     assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 0);
     const previous = readFileSync(sc(name));
     rmSync(sc(name));
-    assert.ok(recoveryCopyProblem(p, root)?.includes(`missing ${name}`));
+    assert.ok(recoveryCopyProblem(p, root)?.includes(name));
     writeFileSync(sc(name), previous);
     writeFileSync(sc(name), '// changed delivery boundary');
-    assert.ok(recoveryCopyProblem(p, root)?.includes(`${name} changed since`));
+    assert.match(recoveryCopyProblem(p, root) ?? '', /identity mismatch/);
     writeFileSync(sc(name), previous);
   }
 });

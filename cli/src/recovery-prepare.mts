@@ -1,4 +1,4 @@
-// Run only a reviewed project copy under saved scheduler Node/PATH. Preparation owns a bounded process group,
+// Run the selected complete workflow under saved scheduler Node/PATH, with project-mode review. Preparation owns a bounded process group,
 // confirms cleanup before interpreting stdout, and never consumes an attempt. Tests inject process boundaries.
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -6,11 +6,12 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Paths } from './paths.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
+import { projectWorkflow } from './workflow.mts';
 import { terminateGroup } from './tick-cancel.mts';
 import { digest, held, validPreparation } from '../../orchestrator/recovery-analysis-contract.mts';
 import type { Preparation } from '../../orchestrator/recovery-analysis-contract.mts';
 export type PreparationProcess = (node: string, args: string[], o: {cwd:string;env:NodeJS.ProcessEnv;detached:true;stdio:['ignore','pipe','pipe']}) => ChildProcess;
-export type PrepareOptions = {root:string;tracker:string;ticket:number;base:string;dir:string;node?:string;path?:string;signal?:AbortSignal;
+export type PrepareOptions = {root:string;tracker:string;ticket:number;base:string;dir:string;node?:string;path?:string;signal?:AbortSignal;workflowEnv?:NodeJS.ProcessEnv;
   spawn?:PreparationProcess; terminate?:typeof terminateGroup; setupTimeoutMs?:number};
 export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Preparation> {
   if (!Number.isSafeInteger(o.ticket) || o.ticket<=0 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(o.base) || o.base.includes('..'))
@@ -18,8 +19,9 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
   let copy:string|null;
   try { copy = recoveryCopyProblem(p,o.root); } catch (e) {return held('config',String(e),'project');}
   if (copy) return held('config',copy,'project');
-  const helper = join(o.root,'.sandcastle/recovery-analysis.mts');
-  if (!existsSync(helper)) return held('config','Recovery preparation helper missing; update and review the project workflow','project');
+  let workflow;
+  try { workflow = projectWorkflow(p, o.root, o.workflowEnv); } catch (error) { return held('config', String(error), 'project'); }
+  const helper = workflow.entrypoints.preparation;
   if (o.signal?.aborted) return held('timeout','Preparation cancelled','project');
   const owner = join(p.recovery,`prepare-${digest(resolve(o.root))}.json`);
   try { mkdirSync(p.recovery,{recursive:true}); } catch (e) {return held('ownership',String(e),'project');}
@@ -32,7 +34,7 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
     if (o.signal?.aborted) return {ok:false,output:'',code:'timeout',reason:'Preparation cancelled'};
     return new Promise(accept => {
       let child:ChildProcess;
-      try { child = (o.spawn ?? spawn)(o.node ?? process.execPath,args,{cwd:o.root,env:{...process.env,PATH:o.path ?? process.env.PATH,
+      try { child = (o.spawn ?? spawn)(o.node ?? process.execPath,args,{cwd:o.root,env:{...process.env,...workflow.env,PATH:o.path ?? process.env.PATH,
         SANDCASTLE_STATE_DIR:o.dir},detached:true,stdio:['ignore','pipe','pipe']}); }
       catch (e) { accept({ok:false,output:'',reason:String(e)}); return; }
       let output='',diagnostics='',expired=false,settled=false,overflow=false;
@@ -59,7 +61,7 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
   };
   try {
     const setupMs = o.setupTimeoutMs ?? 60_000, started = Date.now();
-    const config = await run([join(o.root,'.sandcastle/config-read.mts'),join(o.root,'.sandcastle'),'analysisTimeoutMinutes'],Math.min(setupMs,20_000));
+    const config = await run([workflow.entrypoints.config,join(o.root,'.sandcastle'),'analysisTimeoutMinutes'],Math.min(setupMs,20_000));
     if (!config.ok) return held(config.code ?? 'config',config.reason || 'Cannot read preparation deadline','project');
     const minutes=Number(config.output.trim());
     if (!Number.isFinite(minutes) || minutes<=0 || minutes*60_000+setupMs>2_147_483_647) return held('config','Invalid preparation deadline','project');

@@ -113,13 +113,13 @@ for (const { scenario, tier } of [
 
   // A stopped run of #7 and a jam confirmed on two passes.
   const p = paths(home);
-
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
     patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main", implementationBaseSha: scenario === 'missing-baseline' ? undefined : git(root, 'rev-parse', 'main'), evidenceDir: evidence } });
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
   observePass(p, root, { pass: "b", at: at(5), jam: [7] });
 
-  const runtime = bindExecution(root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state });
+  const runtime = bindExecution(root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state }, { paths: p });
+  recordReview(p, root, { by: 'init' });
   Object.assign(env, runtime.env);
   // Legacy review gate remains independent of the selected runtime; fixture-only reviewed copy.
   for (const file of WORKFLOW) {
@@ -141,7 +141,7 @@ for (const { scenario, tier } of [
   // The launcher's own spawn, minus npx/tsx: node runs the scaffolded main.mts directly.
   let child!: ChildProcess;
   const spawner: Spawner = (cmd, args, o) => {
-    assert.deepEqual([cmd, args[0], args[1]], ["npx", "tsx", ".sandcastle/main.mts"]);
+    assert.deepEqual([cmd, args[0], args[1]], [process.execPath, join(runtime.directory, 'node_modules/tsx/dist/cli.mjs'), join(runtime.directory, 'main.mts')]);
     const out = openSync(o.log, "a");
     child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), ...args.slice(2)], { cwd: o.cwd, env: { ...o.env, ...env }, stdio: ["ignore", out, out] });
     children.push(child);

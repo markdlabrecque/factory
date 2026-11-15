@@ -30,10 +30,13 @@ identity. See the [execution context contract](../docs/execution-context.md).
 
 The copy/update/install recipes retained below describe the older copied-workflow
 layout, not a supported way to launch the new shared entrypoints. Adding context
-variables to an incomplete copy is not sufficient. Top-level CLI/Board/scheduler
-selection and complete overrides are the separate #164 task. The shared runtime
-loads configured additive instruction files without replacing Factory templates.
-Until those callers supply context, they fail closed. No existing project is migrated by these source changes.
+variables to an incomplete copy is not sufficient. CLI, Board, scheduler and recovery
+now select one complete workflow through the shared resolver. Factory mode ignores
+project code copies. Project mode requires an explicit complete override, with no
+per-file fallback. See [selection and override manifest maintenance](../docs/execution-context.md#workflow-selection).
+The shared runtime loads configured additive instruction files without replacing
+Factory templates. New scaffolds contain project data only. No existing project
+is migrated by these source changes.
 
 ## Comparing workflow copies before an upgrade
 
@@ -329,9 +332,9 @@ For shared execution, dispatch and every detached child use the same selected
 runtime even after another bundle is published. Logs remain in the checkout;
 leases, claims, cleanup and proof authorization are independent. The shell validates
 context before credentials and Docker. It invokes only the bundle's absolute tsx
-and Sandcastle executables, never a project npm/npx command. The copied-launch
-commands in the historical description below require the separate routing upgrade
-before they can launch this runtime.
+and Sandcastle executables, never a project npm/npx command. Use `factory dispatch`
+or `factory run` rather than the copied-launch commands in the historical description
+below. Complete overrides use the same selection contract and their own helpers.
 
 `dispatch.mts` lists the tickets that qualify and starts one detached `main.mts --issue N` run for each, up to a cap on concurrent runs.
 

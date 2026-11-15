@@ -31,6 +31,7 @@ import { containerFor, readAttemptRecord, writeAttemptRecord } from '../../orche
 import type { AttemptRecord, Docker } from '../../orchestrator/recovery.mts';
 import { paths } from '../src/paths.mts';
 import { afterPass } from '../src/jam-detect.mts';
+import { projectFixture, refreshManifest } from './workflow-fixture.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import {preparedFixture} from './prepared-fixture.mts';
 import { launchRecovery, settleRecovery } from '../src/recovery-run.mts';
@@ -70,10 +71,10 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   if (o.copy !== false) {
     writeFileSync(join(root, '.sandcastle/main.mts'), 'const CONFIG = { image: "fixture-image" }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });\n');
     // #137: runtime/parser workflow review includes nested assets.
-    for (const f of WORKFLOW.filter(f => f !== 'main.mts')) { mkdirSync(join(root, '.sandcastle', f, '..'), { recursive: true }); writeFileSync(join(root, '.sandcastle', f), ''); }
+    for (const f of WORKFLOW.filter(f => f !== 'main.mts' && !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(root, '.sandcastle', f, '..'), { recursive: true }); writeFileSync(join(root, '.sandcastle', f), ''); }
   }
   const p = paths(home);
-  if (o.copy !== false) recordReview(p, root);
+  if (o.copy !== false) { projectFixture(p, root); recordReview(p, root); }
   const dir = join(home, 'runs');
   // A stopped run of #7 and a confirmed jam that includes it.
   claimRun({ dir, project: 'proj', iid: '7', pid: 2 ** 22 + 4321, cap: 99,
@@ -152,8 +153,7 @@ test('an attempt is refused without the recovery workflow copy, claiming nothing
   const f = fixture(t, { copy: false });
   const r = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, false);
-  assert.match((r as { reason: string }).reason, /no recovery workflow \(missing capabilities\.mts, execution-events\.mts, recovery-analysis\.mts/);
-  for (const name of WORKFLOW) assert.ok((r as { reason: string }).reason.includes(name), `missing ${name} reported`);
+  assert.match((r as { reason: string }).reason, /runtime descriptor|runtime.json/);
   assert.equal(f.launched.length, 0);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'no attempt recorded, no budget spent');
   assert.equal(f.run().stage, 'stopped');
@@ -165,7 +165,7 @@ test('a repair runs detached on the recorded branch with its identity fixed firs
   const r = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, true, (r as { reason?: string }).reason);
   const [l] = f.launched;
-  assert.deepEqual([l.cmd, ...l.args], ['npx', 'tsx', '.sandcastle/main.mts', '--issue', '7', '--base', 'main', '--recover', '1', '--attempt-record', f.record(0)]);
+  assert.deepEqual([l.cmd, ...l.args], [process.execPath, join(f.root, '.sandcastle/node_modules/tsx/dist/cli.mjs'), join(f.root, '.sandcastle/main.mts'), '--issue', '7', '--base', 'main', '--recover', '1', '--attempt-record', f.record(0)]);
   assert.equal(l.cwd, f.root);
   assert.equal(l.env.SANDCASTLE_STATE_DIR, f.dir);
   // Identity recorded before the process started: recovery state, run record and host-owned attempt record agree.
@@ -396,7 +396,8 @@ test('missing TOML is held without executing legacy configuration or charging', 
   const f = fixture(t); let probes = 0;
   rmSync(join(f.root, '.sandcastle/factory.toml'));
   writeFileSync(join(f.root, '.sandcastle/main.mts'), 'const CONFIG = { image: getSecretImage() }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });');
-  recordReview(f.p, f.root);
+  refreshManifest(f.root);
+  assert.throws(() => recordReview(f.p, f.root), /factory.toml/);
   const r = await launchRecovery(f.p, { ...f.common, ticket: 7, capabilities: async () => { probes++; return f.common.capabilities(); } });
   assert.equal(r.ok, false); if (!r.ok) { assert.equal(r.scope, 'project'); assert.match(r.reason, /factory.toml/); }
   assert.equal(probes, 0); assert.equal(readRecovery(f.p, f.root).attempts.length, 0);

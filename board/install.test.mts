@@ -45,17 +45,22 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
 `;
     // Both names are always stubbed so a wrong-platform invocation cannot fall through to the host manager.
     for (const cmd of ['systemctl', 'launchctl']) writeFileSync(join(bin, cmd), stub, { mode: 0o755 });
+    writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nconst {installPackages}=await import(${JSON.stringify(new URL('../cli/test/runtime-fixture.mts', import.meta.url).href)}); if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['ci','--include=dev','--include=optional','--ignore-scripts']))process.exit(99);installPackages(process.cwd());\n`, {mode:0o755});
     const env = { ...process.env, HOME: home, FACTORY_HOME: home, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
       SANDCASTLE_STATE_DIR: join(home, 'state'), HOST: '127.0.0.1', PORT: '0' };
     const script = resolve(`board/install-${platform === 'systemd' ? 'service' : 'launchd'}.sh`);
     const install = () => execFileSync('bash', [script], { cwd: home, env, encoding: 'utf8' });
     install();
     // #153: standalone imports need the checkpoint schema on fresh installs and updates.
-    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'project-config.mts', 'model-policy.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor'].sort();
+    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'project-config.mts', 'model-policy.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor', 'workflow.mts', 'runtime-assets.mts', 'runtime-bundle.mts'].sort();
     assert.deepEqual(readdirSync(app).sort(), files);
     // Simulate a partial/outdated install. Updating must restore every runtime dependency too.
     for (const file of ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'refresh-worker.mts', 'tickets.mts']) rmSync(join(app, file));
     install();
+    const descriptor = join(home, '.local/share/sandcastle-board-runtime/runtime.json');
+    const selected = JSON.parse(readFileSync(descriptor, 'utf8'));
+    assert.match(selected.id, /^[a-f0-9]{64}$/);
+    assert.match(readFileSync(platform === 'systemd' ? join(home, '.config/systemd/user/sandcastle-board.service') : plist, 'utf8'), /FACTORY_RUNTIME_DESCRIPTOR/);
     assert.deepEqual(readdirSync(app).sort(), files);
     assert.deepEqual(readFileSync(join(home, 'calls.jsonl'), 'utf8').trim().split('\n').map(s => JSON.parse(s)), expected);
     execFileSync(process.execPath, ['--input-type=module', '-e',

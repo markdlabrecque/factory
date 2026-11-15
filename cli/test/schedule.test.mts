@@ -1,6 +1,8 @@
 // Scheduler storage: project opt-in defaults off and saves the checked-out branch (which must be on origin), the blocker
 // names why a project would not get a scheduled pass, and the launch configuration holds PATH and Node only, never a
 // global on/off flag (the service manager owns that). Disposable HOME and Git repos only.
+import { projectFixture, refreshManifest } from './workflow-fixture.mts';
+import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -109,12 +111,15 @@ test('opt-in needs an origin that has the branch, an executable dispatch.sh and 
   writeFileSync(join(root, '.sandcastle/dispatch.sh'), '#!/bin/sh\n', { mode: 0o644 });
   writeFileSync(join(root, '.sandcastle/dispatch.mts'), 'reserveRun(a, b);');
   writeFileSync(join(root, '.sandcastle/board.mts'), 'export function reserveRun() {}');
-  assert.match(copyProblem(root)!, /not executable/);
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('fixture'));
+  projectFixture(p, root);
+  assert.match(copyProblem(root, p)!, /EACCES|permission denied/);
   chmodSync(join(root, '.sandcastle/dispatch.sh'), 0o755);
-  assert.equal(copyProblem(root), null);
+  refreshManifest(root);
+  assert.equal(copyProblem(root, p), null);
   writeFileSync(join(root, '.sandcastle/dispatch.mts'), 'spawn();');
-  assert.match(copyProblem(root)!, /predates launch reservations/);
+  assert.match(copyProblem(root, p)!, /identity mismatch/);
   rmSync(join(root, '.sandcastle/dispatch.sh'));
-  assert.match(copyProblem(root)!, /no \.sandcastle\/dispatch\.sh/);
+  assert.match(copyProblem(root, p)!, /dispatch.sh/);
   assert.equal(existsSync(p.scheduleConfig), false);
 });

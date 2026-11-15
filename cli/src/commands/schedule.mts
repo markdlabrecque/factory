@@ -145,7 +145,7 @@ export async function schedule(p: Paths, backend: ScheduleBackend, action: strin
 
 async function setProject(p: Paths, backend: ScheduleBackend, on: boolean, target: string, done: ReturnType<typeof startAction>): Promise<number> {
   const project = findProject(p, target);
-  if (on) { const problem = copyProblem(project.root); if (problem) { done('refused', 'environment-unready'); throw new Error(`Not scheduling ${project.name}: ${problem}`); } }
+  if (on) { const problem = copyProblem(project.root, p); if (problem) { done('refused', 'environment-unready'); throw new Error(`Not scheduling ${project.name}: ${problem}`); } }
   const s = setProjectSchedule(p, project.root, on);
   done(project.schedule?.enabled === on && (!on || project.schedule?.branch === s?.branch) || !project.schedule && !s ? 'no-op' : 'changed', on ? 'unspecified' : 'operator-pause');
   if (on) {

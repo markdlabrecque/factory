@@ -55,7 +55,7 @@ export function readJamReport(file: string, pass: string, project: string): JamR
 
 export type AfterPassOptions = { root: string; tracker: string; name: string; pass: string; report: string; dir: string;
   mayLaunch: () => Promise<boolean>; log: (line: string) => void; now?: () => Date;
-  signal?: AbortSignal; node?: string; path?: string;
+  signal?: AbortSignal; node?: string; path?: string; workflowEnv?: NodeJS.ProcessEnv;
   inspect?: typeof inspectRecoveryCandidate; prepare?: typeof prepareRecovery;
   settle?: typeof settleRecovery; pauseReason?: () => string | undefined;
   launch?: (...args: Parameters<typeof launchRecovery>) => ReturnType<typeof launchRecovery> | Awaited<ReturnType<typeof launchRecovery>> };
@@ -110,7 +110,7 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
         if(inspected.kind==='ticket-refused'){say(`#${target} ticket-refused ${inspected.code}: ${inspected.reason}`);continue;}
         return say(`project-stopped ${inspected.code}: #${target}: ${inspected.reason}`);
       }
-      const prepared=await (o.prepare??prepareRecovery)(p,{root:o.root,tracker:o.tracker,ticket:target,base:current.base??'',dir:o.dir,signal:o.signal,node:o.node,path:o.path});
+      const prepared=await (o.prepare??prepareRecovery)(p,{root:o.root,tracker:o.tracker,ticket:target,base:current.base??'',dir:o.dir,signal:o.signal,node:o.node,path:o.path,workflowEnv:o.workflowEnv});
       mutateRecovery(p,o.root,s=>{s.preparation={at:now(),ticket:target,state:prepared.state,code:prepared.code,reason:prepared.reason,scope:prepared.scope};return {write:true,value:undefined};});
       if(prepared.state!=='ready'){
         mkdirSync(join(o.root,'.sandcastle/logs'),{recursive:true});
@@ -118,7 +118,7 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
         return say(`jam on ${jam} confirmed; preparation ${prepared.code} (${prepared.scope} hold): ${prepared.reason}; no attempt charged`);
       }
       if(!(await o.mayLaunch()))return say(`jam on ${jam} confirmed; preparation complete but scheduled work was stopped; no attempt charged`);
-      const launched = await (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now(), preparation: prepared, mayLaunch: o.mayLaunch, signal: o.signal });
+      const launched = await (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now(), preparation: prepared, mayLaunch: o.mayLaunch, signal: o.signal, node: o.node, path: o.path, workflowEnv: o.workflowEnv });
       refreshFollowups(p, { ...o, at: now(), paused: o.pauseReason?.() });
       switch (launched.kind) {
         case 'ticket-refused':

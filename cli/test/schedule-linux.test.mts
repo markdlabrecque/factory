@@ -12,6 +12,7 @@
 // child) and one detached "ticket run" in its own process group. Everything lives under a temporary HOME; no host service,
 // tracker, Docker or credential is touched, and every spawned process is killed at the end of its test.
 // The end-to-end CLI test also has a project never opted in whose synthetic dispatch.mts records the read-only refresh a tick gives it (#94).
+import { refreshManifest } from './workflow-fixture.mts';
 import { test as nodeTest } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -82,6 +83,7 @@ function world(t: TestContext) {
 async function heldProject(w: World, name: string, extra: Record<string, string> = {}) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
   writeFileSync(join(root, '.sandcastle/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  refreshManifest(root);
   const r = await cli(w, ['schedule', 'on', '--project', name], extra);
   assert.equal(r.code, 0, r.err);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* not started or gone */ } });
@@ -270,6 +272,7 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   // beta is never opted in: each tick runs its dispatch.mts --refresh-only (#94), which records what it got.
   writeFileSync(join(other, '.sandcastle/dispatch.mts'), "import { writeFileSync } from 'node:fs';\n" +
     "writeFileSync('.sandcastle/refresh.json', JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), state: process.env.SANDCASTLE_STATE_DIR, scheduled: process.env.FACTORY_SCHEDULED ?? null, jam: process.env.FACTORY_JAM_REPORT ?? null }));\n");
+  refreshManifest(other);
   const unrelated = join(w.p.home, '.config/systemd/user/unrelated.service');
   mkdirSync(join(w.p.home, '.config/systemd/user'), { recursive: true });
   writeFileSync(unrelated, '[Service]\nExecStart=/bin/true\n');
@@ -383,7 +386,7 @@ test('cli: opt-in refusals (no origin, local-only branch, non-executable script,
   chmodSync(join(exec644, '.sandcastle/dispatch.sh'), 0o644);
   g(detached, 'checkout', '-q', '--detach');
   const before = readFileSync(w.p.projects, 'utf8');
-  const expect: Record<string, RegExp> = { noorigin: /no `origin` remote/, local: /branch only-here is not on origin/, x644: /not executable/, old: /predates launch reservations/, detached: /detached HEAD/ };
+  const expect: Record<string, RegExp> = { noorigin: /no `origin` remote/, local: /branch only-here is not on origin/, x644: /identity mismatch/, old: /runtime-manifest.json/, detached: /detached HEAD/ };
   for (const [name, re] of Object.entries(expect)) { const r = await cli(w, ['schedule', 'on', '--project', name]); assert.notEqual(r.code, 0, name); assert.match(r.err, re, name); }
   assert.equal(readFileSync(w.p.projects, 'utf8'), before, 'no refusal wrote the registry');
   assert.deepEqual(w.stub.lines(), []);
@@ -480,6 +483,7 @@ test('cancellation grace is for cancellation only: a pass that outlives it norma
   const w = world(t);
   const root = repo(w.p, 'stubborn', { script: '#!/bin/sh\n' });
   writeFileSync(join(root, '.sandcastle/dispatch.sh'), heldScript(root), { mode: 0o755 });
+  refreshManifest(root);
   writeFileSync(join(root, '.sandcastle/ignore-term'), '');
   assert.equal((await cli(w, ['schedule', 'on', '--project', 'stubborn'])).code, 0);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* gone */ } });
@@ -810,6 +814,7 @@ async function leftoverProject(w: World, name: string, stubborn = false) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
   writeFileSync(join(root, '.sandcastle/leftover.mjs'), LEFTOVER);
   writeFileSync(join(root, '.sandcastle/dispatch.sh'), `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/leftover.mjs" "$@"\n`, { mode: 0o755 });
+  refreshManifest(root);
   if (stubborn) writeFileSync(join(root, '.sandcastle/stubborn'), '');
   assert.equal((await cli(w, ['schedule', 'on', '--project', name])).code, 0);
   return root;

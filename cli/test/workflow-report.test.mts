@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { populateCopiedWorkflow } from './copied-workflow-fixture.mts';
 import { paths } from '../src/paths.mts';
 import { appRoot, buildAssets, writeScaffold } from '../src/scaffold.mts';
+import { projectFixture } from './workflow-fixture.mts';
 import { addProject } from '../src/projects.mts';
 import { recordReview, reviewFile } from '../src/recovery-review.mts';
 import { writeHistoryCatalog } from '../src/update.mts';
@@ -28,7 +29,7 @@ function fixture(t: TestContext) {
   mkdirSync(root); git(root, 'init', '-q');
   writeScaffold(root, buildAssets({ profile: 'personal', repo: 'test/project', image: 'test/image:local' }, p.state, source));
   populateCopiedWorkflow(root, source);
-  addProject(p, root); recordReview(p, root);
+  addProject(p, root); projectFixture(p, root); recordReview(p, root);
   const v1 = git(source, 'rev-parse', 'HEAD');
   // Installed v2 is ahead of the project; the selected source v3 is ahead of both.
   appendFileSync(join(source, 'orchestrator/ci.mts'), '\n// v2\n');
@@ -148,10 +149,10 @@ test('existing schedule and recovery observations remain separate, incomplete an
   for (const name of ['schedulerCopy', 'recoveryWorkflow', 'recoveryReview'] as const) assert.equal(caps[name].state, 'met');
   appendFileSync(join(f.sc, 'handoff.mts'), '// helper drift\n');
   caps = capabilityObservations(f.p, f.root);
-  assert.equal(caps.schedulerCopy.state, 'met');
-  assert.equal(caps.recoveryWorkflow.state, 'met');
+  assert.equal(caps.schedulerCopy.state, 'blocked');
+  assert.equal(caps.recoveryWorkflow.state, 'blocked');
   assert.equal(caps.recoveryReview.state, 'blocked');
-  assert.deepEqual(caps.recoveryReview.evidence, ['handoff.mts']);
+  assert.match(caps.recoveryWorkflow.evidence.join(' '), /identity mismatch/);
   writeFileSync(reviewFile(f.p, f.root), '{broken');
   assert.equal(capabilityObservations(f.p, f.root).recoveryReview.state, 'unknown');
   writeFileSync(reviewFile(f.p, f.root), JSON.stringify({ version: 1, root: f.root, reviewedAt: 'now', files: { 'handoff.mts': 123 } }));
@@ -163,9 +164,9 @@ test('existing schedule and recovery observations remain separate, incomplete an
   writeFileSync(join(f.sc, 'dispatch.mts'), '// lacks reservations'); chmodSync(join(f.sc, 'dispatch.sh'), 0o755);
   assert.equal(capabilityObservations(f.p, f.root).schedulerCopy.state, 'blocked');
   rmSync(join(f.sc, 'handoff.mts'));
-  assert.deepEqual(capabilityObservations(f.p, f.root).recoveryWorkflow.evidence, ['handoff.mts']);
+  assert.match(capabilityObservations(f.p, f.root).recoveryWorkflow.evidence.join(' '), /handoff.mts/);
   writeFileSync(join(f.sc, 'main.mts'), '// no recovery entrypoint');
-  assert.ok(capabilityObservations(f.p, f.root).recoveryWorkflow.evidence.includes('main.mts --recover --attempt-record'));
+  assert.equal(capabilityObservations(f.p, f.root).recoveryWorkflow.state, 'blocked', 'missing transitive helper still holds the entire workflow');
 });
 
 test('invalid, v1 and missing TOML never execute project modules or use legacy image fallback', async t => {

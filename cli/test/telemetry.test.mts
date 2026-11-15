@@ -19,6 +19,7 @@ import { telemetry } from '../src/commands/telemetry.mts';
 import { update } from '../src/commands/update.mts';
 import { saveManifest } from '../src/manifest.mts';
 import { appRoot, buildAssets, writeScaffold } from '../src/scaffold.mts';
+import { projectFixture } from './workflow-fixture.mts';
 import { recordReview } from '../src/recovery-review.mts';
 import type { ScheduleBackend } from '../src/platform/scheduler.mts';
 const at = '2026-01-01T00:00:00.000Z';
@@ -35,7 +36,7 @@ function fixture(t: any) {
   mkdirSync(root); execFileSync('git',['init','-qb','main'],{cwd:root});
   execFileSync('git',['-c','user.name=t','-c','user.email=t@t','commit','-qm','init','--allow-empty'],{cwd:root});
   writeScaffold(root,buildAssets({profile:'personal',repo:'owner/repo',image:'fake'},p.state));
-  populateCopiedWorkflow(root, appRoot);
+  projectFixture(p,root);
   addProject(p,root); mkdirSync(p.state,{recursive:true});
   t.mock.method(console,'log',()=>{}); t.mock.method(console,'error',()=>{}); t.mock.method(console,'warn',()=>{});
   const run=(stage: any='done')=>writeRecord(p.state,'owner_repo--1',{iid:'1',project:'owner/repo',stage,pid:process.pid,startedAt:at,stageSince:at,updatedAt:at,executionId:'execution-one',verdict:'FAIL',note:secret});

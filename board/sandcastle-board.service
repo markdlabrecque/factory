@@ -8,6 +8,7 @@ After=network.target
 Type=simple
 # Needs Node 22.18+ (runs the .mts files directly). __NODE__ becomes the absolute path of `node`.
 ExecStart=__NODE__ %h/.local/share/sandcastle-board/board-server.mts
+Environment=FACTORY_RUNTIME_DESCRIPTOR=%h/.local/share/sandcastle-board-runtime/runtime.json
 Environment=PORT=4444
 Environment=HOST=127.0.0.1
 Environment=SANDCASTLE_STATE_DIR=%h/.local/state/sandcastle

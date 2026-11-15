@@ -7,6 +7,7 @@ After=network.target
 Type=simple
 ExecStart=@NODE@ @SERVER@
 Environment=@STATE@
+Environment=@RUNTIME@
 Restart=on-failure
 
 [Install]

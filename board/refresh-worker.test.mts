@@ -1,6 +1,8 @@
 // Refresh worker lifecycle (#78): real synthetic child/grandchild groups with inherited or redirected stdio.
 // Check success, failed leaders and timeout cleanup after the leader is gone; unrelated detached work survives.
 // Only temporary local commands run. No trackers, agents, Docker, schedulers or real services.
+import { projectFixture } from '../cli/test/workflow-fixture.mts';
+import { paths } from '../cli/src/paths.mts';
 import { factoryToml } from '../cli/test/config-fixture.mts';
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -55,6 +57,8 @@ for (const stdio of ["ignore", "inherit"] as const) {
           ${outcome === "success" ? "clearRequest(process.env.SANDCASTLE_STATE_DIR, 'p--7', pendingRequests(process.env.SANDCASTLE_STATE_DIR).get('p--7'));" : ""}
           process.exit(${outcome === "success" ? 0 : 1});`}
       `);
+      projectFixture(paths(root), root);
+      process.env.FACTORY_RUNTIME_DESCRIPTOR = paths(root).runtimeDescriptor;
       const first = executeRefresh(key, outcome === "timeout" ? 1500 : 5000);
       assert.equal(first, executeRefresh(key), "same card shares its in-flight worker");
       await first;

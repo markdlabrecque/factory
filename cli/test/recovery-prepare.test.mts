@@ -1,4 +1,6 @@
 // Fixture-owned Node helpers exercise the real bounded subprocess/group protocol, without agents or trackers.
+import { projectFixture } from './workflow-fixture.mts';
+import { factoryToml } from './config-fixture.mts';
 import {test} from 'node:test';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,11 +15,12 @@ import {groupAlive} from '../src/tick-lock.mts';
 function fixture(t:TestContext){
   const home=mkdtempSync(join(tmpdir(),'factory-preparation-')),root=join(home,'project'),sc=join(root,'.sandcastle'),p=paths(home);
   t.after(()=>rmSync(home,{recursive:true,force:true}));
-  for(const f of WORKFLOW){mkdirSync(dirname(join(sc,f)),{recursive:true});writeFileSync(join(sc,f),'');}
+  for(const f of WORKFLOW.filter(f=>!['package.json','package-lock.json'].includes(f))){mkdirSync(dirname(join(sc,f)),{recursive:true});writeFileSync(join(sc,f),'');}
+  writeFileSync(join(sc,'factory.toml'),factoryToml('proj'));
   writeFileSync(join(sc,'main.mts'),'"attempt-record": { type: "string" }');
   const o={root,tracker:'proj',ticket:7,base:'main',dir:p.state,setupTimeoutMs:2000};
   const prepared=preparedFixture(o);
-  const helper=(code:string,minutes='1')=>{writeFileSync(join(sc,'recovery-analysis.mts'),code);writeFileSync(join(sc,'config-read.mts'),`process.stdout.write(${JSON.stringify(minutes)});`);recordReview(p,root);};
+  const helper=(code:string,minutes='1')=>{writeFileSync(join(sc,'recovery-analysis.mts'),code);writeFileSync(join(sc,'config-read.mts'),`process.stdout.write(${JSON.stringify(minutes)});`);projectFixture(p,root);recordReview(p,root);};
   helper(`process.stdout.write(${JSON.stringify(JSON.stringify(prepared))});`);
   return {p,o,helper,prepared,sc};
 }

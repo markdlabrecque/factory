@@ -66,7 +66,8 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { Paths } from '../paths.mts';
-import { scaffoldName } from '../paths.mts';
+import { paths } from '../paths.mts';
+import { projectWorkflow } from '../workflow.mts';
 import { readRegistry } from '../projects.mts';
 import type { Project } from '../projects.mts';
 import { resolveProject } from '../runs.mts';
@@ -143,16 +144,16 @@ export function refreshEnv(p: Paths, config: ScheduleConfig, base: NodeJS.Proces
 /** The arguments of a whole-project read-only refresh against `base` (dispatch.mts --refresh-only, #93). */
 export const refreshArgs = (base: string) => ['--refresh-only', '--base', base];
 /** Why a project not opted in can't be refreshed now, or null. */
-export function refreshProblem(root: string, exists: boolean, branch: string | null): string | null {
+export function refreshProblem(root: string, exists: boolean, branch: string | null, p: Paths = paths()): string | null {
   if (!exists) return 'checkout missing';
-  if (!existsSync(join(root, scaffoldName, 'dispatch.mts'))) return `no ${scaffoldName}/dispatch.mts`;
   if (!branch) return 'detached HEAD';
-  return null;
+  return copyProblem(root, p);
 }
 /** Runs the project's `dispatch.mts` with `args` under the saved Node, from its root, as the leader of its own process
  *  group; stdin is closed. Resolves to its exit code. */
-export const runRefreshOnly = (node: string): Pass => (ctx, args, o) => {
-  const child = spawn(node, [join(ctx.scaffold, 'dispatch.mts'), ...args], { cwd: ctx.root, stdio: ['ignore', 'inherit', 'inherit'], detached: true, env: o.env });
+export const runRefreshOnly = (node: string, p: Paths = paths()): Pass => (ctx, args, o) => {
+  const workflow = projectWorkflow(p, ctx.root, o.env);
+  const child = spawn(node, [workflow.entrypoints.refresh, ...args], { cwd: ctx.root, stdio: ['ignore', 'inherit', 'inherit'], detached: true, env: { ...o.env, ...workflow.env } });
   if (child.pid !== undefined) {
     try { o.onSpawn(child.pid); }
     catch (e) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } throw e; }
@@ -264,16 +265,19 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       if (signal.aborted) { cancelled = true; break; }
       const exists = existsSync(root);
       const branch = exists ? currentBranch(root) : null;
-      const reason = scheduleBlocker({ state: 'on' }, project, exists, branch) ?? (exists ? copyProblem(root) : null);
+      const reason = scheduleBlocker({ state: 'on' }, project, exists, branch) ?? (exists ? copyProblem(root, p) : null);
       // A project never opted in gets a read-only refresh instead of a pass; a paused one gets only local maintenance.
       const refreshing = !project.schedule;
       if (reason && !refreshing) { skip(reason); continue; }
       if (refreshing) {
-        const problem = refreshProblem(root, exists, branch);
+        const problem = refreshProblem(root, exists, branch, p);
         if (problem) { skip(`${reason}; no refresh: ${problem}`); continue; }
       }
       let ctx: ProjectContext;
       try { ctx = resolveProject(p, { project: root }); } catch (e) { skip(refreshing ? `${reason}; no refresh: ${(e as Error).message}` : (e as Error).message); continue; }
+      // Pin one complete selection through the pass and its recovery preparation/launch.
+      let workflow;
+      try { workflow = projectWorkflow(p, root); } catch (e) { skip((e as Error).message); continue; }
       const what = refreshing ? 'refresh' : 'pass';
       log(`${what} ${project.name} (${refreshing ? branch : project.schedule!.branch}): start`);
       const from = mono();
@@ -282,10 +286,10 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       const passId = randomUUID();
       const report = join(p.schedulerState, 'jam', `${passId}.json`);
       const result = refreshing
-        ? await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.refresh ?? runRefreshOnly(config.node))(ctx, refreshArgs(branch!), { ...spawnOptions, env: refreshEnv(p, config) }))
+        ? await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.refresh ?? runRefreshOnly(config.node, p))(ctx, refreshArgs(branch!), { ...spawnOptions, env: { ...refreshEnv(p, config), ...workflow.env } }))
         : (mkdirSync(dirname(report), { recursive: true }),
           await runPass(p, o, lock, project, root, state, signal, log, spawnOptions => (o.pass ?? ((c, args, so) => runDispatchSh(p, c, args, so)))(ctx, SCHEDULED_ARGS,
-            { ...spawnOptions, env: { ...scheduledEnv(p, config), FACTORY_PASS_ID: passId, FACTORY_JAM_REPORT: report } })));
+            { ...spawnOptions, env: { ...scheduledEnv(p, config), ...workflow.env, FACTORY_PASS_ID: passId, FACTORY_JAM_REPORT: report } })));
       const entry = state.projects[root];
       entry.finishedAt = wall().toISOString();
       entry.durationMs = Math.max(0, Math.round(mono() - from));
@@ -346,7 +350,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       // counts. Clean goes first, so a repair attempt jam confirmation launches never races it.
       if (result.code === 0 && !result.cancelled && !result.error && !signal.aborted) {
         try { (o.clean ?? cleanAfterPass)(p, ctx, log); } catch (e) { log(`clean ${project.name}: failed: ${(e as Error).message}`); }
-        if (maintenanceOK) await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall, node:config.node,path:config.path,signal,
+        if (maintenanceOK) await (o.recovery ?? afterPass)(p, { root, tracker: ctx.tracker, name: project.name, pass: passId, report, dir: p.state, log, now: wall, node:config.node,path:config.path,signal,workflowEnv:workflow.env,
           pauseReason: () => {
             const current = readRegistry(p).projects.find(x => x.root === root);
             return !current ? 'Project is no longer registered.' : !current.schedule?.enabled ? 'Project scheduling is paused or not opted in.' : undefined;

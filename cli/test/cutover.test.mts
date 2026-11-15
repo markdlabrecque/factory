@@ -8,6 +8,7 @@
 // reports them; a stale copy is refused until the shipped files are copied in, and Factory arms only its own timer once the
 // legacy one is gone; rollback leaves the opt-ins.
 // It does not prove systemd's own disable/stop behaviour, which is trusted (TESTING.md).
+import { refreshManifest } from './workflow-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,7 +65,7 @@ test('cutover rehearsal: report legacy timers, retire them, refresh the copy, op
   // 2. A stale copy cannot be opted in, and the refusal changes nothing.
   const refused = await cli(w, ['schedule', 'on', '--project', 'alpha']);
   assert.notEqual(refused.code, 0);
-  assert.match(refused.err, /predates launch reservations/);
+  assert.match(refused.err, /runtime-manifest.json/);
   assert.equal(readRegistry(p).projects.find(x => x.name === 'alpha')!.schedule, undefined);
 
   // 3. The developer retires the legacy timer with the explicit command (the only one allowed to send a legacy call).
@@ -78,6 +79,7 @@ test('cutover rehearsal: report legacy timers, retire them, refresh the copy, op
   // 4. The developer refreshes the copy from this checkout's shipped files, then opts the projects in.
   copyFileSync(join(repoRoot, 'orchestrator/dispatch.mts'), join(alpha, '.sandcastle/dispatch.mts'));
   copyFileSync(join(repoRoot, 'board/board.mts'), join(alpha, '.sandcastle/board.mts'));
+  refreshManifest(alpha);
   for (const name of ['alpha', 'beta']) { const r = await cli(w, ['schedule', 'on', '--project', name]); assert.equal(r.code, 0, r.err); }
   assert.equal(w.stub.unit('factory-tick.timer').enabled, false, 'opting projects in never arms the timer');
 

@@ -12,6 +12,7 @@
   </array>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>FACTORY_RUNTIME_DESCRIPTOR</key><string>__HOME__/.local/share/sandcastle-board-runtime/runtime.json</string>
     <key>PORT</key><string>4444</string>
     <key>HOST</key><string>127.0.0.1</string>
     <key>SANDCASTLE_STATE_DIR</key><string>__HOME__/.local/state/sandcastle</string>

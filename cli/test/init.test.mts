@@ -15,6 +15,7 @@ import { uninstall } from '../src/commands/uninstall.mts';
 import { init } from '../src/commands/init.mts';
 import { readRegistry } from '../src/projects.mts';
 import { buildAssets } from '../src/scaffold.mts';
+import { installedFixture } from './workflow-fixture.mts';
 import { bindExecution } from './execution-fixture.mts';
 import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 
@@ -223,4 +224,5 @@ test('a racing creator is never overwritten or registered', async t => {
   assert.ok(result.error);
   assert.equal(readFileSync(join(root, '.sandcastle/factory.toml'), 'utf8'), 'racer');
   assert.equal(existsSync(p.projects), false);
+
 });
