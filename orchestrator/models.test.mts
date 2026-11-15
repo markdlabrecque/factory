@@ -1,4 +1,4 @@
-// #126: description parsing, approval, failures and reference model configuration regressions.
+// Legacy declarations fail closed; provider wiring remains covered until runtime integration.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AGENT as PERSONAL_AGENT, GRAPH as PERSONAL_GRAPH } from "./config.personal.mts";
@@ -11,11 +11,10 @@ const SONNET = "pi-claude-subscription/claude-sonnet-5-5";
 const OPUS = "pi-claude-subscription/claude-opus-5-5";
 const labels = { sonnet: SONNET, opus: OPUS, "Sonnet 5.5": SONNET };
 
-test("ticket model: explicit aliases and approved IDs, never labels or prose", () => {
+test("legacy ticket model fields fail closed; examples and prose stay excluded", () => {
   for (const body of ["**Model:** Sonnet 5.5", "Model: SONNET", "**Pi model:** `sonnet`", `**Model**: ${SONNET}`, "Model: sonnet\r\nPi model: Sonnet 5.5"]) {
     const m = ticketModel(body, labels);
-    assert.equal(m.status, "resolved", body);
-    assert.equal("model" in m && m.model, SONNET);
+    assert.equal(m.status, "unsupported", body);
     assert.match(m.revision, /^[a-f0-9]{64}$/);
     assert.ok(m.declarations.length);
   }
@@ -23,13 +22,13 @@ test("ticket model: explicit aliases and approved IDs, never labels or prose", (
     assert.equal(ticketModel(body, labels).status, "missing", body);
   }
   assert.equal(ticketModel("```md\n``` example, not a closing fence\nModel: opus\n```", labels).status, "missing");
-  assert.equal(ticketModel("```html\n<!--\n```\nModel: opus", labels).status, "resolved");
-  assert.equal(ticketModel("~~~html\n<!--\n~~~\nModel: opus", labels).status, "resolved");
-  assert.equal(ticketModel("```html <!--\nexample\n```\nModel: sonnet", labels).status, "resolved");
-  assert.equal(ticketModel("~~~html <!--\nexample\n~~~\nModel: sonnet", labels).status, "resolved");
+  assert.equal(ticketModel("```html\n<!--\n```\nModel: opus", labels).status, "unsupported");
+  assert.equal(ticketModel("~~~html\n<!--\n~~~\nModel: opus", labels).status, "unsupported");
+  assert.equal(ticketModel("```html <!--\nexample\n```\nModel: sonnet", labels).status, "unsupported");
+  assert.equal(ticketModel("~~~html <!--\nexample\n~~~\nModel: sonnet", labels).status, "unsupported");
   assert.equal(ticketModel("Model: unknown", labels).status, "unsupported");
   assert.equal(ticketModel("Model:", labels).status, "unsupported");
-  assert.equal(ticketModel("Model: sonnet\nModel: opus", labels).status, "conflicting");
+  assert.equal(ticketModel("Model: sonnet\nModel: opus", labels).status, "unsupported");
   assert.equal(ticketModel("Model: openai/gpt-6.1-sol", labels).status, "unsupported");
   assert.equal(ticketModel("", {}).status, "missing", "no fixed fallback even with no aliases");
   assert.notEqual(ticketModel("Model: sonnet", labels).revision, ticketModel("Model: sonnet\nEdited requirement", labels).revision);

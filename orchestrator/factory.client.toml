@@ -1,17 +1,24 @@
-# Factory client profile, schema v1. Authoritative when present; no legacy fallback.
+# Factory client profile, schema v2. Authoritative when present; no legacy fallback.
 # Keep credentials in .env and scripts/prompts separate. Legacy projects migrate by reviewed hand edit.
-version = 1
+version = 2
 [tracker]
 kind = "gitlab"
 project = "islandhealth/public-site" # factory:project
 host = "git.affinitybridge.com" # factory:host
 project_id = 699 # factory:project-id
 [agent]
-provider = "claude"
-model = "claude-opus-4-8" # fixed verifier; thinking is supported only for Pi
-[agent.model_aliases]
-opus = "claude-opus-4-8"
-sonnet = "sonnet"
+family = "openai" # openai|anthropic
+
+# [workflow]
+# mode = "project"
+# directory = ".sandcastle/workflow"
+# [instructions]
+# common = ["docs/agent-instructions.md"]
+# implementation = []
+# verification = []
+# analysis = []
+# recovery = []
+
 [labels]
 needs_human = "needs-human"
 done = "Internal QA"
@@ -42,7 +49,6 @@ auto = false
 method = "squash"
 required_checks = []
 [graph]
-model = "sonnet"
 max_analyses_per_pass = 5
 analysis_timeout_minutes = 10
 conflict_ignore = []
