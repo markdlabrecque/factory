@@ -16,6 +16,22 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Runtime bundle preparation
+
+```sh
+node --test cli/test/runtime-bundle.test.mts cli/test/runtime-ownership.test.mts cli/test/lifecycle.test.mts
+```
+
+These tests copy the assembly inventory into temporary fixtures and inject a package installer. They check source and lock identity, applicable optional dependencies, the exact npm command boundary, failed preparation, competing publication, path collisions and symlink refusal. Copied and linked install fixtures cover descriptor publication, old-bundle retention, process leases and uninstall refusal. Subprocess fixtures exit during temporary preparation and after publication to prove ownership recovery. Late service failure must leave the old descriptor unchanged. Concurrent asynchronous installs and uninstall are fenced across service awaits. Child processes interrupt ledger and lease writes before each rename to verify metadata recovery without weakening unknown-entry deletion checks. These regular tests do not run npm or contact a registry.
+
+An opt-in smoke test exercises the real locked tsx, esbuild platform binary and Sandcastle imports with scripts disabled. Supply a cache containing the public tarballs from the root lock and an npm CLI path. It copies only those tarballs into an isolated cache, clears inherited npm configuration and runs npm with `--offline`. It never fills missing cache entries from the network or changes the supplied cache. Run on a supported Node 22.18+ binary and Node 24 when checking dependency compatibility:
+
+```sh
+node scripts/test-runtime-packages.mts /path/to/npm-cache /path/to/npm/bin/npm-cli.js
+```
+
+The implementation was smoke-tested with Node 22.23.2 and 24.20.0. This is not an execution test of the exact 22.18.0 patch release.
+
 ## Local event observations
 
 ```sh

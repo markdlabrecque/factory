@@ -21,7 +21,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSy
 import { join } from 'node:path';
 import { Fake, FakeSchedule } from '../src/platform/fake.mts';
 import { SystemdSchedule, schedulerUnits } from '../src/platform/scheduler-systemd.mts';
-import { install } from '../src/commands/install.mts';
+import { install, copyRuntimeSources } from './runtime-fixture.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { stopScheduling } from '../src/commands/schedule.mts';
 import { tick } from '../src/commands/tick.mts';
@@ -640,6 +640,7 @@ test('reinstall stops scheduling and cancels the active tick before replacing fi
   const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
   const source = join(w.p.home, 'src');
   for (const d of ['cli', 'board', 'orchestrator', 'skills']) mkdirSync(join(source, d), { recursive: true });
+  copyRuntimeSources(source);
   const logs: string[] = [];
   t.mock.method(console, 'log', (l: string) => logs.push(l));
   t.mock.method(console, 'warn', () => {});

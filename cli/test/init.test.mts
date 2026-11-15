@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { paths } from '../src/paths.mts';
 import { Fake } from '../src/platform/fake.mts';
-import { install } from '../src/commands/install.mts';
+import { install } from './runtime-fixture.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { init } from '../src/commands/init.mts';
 import { readRegistry } from '../src/projects.mts';

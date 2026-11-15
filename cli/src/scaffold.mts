@@ -31,16 +31,8 @@ export type Profile = 'personal' | 'client';
 export type Settings = { profile: Profile; repo: string; image: string; host?: string; projectId?: number };
 export type PlannedFile = { path: string; content: string | Buffer; mode: number };
 
-// #153: ship observer and checkpoint schema together; no partially upgraded automatic continuation.
-// #149: dependency evaluation ships with every project copy, including update source discovery.
-// Preparation and its import-safe protocol ship together; old copies must upgrade and be reviewed before recovery.
-export const FROM_ORCHESTRATOR = ['recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
-  'delivery-followup.mts', 'verification.mts', // #150: structured proof is a required runtime dependency.
-  'capabilities.mts', 'ci.mts', 'models.mts', 'model-policy.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
-  'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
-  ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];
-// journal.mts is a mandatory board projection import, including in project dispatcher copies.
-export const FROM_BOARD = ['execution-events.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'board.template.html'];
+export { FROM_ORCHESTRATOR, FROM_BOARD } from './runtime-assets.mts';
+import { FROM_ORCHESTRATOR, FROM_BOARD } from './runtime-assets.mts';
 
 type Edit = { tag: string; line?: RegExp; value?: (m: RegExpMatchArray) => string };
 const marker = (tag: string) => new RegExp(`// factory:${tag}(?![\\w:-])`, 'g');

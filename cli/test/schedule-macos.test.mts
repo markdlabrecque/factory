@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { Fake } from '../src/platform/fake.mts';
 import { LaunchdSchedule, supervisorPlist } from '../src/platform/scheduler-launchd.mts';
 import { isTickEntry } from '../src/platform/scheduler.mts';
-import { install } from '../src/commands/install.mts';
+import { install } from './runtime-fixture.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { schedule } from '../src/commands/schedule.mts';
 import { supervise, FIRST_DELAY_MS, INTERVAL_MS } from '../src/commands/supervise.mts';
