@@ -11,26 +11,27 @@ const repository = fileURLToPath(new URL('../../', import.meta.url));
 export function executionSnapshot(runtime: { directory: string; env: NodeJS.ProcessEnv }, root: string) {
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `const {executionContext}=await import(${JSON.stringify(join(runtime.directory, 'context.mts'))}); const c=await executionContext(); console.log(JSON.stringify({identity:c.identity,policyIdentity:c.policyIdentity,config:c.config}));`], { cwd: root, env: runtime.env, encoding: 'utf8' }));
 }
-export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env, options: { overlays?: boolean; install?: (dir: string) => void; sdk?: string; paths?: import('../src/paths.mts').Paths } = {}) {
+export function stageExecutionPackages(dir: string, sdk: string) {
+  installPackages(dir);
+  writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {pathToFileURL} from 'node:url'; const entry=process.argv[2]; process.argv.splice(1,1); await import(pathToFileURL(entry).href);\n`);
+  if (existsSync(sdk)) {
+    const pkg = JSON.parse(readFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), 'utf8'));
+    cpSync(sdk, join(dir, 'node_modules/@ai-hero/sandcastle'), { recursive: true });
+    const fake = JSON.parse(readFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), 'utf8'));
+    writeFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), JSON.stringify({ ...fake, ...pkg }));
+  }
+}
+export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env, options: { overlays?: boolean; install?: (dir: string) => void; sdk?: string; sourceRoot?: string; paths?: import('../src/paths.mts').Paths } = {}) {
   const staging = mkdtempSync(join(dirname(root), 'execution-'));
   const source = join(staging, 'source'), data = options.paths?.data ?? join(staging, 'data'), runtimes = options.paths?.runtimes ?? join(data, 'runtimes');
   const descriptor = options.paths?.runtimeDescriptor ?? join(data, 'runtime.json');
   for (const asset of RUNTIME_ASSETS) {
     const target = join(source, asset.source); mkdirSync(dirname(target), { recursive: true });
     const overlay = join(root, '.sandcastle', asset.destination);
-    cpSync(options.overlays !== false && existsSync(overlay) && !['package.json', 'package-lock.json'].includes(asset.destination) ? overlay : join(repository, asset.source), target);
+    cpSync(options.overlays !== false && existsSync(overlay) && !['package.json', 'package-lock.json'].includes(asset.destination) ? overlay : join(options.sourceRoot ?? repository, asset.source), target);
   }
   const bundle = prepareRuntimeBundle({ sourceRoot: source, runtimeStore: runtimes, install: dir => {
-    installPackages(dir);
-    // tsx fixture only imports the selected absolute entrypoint; it performs no package resolution.
-    writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {pathToFileURL} from 'node:url'; const entry=process.argv[2]; process.argv.splice(1,1); await import(pathToFileURL(entry).href);\n`);
-    const sdk = options.sdk ?? join(root, 'node_modules/@ai-hero/sandcastle');
-    if (existsSync(sdk)) {
-      const pkg = JSON.parse(readFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), 'utf8'));
-      cpSync(sdk, join(dir, 'node_modules/@ai-hero/sandcastle'), { recursive: true });
-      const fake = JSON.parse(readFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), 'utf8'));
-      writeFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), JSON.stringify({ ...fake, ...pkg }));
-    }
+    stageExecutionPackages(dir, options.sdk ?? join(root, 'node_modules/@ai-hero/sandcastle'));
     options.install?.(dir);
   } });
   const p = { data, runtimes, runtimeDescriptor: descriptor } as any;

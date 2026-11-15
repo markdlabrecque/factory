@@ -49,6 +49,11 @@ node --test orchestrator/context.test.mts orchestrator/models.test.mts orchestra
 node --test orchestrator/verification-entrypoint.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
 ```
 
+`cli/test/shared-runtime.test.mts` exercises a copied install and data-only init
+through the normal Pi Terra implementation and independent verifier happy path.
+It uses temporary bare Git and fake SDK, tracker, container and authentication
+boundaries; it does not run a real agent or prove semantic verification.
+
 `cli/test/execution-fixture.mts` assembles complete temporary bundles from the
 single runtime inventory with fake private dependencies. The tsx stand-in imports
 only the supplied absolute entrypoint; no package manager or real agent runs.
