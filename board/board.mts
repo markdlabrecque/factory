@@ -89,6 +89,7 @@ export interface RunState {
   historyComplete?: boolean; // false for pre-upgrade records or truncated history
   evidenceDir?: string;
   ticketHash?: string; // content hash of the ticket the run was built from
+  ticketInput?: { hash: string; renderedSha256: string; attemptId?: string }; // host-owned frozen input manifest, located by execution identity
   parentIid?: string; // set when the ticket is a GitLab Task; the Task is closed once its branch merges
   mergedAt?: string; // when the dispatcher saw the MR merged and closed the Task or moved the ticket on; the PR's merge time when merged outside Factory
   mergedOutside?: { pr: number; matchedBy: "branch" | "title" }; // #87: a stopped or parked card whose work a person merged outside Factory
