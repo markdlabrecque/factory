@@ -11,6 +11,8 @@ The [structured ticket-context contract](ticket-readiness.md#structured-ticket-c
 
 The [ticket-readiness contract](ticket-readiness.md) also defines the shared filesystem probe/report API and its passive-reader boundary. The CLI consumes these reports passively and offers explicit doctor probes; launch and sandbox gates are separate consumers. Saved readiness is never launch authority.
 
+Normal implementer stops with zero commits now retain [an attributed no-commit explanation](ticket-readiness.md#no-commit-explanations) in the execution note and bounded execution evidence. Factory's zero-commit, worktree and push facts remain separate from the agent's claim. If capture is unavailable, cause stays unknown. Inspect ticket context and evidence before choosing a relaunch; there is no new automatic retry or success authority. Existing blocked-report dependency handling and opt-in recovery policy are unchanged. The owned sandbox closes before a no-commit exit; teardown failures retain the explanation and do not confirm cleanup.
+
 ## Board readiness
 
 The Board shows stored readiness once per registered project, even before its first run. The notice is separate from historical execution stops. It shows project checks and explicitly attributed ticket-input, ticket-workspace and sandbox checks, with phase, operation, safe path/error, observation time and identity, next actor/action and automatic recheck policy. An unattributed ticket/sandbox check is not a project hold. A later ready observation removes the current failure notice without rewriting old run records or evidence.
