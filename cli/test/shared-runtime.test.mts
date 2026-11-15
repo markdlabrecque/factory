@@ -12,5 +12,8 @@ test('copied install recovers saved Pi Terra work with independent Large verific
 test('two data-only projects share one runtime without sharing settings or artifacts', t =>
   normalEntrypointFixture(t, 'shared-projects', 'openai', undefined, true));
 
+test('complete project workflow executes and a missing helper refuses without fallback', t =>
+  normalEntrypointFixture(t, 'project-override', 'openai', 'mid', true));
+
 test('active detached normal run pins A while a fresh invocation runs published B', t =>
   normalEntrypointFixture(t, 'publication', 'openai', 'mid', true));

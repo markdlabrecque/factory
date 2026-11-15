@@ -16,7 +16,8 @@ import { pathToFileURL } from 'node:url';
 import { fixtureReport } from './fixtures/verification.mts';
 import { proofRoot } from './verification.mts';
 import { MODEL_POLICY } from './model-policy.mts';
-import { prepareRuntimeBundle } from '../cli/src/runtime-bundle.mts';
+import { prepareRuntimeBundle, regenerateRuntimeManifest } from '../cli/src/runtime-bundle.mts';
+import { addProject } from '../cli/src/projects.mts';
 import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../cli/src/runtime-ownership.mts';
 import { resolveWorkflow } from './workflow.mts';
 
@@ -53,7 +54,7 @@ export async function createSandbox(o) {
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
     run: async o => {
-      if (scenario === 'publication' || scenario === 'shared-projects') {
+      if (scenario === 'publication' || scenario === 'shared-projects' || scenario === 'project-override') {
         const { executionContext } = await import(process.env.FACTORY_RUNTIME_ROOT + '/context.mts');
         const c = await executionContext();
         writeFileSync(join(fake, o.name + '-identity.json'), JSON.stringify({root:c.runtimeRoot, identity:c.identity, templates:c.templates, additive:c.additive}));
@@ -137,13 +138,14 @@ const out = (v)`).replace('parent: null,', "parent: changed && scenario === 'par
 import * as fs from 'node:fs'; import * as path from 'node:path';
 import { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, 'fixtures/capability-docker.mjs'))};
 const a = process.argv.slice(2);
+fs.appendFileSync(path.join(process.env.FAKE_STATE, 'docker-calls.jsonl'), JSON.stringify(a)+'\\n');
 const out = capabilityDocker(a, process.env.FAKE_STATE);
 if (out !== undefined) { console.log(out); process.exit(0); }
 if (a[0] !== 'container' || a[1] !== 'inspect') process.exit(90);
 if (!fs.existsSync(path.join(process.env.FAKE_STATE,'live'))) { console.error('No such container'); process.exit(1); }
 console.log('sha256:'+'a'.repeat(64));
 `, { mode: 0o755 });
-    writeFileSync(join(bin, 'pi'), '#!/bin/sh\n[ "$1" = auth ] || exit 90\nprintf "fixture-token\\n"\n', { mode: 0o755 });
+    writeFileSync(join(bin, 'pi'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_STATE/pi-calls"\n[ "$1" = auth ] || exit 90\nprintf "fixture-token\\n"\n', { mode: 0o755 });
     const runtime = bindExecution(root, process.env, { sdk, overlays: false, ...(copied ? { sourceRoot: p.app, paths: p } : {}) });
     if (!copied) for (const name of ['main.mts', 'dispatch.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
     if (copied) {
@@ -155,6 +157,56 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
     }
     assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
+    if (scenario === 'project-override') {
+      assert.ok(copied);
+      const override = join(root, '.factory-workflow');
+      cpSync(runtime.directory, override, { recursive: true });
+      const template = join(override, 'prompt.verify.md'), main = join(override, 'main.mts');
+      writeFileSync(template, readFileSync(template, 'utf8') + '\nCUSTOM OVERRIDE VERIFIER MARKER\n');
+      writeFileSync(main, readFileSync(main, 'utf8') + '\nawait import("node:fs").then(fs => fs.writeFileSync(process.env.FAKE_STATE + "/custom-code-ran", "CUSTOM OVERRIDE CODE"));\n');
+      writeFileSync(join(override, 'runtime-manifest.json'), JSON.stringify(regenerateRuntimeManifest(override)) + '\n');
+      writeFileSync(config, readFileSync(config, 'utf8') + '\n[workflow]\nmode = "project"\ndirectory = ".factory-workflow"\n');
+      const selected = resolveWorkflow(root, p.runtimeDescriptor);
+      assert.equal(selected.root, override); assert.notEqual(selected.id, runtime.id);
+      const env = { ...runtime.env, ...selected.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: mid\nThe login form must work.' };
+      const result = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env, timeout: 15000 });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      for (const role of ['implementer', 'verifier']) {
+        const identity = JSON.parse(readFileSync(join(fake, `${role}-identity.json`), 'utf8'));
+        assert.equal(identity.root, override); assert.equal(identity.identity.runtime.id, selected.id);
+        assert.deepEqual(identity.templates, JSON.parse(readFileSync(join(fake, 'implementer-identity.json'), 'utf8')).templates);
+      }
+      assert.ok(readFileSync(join(fake, 'verifier-prompt.txt'), 'utf8').includes('CUSTOM OVERRIDE VERIFIER MARKER'));
+      assert.equal(readFileSync(join(fake, 'custom-code-ran'), 'utf8'), 'CUSTOM OVERRIDE CODE');
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: 'openai/gpt-6.1-terra', thinking: 'high' });
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.large, thinking: 'high' });
+      assert.ok(existsSync(join(fake, 'implementer-started')) && existsSync(join(fake, 'verifier-started')));
+      const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+      const proof = JSON.parse(readFileSync(join(proofRoot(state, 'owner/repo', '7', run.verification.id), 'proof.json'), 'utf8'));
+      assert.equal(proof.report.verdict, 'PASS');
+      assert.equal(proof.provenance.code['main.mts'], selected.manifest.files.find((f: {path: string}) => f.path === 'main.mts')!.sha256);
+      assert.equal(readFileSync(join(run.evidenceDir, 'check.txt'), 'utf8'), 'Assertions passed');
+      addProject(p, root);
+      const snapshot = (dir: string): Record<string, string> => {
+        if (!existsSync(dir)) return {};
+        return Object.fromEntries(readdirSync(dir, { recursive: true, withFileTypes: true }).filter(d => d.isFile()).map(d => {
+          const path = join(d.parentPath, d.name); return [path, readFileSync(path).toString('base64')];
+        }));
+      };
+      const beforeState = snapshot(state), beforeEvidence = snapshot(join(root, '.sandcastle/evidence')), beforeFake = snapshot(fake);
+      rmSync(join(override, 'verification.mts'));
+      const cli = join(p.app, 'cli/bin/factory.mts');
+      const refused = spawnSync(process.execPath, [cli, 'run', '7', '--project', root], { cwd: root, encoding: 'utf8', env: { ...env, HOME: home, FACTORY_HOME: home }, timeout: 15000 });
+      assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
+      assert.match(refused.stdout + refused.stderr, /Invalid project workflow/);
+      assert.match(refused.stdout + refused.stderr, /no Factory fallback is permitted/);
+      assert.deepEqual(snapshot(state), beforeState); assert.deepEqual(snapshot(join(root, '.sandcastle/evidence')), beforeEvidence);
+      assert.deepEqual(snapshot(fake), beforeFake, 'no tracker, sandbox or agent boundary ran');
+      assert.equal(existsSync(join(fake, 'npm-called')), false);
+      assert.equal(existsSync(join(root, 'node_modules')), false);
+      assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false);
+      return;
+    }
     if (scenario === 'shared-projects') {
       assert.ok(copied);
       const second = join(home, 'second'), secondOrigin = join(home, 'second.git'), secondFake = join(home, 'second-fake'), secondBin = join(home, 'second-bin');

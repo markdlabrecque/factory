@@ -58,7 +58,11 @@ tier. The normal cases poison project workflow files; the copied recovery checks
 their absence. They trap npm calls
 and checks that execution creates no project dependencies. It uses temporary bare
 Git and fake SDK, tracker, container and authentication boundaries; it does not
-run a real agent or prove semantic verification.
+run a real agent or prove semantic verification. A complete project override also
+runs the implementation and verifier with custom code and a marked template. Removing
+its mandatory verification helper makes the CLI refuse before any fixture tracker,
+authentication, Docker or agent call, while saved state and evidence remain unchanged.
+This exercises one override, not a model-policy guarantee for arbitrary custom code.
 
 `cli/test/execution-fixture.mts` assembles complete temporary bundles from the
 single runtime inventory with fake private dependencies. The tsx stand-in imports
