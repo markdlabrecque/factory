@@ -12,6 +12,8 @@ Requires Node 22.18+; CI uses Node 24. From the repository root:
 node --test orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 ```
 
+CI sets `--test-concurrency=4` to overlap independent fixture subprocess waits on small runners. It still runs the complete inventory above with the 180-second suite deadline and 120-second per-test deadline. A two-CPU Node 24.20.0 fixture run completed all 714 tests in 99 seconds at this concurrency, compared with 172 seconds using the CPU-derived default. This is a scheduling choice, not a skipped-test or timeout waiver.
+
 Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
