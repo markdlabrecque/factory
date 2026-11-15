@@ -5,8 +5,26 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ReadinessIdentity, ReadinessReport, ObservationOwner } from '../orchestrator/readiness-schema.mts';
 const schema = await import(fs.existsSync(new URL('./readiness-schema.mts', import.meta.url)) ? './readiness-schema.mts' : '../orchestrator/readiness-schema.mts');
-const { MAX_REPORT_BYTES, identityKey, projectKey, validIdentity, validReport, displayFreshness, safeErrno } = schema;
+const { MAX_REPORT_BYTES, identityKey, projectKey, validIdentity, validReport, displayFreshness, safeErrno, reportStatus } = schema;
 export { displayFreshness };
+/** Scope filtering recomputes the aggregate, so ticket holds never become a project failure. */
+export function scopedReadiness(read: ReadinessRead, scope: string): ReadinessRead {
+  if (!('report' in read)) return read;
+  const checks = read.report.checks.filter(c => c.scope === scope);
+  return { ...read, report: { ...read.report, status: reportStatus(checks), checks } };
+}
+/** One text projection for bounded observations. Stale reports are history, never a current green claim. */
+export function readinessLines(read: ReadinessRead, label = 'Readiness'): string[] {
+  if (!('report' in read)) return [`${label}: unknown (${read.state}): ${read.reason}${read.errno ? ` [${read.errno}]` : ''}`,
+    '  Cause unknown. Automatic recheck: next launch; saved reports do not authorize work.'];
+  const r = read.report;
+  const lines = [`${label}: ${read.state === 'stale' ? 'unknown (stale)' : r.status} | ${r.phase} | checked ${r.observedAt}`,
+    `  Identity: ${r.identity.runtimeIdentity} / ${r.identity.configIdentity} / ${r.identity.contextFingerprint}`,
+    `  Observation: ${r.owner.invocationId} / ${r.owner.generation}; not launch authorization.`];
+  for (const c of r.checks) lines.push(`  ${c.scope}/${c.phase}${c.ticket ? ` ticket #${c.ticket}` : c.scope === 'project' ? '' : ' unattributed'} ${c.id}: ${c.status}; ${c.operation} ${JSON.stringify(c.path)}${c.errno ? ` [${c.errno}]` : ''}; ${c.reason}`,
+    `    Next actor: ${c.nextActor}; ${c.nextAction}. Automatic recheck: ${c.automaticRecheck}.`);
+  return lines;
+}
 export type ReadinessToken = { identity: ReadinessIdentity; owner: ObservationOwner };
 interface Envelope { version: 1; token: ReadinessToken; report: ReadinessReport | null; diagnostics: { observedAt: string; status: string }[] }
 export type ReadinessRead =

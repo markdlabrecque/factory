@@ -9,7 +9,7 @@ Dispatch and recovery enforce [image and sandbox readiness](image-readiness.md) 
 
 The [structured ticket-context contract](ticket-readiness.md#structured-ticket-context) defines complete child and immediate-parent input, bounded collection holds, provenance, hashing and untrusted rendering. It currently owns collection only; launch and operator-report consumers adopt it separately.
 
-The [ticket-readiness contract](ticket-readiness.md) also defines the shared filesystem probe/report API and its passive-reader boundary. These core modules do not yet add filesystem gating or CLI commands; consumers wire those separately. Saved readiness is never launch authority.
+The [ticket-readiness contract](ticket-readiness.md) also defines the shared filesystem probe/report API and its passive-reader boundary. The CLI consumes these reports passively and offers explicit doctor probes; launch and sandbox gates are separate consumers. Saved readiness is never launch authority.
 
 Normal implementer stops with zero commits now retain [an attributed no-commit explanation](ticket-readiness.md#no-commit-explanations) in the execution note and bounded execution evidence. Factory's zero-commit, worktree and push facts remain separate from the agent's claim. If capture is unavailable, cause stays unknown. Inspect ticket context and evidence before choosing a relaunch; there is no new automatic retry or success authority. Existing blocked-report dependency handling and opt-in recovery policy are unchanged. The owned sandbox closes before a no-commit exit; teardown failures retain the explanation and do not confirm cleanup.
 
@@ -49,7 +49,7 @@ Turn this repo from a set of skills and patterns into a software factory with on
 
 ```
 factory install              set up the CLI, write the manifest (the bootstrap script runs this)
-factory doctor               check node, docker, glab/gh, claude/pi, logins, linger
+factory doctor [--project <name|path>] [--probe-filesystem] [--json]   passive diagnostics or explicit owned filesystem probes
 factory update               report project-owned data (--dry-run and --apply do not repair files)
 factory workflow status      compare an explicit source, invoking/installed apps and registered project copy; read-only (--json)
 factory uninstall            stop and remove everything in the manifest
@@ -500,6 +500,26 @@ Deletes the ticket's run record, the same as deleting the JSON file by hand, onl
 
 Prints the board service's state (`active`, `inactive`, `missing`, or `unknown (<reason>)` when the service manager can't be asked) and URL, then each of the project's run records, oldest first, with stage, time in that stage, title, branch, verdict, PR and note; a dead process reads as `stopped`. `--json` prints `{version:1, project:{name,root,tracker}, board:{service,url}, runs:[...]}`, the runs being the records plus their `key`. Since slice four (#37) it also shows scheduler health and this project's schedule and pass timings, between the board line and the runs, and `--json` adds `scheduler` and `schedule`; see "Scheduler health" under "Slice four: the Linux scheduler". Since #62 it also summarizes self-recovery and `--json` adds `recovery`; see "Slice four: recovery status and reset". The service and schedule backends are passed in, so tests use the fake ones.
 
+Readiness appears once above the runs, including projects with no runs. Project checks and ticket-input, ticket-workspace and sandbox observations are separate; a ticket hold is not a failure of every selected ticket. Each observation shows scope/phase, checked time, identity, operation, quoted path, safe errno, next actor/action and automatic recheck policy. Like Board, status and ticket show use `readStoredReadiness` for the registered root. Identity is the recorded observation identity, not a claim that current configuration/runtime still matches. Stale observations retain their historical facts but show current readiness as unknown. Missing, pending, invalid or unreadable reports show unknown with cause-known limits. Status never publishes or starts probes. JSON adds `readiness: ReadinessRead` to version 1 without changing existing fields. There is no prose on JSON stdout. A successfully displayed blocked or unknown report exits 0; bad arguments or project selection exit 1.
+
+`factory ticket show <ticket> [--project <name|path>] [--json]` adds current project `readiness`, explicitly attributed `ticketReadiness`, `input` and `executionReadiness` to its version-1 JSON. It works without a run or journal so a project hold remains visible. A colliding foreign run is still refused. Only checks with an explicit matching `ticket` are associated with this ticket; paths, IDs and owner names are never used to infer attribution. Historical execution stage/note stays separate from current project readiness. Missing optional input/execution report producers are explicit unknowns, with empty coverage/references and a null hash, not a reason to collect tracker content. Neither command follows arbitrary links, reads log bodies or environment values, imports executable override modules or starts agents/containers. Existing service-manager status queries remain read-only.
+
+### Explicit project doctor
+
+```sh
+factory doctor --project "project with spaces"
+factory doctor --project "project with spaces" --probe-filesystem
+factory doctor --project "project with spaces" --probe-filesystem --json
+```
+
+Project selection follows the existing registered name/path rules. Explicit project mode checks only the project filesystem, not installation services or Board HTTP. With no flags, doctor retains its installation checks and adds passive filesystem observation when run inside a registered checkout. `--json` or `--probe-filesystem` without a selector uses the current registered checkout.
+
+Passive doctor never creates directories or files. Required write ability is `untested` unless a current matching active observation contains successful write cycles for every intended writable location. A saved observation is not authorization. Passive unknown write ability alone exits 0, while an observed required failure exits 1.
+
+`--probe-filesystem` explicitly permits exclusive create/write/rename/remove checks using private disposable files. It may create missing ordinary Factory state, logs, evidence and worktree-parent directories. It never repairs permissions, deletes branches/worktrees, runs setup commands, reads credentials or provisions a sandbox. Active blocked/unknown, timeout or failed collection exits 1 and reports a safe operation-specific inspection action. Success exits 0. Doctor does not publish even active observations over the launch report. JSON is a single `{version:1, project, readiness, saved, writeCapability, coverage}` object, or a safe unknown `readiness` on collection failure. Unknown project selection is an argument error on stderr.
+
+The host observation does not establish sandbox-user access, especially inside opaque custom workflows. Reports cannot replace image/browser gates, admission, independent verification, exact-SHA delivery or recovery accounting. See [ticket readiness](ticket-readiness.md#cli-observation-examples) for examples and local test coverage.
+
 ## `factory logs [ticket] [-f] [--recovery] [--project <name>]`
 
 Prints the ticket's run log, or the project's most recently written `run-*.log` without a ticket. With `--recovery` (#62) the repair log, `recover-<n>.log`, instead. `-f` polls for appended output (starting over if the file is truncated) until interrupted.
@@ -655,7 +675,7 @@ Few and focused, per the project's testing rules. Run with `node --test cli/test
 2. **Install is idempotent.** Run install twice and assert the manifest has no duplicate entries and the same set of files exists.
 3. **Crash recovery.** Make the adapter throw on the unit step, and assert the manifest lists the entries created before the failure, and that uninstall then cleans them.
 
-Not tested: argument parsing, `doctor` output text, and the unit templates. They are trivial or covered by the manual check.
+Readiness argument/output and safety boundaries are covered by `cli/test/readiness*.test.mts`; installation unit templates retain their existing fixture and manual coverage.
 
 ## Manual check on a real machine
 

@@ -1,8 +1,10 @@
 // `factory status [--json] [--project <name>]`: the board service's state and URL, then every run of the project
 // picked by runs.mts with its stage, how long it has been there, title, branch, verdict, PR and note. A run whose
 // process is gone without finishing shows as stopped (read-only; its record is left alone). `--json` prints the same
-// data as `{version:1, project, board, runs}`, plus `scheduler` and `schedule` when a scheduler backend is given (the CLI
-// always gives one). Only one project.
+// data as `{version:1, project, board, runs, readiness}`, plus `scheduler` and `schedule` when a scheduler backend is given (the CLI
+// always gives one). Only one project. Readiness is a passive bounded report read, with separate scopes above runs.
+// Missing/invalid/stale observations remain unknown. Identity is the recorded observation, as on Board;
+// current config/runtime is not revalidated and no probes or executable workflow imports run here.
 // Scheduler health and timings (#37, scheduler-health.mts): the service manager's answer (on, off or unknown with the
 // reason; a failed query is never on), whether a tick is running, the last tick and tick timings from the history, health
 // problems and enabled legacy timers; then this project's switch and branch, why it would not get a pass (or `ready`), its
@@ -12,6 +14,8 @@
 // confirmation, a running attempt, the last finished attempt and its outcome, and spent budgets; `--json` adds `recovery`.
 // Details (budgets, reports, renewals) are in `factory recovery status`. A malformed recovery record is a problem line.
 import { existsSync } from 'node:fs';
+import { savedReadiness } from '../readiness.mts';
+import { readinessLines, scopedReadiness } from '../../../board/readiness.mts';
 import { boardURL } from '../paths.mts';
 import type { Paths } from '../paths.mts';
 import type { ServiceBackend } from '../platform/index.mts';
@@ -39,9 +43,10 @@ export async function status(p: Paths, service: Pick<ServiceBackend, 'status'>, 
   const now = o.now ?? Date.now();
   const sched = o.schedule ? await scheduling(p, o.schedule, ctx, now) : null;
   const recovery = recoverySummary(p, ctx);
+  const readiness = savedReadiness(p, ctx.root, now);
   if (o.json) {
     console.log(JSON.stringify({ version: 1, project: { name: ctx.name, root: ctx.root, tracker: ctx.tracker }, board: { service: state, url: boardURL },
-      ...(sched ? { scheduler: sched.scheduler, schedule: sched.schedule } : {}), recovery, runs }, null, 2));
+      ...(sched ? { scheduler: sched.scheduler, schedule: sched.schedule } : {}), recovery, readiness, runs }, null, 2));
     return;
   }
   console.log(`Board: ${state}  ${boardURL}`);
@@ -49,6 +54,11 @@ export async function status(p: Paths, service: Pick<ServiceBackend, 'status'>, 
   console.log(`Project: ${ctx.name} (${ctx.tracker})  ${ctx.root}`);
   if (sched) for (const l of sched.text.schedule) console.log(l);
   for (const l of recoveryStatusLines(recovery, ctx.name, now)) console.log(l);
+  for (const l of readinessLines(scopedReadiness(readiness, 'project'), 'Current project readiness')) console.log(l);
+  if ('report' in readiness) for (const scope of ['ticket-input', 'ticket-workspace', 'sandbox']) {
+    if (readiness.report.checks.some(c => c.scope === scope))
+      for (const l of readinessLines(scopedReadiness(readiness, scope), `${scope} observations, not all selected tickets`)) console.log(l);
+  }
   if (!runs.length) console.log('No runs yet.');
   else for (const r of runs) console.log(line(r, now));
 }
