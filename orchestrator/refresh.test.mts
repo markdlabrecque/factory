@@ -20,12 +20,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
-import { unitHash } from "./graph.mts";
+import { fixtureTicketHash } from './fixtures/ticket-input.mts';
 
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -78,7 +78,7 @@ function fixture(t: any, kind = "github") {
   };
   const manifest = (iid: number) => {
     const ti = data.tickets.find((x: any) => x.iid === iid), p = data.parents[iid] && data.tickets.find((x: any) => x.iid === data.parents[iid]);
-    const m = { iid, project: "owner/repo", policyIdentity: snapshot.policyIdentity, hash: unitHash({ ...ti, ...(p ? { parent: p } : {}) }, data.notes[iid]), analyzedAt: new Date().toISOString(),
+    const m = { iid, project: "owner/repo", policyIdentity: snapshot.policyIdentity, hash: fixtureTicketHash(data, iid, kind), analyzedAt: new Date().toISOString(),
       base: "main", baseSha: "", provides: [], requires: [], footprint: [], actualFootprint: [], catalogueIids: data.tickets.filter((t: any) => !t.contextOnly).map((t: any) => t.iid), blockerHashes: {} };
     writeFileSync(join(dir, "graph", `${key(iid)}.json`), JSON.stringify(m));
   };
@@ -112,7 +112,7 @@ for (const changedInstructions of [false, true]) test(`scheduled copied dispatch
   writeFileSync(join(evidence,'verification.json'),JSON.stringify({version:1,verdict:'PASS',changeKind:'feature',evidenceKind:'command',interactive:false,criteria:[{requirement:'behavior',result:'pass',evidence:['out.txt']}],artifacts:[{path:'out.txt',kind:'command-output',phase:'check'}],limitations:[]}));
   const code = Object.fromEntries(f.runtime.manifest.files.map(file => [file.path, file.sha256]));
   const settings = {image:cfg.config.image,model:cfg.AGENT.model,thinking:cfg.AGENT.thinking??null,merge:{auto:cfg.MERGE.auto,method:cfg.MERGE.method,requiredChecks:cfg.MERGE.requiredChecks??[]},ciWaitMinutes:cfg.config.ciWaitMinutes,noPipelineMinutes:cfg.config.noPipelineMinutes,execution:snapshot.identity};
-  const hash = unitHash(f.data.tickets[0], []);
+  const hash = fixtureTicketHash(f.data, 7);
   const identity = {project:'owner/repo',ticket:'7',executionId:'execution',branch:'7-topic',base:'main',baseline:tip,tip,requirementsHash:hash};
   const proof = createProof(f.dir,evidence,identity,{imageId:`sha256:${'a'.repeat(64)}`,nodeVersion:'v22',settings,code});
   const at = new Date().toISOString(), path = join(f.dir,`${f.key(7)}.json`);
@@ -280,6 +280,29 @@ for (const kind of ["github", "gitlab"]) {
     assert.equal(JSON.parse(f.bytes(join(f.dir, `${f.key(8)}.json`))).stage, 'setup', 'an edited valid declaration becomes dispatchable without a model label');
   });
 }
+
+test('analysis includes frozen complete child/parent plan bytes and parent edits revoke cache, generated notes do not', t => {
+  const f = fixture(t); f.record(7, 'stopped');
+  f.data.parents[7] = 90;
+  f.data.tickets.push(ticket(90, { title: 'Parent specification', description: 'Complete packaging specification', contextOnly: true }));
+  f.data.notes[90] = [{ body: '<details>Agreed decisions and implementation plan</details>' }];
+  f.data.notes[7] = [{ body: 'Complete child acceptance details' }];
+  const calls = () => f.bytes(join(f.fake, 'analysis.jsonl')).trim().split('\n').map(line => JSON.parse(line));
+  f.pass(['--refresh-only', '--ticket', '7']);
+  const first = calls()[0].input;
+  for (const text of ['Complete packaging specification', 'Agreed decisions and implementation plan', 'Complete child acceptance details']) assert.ok(first.includes(text));
+  const inputs = join(f.dir, 'ticket-inputs', f.key(7), 'analysis');
+  const inputDir = join(inputs, readdirSync(inputs)[0]);
+  assert.ok(first.includes(f.bytes(join(inputDir, 'ticket-context.txt'))));
+  assert.equal(JSON.parse(f.bytes(join(inputDir, 'ticket-context.json'))).contentHash, f.assessment().analysis?.hash);
+  f.pass(['--refresh-only', '--ticket', '7']); assert.equal(calls().length, 1);
+  f.data.notes[90].push({body:'## Sandcastle: verification\nGenerated proof\n<!-- sandcastle -->'});
+  f.pass(['--refresh-only', '--ticket', '7']); assert.equal(calls().length, 1);
+  f.data.notes[90][0].body = '<details>Changed parent plan</details>';
+  f.pass(['--refresh-only', '--ticket', '7']); assert.equal(calls().length, 2);
+  assert.match(calls()[1].input, /Changed parent plan/);
+  assert.ok(first.includes('Agreed decisions and implementation plan'), 'active prompt stays frozen');
+});
 
 test('refresh analyzes with frozen analysis instructions and invalidates the cache when bytes change', t => {
   const f = fixture(t); f.record(7, 'stopped');
@@ -537,7 +560,7 @@ test("analysis timeout is recorded without changing execution or losing the last
   assert.equal(f.assessment().analysisState, "error");
   assert.match(f.assessment().analysisError!, /analysis.*failed/);
   assert.deepEqual(f.assessment().analysis, prior);
-  assert.equal(f.assessment().facts?.hash, unitHash(f.data.tickets[0]));
+  assert.equal(f.assessment().facts?.hash, fixtureTicketHash(f.data, 7));
   assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
   assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
 });

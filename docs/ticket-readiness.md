@@ -6,7 +6,27 @@ Readiness is an observation, not permission to execute, verify or deliver. A sav
 
 `orchestrator/ticket-context.mts` owns collection, content identity and rendering of tracker task input. It is import-safe and does not load project configuration, invoke a tracker, save reports or launch an agent on import. Complete transport is not a judgment that a plan is adequate. There is no keyword classifier.
 
-This is a collection contract, not launch wiring. Existing launch, analysis-cache, proof and prompt consumers are unchanged by this module. Consumers must explicitly adopt it, freeze its output and apply their own freshness and admission policy. A collected success cannot replace independent verification, exact-SHA delivery, image/browser readiness or recovery ownership and budget gates.
+The standard workflow uses this contract before analysis and normal/recovery agents. `ticket-input.mts` freezes one collected snapshot and its rendered bytes per invocation. Analysis, implementation, repair and independent verification receive the full child specification and immediate-parent planning comments as untrusted task data. Role-specific configured instructions and read-only analysis tools remain separate. A collected success cannot replace independent verification, exact-SHA delivery, image/browser readiness or recovery ownership and budget gates.
+
+### Frozen input, holds and evidence
+
+`freezeTicketInput(contextSource, iid)` returns `{ context, text, hash, textHash }`. `hash` is the included-source content identity from the collector. `textHash` is SHA-256 of the exact rendered UTF-8 `TICKET` prompt argument, including coverage and collection metadata. Prompt substitution is one pass; placeholders in tracker text are data.
+
+Before an analysis agent starts, the selected runtime must also pass its configured instruction/template freshness check. Dispatch excludes an incomplete ticket from analysis and admission without creating a stopped record or needs-human label. It recollects immediately before claiming a normal launch. The entrypoint collects independently, freezes those bytes and checks again after claim adoption, before creating the workspace. It does not silently replace a frozen prompt after an edit. A later race holds work rather than delivering from stale input.
+
+`TicketInputHold` exposes the original source-specific `.hold` and a shared `.check: ReadinessCheck` with ticket-input scope. The message names child/parent, ticket, operation and safe reason, never raw tracker stderr. Recovery preparation returns code `ticket-input`, scope `ticket`, before admission or a new budget charge. Other unreadable configuration remains a configuration hold. Collection is retried on the next pass, not by silently retrying stopped executions. Ticket-only observations must not overwrite a project filesystem report.
+
+`saveTicketInput(directory, input)` writes three exclusive host-owned files:
+
+- `ticket-context.json`: complete canonical structured snapshot.
+- `ticket-context.txt`: exact rendered prompt argument, without an added newline.
+- `ticket-sources.json`: content and rendered hashes, source references/counts/coverage and collection limits/times.
+
+Execution evidence lives outside sandbox mounts at `<state>/ticket-inputs/<project-ticket-key>/<executionId>/`, with `<attemptId>/` for recovery. Read-only analysis uses `<state>/ticket-inputs/<project-ticket-key>/analysis/<uuid>/`. These files are not rewritten on subsequent tracker reads or retries. Agent evidence remains in its existing execution/attempt directory. A publication failure stops that invocation. The container receives rendered task data, not host tracker credentials or this host evidence directory.
+
+Analysis cache identities, execution manifests and requirement/proof freshness use the same included child/parent source hash. Relevant parent body or human planning-comment edits invalidate analysis and old delivery authority. Generated Factory notes remain excluded, so posting verification does not invalidate its own proof. Older child-only hashes are stale, not migrated or rewritten. Current eligibility, dependency, claim, branch/base/tip and exact-SHA gates still apply. Fresh source collection runs before verification, delivery and existing-delivery continuation, including adapter authorization after CI. Active prompts remain frozen while those checks see current tracker bytes. Remote tracker edits and merge cannot be made one atomic transaction.
+
+Complete project overrides retain their own internal prompt implementation. These standard workflow helpers do not impose a new custom-workflow protocol or prove that an arbitrary override adopts the frozen-input contract.
 
 ### Consumer interface
 

@@ -5,10 +5,12 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { keyFor, stateDir } from "./board.mts";
 import { context, GRAPH } from "./runtime-config.mts";
-import { contentHash, isSandcastleNote, unitHash } from "./graph.mts";
+import { contentHash } from "./graph.mts";
 import { piAnalysisArgs } from "./models.mts";
 import type { Manifest, Note, Requirement } from "./graph.mts";
 import type { Ticket } from "./tracker.mts";
+import { randomUUID } from 'node:crypto';
+import { saveTicketInput, type FrozenTicketInput } from './ticket-input.mts';
 
 // Ticket analysis: one read-only agent run on the host per ticket, against a detached worktree at
 // origin/<base>, with GRAPH.model. Pi runs with read, grep, find and ls, no discovered extensions,
@@ -90,22 +92,6 @@ function runPi(iid: number, prompt: string, cwd: string): Analysis {
   return so!;
 }
 
-/** Ticket text as an agent sees it: description, then comments from people, then a Task's parent. */
-export function ticketText(t: Ticket, notes: Note[]): string {
-  const comments = notes.filter((n) => !isSandcastleNote(n)).map((n) => `> ${n.body.replace(/\n/g, "\n> ")}`);
-  return [t.description || "(no description)", ...(comments.length ? ["### Comments", ...comments] : []), parentText(t)].filter(Boolean).join("\n\n");
-}
-
-/** Context for a Task: its parent issue. Empty for a whole ticket. */
-export function parentText(t: Ticket): string {
-  if (!t.parent) return "";
-  return [
-    `### Parent ticket #${t.parent.iid}: ${t.parent.title}`,
-    `This ticket is one Task of #${t.parent.iid}. Do only this Task; the parent and its other Tasks are context.`,
-    t.parent.description || "(no description)",
-  ].join("\n\n");
-}
-
 /** One line per open ticket plus what it provides when it has been analysed. */
 export function catalogueText(cat: Ticket[], manifests: Map<number, Manifest>, self: number): string {
   const lines = cat.filter((t) => t.iid !== self).map((t) => {
@@ -120,6 +106,7 @@ export function analyse(args: {
   base: string;
   worktree: { path: string; sha: string };
   ticket: Ticket;
+  input: FrozenTicketInput;
   notes: Note[];
   catalogue: Ticket[];
   manifests: Map<number, Manifest>;
@@ -127,22 +114,24 @@ export function analyse(args: {
   knownProviders?: Ticket[]; // assessment/preparation: reliably read previously named dependencies can now be closed
 }): Manifest {
   const { ticket: t, catalogue: cat } = args;
+  const input = args.input;
   const vars: Record<string, string> = {
     ADDITIVE_INSTRUCTIONS: context.additive.analysis.text,
     ISSUE_IID: String(t.iid),
-    ISSUE_TITLE: t.title,
+    ISSUE_TITLE: input.context.child.title,
     BASE_BRANCH: args.base,
     BASE_SHA: args.worktree.sha,
     CATALOGUE: [catalogueText(cat, args.manifests, t.iid), ...(args.knownProviders?.length ? [
       "Previously named dependencies outside the open catalogue (closed is not proof of a merge or verification PASS):",
       ...args.knownProviders.map((p) => `- #${p.iid} ${p.title} [${p.state}]: ${p.description}`),
     ] : [])].join("\n"),
-    TICKET: ticketText(t, args.notes),
+    TICKET: input.text,
   };
   // One pass, so placeholders inside ticket text are left alone.
   context.assertCurrent();
   const prompt = context.templates['prompt.analyze.md'].replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
 
+  saveTicketInput(resolve(stateDir(), 'ticket-inputs', keyFor(String(t.iid), args.project), 'analysis', randomUUID()), input);
   const so = runPi(t.iid, prompt, args.worktree.path);
 
   // Ordinary execution uses the open catalogue; assessment/preparation can retain a known closed provider's identity.
@@ -159,7 +148,7 @@ export function analyse(args: {
   return {
     iid: t.iid,
     project: args.project,
-    hash: unitHash(t, args.notes), policyIdentity: context.policyIdentity,
+    hash: input.hash, policyIdentity: context.policyIdentity,
     analyzedAt: new Date().toISOString(),
     base: args.base,
     baseSha: args.worktree.sha,

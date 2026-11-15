@@ -36,6 +36,8 @@ if (args[0] === "api" && args[1] === "graphql") {
   const q = args.find((a) => a.startsWith("query="));
   if (isGh) {
     const repository = {};
+    const single = /issue\(number: (\d+)\)/.exec(q);
+    if (single) repository.issue = {parent:data.parents?.[single[1]] ? {number:data.parents[single[1]]} : null};
     for (const m of q.matchAll(/i(\d+): issue/g)) repository[`i${m[1]}`] = { parent: data.parents?.[m[1]] ? { number: data.parents[m[1]] } : null, subIssues: { nodes: [] } };
     out({ data: { repository } });
   }
@@ -50,6 +52,15 @@ if (isGh && data.delivery && args[0] === 'api') {
   if (path === `repos/owner/repo/commits/${d.sha}/statuses?per_page=100`) out([[]]);
   if (path === 'repos/owner/repo/pulls/1/merge' && args.includes('PUT') && args.includes(`sha=${d.sha}`)) {
     data.delivery.merged=true; writeFileSync(join(dir,'tracker.json'),JSON.stringify(data)); out({merged:true});
+  }
+}
+// Bounded structured context pages retain stable source IDs and authors in synthetic notes.
+if (args[0] === 'api' && !args.includes('--paginate')) {
+  const match = /^(?:repos\/owner\/repo|projects\/1)\/issues\/(\d+)(?:\/(comments|notes)\?)?/.exec(args[1]);
+  if (match) {
+    const t = ticket(match[1]);
+    if (!match[2]) out(isGh ? ghTicket(t) : t);
+    out((data.notes?.[match[1]] ?? []).map((n,i) => ({id:i+1,system:false,...n,user:{login:'human'},author:{username:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'})));
   }
 }
 if (isGh && args[0] === "api" && args.includes("--paginate")) {

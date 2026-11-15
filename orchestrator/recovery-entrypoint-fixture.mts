@@ -92,7 +92,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const fake = join(home, "fake");
   mkdirSync(fake);
   const env = {
-    PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, FAKE_TICKET_BODY: `Model tier: ${tier}\nThe login form must work.`,
+    PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, FAKE_CONTEXT_PARENT: scenario === 'pass' ? '90' : '', FAKE_TICKET_BODY: `Model tier: ${tier}\nThe login form must work.`,
     FAKE_SETUP_BROWSER_BAD: scenario === 'setup-bad' ? 'yes' : '',
     FAKE_DEPENDENCY_ERROR: scenario === 'dependency-unknown' ? 'yes' : '',
     FAKE_MUTATION: scenario === 'closed-before' ? 'closed' : scenario === 'title' ? 'title' : '',
@@ -136,7 +136,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const policy = (await loadExecutionContext({ env: runtime.env, cwd: root, moduleRoot: runtime.directory })).policyIdentity;
   // The dispatcher's analysis of #7, with the same explicit runtime context.
   const hash = execFileSync(process.execPath, ["--input-type=module", "-e",
-    `const t = await import(${JSON.stringify(join(runtime.directory, 'tracker.mts'))}); const g = await import(${JSON.stringify(join(runtime.directory, 'graph.mts'))}); process.stdout.write(g.unitHash(t.ticket(7), t.notes(7)));`],
+    `const t = await import(${JSON.stringify(join(runtime.directory, 'tracker.mts'))}); const g = await import(${JSON.stringify(join(runtime.directory, 'ticket-input.mts'))}); process.stdout.write(g.freezeTicketInput(t.contextSource, 7).hash);`],
   { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   mkdirSync(join(state, "graph"), { recursive: true });
   writeFileSync(join(state, "graph", "owner_repo--7.json"), JSON.stringify({ iid: 7, project: "owner/repo", hash, policyIdentity: policy, analyzedAt: at(1), base: "main", baseSha: "",
@@ -163,6 +163,12 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.equal(readRecovery(p,root).attempts.length,0);
     const extension=join(home,'subscription-fixture.mjs');writeFileSync(extension,'// fixture only');
     writeFileSync(join(bin,'pi'),`#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify({provides:['fix'],requires:[],footprint:['app.txt']})));\n`,{mode:0o755});
+    const heldInput=await prepareRecovery(p,{root,tracker:'owner/repo',ticket:7,base:'main',dir:state,
+      spawn:(node,args,o)=>spawn(node,[join(runtime.directory, args[0].split('/').at(-1)!), ...args.slice(1)],{...o,env:{...o.env,...env,SCENARIO:'parent-read-failed',FACTORY_PI_SUBSCRIPTION_EXTENSION:extension}})});
+    assert.equal(heldInput.state,'held',JSON.stringify(heldInput));
+    assert.match(heldInput.reason,/parent #90 notes: read-failed/);
+    assert.equal(readRecovery(p,root).attempts.length,0,'host-known input failure spends zero attempts');
+    assert.equal(existsSync(join(fake,'models.log')),false,'no sandbox agent starts');
     const ready=await prepareRecovery(p,{root,tracker:'owner/repo',ticket:7,base:'main',dir:state,
       spawn:(node,args,o)=>spawn(node,[join(runtime.directory, args[0].split('/').at(-1)!), ...args.slice(1)],{...o,env:{...o.env,...env,FACTORY_PI_SUBSCRIPTION_EXTENSION:extension}})});
     assert.equal(ready.state,'ready',JSON.stringify(ready));if(ready.state!=='ready')throw Error(ready.reason);preparation=ready;
@@ -236,6 +242,13 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   assert.match(readFileSync(join(record.evidence, 'verdict.md'), 'utf8'), /VERDICT: PASS/);
   assert.equal(readFileSync(join(worktree, 'untracked.txt'), 'utf8'), 'keep me\n', 'saved untracked work survived repair');
   const runRec = readRuns(state).find((r) => r.iid === "7")!;
+  const inputDir = join(state, 'ticket-inputs', 'owner_repo--7', runRec.executionId!, ID);
+  const inputText = readFileSync(join(inputDir, 'ticket-context.txt'), 'utf8');
+  assert.ok(prompts[0].includes(inputText)); assert.ok(prompts[1].includes(inputText));
+  assert.match(inputText, /Complete parent body with packaging requirements/);
+  assert.match(inputText, /Agreed parent decisions and implementation plan/);
+  const snapshot = JSON.parse(readFileSync(join(inputDir, 'ticket-context.json'), 'utf8'));
+  assert.equal(snapshot.contentHash, runRec.verification!.requirementsHash);
   if (copied) assert.equal(runRec.implementationModel, 'openai/gpt-6.1-terra');
   assert.deepEqual([runRec.stage, runRec.verdict, runRec.mr], ["done", "PASS", "https://github.com/owner/repo/pull/9"]);
 

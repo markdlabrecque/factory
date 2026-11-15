@@ -15,6 +15,7 @@ import { install } from '../cli/src/commands/install.mts';
 import { pathToFileURL } from 'node:url';
 import { fixtureReport } from './fixtures/verification.mts';
 import { proofRoot } from './verification.mts';
+import { createHash } from 'node:crypto';
 import { MODEL_POLICY } from './model-policy.mts';
 import { prepareRuntimeBundle, regenerateRuntimeManifest } from '../cli/src/runtime-bundle.mts';
 import { addProject } from '../cli/src/projects.mts';
@@ -78,7 +79,7 @@ export async function createSandbox(o) {
         if (scenario === 'config-family') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
         if (scenario === 'config-setup') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('setup = []','setup = [{command="changed setup"}]')); }
         if (scenario === 'runtime-template') writeFileSync(join(process.env.FACTORY_RUNTIME_ROOT,'prompt.verify.md'),'changed verifier');
-        if (scenario === 'tier-edit') writeFileSync(join(fake,'changed'),'yes');
+        if (scenario === 'tier-edit' || scenario === 'parent-plan') writeFileSync(join(fake,'changed'),'yes');
         if (scenario === 'missing-baseline') rmSync(join(root,'.git/objects',${JSON.stringify(baseline.slice(0, 2))},${JSON.stringify(baseline.slice(2))}));
         return {commits:['implementation']};
       }
@@ -317,8 +318,11 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false);
       return;
     }
+    if (scenario === 'instruction-missing') {
+      writeFileSync(config, readFileSync(config, 'utf8') + '\n[instructions]\ncommon = ["missing.md"]\n');
+    }
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
+      cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
@@ -366,6 +370,15 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(readFileSync(join(fake, 'verifier-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nverification only');
       const implementationPrompt = readFileSync(join(fake, 'implementer-prompt.txt'), 'utf8');
       const verifierPrompt = readFileSync(join(fake, 'verifier-prompt.txt'), 'utf8');
+      const inputDir = join(state, 'ticket-inputs', 'owner_repo--7', run.executionId);
+      const frozenText = readFileSync(join(inputDir, 'ticket-context.txt'), 'utf8');
+      const sources = JSON.parse(readFileSync(join(inputDir, 'ticket-sources.json'), 'utf8'));
+      const snapshot = JSON.parse(readFileSync(join(inputDir, 'ticket-context.json'), 'utf8'));
+      assert.ok(implementationPrompt.includes(frozenText)); assert.ok(verifierPrompt.includes(frozenText));
+      assert.match(frozenText, /Complete parent body with packaging requirements/);
+      assert.match(frozenText, /Agreed parent decisions and implementation plan/);
+      assert.equal(snapshot.contentHash, proof.requirementsHash); assert.equal(sources.contentHash, run.ticketHash);
+      assert.equal(createHash('sha256').update(frozenText).digest('hex'), sources.renderedSha256);
       assert.ok(implementationPrompt.includes('Common {{TICKET}} $(literal) !`shell`\n\nimplementation only'));
       assert.ok(verifierPrompt.includes('Common {{TICKET}} $(literal) !`shell`\n\nverification only'));
       assert.ok(!implementationPrompt.includes('verification only')); assert.ok(!verifierPrompt.includes('implementation only'));
@@ -374,6 +387,13 @@ console.log('sha256:'+'a'.repeat(64));
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.verification).sort(), ['common.md', 'verify.md']);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.templates).sort(), ['prompt.analyze.md','prompt.md','prompt.recover.md','prompt.verify.md']);
       assert.deepEqual(proof.provenance.code, Object.fromEntries(runtime.manifest.files.map(file => [file.path,file.sha256])));
+    } else if (['parent-read-failed', 'instruction-missing'].includes(scenario)) {
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.equal(existsSync(join(fake, 'implementer-started')), false);
+      assert.equal(existsSync(join(fake, 'verifier-started')), false);
+      assert.equal(existsSync(join(state, 'owner_repo--7.json')), false, 'input failure creates no stopped run');
+      assert.equal(existsSync(join(fake, 'live')), false);
+      assert.match(result.stdout + result.stderr, scenario === 'parent-read-failed' ? /parent #90 notes: read-failed/ : /missing.md/);
     } else if (['image-bad', 'setup-bad', 'image-changed'].includes(scenario)) {
       assert.notEqual(result.status, 0, result.stdout + result.stderr);
       assert.equal(existsSync(join(fake, 'implementer-started')), false);
@@ -391,14 +411,14 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', result.stdout + result.stderr);
       const log = readFileSync(join(fake, 'gh.jsonl'), 'utf8');
       assert.ok(!log.includes('"merge"'), result.stdout + result.stderr);
-      assert.equal(existsSync(join(fake, 'verifier-started')), !['missing-baseline', 'config-family', 'config-setup', 'runtime-template', 'tier-edit', 'instruction-edit'].includes(scenario), result.stdout + result.stderr);
+      assert.equal(existsSync(join(fake, 'verifier-started')), !['missing-baseline', 'config-family', 'config-setup', 'runtime-template', 'tier-edit', 'instruction-edit', 'parent-plan'].includes(scenario), result.stdout + result.stderr);
       if (scenario === 'instruction-edit') assert.equal(readFileSync(join(fake, 'frozen-after-edit.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nimplementation only');
       if (['config-family', 'config-setup', 'runtime-template', 'tier-edit'].includes(scenario)) {
         const record = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
         assert.equal(record.modelChoice.family, 'openai'); assert.equal(record.modelChoice.tier, 'mid');
         assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.mid, thinking: 'high' });
       }
-      const reason = ({'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Requirements changed/,title:/Requirements changed/,body:/Requirements changed/,comment:/Requirements changed/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
+      const reason = ({'parent-plan':/Requirements changed/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Requirements changed/,title:/Requirements changed/,body:/Requirements changed/,comment:/Requirements changed/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
       assert.match(result.stdout + result.stderr, reason);
     }
 }

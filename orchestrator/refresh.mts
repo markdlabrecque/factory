@@ -7,13 +7,14 @@
 // scheduled/manual passes cannot publish over newer facts. The board worker passes its token to its child; neither
 // path takes admission locks. The caller gives the remaining per-pass budget; analyze.mts enforces its own timeout.
 // #149: assessment uses the same fail-closed dependency evaluator as execution.
+import { freezeTicketInput, type FrozenTicketInput } from './ticket-input.mts';
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { readRuns, stateDir } from "./board.mts";
 import { assessed, beginAssessment, pickRefreshes, publishAssessment, readAssessment, readAssessments, refreshCards, writeAssessment, pendingRequests, clearRequest } from "./assessment.mts";
 import { selectCandidates, unitEligibility } from "./selection.mts";
 import { context, effectiveConfig, AGENT, GRAPH, LABELS, SUBTASKS, TRACKER } from "./runtime-config.mts";
-import { contentHash, expandUnits, unitHash } from "./graph.mts";
+import { contentHash, expandUnits } from "./graph.mts";
 import { readManifests } from "./manifests.mts";
 import { resolveTicketModel } from "./models.mts";
 import * as tracker from "./tracker.mts";
@@ -43,20 +44,23 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
     const catalogueKey = contentHash({ description: context.policyIdentity, title: JSON.stringify(catalogue.map((t) => [t.iid, t.title, t.description, t.parent]).sort((a, b) => Number(a[0]) - Number(b[0]))) });
     const dependencyCache = new Map<number, DependencyResult>();
     let worktree: ReturnType<typeof analysisWorktree> | undefined;
+    const inputs = new Map<number, FrozenTicketInput>();
     refreshCards(runs.filter((r) => attempts.has(r.key)), {
       dir, attempts, project: TRACKER.project, root: process.cwd(), now: () => new Date().toISOString(),
       read: (iid) => {
-        const t = tracker.ticket(iid), parent = tracker.parentOf(iid);
+        const input = freezeTicketInput(tracker.contextSource, iid);
+        inputs.set(iid, input);
+        const t = { ...tracker.ticket(iid), title: input.context.child.title, description: input.context.child.description }, parent = input.context.parent?.iid;
         if (parent === undefined) return t;
-        const p = tracker.ticket(parent);
+        const p = input.context.parent!;
         return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
       },
-      notes: tracker.notes, hash: unitHash, model: (description) => resolveTicketModel(description, AGENT.family),
+      notes: iid => inputs.get(iid)!.context.child.notes, hash: t => inputs.get(t.iid)!.hash, model: (description) => resolveTicketModel(description, AGENT.family),
       selection: (t) => {
         const result = unitEligibility(t, selected.has(t.iid), LABELS.exclude);
         return { selected: result.status === 'selected', selectionReason: result.reasons[0]?.message };
       },
-      analysisInput: (t, notes) => `${unitHash(t, notes)}:${catalogueKey}:${JSON.stringify(manifests.get(t.iid)?.implementerBlockers ?? [])}`,
+      analysisInput: (t, notes) => `${inputs.get(t.iid)!.hash}:${catalogueKey}:${JSON.stringify(manifests.get(t.iid)?.implementerBlockers ?? [])}`,
       analysisBudget: o.budget ?? GRAPH.maxAnalysesPerPass,
       analyse: (ticket, notes) => {
         worktree ??= analysisWorktree(`${TRACKER.project}--assessment`, o.base);
@@ -67,7 +71,7 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
         for (const iid of ids) if (!catalogue.some((t) => t.iid === iid)) {
           try { knownProviders.push(tracker.ticket(iid)); } catch { /* leave unresolved, never infer satisfied */ }
         }
-        return analyse({ project: TRACKER.project, base: o.base, worktree, ticket, notes, catalogue, manifests,
+        return analyse({ project: TRACKER.project, base: o.base, worktree, ticket, input: inputs.get(ticket.iid)!, notes, catalogue, manifests,
           knownProviders, keepImplementerBlockers: true });
       },
       historicalBlockers: (iid) => manifests.get(iid),

@@ -252,7 +252,7 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
 export interface PrerequisiteView {
   /** The dispatcher's analysis of the ticket (its manifest), if any. */
   manifest: Manifest | undefined;
-  /** The ticket's current content hash (graph.mts unitHash), to tell an out-of-date analysis. */
+  /** Complete included child/parent source hash, matching the frozen agent input, to reject stale analysis. */
   hash: string;
   policyIdentity?: string;
   /** Shared dependency evidence. Unknown and thrown reads both hold recovery. */
