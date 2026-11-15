@@ -269,6 +269,14 @@ verification and delivery. Scheduled recovery fixtures inject synthetic preparat
 rather than running a real analyst. No test contacts live trackers, agents, Docker,
 credentials or a service manager.
 
+## Host launch readiness tests
+
+```sh
+node --test orchestrator/launch-readiness.test.mts orchestrator/refresh.test.mts cli/test/run.test.mts cli/test/recovery-prepare.test.mts cli/test/recovery-run.test.mts board/refresh-worker.test.mts board/install.test.mts
+```
+
+These fixtures use temporary projects/state and local Git with stubbed tracker, image, agent and process boundaries. They check project holds before tracker analysis or new queue/admission/container effects, explicit shared ticket attribution, input/workspace isolation, preserved dirty/unrelated worktrees and stale registrations, fresh success without stopped-run retry, late path/branch/image-readiness races, direct report-write failure and zero pre-charge recovery attempts. Recovery fixtures change or fail structured input after image readiness and assert typed ticket-only reports without charge. Manual, dispatch and real scheduled routing share the host hold identity; a late scheduler-policy refusal or cancellation cannot spawn after the asynchronous gate. Exact-owned-container settlement/cleanup remains exercised during a host hold. Explicit Board and scheduled read-only refresh guard opaque overrides too; standalone Board install/update fixtures execute the shipped host probe/store dependencies. Routing, pause/off/unknown policy and process-group cancellation regressions remain in the complete suite. No installed app, real registered project, service manager, Docker daemon or authentication is used.
+
 ## Offline image readiness tests
 
 `orchestrator/capabilities.test.mts` injects Docker commands to exercise immutable identity, non-root/offline container arguments, exact cleanup, cancellation, owner-process locks, malformed cache and non-sticky failures. No daemon or auth is used. `browser-provisioning.test.mts` runs the actual Node watchdog against fixture-owned fake global modules and checks descendant cleanup. Normal/recovery entrypoint tests use synthetic owned Docker responses and verify setup failures start no agents; admitted setup failures retain their budget charge. CLI recovery tests inject readiness to prove known-bad images spend zero attempts and pause/off/cancellation still prevent admission. `image-config.test.mts` proves configuration discovery never executes project code.

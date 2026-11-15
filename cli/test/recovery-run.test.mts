@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { keyFor, readAdmission, withAdmission } from '../../board/admission.mts';
@@ -33,7 +33,9 @@ import { paths } from '../src/paths.mts';
 import { afterPass } from '../src/jam-detect.mts';
 import { projectFixture, refreshManifest } from './workflow-fixture.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
-import {preparedFixture} from './prepared-fixture.mts';
+import {preparedFixture, preparedContextSource} from './prepared-fixture.mts';
+import { ContextReadError } from '../../orchestrator/ticket-context.mts';
+import { readStoredReadiness } from '../../board/readiness.mts';
 import { launchRecovery, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
 import { beginAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
@@ -105,7 +107,7 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   let n = 0;
   const uuid = () => IDS[n++];
   const preparation=preparedFixture({root,tracker:'proj',dir,ticket:7});
-  const common = { root, tracker: 'proj', dir, docker, spawn: spawner, npx: 'npx', uuid, preparation,
+  const common = { root, tracker: 'proj', dir, contextSource: preparedContextSource('proj'), docker, spawn: spawner, npx: 'npx', uuid, preparation,
     capabilities: async () => ({ ok: true as const, imageId: `sha256:${'a'.repeat(64)}`, cached: false }) };
   const run = () => readRuns(dir).find(r => r.project === 'proj' && r.iid === '7')!;
   const kill = async (c: ChildProcess) => { c.kill('SIGKILL'); await once(c, 'exit'); };
@@ -115,6 +117,46 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   const advance = (i: number, patch: Partial<AttemptRecord>) => writeAttemptRecord(record(i), { ...readRecord(i), ...patch });
   return { home, root, p, dir, git, worktree, evidence, launched, containers, stuck, removed, common, run, kill, record, readRecord, advance };
 }
+
+for (const change of ['failure', 'changed']) test(`recovery ${change} after image readiness publishes a ticket-only input hold before charge`, async t => {
+  const f = fixture(t), source = f.common.contextSource;
+  const held = await launchRecovery(f.p, { ...f.common, ticket: 7, capabilities: async () => {
+    if (change === 'failure') source.notes = () => { throw new ContextReadError('read-failed'); };
+    else { const original = source.ticket; source.ticket = (iid, budget) => { const read = original(iid, budget); return { ...read, value: { ...read.value, description: 'Changed after preparation' } }; }; }
+    return { ok: true, imageId: `sha256:${'a'.repeat(64)}`, cached: false };
+  } });
+  assert.equal(held.ok, false); if (held.ok || held.kind !== 'project-stopped') throw Error(JSON.stringify(held));
+  assert.equal(held.code, 'ticket-input'); assert.equal(held.scope, 'ticket');
+  assert.equal(readRecovery(f.p, f.root).attempts.length, 0); assert.equal(f.launched.length, 0);
+  const saved = readStoredReadiness(f.dir, realpathSync(f.root)); assert.equal(saved.state, 'current'); assert.ok(saved.report);
+  assert.ok(saved.report.checks.filter(c => c.scope === 'project').every(c => c.status === 'ready'));
+  const check = saved.report.checks.find(c => c.scope === 'ticket-input'); assert.equal(check?.ticket, '7'); assert.equal(check?.status, 'blocked');
+  assert.equal(check?.operation, change === 'failure' ? 'child notes' : 'compare-context-hash');
+  assert.equal((await launchRecovery(f.p, { ...f.common, ticket: 7, contextSource: preparedContextSource('proj') })).ok, true);
+});
+
+test('host holds spend no recovery attempt, catch a late race and do not block exact-owned cleanup', async t => {
+  const f = fixture(t), logs = join(f.root, '.sandcastle/logs');
+  symlinkSync(f.evidence, logs);
+  const before = readRecovery(f.p, f.root); const admission = readAdmission(f.dir);
+  const held = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
+  assert.equal(held.ok, false); if (!held.ok) assert.equal(held.code, 'host-readiness');
+  assert.deepEqual(readRecovery(f.p, f.root), before); assert.deepEqual(readAdmission(f.dir), admission);
+  assert.equal(f.launched.length, 0); rmSync(logs);
+  const raced = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(11), capabilities: async () => {
+    rmSync(logs, { recursive: true }); symlinkSync(f.evidence, logs);
+    return { ok: true, imageId: `sha256:${'a'.repeat(64)}`, cached: false };
+  } });
+  assert.equal(raced.ok, false); if (!raced.ok) assert.equal(raced.code, 'host-readiness');
+  assert.deepEqual(readRecovery(f.p, f.root), before); assert.equal(f.launched.length, 0);
+  rmSync(logs); assert.equal((await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(12) })).ok, true);
+  const mine = readRecovery(f.p, f.root).attempts[0].container!; f.containers.add(mine);
+  rmSync(logs, { recursive: true }); symlinkSync(f.evidence, logs);
+  await f.kill(f.launched[0].child);
+  assert.equal(settleRecovery(f.p, { ...f.common, at: at(13) }).state, 'settled');
+  assert.deepEqual(f.removed, [mine]); assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
+  assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
+});
 
 test('launcher admission, direct patches and settlement emit once with stable separate identities', async t => {
   const f = fixture(t);

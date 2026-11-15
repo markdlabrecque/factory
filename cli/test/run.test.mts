@@ -16,6 +16,14 @@ import { join } from 'node:path';
 import { paths } from '../src/paths.mts';
 import { addProject } from '../src/projects.mts';
 import { run } from '../src/commands/run.mts';
+import { dispatch, runDispatchSh } from '../src/commands/dispatch.mts';
+import { resolveProject } from '../src/runs.mts';
+import { doctorReadiness } from '../src/readiness.mts';
+import { tick, runRefreshOnly } from '../src/commands/tick.mts';
+import { setProjectSchedule, writeScheduleConfig } from '../src/schedule.mts';
+import { FakeSchedule } from '../src/platform/fake.mts';
+import { readStoredReadiness } from '../../board/readiness.mts';
+import { symlinkSync, readdirSync } from 'node:fs';
 
 function fixture(t: TestContext) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'factory-run-')));
@@ -39,6 +47,52 @@ function fixture(t: TestContext) {
 const stub = (exit = 0) => `#!/usr/bin/env bash\n# takes --issue N\nprintf '%s\\n' "$PWD" "$SANDCASTLE_STATE_DIR" "$*" > "$PWD/called"\nexit ${exit}\n`;
 const called = (root: string) => readFileSync(join(root, 'called'), 'utf8').split('\n').slice(0, 3);
 
+test('manual run, dispatch and scheduled tick share the host gate before opaque overrides, without queue or admission', async t => {
+  const { p, project, home } = fixture(t); const root = project('held', stub());
+  execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: root });
+  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '--allow-empty', '-m', 'fixture'], { cwd: root });
+  execFileSync('git', ['remote', 'add', 'origin', root], { cwd: root });
+  execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: root });
+  const outside = join(home, 'outside'); mkdirSync(outside);
+  symlinkSync(outside, join(root, '.sandcastle/logs'));
+  assert.equal(await run(p, '7', { cwd: root }), 1);
+  const manual = readStoredReadiness(p.state, realpathSync(root)); assert.ok(manual.report);
+  assert.equal(await dispatch(p, { cwd: root }), 1);
+  assert.equal(await runRefreshOnly(process.execPath, p)(resolveProject(p, {cwd:root}), ['--refresh-only'], {
+    group:true, onSpawn: () => assert.fail('held refresh cannot spawn'), env:{...process.env,SANDCASTLE_STATE_DIR:p.state},
+  }), 1);
+  writeScheduleConfig(p, { node: process.execPath, path: process.env.PATH ?? '/usr/bin:/bin' }); setProjectSchedule(p, root, true);
+  const backend = new FakeSchedule(p); backend.enabled = true; backend.timer = 'active'; let maintained = 0;
+  const scheduled = await tick(p, { backend, log: () => {}, maintenance: () => { maintained++; } });
+  assert.equal(scheduled.result, 'failed'); assert.equal(maintained, 1, 'local maintenance is not behind new-launch readiness');
+  const saved = readStoredReadiness(p.state, realpathSync(root)); assert.ok(saved.report);
+  assert.deepEqual(saved.report.identity, manual.report.identity); assert.notEqual(saved.report.owner.generation, manual.report.owner.generation);
+  assert.ok(saved.report.checks.some(c => c.scope === 'project' && c.path === join(root, '.sandcastle/logs') && c.status !== 'ready'));
+  assert.equal(existsSync(join(root, 'called')), false);
+  assert.equal(existsSync(join(p.state, 'admission')), false);
+  assert.deepEqual(readdirSync(outside), []);
+  assert.equal(readdirSync(join(p.state, 'readiness')).filter(n => n.endsWith('.json')).length, 1);
+  rmSync(join(root, '.sandcastle/logs'));
+  assert.equal(await run(p, '7', { cwd: root }), 0);
+});
+
+test('scheduled policy is rechecked after host readiness before spawning', async t => {
+  const { p, project } = fixture(t); const root = project('policy', stub()); let checks = 0;
+  const code = await runDispatchSh(p, resolveProject(p, { cwd: root }), [], { mayLaunch: async () => {
+    checks++; assert.ok(existsSync(join(p.state, 'readiness'))); return false;
+  } });
+  assert.equal(code, 1); assert.equal(checks, 1); assert.equal(existsSync(join(root, 'called')), false);
+});
+
+test('cancellation during the asynchronous host gate cannot spawn a dispatcher afterwards', async t => {
+  const { p, project } = fixture(t); const root = project('cancelled', stub());
+  const signal = new AbortController(); let spawned = false;
+  const pending = runDispatchSh(p, resolveProject(p, { cwd: root }), [], { signal: signal.signal, onSpawn: () => { spawned = true; } });
+  signal.abort();
+  assert.equal(await pending, 1); assert.equal(spawned, false); assert.equal(existsSync(join(root, 'called')), false);
+  assert.equal(existsSync(join(p.state, 'admission')), false);
+});
+
 test('runs dispatch.sh --issue <n> from the project root with Factory\'s state folder; the exit code comes back', async t => {
   const { p, project } = fixture(t);
   const a = project('a', stub());
@@ -46,6 +100,8 @@ test('runs dispatch.sh --issue <n> from the project root with Factory\'s state f
   mkdirSync(join(a, 'sub'));
   assert.equal(await run(p, '#15', { cwd: join(a, 'sub') }), 0);
   assert.deepEqual(called(a), [a, p.state, '--issue 15']);
+  const observed = await doctorReadiness(p, a, false);
+  assert.equal(observed.saved.state, 'current'); assert.equal(observed.matchingActiveWrites, true, 'passive doctor recognizes the same host launch identity/checks');
   assert.equal(await run(p, '7', { cwd: a, project: 'b' }), 3);
   assert.deepEqual(called(b), [b, p.state, '--issue 7']);
 });

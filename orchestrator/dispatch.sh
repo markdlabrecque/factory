@@ -46,6 +46,7 @@ if [ "${FACTORY_CONTEXT_BOOTSTRAPPED:-}" != 1 ]; then
   exec node "$runtime/context-process.mts" ${original_args[@]+"${original_args[@]}"}
 fi
 
+node "$runtime/host-launch.mts" || exit 1
 base="$(git branch --show-current)"
 [ -n "$base" ] || fail "detached HEAD. Check out the integration branch first."
 git ls-remote --exit-code --heads origin "$base" >/dev/null || fail "branch $base isn't on origin. Push it, or check out the integration branch."

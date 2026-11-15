@@ -1,6 +1,6 @@
 // Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
 // Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
-// Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
+// Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute bounded Pi session replies without delivery authority, then exit after owned teardown.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup, closeSandbox } from './sandbox-readiness.mts';
@@ -23,7 +23,7 @@ import { randomUUID } from "node:crypto";
 import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
 import { readAdmission } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
-import { freezeTicketInput, saveTicketInput } from './ticket-input.mts';
+import { freezeTicketInput, saveTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { context, effectiveConfig, AGENT, allLabels, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { piEnvFor, resolveTicketModel } from "./models.mts";
 import { contextHold, retainRuntime } from './context.mts';
@@ -70,6 +70,12 @@ import * as tracker from "./tracker.mts";
 
 // Sandbox and CI settings are data, never executable project configuration.
 const runtimeLease = await retainRuntime(context);
+const { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordTicketInput, ticketWorkspaceProblem, ticketBranch } = await import('./launch-readiness.mts');
+const hostReadinessInput = { projectRoot: context.projectRoot, runtimeRoot: context.runtimeRoot, runtimeIdentity: context.manifest.id, runtimeDependencies: context.manifest.dependencies, config: effectiveConfig, stateRoot: stateDir() };
+const hostReport = await projectLaunchReadiness(hostReadinessInput);
+let inputReport = hostReport;
+const hostHold = readinessReason(hostReport);
+if (hostHold) { console.error(`project held: ${hostHold}`); process.exit(1); }
 const CONFIG = effectiveConfig.config;
 const PROJECT = TRACKER.project;
 // What the container's Pi run needs depends on its model's provider (models.mts). pi-claude-subscription (the
@@ -158,13 +164,29 @@ if (!iid) {
 }
 // A Task gets its parent issue as context; whole tickets have none.
 // Collection is host-only and fails before a run/agent is created. Later authority checks recollect.
-const frozenInput = freezeTicketInput(tracker.contextSource, Number(iid));
+const currentTicketInput = (): FrozenTicketInput => {
+  try { return freezeTicketInput(tracker.contextSource, Number(iid)); }
+  catch (error) {
+    if (error instanceof TicketInputHold) {
+      try { recordTicketInput(stateDir(), inputReport, error); }
+      catch (writeError) { console.error(`Ticket readiness report write failed: ${(writeError as Error).message}`); }
+    }
+    throw error;
+  }
+};
+const frozenInput = currentTicketInput();
+recordTicketInput(stateDir(), inputReport, frozenInput);
 const parentIid = frozenInput.context.parent?.iid;
 const withParent = (t: tracker.Ticket): tracker.Ticket => {
   if (parentIid === undefined) return t;
   const p = frozenInput.context.parent!;
   return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
 };
+if (!recovering) {
+  const workspaceHold = ticketWorkspaceProblem(context.projectRoot, ticketBranch(iid, frozenInput.context.child.title));
+  recordTicketLaunch(stateDir(), hostReport, Number(iid), workspaceHold);
+  if (workspaceHold) fail(`#${iid} held: ${workspaceHold}`);
+}
 setProject(PROJECT);
 let startTicket!: tracker.Ticket;
 const picked = recordModelResolution(stateDir(), keyFor(iid, PROJECT), { iid, project: PROJECT }, () => {
@@ -178,7 +200,14 @@ if ("error" in picked && !recovering) {
 }
 const ticket = frozenInput.text;
 // Fresh structured source reads at authority boundaries, never replace the active prompt.
-const ticketHash = () => ({ hash: freezeTicketInput(tracker.contextSource, Number(iid)).hash });
+const ticketHash = () => {
+  const current = currentTicketInput();
+  if (current.hash !== frozenInput.hash) {
+    try { recordTicketInput(stateDir(), inputReport, current, frozenInput.hash); }
+    catch (error) { console.error(`Ticket readiness report write failed: ${(error as Error).message}`); }
+  }
+  return { hash: current.hash };
+};
 const startVersion = { hash: frozenInput.hash };
 const inputEvidence = (...parts: string[]) => resolve(stateDir(), 'ticket-inputs', keyFor(iid!, PROJECT), ...parts);
 context.assertCurrent();
@@ -314,11 +343,18 @@ if (recovering) {
 if ('error' in picked) fail(`#${iid} ${picked.error} Not started.`);
 const implementerModel = picked.model;
 const branch = `${iid}-${slug}`;
+const admissionReport = await projectLaunchReadiness({ ...hostReadinessInput, base });
+inputReport = admissionReport;
+const lateHold = readinessReason(admissionReport) ?? ticketWorkspaceProblem(context.projectRoot, branch);
+if (lateHold) {
+  if (!readinessReason(admissionReport)) recordTicketLaunch(stateDir(), admissionReport, Number(iid), lateHold);
+  fail(`#${iid} held before admission: ${lateHold}`);
+}
 
 sh("git", ["fetch", "origin", base]);
 const baseSha = sh("git", ["rev-parse", `origin/${base}`]);
 if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads", "origin", branch])) {
-  fail(`Branch ${branch} already exists locally or on origin; delete it or pick another ticket.`);
+  fail(`Branch ${branch} already exists locally or on origin; preserve saved work and inspect this ticket's workspace.`);
 }
 setProject(PROJECT);
 // The dispatcher's launch claim (if this run was dispatched): take it over, and fence every later board write with it.
@@ -372,6 +408,13 @@ function readBlocked(): ImplementerBlocker[] | undefined {
   }
 }
 
+// Recheck after remote reads and host setup. A race here is explicit; no branch/worktree is adopted or removed.
+const creationHold = ticketWorkspaceProblem(context.projectRoot, branch);
+if (creationHold) {
+  try { recordTicketLaunch(stateDir(), admissionReport, Number(iid), creationHold); }
+  catch (error) { console.error(`Ticket readiness report write failed: ${(error as Error).message}`); }
+  fail(`#${iid} workspace creation race: ${creationHold}`);
+}
 // The ownership receipt says what this run is about to create, before Sandcastle creates it (ownership.mts).
 const tracked = TRACKER as { kind?: string; host?: string; gitlabHost?: string; project: string };
 const receipt = recordIntent(stateDir(), {

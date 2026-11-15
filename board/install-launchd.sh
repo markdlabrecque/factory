@@ -26,6 +26,9 @@ cp "$HERE/execution-events.mts" "$HERE/delivery.mts" "$HERE/board.mts" "$HERE/ad
   "$HERE/readiness.mts" "$HERE/readiness-view.mts" "$HERE/../orchestrator/readiness-schema.mts" \
   "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
 cp "$HERE/../orchestrator/project-config.mts" "$HERE/../orchestrator/model-policy.mts" "$HERE/../orchestrator/workflow.mts" "$APP/"
+# Explicit refresh actions need host probes too; keep the Board store's readiness.mts name distinct.
+cp "$HERE/../orchestrator/launch-readiness.mts" "$HERE/../orchestrator/readiness-identity.mts" "$HERE/../orchestrator/instructions.mts" "$APP/"
+cp "$HERE/../orchestrator/readiness.mts" "$APP/readiness-probe.mts"
 cp "$HERE/../cli/src/runtime-assets.mts" "$HERE/../cli/src/runtime-bundle.mts" "$APP/"
 mkdir -p "$APP/vendor"
 cp -R "$HERE/../orchestrator/vendor/smol-toml" "$APP/vendor/"

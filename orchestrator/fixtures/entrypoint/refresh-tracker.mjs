@@ -4,7 +4,8 @@
 // All data and exact call logs are fixture-owned. #135: write large capped-selection responses synchronously
 // so process.exit cannot truncate JSON still buffered on stdout.
 // Reject every mutation and unexpected command, including label creation, comments, issue closes and PR creation.
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { execFileSync } from 'node:child_process';
 import { join } from "node:path";
 const args = process.argv.slice(2), dir = process.env.FAKE_STATE;
 appendFileSync(join(dir, "tracker.jsonl"), JSON.stringify(args) + "\n");
@@ -58,6 +59,12 @@ if (isGh && data.delivery && args[0] === 'api') {
 if (args[0] === 'api' && !args.includes('--paginate')) {
   const match = /^(?:repos\/owner\/repo|projects\/1)\/issues\/(\d+)(?:\/(comments|notes)\?)?/.exec(args[1]);
   if (match) {
+    if ((data.contextErrors ?? []).includes(Number(match[1]))) fail('structured context read unavailable');
+    if (data.workspaceRace && Number(match[1]) === 7 && !match[2]) {
+      const counter = join(dir, 'context-reads'), count = existsSync(counter) ? Number(readFileSync(counter, 'utf8')) + 1 : 1;
+      writeFileSync(counter, String(count));
+      if (count === 2) execFileSync('git', ['branch', '7-ticket-7'], { stdio: 'pipe' });
+    }
     const t = ticket(match[1]);
     if (!match[2]) out(isGh ? ghTicket(t) : t);
     out((data.notes?.[match[1]] ?? []).map((n,i) => ({id:i+1,system:false,...n,user:{login:'human'},author:{username:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'})));

@@ -22,7 +22,7 @@ import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from 
 import { installedFixture } from './workflow-fixture.mts';
 import { installPackages } from './runtime-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
-import { preparedFixture } from './prepared-fixture.mts';
+import { preparedFixture, preparedContextSource } from './prepared-fixture.mts';
 import { claimRun, readRuns } from '../../board/board.mts';
 import { readAdmission } from '../../board/admission.mts';
 import { requestRefresh, readAssessment } from '../../board/assessment.mts';
@@ -113,7 +113,7 @@ for (const mode of ['factory', 'project'] as const) {
     observePass(p, root, { pass: 'b', at: new Date().toISOString(), jam: [7] });
     let launch: any; let child: ReturnType<typeof spawn> | undefined;
     t.after(() => child?.kill('SIGKILL'));
-    const result = await launchRecovery(p, { root, tracker: 'owner/repo', dir: p.state, ticket: 7, preparation: ready, node: process.execPath, path: env.PATH, workflowEnv: selected.env,
+    const result = await launchRecovery(p, { root, tracker: 'owner/repo', contextSource: preparedContextSource('owner/repo'), dir: p.state, ticket: 7, preparation: ready, node: process.execPath, path: env.PATH, workflowEnv: selected.env,
       spawn: (cmd, args, o) => { launch = { cmd, args, ...o }; child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' }); return child.pid!; } });
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(launch.cmd, process.execPath); assert.equal(launch.cwd, root); assert.equal(launch.env.PATH, env.PATH);

@@ -1,8 +1,9 @@
-// Pinned runtime code launches detached children with independent leases; artifacts stay in the explicit project.
+// Fresh host/project and ticket gates precede analysis/admission. Pinned runtime children keep independent leases and explicit project artifacts.
 // Only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
 import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthorization } from './delivery-followup.mts';
 import { validDelivery } from './delivery.mts';
 import { readAdmission } from './admission.mts';
+import { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordReadinessCheck, recordTicketInput, ticketBranch, ticketWorkspaceProblem } from './launch-readiness.mts';
 // #149: cache full three-state dependency results per pass; unknown reads hold dispatch.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
 // #137: TOML completely replaces legacy SELECT; shared selection preserves exhaustive-read semantics.
@@ -18,7 +19,7 @@ import type { BoardRun } from "./board.mts";
 import { context, effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { resolveTicketModel } from "./models.mts";
 import { retainRuntime } from './context.mts';
-import { freezeTicketInput, type FrozenTicketInput } from './ticket-input.mts';
+import { freezeTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
@@ -91,10 +92,17 @@ const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: 
 
 if (opts["refresh-only"]) {
   if (opts.ticket !== undefined && !/^\d+$/.test(opts.ticket)) throw new Error("--refresh-only takes --ticket <iid> (a number), or no --ticket for the whole project");
-  refreshProject({ base, ticket: opts.ticket, subtasks, select: SELECT, log });
+  // An explicit assessment refresh can start a host analysis agent. Passive status/Board reads never enter here.
+  const refreshReadiness = await projectLaunchReadiness({ projectRoot: context.projectRoot, runtimeRoot: context.runtimeRoot, runtimeIdentity: context.manifest.id, runtimeDependencies: context.manifest.dependencies, config: effectiveConfig, stateRoot: stateDir(), base });
+  const refreshHold = readinessReason(refreshReadiness);
+  if (refreshHold) { log(`project held before assessment analysis: ${refreshHold}`); process.exit(1); }
+  refreshProject({ base, ticket: opts.ticket, subtasks, select: SELECT, log, readiness: refreshReadiness });
   process.exit(0);
 }
 
+let projectReadiness = await projectLaunchReadiness({ projectRoot: context.projectRoot, runtimeRoot: context.runtimeRoot, runtimeIdentity: context.manifest.id, runtimeDependencies: context.manifest.dependencies, config: effectiveConfig, stateRoot: stateDir(), base });
+const projectHold = readinessReason(projectReadiness);
+if (projectHold) { log(`project held: ${projectHold}`); process.exit(1); }
 await tracker.ensureLabels(allLabels());
 setProject(PROJECT);
 
@@ -223,16 +231,12 @@ const issues = units
   .filter((t): t is Ticket => !!t && unitEligibility(t, true, LABELS.exclude).status === 'selected');
 
 sh("git", ["fetch", "origin", "--prune"]);
-const branches = new Set(
-  sh("git", ["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin"]).split("\n").map((b) => b.replace(/^origin\//, "")),
-);
 const runs = allRuns.filter((r) => r.project === PROJECT);
 const runOf = new Map(runs.map((r) => [Number(r.iid), r]));
 
 const unstarted = issues.filter((i) => {
   const r = runOf.get(i.iid);
   if (r && !PARKED.includes(r.stage)) return false; // has a run record that isn't parked
-  if ([...branches].some((b) => b.startsWith(`${i.iid}-`))) return false; // already has a branch
   return true;
 });
 // Resolve all selected descriptions, including active tickets, without touching their attempt model.
@@ -244,8 +248,22 @@ for (const i of issues) {
   );
   if ("error" in m) noModel.set(i.iid, m.error);
 }
-const candidates = unstarted.filter((i) => !noModel.has(i.iid));
-for (const i of unstarted.filter((u) => noModel.has(u.iid))) {
+const heldTickets = new Set<number>();
+const inputs = new Map<number, FrozenTicketInput>();
+const candidates = unstarted.filter((i) => {
+  let input: FrozenTicketInput;
+  try { input = freezeTicketInput(tracker.contextSource, i.iid); inputs.set(i.iid, input); }
+  catch (error) {
+    if (error instanceof TicketInputHold) recordReadinessCheck(stateDir(), projectReadiness, error.check);
+    heldTickets.add(i.iid); log(`#${i.iid} held: ${(error as Error).message}`); return false;
+  }
+  recordTicketInput(stateDir(), projectReadiness, input);
+  const problem = ticketWorkspaceProblem(context.projectRoot, ticketBranch(i.iid, input.context.child.title));
+  recordTicketLaunch(stateDir(), projectReadiness, i.iid, problem);
+  if (problem) { heldTickets.add(i.iid); log(`#${i.iid} held: ${problem}`); return false; }
+  return !noModel.has(i.iid);
+});
+for (const i of unstarted.filter((u) => noModel.has(u.iid) && !heldTickets.has(u.iid))) {
   log(`#${i.iid} ${i.title}: ${noModel.get(i.iid)}`);
   if (!dry) queueModelProblem(String(i.iid), { title: i.title, ticketUrl: tracker.ticketUrl(i.iid), base, note: noModel.get(i.iid) });
 }
@@ -264,16 +282,16 @@ const tracked: Ticket[] = [
   ...live.filter((r) => !manifests.get(Number(r.iid))?.actualFootprint).map((r) => catalogueById.get(Number(r.iid))).filter((t): t is Ticket => !!t),
 ];
 const notesOf = new Map<number, Note[]>();
-const inputs = new Map<number, FrozenTicketInput>();
 const inputHolds = new Set<number>();
 const hashOf = new Map<number, string>();
 for (const t of tracked) {
   try {
-    const input = freezeTicketInput(tracker.contextSource, t.iid);
+    const input = inputs.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid);
     inputs.set(t.iid, input);
     notesOf.set(t.iid, input.context.child.notes);
     hashOf.set(t.iid, input.hash);
   } catch (e) {
+    if (e instanceof TicketInputHold) recordReadinessCheck(stateDir(), projectReadiness, e.check);
     inputHolds.add(t.iid);
     log(`#${t.iid}: ${(e as Error).message}`);
   }
@@ -333,7 +351,7 @@ for (const e of dropped) log(`cycle: ignoring "#${e.to} depends on #${e.from}" (
 // This separate analysis store never feeds decide() or writes an execution manifest. Share the per-pass budget,
 // including failed analysis attempts. No assessment-store failure may abort the admission path below.
 if (!dry) {
-  try { refreshProject({ base, subtasks, select: SELECT, budget: Math.max(0, GRAPH.maxAnalysesPerPass - batch.length), log }); }
+  try { refreshProject({ base, subtasks, select: SELECT, budget: Math.max(0, GRAPH.maxAnalysesPerPass - batch.length), log, readiness: projectReadiness }); }
   catch (e) { log(`assessment refresh: ${(e as Error).message}`); }
 }
 
@@ -390,6 +408,9 @@ if (jamReport && !dry) {
 // ---- launch ------------------------------------------------------------------
 const launch = decisions.filter((d) => d.launch);
 if (dry || !launch.length) process.exit(0);
+projectReadiness = await projectLaunchReadiness({ projectRoot: context.projectRoot, runtimeRoot: context.runtimeRoot, runtimeIdentity: context.manifest.id, runtimeDependencies: context.manifest.dependencies, config: effectiveConfig, stateRoot: stateDir(), base });
+const admissionProjectHold = readinessReason(projectReadiness);
+if (admissionProjectHold) { log(`project held before admission: ${admissionProjectHold}`); process.exit(1); }
 const logDir = context.projectPath('.sandcastle/logs');
 mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
@@ -398,11 +419,19 @@ for (const [n, d] of launch.entries()) {
   // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
   try {
     context.assertCurrent();
-    if (freezeTicketInput(tracker.contextSource, d.iid).hash !== hashOf.get(d.iid)) {
+    const freshInput = freezeTicketInput(tracker.contextSource, d.iid);
+    if (freshInput.hash !== hashOf.get(d.iid)) {
+      recordTicketInput(stateDir(), projectReadiness, freshInput, hashOf.get(d.iid));
       log(`#${iid} ticket-input changed before admission; retry next pass`);
       continue;
     }
-  } catch (e) { log(`#${iid}: ${(e as Error).message}`); continue; }
+    const problem = ticketWorkspaceProblem(context.projectRoot, ticketBranch(d.iid, freshInput.context.child.title));
+    if (problem) { recordTicketLaunch(stateDir(), projectReadiness, d.iid, problem); log(`#${iid} held before admission: ${problem}`); continue; }
+  } catch (e) {
+    try { if (e instanceof TicketInputHold) recordReadinessCheck(stateDir(), projectReadiness, e.check); }
+    catch (writeError) { console.error(`Ticket readiness report write failed; launch held: ${(writeError as Error).message}`); }
+    log(`#${iid}: ${(e as Error).message}`); continue;
+  }
   const claim = claimRun({ iid, pid: process.pid, cap, patch: meta });
   if (!claim.ok) {
     log(`#${iid} not launched: ${claim.reason}`);
