@@ -1,4 +1,5 @@
 // Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
+// Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
 // Image readiness pins sandbox construction; setup and independent verifier probes remain mandatory.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 // #153: proofs also bind continuation, checkpoint and admission code; upgrades require fresh verification.

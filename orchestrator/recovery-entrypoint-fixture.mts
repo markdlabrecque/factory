@@ -92,7 +92,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const fake = join(home, "fake");
   mkdirSync(fake);
   const env = {
-    PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, FAKE_CONTEXT_PARENT: scenario === 'pass' ? '90' : '', FAKE_TICKET_BODY: `Model tier: ${tier}\nThe login form must work.`,
+    PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, FAKE_CONTEXT_PARENT: ['pass','parent-plan'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: `Model tier: ${tier}\nThe login form must work.`,
     FAKE_SETUP_BROWSER_BAD: scenario === 'setup-bad' ? 'yes' : '',
     FAKE_DEPENDENCY_ERROR: scenario === 'dependency-unknown' ? 'yes' : '',
     FAKE_MUTATION: scenario === 'closed-before' ? 'closed' : scenario === 'title' ? 'title' : '',
@@ -100,7 +100,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     FAKE_VERIFY: `printf 'VERDICT: PASS\\nverified\\n' > "$EVIDENCE/verdict.md" && ${verificationCommand()}`,
   };
   if (scenario === 'closed-before') env.FAKE_REPAIR += ` && touch '${join(fake, 'changed')}'`;
-  if (scenario === 'title') env.FAKE_VERIFY += ` && touch '${join(fake, 'changed')}'`;
+  if (scenario === 'title' || scenario === 'parent-plan') env.FAKE_VERIFY += ` && touch '${join(fake, 'changed')}'`;
   if (scenario === 'dirty') env.FAKE_VERIFY += ` && echo dirty > app.txt`;
   if (scenario === 'legacy-prompt') env.FAKE_VERIFY = `printf 'VERDICT: PASS\\nlegacy\\n' > "$EVIDENCE/verdict.md"`;
   const docker: Docker = (args) => {
@@ -192,7 +192,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   if (scenario !== 'pass') {
     assert.notEqual(code, 0, log);
     assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
-    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
+    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'parent-plan':/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
     assert.match(log, expected);
     const calls = existsSync(join(fake, 'docker.jsonl')) ? readFileSync(join(fake, 'docker.jsonl'), 'utf8') : '';
     if (scenario === 'missing-baseline') assert.ok(!calls.includes('"run"'), log);

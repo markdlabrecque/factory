@@ -42,7 +42,10 @@ import { join } from 'node:path';
 const root = process.cwd(), scenario = process.env.SCENARIO, fake = process.env.FAKE_STATE;
 const git = (cwd, args) => execFileSync('git', args, {cwd, encoding:'utf8'}).trim();
 const readFileSyncBarrier = () => { try { return readFileSync(join(fake, 'release'), 'utf8') === 'yes'; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
-export const pi = (model, options) => ({model, thinking: options.thinking});
+export const pi = (model, options) => {
+  if (Object.keys(options.env ?? {}).some(key => key !== 'OPENAI_API_KEY')) throw Error('Unexpected credential handed to sandbox agent');
+  return {model, thinking: options.thinking};
+};
 export async function createSandbox(o) {
   if (scenario === 'shared-projects') writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
   const worktree = join(root, '.sandcastle/worktrees', o.branch); mkdirSync(join(root, '.sandcastle/worktrees'), {recursive:true});

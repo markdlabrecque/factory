@@ -281,6 +281,22 @@ for (const kind of ["github", "gitlab"]) {
   });
 }
 
+test('dispatch incomplete parent input creates no run or analysis; the next complete pass can launch', t => {
+  const f = fixture(t);
+  f.data.parents[7] = 90;
+  f.data.tickets.push(ticket(90, {description:'Parent plan',contextOnly:true}));
+  f.data.errors = [90];
+  const held = f.pass();
+  assert.match(held.stdout,/Ticket-input hold: parent #90 ticket: read-failed/);
+  assert.equal(f.bytes(join(f.fake,'analysis.jsonl')),'absent');
+  assert.equal(f.bytes(join(f.fake,'launches')),'absent');
+  assert.equal(f.bytes(join(f.dir,`${f.key(7)}.json`)),'absent','no stopped or queued run is manufactured');
+  f.data.errors = [];
+  f.data.tickets[0].description = 'Model tier: mid\nSelf-contained requirement';
+  f.pass();
+  assert.match(f.bytes(join(f.fake,'launches')),/--issue 7/);
+});
+
 test('analysis includes frozen complete child/parent plan bytes and parent edits revoke cache, generated notes do not', t => {
   const f = fixture(t); f.record(7, 'stopped');
   f.data.parents[7] = 90;

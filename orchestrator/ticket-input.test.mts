@@ -40,7 +40,7 @@ test('parent read failure is a source-specific ticket-only readiness outcome wit
   assert.throws(() => freezeTicketInput(f.source,7), e => {
     assert.ok(e instanceof TicketInputHold);
     assert.equal(e.hold.source,'parent'); assert.equal(e.hold.operation,'notes');
-    assert.equal(e.check.scope,'ticket-input'); assert.equal(e.check.status,'blocked'); assert.equal(e.check.automaticRecheck,'next-launch');
+    assert.equal(e.check.ticket,'7'); assert.equal(e.check.scope,'ticket-input'); assert.equal(e.check.status,'blocked'); assert.equal(e.check.automaticRecheck,'next-launch');
     assert.ok(!e.message.includes('secret')); return true;
   });
 });

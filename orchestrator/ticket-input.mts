@@ -17,7 +17,7 @@ export class TicketInputHold extends Error {
 }
 /** Shared diagnostic shape; callers must not overwrite the project filesystem report with a ticket-only hold. */
 export function ticketInputCheck(hold: TicketContextHold, observedAt = new Date().toISOString()): ReadinessCheck {
-  return { id: `ticket-input-${hold.iid}`, scope: 'ticket-input', phase: 'passive', observedAt, status: 'blocked', required: true,
+  return { id: `ticket-input-${hold.iid}`, ticket: String(hold.iid), scope: 'ticket-input', phase: 'passive', observedAt, status: 'blocked', required: true,
     operation: `${hold.source} ${hold.operation}`, path: `${hold.identity.kind}://${hold.identity.host}/${hold.identity.project}/${hold.sourceIid}`,
     reason: hold.reason, nextActor: hold.nextActor, nextAction: hold.nextAction, automaticRecheck: 'next-launch' };
 }
@@ -35,6 +35,8 @@ export function saveTicketInput(directory: string, input: FrozenTicketInput): vo
   writeFileSync(join(directory, 'ticket-context.json'), JSON.stringify(input.context, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
   writeFileSync(join(directory, 'ticket-context.txt'), input.text, { flag: 'wx', mode: 0o600 });
   writeFileSync(join(directory, 'ticket-sources.json'), JSON.stringify({ version: 1, contentHash: input.hash,
-    renderedSha256: input.textHash, identity: input.context.identity, coverage: input.context.coverage,
-    collection: input.context.collection }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    renderedSha256: input.textHash, identity: input.context.identity,
+    sources: [input.context.child, ...(input.context.parent ? [input.context.parent] : [])].map(t => ({
+      iid: t.iid, url: t.url, notes: t.notes.map(n => ({ id: n.id, url: n.url })) })),
+    coverage: input.context.coverage, collection: input.context.collection }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
 }

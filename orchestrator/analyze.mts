@@ -1,4 +1,5 @@
-// Read-only analysis uses selected-runtime templates and binds project manifests to the frozen execution policy.
+// Read-only analysis uses selected-runtime templates and complete frozen ticket bytes, saved as host evidence.
+// Project manifests bind included child/parent sources and the frozen execution policy.
 // Analysis uses the family's fixed Mid policy model and validated v2 graph settings.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
