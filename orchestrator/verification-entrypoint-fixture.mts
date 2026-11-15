@@ -2,7 +2,8 @@
 // No Docker daemon, credentials, browser installation, tracker or service manager is used.
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -15,6 +16,9 @@ import { pathToFileURL } from 'node:url';
 import { fixtureReport } from './fixtures/verification.mts';
 import { proofRoot } from './verification.mts';
 import { MODEL_POLICY } from './model-policy.mts';
+import { prepareRuntimeBundle } from '../cli/src/runtime-bundle.mts';
+import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../cli/src/runtime-ownership.mts';
+import { resolveWorkflow } from './workflow.mts';
 
 
 export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false) {
@@ -35,6 +39,7 @@ import { writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 const root = process.cwd(), scenario = process.env.SCENARIO, fake = process.env.FAKE_STATE;
 const git = (cwd, args) => execFileSync('git', args, {cwd, encoding:'utf8'}).trim();
+const readFileSyncBarrier = () => { try { return readFileSync(join(fake, 'release'), 'utf8') === 'yes'; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 export const pi = (model, options) => ({model, thinking: options.thinking});
 export async function createSandbox(o) {
   const worktree = join(root, '.sandcastle/worktrees', o.branch); mkdirSync(join(root, '.sandcastle/worktrees'), {recursive:true});
@@ -47,6 +52,11 @@ export async function createSandbox(o) {
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
     run: async o => {
+      if (scenario === 'publication') {
+        const { executionContext } = await import(process.env.FACTORY_RUNTIME_ROOT + '/context.mts');
+        const c = await executionContext();
+        writeFileSync(join(fake, o.name + '-identity.json'), JSON.stringify({root:c.runtimeRoot, identity:c.identity, templates:c.templates, additive:c.additive}));
+      }
       writeFileSync(join(fake, o.name + '-agent.json'), JSON.stringify(o.agent));
       writeFileSync(join(fake, o.name + '-instructions.txt'), o.promptArgs.ADDITIVE_INSTRUCTIONS);
       // Contract stub: mark template shell blocks before a single callback substitution.
@@ -58,6 +68,9 @@ export async function createSandbox(o) {
       const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.sandcastle/evidence'));
       if (o.name === 'implementer') {
         writeFileSync(join(fake,'implementer-started'),'yes');
+        if (scenario === 'publication' && process.env.FIXTURE_BARRIER === 'yes') {
+          while (!readFileSyncBarrier()) await new Promise(resolve => setTimeout(resolve, 10));
+        }
         writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
         if (scenario === 'instruction-edit') { writeFileSync(join(root,'common.md'),'changed after invocation'); writeFileSync(join(fake,'frozen-after-edit.txt'),o.promptArgs.ADDITIVE_INSTRUCTIONS); }
         if (scenario === 'config-family') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
@@ -103,7 +116,7 @@ export async function createSandbox(o) {
     }
     const config = join(root, '.sandcastle/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
-    if (scenario === 'pass' || scenario === 'instruction-edit') {
+    if (scenario === 'pass' || scenario === 'instruction-edit' || scenario === 'publication') {
       writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal) !`shell`');
       writeFileSync(join(root, 'impl.md'), 'implementation only');
       writeFileSync(join(root, 'verify.md'), 'verification only');
@@ -141,6 +154,59 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
     }
     assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
+    if (scenario === 'publication') {
+      assert.ok(copied);
+      const env = { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: mid\nThe login form must work.', FIXTURE_BARRIER: 'yes' };
+      const child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
+      t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+      const exited = once(child, 'exit');
+      const deadline = Date.now() + 15000;
+      while (!existsSync(join(fake, 'implementer-started'))) {
+        assert.ok(child.exitCode === null && child.signalCode === null && Date.now() < deadline, output || 'implementer did not reach barrier');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      const aImpl = JSON.parse(readFileSync(join(fake, 'implementer-identity.json'), 'utf8'));
+      const source = join(runtime.staging, 'source');
+      const verifyTemplate = join(source, 'cli/templates/project/prompt.verify.md');
+      writeFileSync(verifyTemplate, readFileSync(verifyTemplate, 'utf8') + '\nB VERIFIER TEMPLATE MARKER\n');
+      const b = prepareRuntimeBundle({ sourceRoot: source, runtimeStore: p.runtimes, install: dir => stageExecutionPackages(dir, sdk) });
+      withRuntimeLock(p, () => { recordRuntimeOwnership(p, b.id); writeRuntimeDescriptor(p, b.id); });
+      assert.notEqual(b.id, runtime.id);
+      assert.equal(child.exitCode, null);
+      writeFileSync(join(fake, 'release'), 'yes');
+      const [code] = await exited; assert.equal(code, 0, output);
+      const aVerify = JSON.parse(readFileSync(join(fake, 'verifier-identity.json'), 'utf8'));
+      assert.equal(aImpl.root, runtime.directory); assert.equal(aImpl.identity.runtime.id, runtime.id);
+      assert.deepEqual(aVerify, aImpl);
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: 'openai/gpt-6.1-terra', thinking: 'high' });
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.large, thinking: 'high' });
+      assert.equal(readFileSync(join(fake, 'implementer-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nimplementation only');
+      assert.equal(readFileSync(join(fake, 'verifier-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nverification only');
+      assert.ok(!readFileSync(join(fake, 'verifier-prompt.txt'), 'utf8').includes('B VERIFIER TEMPLATE MARKER'));
+      const selected = resolveWorkflow(root, p.runtimeDescriptor);
+      assert.equal(selected.id, b.id); assert.equal(selected.root, b.directory);
+      git(root, 'push', '-q', 'origin', '--delete', '7-fix-login');
+      git(root, 'worktree', 'remove', '--force', join(root, '.sandcastle/worktrees/7-fix-login'));
+      git(root, 'branch', '-D', '7-fix-login');
+      rmSync(state, { recursive: true, force: true }); mkdirSync(state, { recursive: true });
+      rmSync(join(fake, 'changed'), { force: true });
+      const fresh = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env: { ...env, ...selected.env, FIXTURE_BARRIER: '' }, timeout: 15000 });
+      assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
+      const bImpl = JSON.parse(readFileSync(join(fake, 'implementer-identity.json'), 'utf8'));
+      const bVerify = JSON.parse(readFileSync(join(fake, 'verifier-identity.json'), 'utf8'));
+      assert.equal(bImpl.root, b.directory); assert.equal(bImpl.identity.runtime.id, b.id); assert.deepEqual(bVerify, bImpl);
+      assert.notEqual(bImpl.templates['prompt.verify.md'], aImpl.templates['prompt.verify.md']);
+      assert.deepEqual(bImpl.additive, aImpl.additive);
+      assert.ok(readFileSync(join(fake, 'verifier-prompt.txt'), 'utf8').includes('B VERIFIER TEMPLATE MARKER'));
+      assert.equal(readFileSync(join(fake, 'verifier-instructions.txt'), 'utf8'), 'Common {{TICKET}} $(literal) !`shell`\n\nverification only');
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: 'openai/gpt-6.1-terra', thinking: 'high' });
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.large, thinking: 'high' });
+      assert.equal(existsSync(join(fake, 'npm-called')), false);
+      assert.equal(existsSync(join(root, 'node_modules')), false);
+      assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false);
+      return;
+    }
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
       cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,

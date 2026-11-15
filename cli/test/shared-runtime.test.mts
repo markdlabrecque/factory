@@ -4,3 +4,6 @@ import { normalEntrypointFixture } from '../../orchestrator/verification-entrypo
 
 test('copied install runs Pi Terra implementation and independent verification', t =>
   normalEntrypointFixture(t, 'pass', 'openai', 'mid', true));
+
+test('active detached normal run pins A while a fresh invocation runs published B', t =>
+  normalEntrypointFixture(t, 'publication', 'openai', 'mid', true));
