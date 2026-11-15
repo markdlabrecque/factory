@@ -63,7 +63,13 @@ export function configExplain(p: Paths, action: string | undefined, o: { project
     const message = error instanceof Error ? error.message : '';
     const key = phase === 'configuration' ? message.match(/: ((?:version|tracker|agent|labels|graph|sandbox|selection|work|dispatch|merge|ci|workflow|instructions)(?:\.[a-z_]+|\[\d+\])*)\: /)?.[1] : undefined;
     const safeKey = key && key.length <= 100 && /^(?:version|tracker\.(?:kind|project|host|project_id)|agent\.family|workflow\.(?:mode|directory)|instructions\.(?:common|implementation|verification|analysis|recovery)|sandbox\.(?:image|setup(?:\[\d+\](?:\.(?:command|sudo|timeout_ms))?)?))$/.test(key) ? key : undefined;
-    result.errors = [{ phase, ...(phase === 'configuration' ? { file: '.sandcastle/factory.toml' } : {}), ...(safeKey ? { key: safeKey } : {}), message: `Cannot validate ${phase}; check the relevant project files and permissions.` }];
+    const advice: Record<string, string> = {
+      'project resolution': 'Check the project path or registration.',
+      configuration: 'Check .sandcastle/factory.toml and its permissions.',
+      'instruction files': 'Check the configured instruction paths and their permissions.',
+      'workflow runtime': 'Check the selected workflow runtime and its descriptor or manifest.',
+    };
+    result.errors = [{ phase, ...(phase === 'configuration' ? { file: '.sandcastle/factory.toml' } : {}), ...(safeKey ? { key: safeKey } : {}), message: `Cannot validate ${phase}. ${advice[phase]}` }];
   }
   const failed = (result.errors as unknown[]).length > 0;
   if (o.json) console.log(JSON.stringify(result, null, 2));
