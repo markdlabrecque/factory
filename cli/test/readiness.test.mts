@@ -1,4 +1,5 @@
-// Temporary projects and fake runtime dependencies only. Diagnostics never invoke external operations.
+// Readiness diagnostics and documented CLI/JSON examples use temporary projects and fake runtime dependencies.
+// External commands are trapped or absent; only fixture-local Git and Node children are permitted.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -40,6 +41,57 @@ function fixture(t: any) {
   return { p, root, out, save };
 }
 const board = { status: async () => 'inactive' };
+test('readiness guide commands, JSON subsets, selectors and exit semantics match isolated CLI results', t => {
+  const f = fixture(t);
+  const docs = fs.readFileSync(new URL('../../docs/factory-cli.md', import.meta.url), 'utf8');
+  const block = (label: string, language: string) => {
+    const match = docs.match(new RegExp(`<!-- ${label} -->\\s*\x60\x60\x60${language}\\n([\\s\\S]*?)\x60\x60\x60`));
+    assert.ok(match, label); return match[1].trim();
+  };
+  // No inherited PATH, auth, provider or service environment. Git can only inspect this disposable checkout.
+  const bin = join(f.p.home, 'fixture-bin'); fs.mkdirSync(bin); fs.symlinkSync('/usr/bin/git', join(bin, 'git'));
+  const cli = (args: string[], cwd = f.p.home) => childProcess.spawnSync(process.execPath,
+    [join(import.meta.dirname, '../bin/factory.mts'), ...args], { cwd, encoding: 'utf8',
+      env: { HOME: f.p.home, FACTORY_HOME: f.p.home, SANDCASTLE_STATE_DIR: f.p.state, PATH: bin, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });
+  const subset = (actual: any, expected: any) => {
+    for (const [key, value] of Object.entries(expected)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) subset(actual[key], value);
+      else assert.deepEqual(actual[key], value, key);
+    }
+  };
+  const results = block('readiness-command-fixture', 'sh').split('\n').map(line => {
+    const words = line.match(/"[^"]*"|\S+/g)!.map(word => word.replace(/^"|"$/g, ''));
+    assert.equal(words.shift(), 'factory');
+    const result = cli(words); assert.equal(result.status, 0, result.stdout + result.stderr);
+    return JSON.parse(result.stdout);
+  });
+  assert.equal(results.length, 4);
+  subset(results[0], JSON.parse(block('readiness-passive-json', 'json')));
+  assert.equal(results[1].readiness.state, 'missing'); assert.deepEqual(results[1].runs, []);
+  subset(results[2], JSON.parse(block('readiness-ticket-json', 'json')));
+  subset(results[3], JSON.parse(block('readiness-active-json', 'json')));
+  assert.equal(fs.existsSync(join(f.p.state, 'readiness')), false, 'doctor must not publish');
+  assert.deepEqual(fs.readdirSync(join(f.root, '.sandcastle/evidence')), []);
+  for (const selector of [f.root, join(f.root, '.sandcastle')]) {
+    const result = cli(['doctor', '--project', selector, '--json']);
+    assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).project.root, f.root);
+  }
+  const implicit = cli(['doctor', '--json'], f.root);
+  assert.equal(implicit.status, 0, implicit.stderr); assert.equal(JSON.parse(implicit.stdout).project.root, f.root);
+  for (const args of [['doctor', '--project', 'not registered', '--json'], ['doctor', 'unexpected', '--project', 'project with spaces']]) {
+    const result = cli(args); assert.equal(result.status, 1); assert.ok(result.stderr); assert.equal(result.stdout, '');
+  }
+  fs.rmdirSync(join(f.root, '.sandcastle/evidence'));
+  fs.symlinkSync(f.p.state, join(f.root, '.sandcastle/evidence'));
+  const failed = cli(['doctor', '--project', 'project with spaces', '--probe-filesystem', '--json']);
+  assert.equal(failed.status, 1); const failure = JSON.parse(failed.stdout).readiness.report;
+  assert.equal(failure.status, 'blocked'); assert.ok(failure.checks.some((c: any) => c.id === 'evidence' && c.errno === 'EUNSAFEPATH'));
+  f.save(r => { r.status = 'blocked'; r.checks[0] = { ...r.checks[0], status: 'blocked', errno: 'EACCES' }; });
+  for (const args of [['status'], ['ticket', 'show', '7']]) {
+    const result = cli([...args, '--project', 'project with spaces', '--json']);
+    assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).readiness.report.status, 'blocked');
+  }
+});
 test('doctor CLI accepts explicit project/probe/json and rejects stray positionals before writing', t => {
   const f = fixture(t);
   const cli = (...args: string[]) => childProcess.spawnSync(process.execPath, [join(import.meta.dirname, '../bin/factory.mts'), 'doctor', ...args],

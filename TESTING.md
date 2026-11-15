@@ -34,6 +34,12 @@ Exercise documentation examples in disposable directories, not a registered proj
 
 Use `bindExecution` from `cli/test/execution-fixture.mts` with a temporary `paths` home and `overlays: false` to publish an inventory-complete fixture runtime with fake private dependencies. Use `projectFixture` and `refreshManifest` from `cli/test/workflow-fixture.mts` for an explicit complete override. Exercise context pinning, missing or unknown inventory, changed code, dependencies and directory, and renewed recovery review. Do not execute arbitrary project modules to explain configuration. `cli/test/config-explain.test.mts` shows how to trap process, network, filesystem mutation and secret reads while checking redaction, source attribution and opaque or unknown policy. Check documentation links and examples as well.
 
+The readiness command block and labeled JSON subsets in `docs/factory-cli.md` are executed by `cli/test/readiness.test.mts`, using a temporary registered project and complete fake runtime. It checks quoted names, absolute/subdirectory selectors, implicit current checkout, passive/active exits, blocked display exits and the fact that doctor never publishes. Its child environment exposes only local Git; absent service commands cannot reach the host. Permission/error injection and passive mutation/process/network traps remain separate tests. `cli/test/documentation.test.mts` also validates the dedicated `docs/ticket-readiness.md` links and heading anchors.
+
+```sh
+node --test cli/test/documentation.test.mts cli/test/documentation-cli.test.mts cli/test/readiness*.test.mts cli/test/status.test.mts cli/test/ticket.test.mts board/readiness*.test.mts orchestrator/readiness.test.mts
+```
+
 Keep tracker, provider, authentication, Docker and service-manager boundaries fixture-owned and fail on unexpected calls. Do not invoke real npm, install packages, use credentials, contact a registry or service, or start a real agent. Local Git repositories and local Node children are permitted fixture boundaries. `cli/test/shared-runtime.test.mts` covers normal execution, recovery, two data-only projects, override refusal and A/B publication with those stubs.
 
 ## Runtime bundle preparation

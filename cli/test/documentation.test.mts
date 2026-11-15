@@ -17,7 +17,7 @@ import { installedFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
-const guides = ['README.md', 'TESTING.md', 'docs/factory-cli.md', 'docs/project-config.md', 'orchestrator/ADAPTING.md', 'skills/sandcastle-setup/SKILL.md'];
+const guides = ['README.md', 'TESTING.md', 'docs/factory-cli.md', 'docs/ticket-readiness.md', 'docs/project-config.md', 'orchestrator/ADAPTING.md', 'skills/sandcastle-setup/SKILL.md'];
 const text = (file: string) => readFileSync(join(repo, file), 'utf8');
 function fences(source: string, language: string) {
   return [...source.matchAll(new RegExp('^\\s*```' + language + '[^\\n]*\\n([\\s\\S]*?)^\\s*```[ \\t]*$', 'gm'))].map(m => m[1].replace(/^ {1,3}/gm, ''));
@@ -134,7 +134,7 @@ function headingIds(source: string) {
   }
   return ids;
 }
-test('relative Markdown links and GitHub heading anchors in six guides resolve', () => {
+test('relative Markdown links and GitHub heading anchors in authoritative guides resolve', () => {
   for (const guide of guides) {
     const prose = markdownProse(text(guide)).replace(/`+[^`\n]*`+/g, '');
     for (const match of prose.matchAll(/!?\[[^\]\n]*\]\(([^\s)]+)(?:\s+[^)]*)?\)/g)) {
