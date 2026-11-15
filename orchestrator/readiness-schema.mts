@@ -1,4 +1,4 @@
-// Versioned local readiness observations. These facts never authorize a launch.
+// Versioned local readiness observations and attributed attention text. These facts never authorize a launch.
 import { createHash } from 'node:crypto';
 export type ReadinessStatus = 'ready' | 'blocked' | 'unknown';
 export type ReadinessScope = 'project' | 'ticket-input' | 'ticket-workspace' | 'sandbox';
@@ -34,6 +34,14 @@ export interface ReadinessReport {
   phase: ReadinessPhase;
   status: ReadinessStatus;
   checks: ReadinessCheck[];
+}
+/** Display-only attention projection, shared by readiness and execution diagnostics. */
+export function attentionText(value: {
+  observed: string; agentReported?: string; nextActor: ReadinessCheck['nextActor'];
+  nextAction: string; automaticAction: string; evidence: string;
+}): string {
+  return `Factory observed: ${value.observed}. Agent reported: ${value.agentReported ? JSON.stringify(value.agentReported) : 'unavailable; cause unknown'}. ` +
+    `Next actor: ${value.nextActor}. ${value.nextAction} Automatic action: ${value.automaticAction} Evidence: ${value.evidence}.`;
 }
 export const MAX_REPORT_BYTES = 256 * 1024;
 export const DISPLAY_FRESHNESS_MS = 60_000;
