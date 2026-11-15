@@ -188,7 +188,7 @@ for (const kind of ["github", "gitlab"]) {
     f.data.tickets[1].contextOnly = true;
     f.data.errors = [20];
     f.save();
-    writeFileSync(join(dirname(f.node), 'docker'), `#!${process.execPath}\nimport { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, 'fixtures/capability-docker.mjs'))}; const out = capabilityDocker(process.argv.slice(2), process.env.FAKE_STATE); if (out === undefined) process.exit(90); console.log(out);`, { mode: 0o755 });
+    writeFileSync(join(dirname(f.node), 'docker'), `#!${process.execPath}\nimport { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, 'fixtures/capability-docker.mjs'))}; const a = process.argv.slice(2); if (a[0] === 'container' && a[1] === 'inspect' && a[2] === 'fixture-container') { console.error('No such container'); process.exit(1); } const out = capabilityDocker(a, process.env.FAKE_STATE); if (out === undefined) process.exit(90); console.log(out);`, { mode: 0o755 });
     const module = join(f.root, "node_modules/@ai-hero/sandcastle");
     mkdirSync(join(module, "sandboxes"), { recursive: true });
     writeFileSync(join(module, "package.json"), JSON.stringify({ type: "module", exports: { ".": "./index.mjs", "./sandboxes/docker": "./sandboxes/docker.mjs" } }));
@@ -199,7 +199,7 @@ for (const kind of ["github", "gitlab"]) {
       export const pi = () => ({}), claudeCode = pi;
       export const createSandbox = async ({branch, baseBranch, sandbox}) => {
         execFileSync('git', ['branch', branch, baseBranch]);
-        return { close: async () => {}, exec: async () => ({stdout:'browser preflight OK',exitCode:0}), run: async () => {
+        return { sandboxId:'fixture-container', close: async () => {}, exec: async () => ({stdout:'browser preflight OK',exitCode:0}), run: async () => {
           writeFileSync(sandbox.mounts[0].hostPath + '/blocked.json', JSON.stringify({blockers: [{iid:20, what:'provider', evidence:'missing API'}]}));
           return {commits: []};
         }};

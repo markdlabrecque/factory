@@ -52,7 +52,7 @@ const privateDir = dir => {
     const name = '.factory-readiness-'+crypto.randomUUID();
     fs.mkdirSync(p.join(fdPath(parent.fd),name), {mode:0o700}); created = true;
     const child = pin(p.join(dir,name));
-    const o = {parent, child, name}; owned.push(o); return child.dir;
+    const o = {parent, child, name}; owned.push(o); return child;
   } catch(e) {
     if(created) add('cleanup-failure','blocked','private probe directory could not be pinned; cleanup unconfirmed',errno(e));
     fs.closeSync(parent.fd); throw e;
@@ -60,10 +60,11 @@ const privateDir = dir => {
 };
 const writeProbe = dir => {
   const temp = privateDir(dir);
-  const a = p.join(temp,'write'), b = p.join(temp,'renamed');
+  const a = p.join(fdPath(temp.fd),'write'), b = p.join(fdPath(temp.fd),'renamed');
+  verify(temp);
   const fd = fs.openSync(a, fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_WRONLY|fs.constants.O_NOFOLLOW,0o600);
-  try {fs.writeFileSync(fd,'factory readiness\n'); fs.fsyncSync(fd);} finally {fs.closeSync(fd);}
-  fs.renameSync(a,b); fs.unlinkSync(b);
+  try {verify(temp); fs.writeFileSync(fd,'factory readiness\n'); fs.fsyncSync(fd);} finally {fs.closeSync(fd);}
+  verify(temp); fs.renameSync(a,b); verify(temp); fs.unlinkSync(b);
 };
 const indexHash = () => {
   let fd;
@@ -116,10 +117,12 @@ try {
   if(!p.isAbsolute(path) || fs.realpathSync(path) !== path) throw error('EUNSAFEPATH');
   writeProbe(path); add('evidence-write','ready','private evidence write/rename/remove succeeded');
   operation = 'alternate-index-read-tree'; path = p.dirname(index);
-  const alternate = p.join(privateDir(path),'index');
-  git(['read-tree',input.baseline], {GIT_INDEX_FILE:alternate});
-  git(['ls-files','--stage'], {GIT_INDEX_FILE:alternate});
-  fs.unlinkSync(alternate);
+  const temp = privateDir(path);
+  // Git is a child process, so use the probe process's pinned descriptor, not the child's /proc/self.
+  const alternate = p.join('/proc/'+process.pid+'/fd/'+temp.fd,'index');
+  verify(temp); git(['read-tree',input.baseline], {GIT_INDEX_FILE:alternate});
+  verify(temp); git(['ls-files','--stage'], {GIT_INDEX_FILE:alternate});
+  verify(temp); fs.unlinkSync(alternate);
   add('git-index-write','ready','disposable alternate index read-tree succeeded; real index/refs untouched');
 } catch(e) {add('probe-failure','blocked','required sandbox operation failed',errno(e));}
 finally {
@@ -204,7 +207,7 @@ export async function closeSandbox(sandbox: { sandboxId?: string; close(): Promi
   if (sandbox.sandboxId && /^[A-Za-z0-9_.-]+$/.test(sandbox.sandboxId)) {
     try {
       const r = await proc('docker', ['container', 'inspect', sandbox.sandboxId], { signal: AbortSignal.timeout(5000) });
-      confirmed = r.status !== null && r.status !== 0 && /No such (object|container)/i.test(r.stderr);
+      confirmed = !reason && r.status !== null && r.status !== 0 && /No such (object|container)/i.test(r.stderr);
     } catch { /* Uncertainty retains the runtime cleanup lease. */ }
   }
   if (!confirmed) reason = [reason, `Container ${sandbox.sandboxId ?? '(unknown)'} teardown unconfirmed; ownership cleanup hold retained`].filter(Boolean).join('; ');
