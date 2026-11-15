@@ -1,7 +1,7 @@
 // Atomic local readiness projection. Generation allocation fences older publishers across processes.
 // Reads are passive and bounded. Write errors are fatal to callers, never best-effort launch success.
 import * as fs from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ReadinessIdentity, ReadinessReport, ObservationOwner } from '../orchestrator/readiness-schema.mts';
 const schema = await import(fs.existsSync(new URL('./readiness-schema.mts', import.meta.url)) ? './readiness-schema.mts' : '../orchestrator/readiness-schema.mts');
@@ -21,7 +21,7 @@ export function readinessLines(read: ReadinessRead, label = 'Readiness'): string
   const lines = [`${label}: ${read.state === 'stale' ? 'unknown (stale)' : r.status} | ${r.phase} | checked ${r.observedAt}`,
     `  Identity: ${r.identity.runtimeIdentity} / ${r.identity.configIdentity} / ${r.identity.contextFingerprint}`,
     `  Observation: ${r.owner.invocationId} / ${r.owner.generation}; not launch authorization.`];
-  for (const c of r.checks) lines.push(`  ${c.scope}/${c.phase} ${c.id}: ${c.status}; ${c.operation} ${JSON.stringify(c.path)}${c.errno ? ` [${c.errno}]` : ''}; ${c.reason}`,
+  for (const c of r.checks) lines.push(`  ${c.scope}/${c.phase}${c.ticket ? ` ticket #${c.ticket}` : c.scope === 'project' ? '' : ' unattributed'} ${c.id}: ${c.status}; ${c.operation} ${JSON.stringify(c.path)}${c.errno ? ` [${c.errno}]` : ''}; ${c.reason}`,
     `    Next actor: ${c.nextActor}; ${c.nextAction}. Automatic recheck: ${c.automaticRecheck}.`);
   return lines;
 }
@@ -136,15 +136,25 @@ export function publishReadiness(stateRoot: string, token: ReadinessToken, repor
     atomic(file, { ...current, report }, directoryFd, stateRoot); return true;
   });
 }
+/** Read a registered canonical root's stored observation without executing or reading project code.
+ * No current runtime/config identity is asserted. Call readReadiness with a resolved identity when available. */
+export function readStoredReadiness(stateRoot: string, projectRoot: string, now = Date.now(), maxAgeMs?: number): ReadinessRead {
+  return readProjection(stateRoot, projectRoot, undefined, now, maxAgeMs);
+}
 /** Missing, invalid, pending and stale are display states, never launch authorization. */
 export function readReadiness(stateRoot: string, identity: ReadinessIdentity, now = Date.now(), maxAgeMs?: number): ReadinessRead {
+  if (!validIdentity(identity)) return { state: 'invalid', reason: 'Invalid readiness identity' };
+  return readProjection(stateRoot, identity.projectRoot, identity, now, maxAgeMs);
+}
+function readProjection(stateRoot: string, projectRoot: string, identity: ReadinessIdentity | undefined, now: number, maxAgeMs?: number): ReadinessRead {
   let fd: number | undefined;
   try {
-    if (!validIdentity(identity)) throw fail('EINVAL');
+    if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) throw fail('EINVAL');
     fd = directory(stateRoot, false);
-    const envelope = readEnvelope(join(fdPath(fd), `${projectKey(identity.projectRoot)}.json`));
+    const envelope = readEnvelope(join(fdPath(fd), `${projectKey(projectRoot)}.json`));
+    if (envelope.token.identity.projectRoot !== projectRoot || envelope.report && envelope.report.identity.projectRoot !== projectRoot) throw fail('EINVALIDREPORT');
     if (!envelope.report) return { state: 'pending', reason: 'Current observation has not been published' };
-    return { state: displayFreshness(envelope.report, identity, now, maxAgeMs), report: envelope.report };
+    return { state: displayFreshness(envelope.report, identity ?? envelope.report.identity, now, maxAgeMs), report: envelope.report };
   } catch (e) {
     const errno = safeErrno(e);
     return { state: errno === 'ENOENT' ? 'missing' : 'invalid', reason: 'Readiness report could not be established', errno };

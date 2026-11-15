@@ -30,6 +30,7 @@ import { controlAction } from '../../../board/execution-events.mts';
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { savedReadiness } from '../readiness.mts';
+import { reportStatus } from '../../../orchestrator/readiness-schema.mts';
 import { readinessLines, scopedReadiness } from '../../../board/readiness.mts';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -303,16 +304,24 @@ export function ticketShow(p: Paths, ticket: string | undefined, o: TicketOption
   const readiness = savedReadiness(p, ctx.root);
   const view = projectTicket(j, run ?? { startedAt: '' });
   const projectReadiness = scopedReadiness(readiness, 'project');
-  const input = { state: 'unknown', reason: 'No applicable saved ticket-input projection is available', coverage: [], contentHash: null, references: [] };
+  const ticketReadiness = 'report' in readiness ? (() => {
+    const report = readiness.report;
+    const checks = report.checks.filter(c => c.scope !== 'project' && c.ticket === iid);
+    return { ...readiness, report: { ...report, status: reportStatus(checks), checks } };
+  })() : readiness;
+  const input = { state: 'unknown', reason: 'No applicable saved ticket-input coverage projection is available', coverage: [], contentHash: null, references: [],
+    readiness: scopedReadiness(ticketReadiness, 'ticket-input') };
   const executionReadiness = { state: 'unknown', reason: 'No structured execution readiness observation is available',
     ...(run ? { execution: runIdentity(run), stage: run.stage, note: run.note ?? null } : {}) };
   const data = { version: 1, project: ctx.tracker, iid, run, ...view, manuallyCorrected: !!view.correction, history: j.events,
-    readiness: projectReadiness, input, executionReadiness };
+    readiness: projectReadiness, ticketReadiness, input, executionReadiness };
   if (o.json) console.log(JSON.stringify(data, null, 2));
   else {
     console.log(`${ctx.name} #${iid}: ${view.archived ? 'archived' : 'not archived'}`);
     console.log(`Original verdict: ${view.original ?? 'none'}; effective verdict: ${view.verdict ?? 'none'}${view.correction ? ' (manually corrected)' : ''}`);
     for (const l of readinessLines(projectReadiness, 'Current project readiness')) console.log(l);
+    if ('report' in ticketReadiness && ticketReadiness.report.checks.length)
+      for (const l of readinessLines(ticketReadiness, `Current ticket #${iid} readiness observation`)) console.log(l);
     console.log(`Ticket input: ${input.state}; ${input.reason}. No tracker or arbitrary links fetched.`);
     console.log(`Historical execution readiness: ${executionReadiness.state}; ${executionReadiness.reason}${run ? `; ${runIdentity(run)} ${run.stage}${run.note ? `; ${run.note}` : ''}` : '; no execution'}`);
     console.log(`Run: ${run ? runIdentity(run) : 'none'}; pending tracker posts: ${view.undelivered.length}`);

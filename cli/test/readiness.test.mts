@@ -63,6 +63,23 @@ test('zero-run project hold is shown once above runs; JSON contains no prose', a
   await status(f.p, board, { project: f.root, json: true });
   const data = JSON.parse(f.out()); assert.equal(data.version, 1); assert.equal(data.readiness.report.status, 'blocked'); assert.deepEqual(data.runs, []);
 });
+test('explicit ticket attribution shows only applicable holds, including tickets without runs', async t => {
+  const f = fixture(t);
+  f.save(r => {
+    r.checks = r.checks.filter((c: any) => c.status === 'ready');
+    const base = r.checks[0];
+    r.checks.push({ ...base, id: 'parent-notes', scope: 'ticket-input', ticket: '10', status: 'blocked', operation: 'notes', reason: 'Required parent notes unavailable' },
+      { ...base, id: 'branch-conflict', scope: 'ticket-workspace', ticket: '11', status: 'blocked', operation: 'worktree-registration', reason: 'Branch conflict' });
+    r.status = 'blocked';
+  });
+  await status(f.p, board, { project: f.root });
+  const text = f.out(); assert.match(text, /Current project readiness: ready/); assert.match(text, /ticket #10/); assert.match(text, /ticket #11/);
+  ticketShow(f.p, '10', { project: f.root, json: true });
+  const ticket = JSON.parse(f.out()); assert.equal(ticket.readiness.report.status, 'ready');
+  assert.deepEqual(ticket.ticketReadiness.report.checks.map((c: any) => c.ticket), ['10']);
+  assert.equal(ticket.input.readiness.report.status, 'blocked'); assert.equal(ticket.run, undefined);
+  assert.doesNotMatch(JSON.stringify(ticket), /branch-conflict/);
+});
 test('missing, pending, invalid and stale reports never claim current ready', async t => {
   const f = fixture(t);
   const read = async () => { await status(f.p, board, { project: f.root, json: true }); return JSON.parse(f.out()).readiness; };
