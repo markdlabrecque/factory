@@ -15,6 +15,7 @@ import { collectReadiness, projectKey } from '../../orchestrator/readiness.mts';
 import { beginReadiness, publishReadiness } from '../../board/readiness.mts';
 import { status } from '../src/commands/status.mts';
 import { doctor } from '../src/commands/doctor.mts';
+import { freezeTicketInput, saveTicketInput } from '../../orchestrator/ticket-input.mts';
 import { ticketShow } from '../src/commands/ticket.mts';
 function fixture(t: any) {
   const home = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'cli-readiness-'))), p = paths(home), root = join(home, 'project with spaces');
@@ -80,6 +81,24 @@ test('explicit ticket attribution shows only applicable holds, including tickets
   assert.equal(ticket.input.readiness.report.status, 'blocked'); assert.equal(ticket.run, undefined);
   assert.doesNotMatch(JSON.stringify(ticket), /branch-conflict/);
 });
+test('ticket show reads the frozen input producer by execution identity without tracker or log reads', t => {
+  const f = fixture(t), at = new Date().toISOString();
+  const input = freezeTicketInput({identity:{kind:'github',host:'github.test',project:'me/project'},
+    ticket:iid=>({bytes:1,value:{iid,title:'Full specification',description:'Task data must not be exposed in passive metadata',url:`https://github.test/me/project/issues/${iid}`}}),
+    parentOf:()=>({bytes:1,value:null}),notes:()=>({bytes:1,value:{notes:[],nextPage:null}})},7);
+  saveTicketInput(join(f.p.state,'ticket-inputs','me_project--7','execution'),input);
+  const run = {iid:'7',project:'me/project',executionId:'execution',stage:'implementing',startedAt:at,updatedAt:at,stageSince:at,pid:process.pid,
+    evidenceDir:'/must-not-read-logs',ticketInput:{hash:input.hash,renderedSha256:input.textHash}};
+  const file = join(f.p.state,'me_project--7.json'); fs.writeFileSync(file,JSON.stringify(run));
+  ticketShow(f.p,'7',{project:f.root,json:true,exec:()=>{throw Error('tracker forbidden');}});
+  const data = JSON.parse(f.out()); assert.equal(data.input.state,'frozen'); assert.equal(data.input.contentHash,input.hash);
+  assert.equal(data.input.renderedSha256,input.textHash); assert.equal(data.input.coverage.length,3);
+  assert.equal(data.input.references[0].iid,7); assert.match(data.input.reason,/current tracker freshness is not checked/);
+  assert.doesNotMatch(JSON.stringify(data.input),/Task data must not be exposed/);
+  fs.writeFileSync(file,JSON.stringify({...run,executionId:'different-execution'}));
+  ticketShow(f.p,'7',{project:f.root,json:true}); assert.equal(JSON.parse(f.out()).input.state,'unknown','never reuse another execution snapshot');
+});
+
 test('missing, pending, invalid and stale reports never claim current ready', async t => {
   const f = fixture(t);
   const read = async () => { await status(f.p, board, { project: f.root, json: true }); return JSON.parse(f.out()).readiness; };

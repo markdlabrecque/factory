@@ -262,7 +262,7 @@ A repair continues the affected ticket's own work (#59, `cli/src/recovery-worksp
 Policy-1 delivery now requires the verifier's structured criterion report and a
 host-only frozen proof (`orchestrator/verification.mts`). Both entrypoints bind the
 execution, recovery UUID if applicable, recorded historical baseline, verified tip,
-starting `unitHash`, artifact hashes and runtime/workflow provenance after teardown.
+starting complete child/parent included-source hash, artifact hashes and runtime/workflow provenance after teardown.
 Legacy PASS is never proof. Missing baseline or execution identity requires explicit
 human review or newly established verification, not today's fetched base as a fallback.
 Requirements/eligibility/claim changes refuse delivery; exact-SHA nonforced push and
@@ -279,6 +279,23 @@ A repaired branch goes through the same hand-off as an implemented one (#58, `or
 - **Prerequisite recheck** (#75, `prerequisiteHold`). A recovery run calls it before verification and again before delivery with the dispatcher's analysis of the ticket (its manifest under `<state>/graph/`): every analysed requirement and implementer-reported blocker that names another ticket must be closed or merged into its base, so a prerequisite with a run in flight or an open PR holds the ticket (the attempt ends `unresolved`, nothing delivered). A missing or out-of-date analysis, or a tracker lookup that fails, is unknown and holds too. Normal runs do not call it.
 - Not handled here: a preserved branch whose PR is already open (open PRs are not jams, so a recovery should not reach delivery with one), and merging (still the tracker's `deliver` and `MERGE.auto`). The attempt's outcome is recorded by the launcher (see "Slice four: bounded repair attempts").
 
+# Frozen ticket input
+
+The standard workflow collects complete structured child and immediate-parent bodies
+and planning comments on the host before analysis or implementation. Failed required
+reads hold only that ticket, without a new stopped record or needs-human label.
+Readable configured instructions/templates are also required. Normal, read-only
+analysis, repair and independent verifier prompts use frozen rendered task bytes;
+the sandbox gets no tracker credentials. Host-owned source manifests and rendered
+bytes are saved under `<state>/ticket-inputs/`, separate from agent-writable evidence.
+See [ticket readiness](ticket-readiness.md#frozen-input-holds-and-evidence) for paths,
+hashes, typed diagnostics and custom-workflow coverage.
+
+Analysis and proof freshness include parent human-plan bytes. An edit requires fresh
+analysis/verification; generated Factory comments do not invalidate their own proof.
+Current source checks before verification/delivery never rewrite a running prompt
+or an old proof. Existing claim, eligibility, base/tip, budget and cleanup gates remain.
+
 # Recovery execution-analysis preparation
 
 A current Board assessment does not authorize recovery. After a confirmed jam,
@@ -291,7 +308,7 @@ never renews or charges a budget.
 The selected helper reads current ticket, parent and human-note inputs, the open provider
 catalogue and reliably read previously named providers, and fetches the recorded
 origin base exactly. Its optional execution-manifest `recoveryAnalysisKey` hashes
-normalized requirements, base identity, provider descriptions, saved implementer
+complete included child/parent source bytes, base identity, provider descriptions, saved implementer
 blockers, analysis prompt bytes, model/provider and schema. Missing keys are stale,
 not lost history. Identical inputs reuse successful execution analysis; changed
 inputs run the existing read-only analyst in an invocation-specific detached
@@ -502,7 +519,7 @@ Prints the board service's state (`active`, `inactive`, `missing`, or `unknown (
 
 Readiness appears once above the runs, including projects with no runs. Project checks and ticket-input, ticket-workspace and sandbox observations are separate; a ticket hold is not a failure of every selected ticket. Each observation shows scope/phase, checked time, identity, operation, quoted path, safe errno, next actor/action and automatic recheck policy. Like Board, status and ticket show use `readStoredReadiness` for the registered root. Identity is the recorded observation identity, not a claim that current configuration/runtime still matches. Stale observations retain their historical facts but show current readiness as unknown. Missing, pending, invalid or unreadable reports show unknown with cause-known limits. Status never publishes or starts probes. JSON adds `readiness: ReadinessRead` to version 1 without changing existing fields. There is no prose on JSON stdout. A successfully displayed blocked or unknown report exits 0; bad arguments or project selection exit 1.
 
-`factory ticket show <ticket> [--project <name|path>] [--json]` adds current project `readiness`, explicitly attributed `ticketReadiness`, `input` and `executionReadiness` to its version-1 JSON. It works without a run or journal so a project hold remains visible. A colliding foreign run is still refused. Only checks with an explicit matching `ticket` are associated with this ticket; paths, IDs and owner names are never used to infer attribution. Historical execution stage/note stays separate from current project readiness. Missing optional input/execution report producers are explicit unknowns, with empty coverage/references and a null hash, not a reason to collect tracker content. Neither command follows arbitrary links, reads log bodies or environment values, imports executable override modules or starts agents/containers. Existing service-manager status queries remain read-only.
+`factory ticket show <ticket> [--project <name|path>] [--json]` adds current project `readiness`, explicitly attributed `ticketReadiness`, `input` and `executionReadiness` to its version-1 JSON. It works without a run or journal so a project hold remains visible. A colliding foreign run is still refused. Only checks with an explicit matching `ticket` are associated with this ticket; paths, IDs and owner names are never used to infer attribution. Historical execution stage/note stays separate from current project readiness. Standard workflow `input.state:"frozen"` projects the saved execution/attempt's bounded host-owned source manifest, with coverage, content/rendered hashes and source references. It does not establish current tracker freshness. Missing or invalid input evidence and missing execution-specific producers are explicit unknowns, with empty coverage/references and a null hash, not a reason to collect tracker content. Neither command follows arbitrary links, reads log bodies or environment values, imports executable override modules or starts agents/containers. Existing service-manager status queries remain read-only.
 
 ### Explicit project doctor
 

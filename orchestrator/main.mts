@@ -1,4 +1,5 @@
 // Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
+// Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
 // Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute bounded Pi session replies without delivery authority, then exit after owned teardown.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
@@ -22,11 +23,11 @@ import { randomUUID } from "node:crypto";
 import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
 import { readAdmission } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
-import { parentText } from "./analyze.mts";
+import { freezeTicketInput, saveTicketInput } from './ticket-input.mts';
 import { context, effectiveConfig, AGENT, allLabels, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { piEnvFor, resolveTicketModel } from "./models.mts";
 import { contextHold, retainRuntime } from './context.mts';
-import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
+import { blockedOutcome, expandUnits, SANDCASTLE_MARK } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest, readManifest } from "./manifests.mts";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
@@ -156,16 +157,18 @@ if (!iid) {
   iid = String(first.iid);
 }
 // A Task gets its parent issue as context; whole tickets have none.
-const parentIid = tracker.parentOf(Number(iid));
+// Collection is host-only and fails before a run/agent is created. Later authority checks recollect.
+const frozenInput = freezeTicketInput(tracker.contextSource, Number(iid));
+const parentIid = frozenInput.context.parent?.iid;
 const withParent = (t: tracker.Ticket): tracker.Ticket => {
   if (parentIid === undefined) return t;
-  const p = tracker.ticket(parentIid);
+  const p = frozenInput.context.parent!;
   return { ...t, parent: { iid: p.iid, title: p.title, description: p.description } };
 };
 setProject(PROJECT);
 let startTicket!: tracker.Ticket;
 const picked = recordModelResolution(stateDir(), keyFor(iid, PROJECT), { iid, project: PROJECT }, () => {
-  startTicket = withParent(tracker.ticket(Number(iid)));
+  startTicket = { ...withParent(tracker.ticket(Number(iid))), title: frozenInput.context.child.title, description: frozenInput.context.child.description };
   return resolveTicketModel(startTicket.description, AGENT.family);
 });
 const issue = startTicket;
@@ -173,10 +176,12 @@ if ("error" in picked && !recovering) {
   queueModelProblem(iid, { title: startTicket.title, ticketUrl: tracker.ticketUrl(iid), base, note: picked.error }, process.env.FACTORY_LAUNCH_CLAIM);
   fail(`#${iid} ${picked.error} Not started.`);
 }
-const ticket = [tracker.viewText(Number(iid)), parentText(startTicket)].filter(Boolean).join("\n\n");
-// The version of the ticket this run builds from; compared again before the MR opens.
-const ticketHash = (t = withParent(tracker.ticket(Number(iid)))) => ({ hash: unitHash(t, tracker.notes(Number(iid))), description: t.description });
-const startVersion = ticketHash(startTicket);
+const ticket = frozenInput.text;
+// Fresh structured source reads at authority boundaries, never replace the active prompt.
+const ticketHash = () => ({ hash: freezeTicketInput(tracker.contextSource, Number(iid)).hash });
+const startVersion = { hash: frozenInput.hash };
+const inputEvidence = (...parts: string[]) => resolve(stateDir(), 'ticket-inputs', keyFor(iid!, PROJECT), ...parts);
+context.assertCurrent();
 assertProofStoreOutsideMounts(stateDir(), [resolve('.sandcastle/evidence'), resolve('.sandcastle/sandbox'), resolve('.sandcastle/worktrees'), resolve('.sandcastle/recovery')]);
 const provenance = async (sandbox: { exec(cmd: string): Promise<{ stdout: string }> }, container: string): Promise<Provenance> => {
   // The SDK/host supplies this identity; never trust an agent-controlled hostname or report.
@@ -233,7 +238,9 @@ if (recovering) {
     if (!['open', 'opened'].includes(now.state ?? '')) return `#${iid}'s eligibility is unknown`;
     if (tracker.parentOf(Number(iid)) !== parentIid) return 'Ticket parent changed';
     if ((now.labels ?? []).some(l => l === LABELS.needsHuman || LABELS.exclude.includes(l))) return `#${iid} is excluded or needs human review`;
-    if (ticketHash(now).hash !== startVersion.hash) return `#${iid}'s requirements changed since the attempt started`;
+    try {
+      if (ticketHash().hash !== startVersion.hash) return `#${iid}'s requirements changed since the attempt started`;
+    } catch (e) { return (e as Error).message; }
     const r = readRuns().find((x) => x.project === PROJECT && x.iid === iid);
     const c = claimOf();
     if (r?.recovery?.id !== rec.id || r.claim !== token || c?.token !== token || c.attempt !== rec.id) return `#${iid}'s claim is no longer held by this attempt`;
@@ -241,7 +248,7 @@ if (recovering) {
     const openMrs = tracker.openMrBranches();
     const runOf = (b: number) => readRuns().find((x) => x.project === PROJECT && x.iid === String(b));
     return prerequisiteHold(Number(iid), {
-      manifest: readManifest(PROJECT, Number(iid)), hash: ticketHash(now).hash, policyIdentity: context.policyIdentity,
+      manifest: readManifest(PROJECT, Number(iid)), hash: startVersion.hash, policyIdentity: context.policyIdentity,
       dependency: (b) => dependencyState(b, { ticket: tracker.ticket, run: runOf, mergedInto: tracker.mergedInto, base }),
       active: (b) => {
         const dep = runOf(b);
@@ -250,6 +257,10 @@ if (recovering) {
       },
     });
   };
+  const inputHold = recheck();
+  if (inputHold) fail(inputHold);
+  saveTicketInput(inputEvidence(claimed.executionId!, rec.id), frozenInput);
+  setStage(iid, { ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash, attemptId: rec.id } });
   runtimeLease.pendingCleanup();
   let recoveryReport: ReadinessReport | undefined;
   const result = await runRecoveryAttempt({
@@ -319,12 +330,16 @@ try {
 }
 currentIid = iid;
 const executionId = claimToken ?? randomUUID();
+// Recheck after claim adoption without silently substituting different prompt bytes.
+if (ticketHash().hash !== startVersion.hash) fail('Ticket-input changed during admission; retry collection before launch');
+saveTicketInput(inputEvidence(executionId), frozenInput);
 setStage(iid, {
   title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
   implementationModel: implementerModel, modelChoice: picked.choice,
   implementationBaseSha: baseSha, verification: undefined,
   executionId,
-  evidenceDir: resolve('.sandcastle/evidence', iid, executionId), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
+  evidenceDir: resolve('.sandcastle/evidence', iid, executionId), ticketHash: startVersion.hash,
+  ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash }, verdict: undefined, mr: undefined,
   parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
   starting: undefined, // this run now owns the record the dispatcher reserved at launch
 });
@@ -401,7 +416,9 @@ const recheck = () => {
   if (now.state === 'closed') return `#${iid} is closed`;
   if (!['open', 'opened'].includes(now.state ?? '')) return `#${iid}'s eligibility is unknown`;
   if ((now.labels ?? []).some(l => l === LABELS.needsHuman || LABELS.exclude.includes(l))) return 'Ticket is excluded or needs human review';
-  if (ticketHash(now).hash !== startVersion.hash) return 'Requirements changed; preserve code and evidence for fresh verification or explicit human review';
+  try {
+    if (ticketHash().hash !== startVersion.hash) return 'Requirements changed; preserve code and evidence for fresh verification or explicit human review';
+  } catch (e) { return (e as Error).message; }
   const record = readRuns().find(r => r.project === PROJECT && r.iid === iid);
   if (record?.executionId !== executionId || record.branch !== branch) return 'Execution identity changed';
   if (record.claim !== claimToken || readAdmission(stateDir()).claims[keyFor(iid!, PROJECT)]?.token !== claimToken) return 'Expected launch claim is no longer held';

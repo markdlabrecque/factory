@@ -18,7 +18,8 @@ import type { BoardRun } from "./board.mts";
 import { context, effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { resolveTicketModel } from "./models.mts";
 import { retainRuntime } from './context.mts';
-import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
+import { freezeTicketInput, type FrozenTicketInput } from './ticket-input.mts';
+import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
 import { refreshProject } from "./refresh.mts";
@@ -57,7 +58,7 @@ import type { Ticket } from "./tracker.mts";
 // a pass that is not a dry run writes there, after the board update and before launching, whether the project is jammed
 // (graph.mts findJam: still-ready stopped tickets and the holds behind them, with no run in flight, nothing launched,
 // nothing awaiting analysis and a free slot) and, for each jammed or still-ready ticket with a run record, its requirement
-// fingerprint (unitHash and labels minus the ones Sandcastle writes). The tick counts it only once the pass exits 0. Manual
+// fingerprint (structured context hash and labels minus the ones Sandcastle writes). The tick counts it only once the pass exits 0. Manual
 // passes are not asked for one. The report changes nothing here; the tick decides what to do with it.
 
 // All filters and launch limits come from validated v2 data. --max overrides only the cap.
@@ -201,7 +202,7 @@ if (!dry && process.env.FACTORY_SCHEDULED === '1' && MERGE.auto) {
             const parent = tracker.parentOf(t.iid);
             if (String(parent ?? '') !== (run.parentIid ?? '')) return 'Ticket parent changed';
             if (parent !== undefined) { const p = tracker.ticket(parent); t.parent = { iid: p.iid, title: p.title, description: p.description }; }
-            if (unitHash(t, tracker.notes(t.iid)) !== run.verification?.requirementsHash) return 'Requirements changed; fresh verification or human review required';
+            if (freezeTicketInput(tracker.contextSource, t.iid).hash !== run.verification?.requirementsHash) return 'Requirements changed; fresh verification or human review required';
             const selected = selectCandidates(tracker.readyList(SELECT), SELECT, tracker.currentUsername);
             if (!selected.some(x => x.iid === (parent ?? t.iid))) return 'Ticket no longer selected';
             return schedulerAuthorization(process.cwd(), d.base, deadline);
@@ -263,14 +264,22 @@ const tracked: Ticket[] = [
   ...live.filter((r) => !manifests.get(Number(r.iid))?.actualFootprint).map((r) => catalogueById.get(Number(r.iid))).filter((t): t is Ticket => !!t),
 ];
 const notesOf = new Map<number, Note[]>();
+const inputs = new Map<number, FrozenTicketInput>();
+const inputHolds = new Set<number>();
 const hashOf = new Map<number, string>();
 for (const t of tracked) {
-  const n = tracker.notes(t.iid);
-  notesOf.set(t.iid, n);
-  hashOf.set(t.iid, unitHash(t, n));
+  try {
+    const input = freezeTicketInput(tracker.contextSource, t.iid);
+    inputs.set(t.iid, input);
+    notesOf.set(t.iid, input.context.child.notes);
+    hashOf.set(t.iid, input.hash);
+  } catch (e) {
+    inputHolds.add(t.iid);
+    log(`#${t.iid}: ${(e as Error).message}`);
+  }
 }
 
-const stale = tracked
+const stale = tracked.filter(t => !inputHolds.has(t.iid))
   .map((t) => ({ t, why: staleReason(manifests.get(t.iid), hashOf.get(t.iid)!, catalogueHash, context.policyIdentity) }))
   .filter((s): s is { t: Ticket; why: string } => !!s.why);
 const batch = stale.slice(0, GRAPH.maxAnalysesPerPass);
@@ -282,7 +291,7 @@ if (batch.length) {
     const prev = manifests.get(t.iid);
     try {
       const m = analyse({
-        project: PROJECT, base, worktree, ticket: t, notes: notesOf.get(t.iid)!, catalogue, manifests,
+        project: PROJECT, base, worktree, ticket: t, input: inputs.get(t.iid)!, notes: notesOf.get(t.iid)!, catalogue, manifests,
         // A person editing the ticket is how a wrong implementer-reported blocker gets corrected.
         keepImplementerBlockers: !prev?.analyzedAt || why !== "ticket changed",
       });
@@ -306,7 +315,7 @@ const dependency = (iid: number): DependencyResult => {
 };
 
 const { decisions, dropped } = decide({
-  candidates: candidates.map((c) => ({ iid: c.iid, hash: hashOf.get(c.iid)! })),
+  candidates: candidates.filter(c => !inputHolds.has(c.iid)).map((c) => ({ iid: c.iid, hash: hashOf.get(c.iid)! })),
   policyIdentity: context.policyIdentity,
   manifests,
   dependency,
@@ -363,15 +372,19 @@ if (jamReport && !dry) {
   const ours = new Set([...LABELS.ready, LABELS.needsHuman, LABELS.done]);
   const jammed = new Set<number>(jam.tickets);
   const watched = issues.filter((i) => jammed.has(i.iid) || ["stopped", "done"].includes(runOf.get(i.iid)?.stage ?? ""));
-  const tickets = watched.map((t) => ({
-    iid: t.iid,
-    content: hashOf.get(t.iid) ?? unitHash(t, tracker.notes(t.iid)),
-    labels: (t.labels ?? []).filter((l) => !ours.has(l)),
-  }));
+  const tickets = watched.map((t) => {
+    try {
+      return { iid: t.iid, content: hashOf.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid).hash,
+        labels: (t.labels ?? []).filter((l) => !ours.has(l)) };
+    } catch (e) { log(`#${t.iid}: ${(e as Error).message}; jam observation not counted`); return undefined; }
+  });
   log(jam.tickets.length ? `jam: ${jam.tickets.map((t) => `#${t}`).join(", ")}` : `no jam: ${"none" in jam ? jam.none : ""}`);
-  const temp = `${jamReport}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify({ version: 1, pass: process.env.FACTORY_PASS_ID ?? "", project: PROJECT, at: new Date().toISOString(), ...jam, observed: tickets }, null, 2) + "\n", { mode: 0o600 });
-  renameSync(temp, jamReport);
+  // An unreadable stopped ticket must neither reset its budget nor prevent unrelated normal launches.
+  if (tickets.every(t => t !== undefined)) {
+    const temp = `${jamReport}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify({ version: 1, pass: process.env.FACTORY_PASS_ID ?? "", project: PROJECT, at: new Date().toISOString(), ...jam, observed: tickets }, null, 2) + "\n", { mode: 0o600 });
+    renameSync(temp, jamReport);
+  }
 }
 
 // ---- launch ------------------------------------------------------------------
@@ -383,7 +396,13 @@ for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);
   const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base };
   // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
-  context.assertCurrent();
+  try {
+    context.assertCurrent();
+    if (freezeTicketInput(tracker.contextSource, d.iid).hash !== hashOf.get(d.iid)) {
+      log(`#${iid} ticket-input changed before admission; retry next pass`);
+      continue;
+    }
+  } catch (e) { log(`#${iid}: ${(e as Error).message}`); continue; }
   const claim = claimRun({ iid, pid: process.pid, cap, patch: meta });
   if (!claim.ok) {
     log(`#${iid} not launched: ${claim.reason}`);

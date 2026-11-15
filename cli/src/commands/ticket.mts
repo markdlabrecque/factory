@@ -29,6 +29,7 @@ import { controlAction } from '../../../board/execution-events.mts';
 // producers stay unknown, separately from historical run notes. A project hold is visible even without a run.
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
+import { readSavedTicketInput } from '../../../orchestrator/ticket-input-evidence.mts';
 import { savedReadiness } from '../readiness.mts';
 import { reportStatus } from '../../../orchestrator/readiness-schema.mts';
 import { readinessLines, scopedReadiness } from '../../../board/readiness.mts';
@@ -309,7 +310,7 @@ export function ticketShow(p: Paths, ticket: string | undefined, o: TicketOption
     const checks = report.checks.filter(c => c.scope !== 'project' && c.ticket === iid);
     return { ...readiness, report: { ...report, status: reportStatus(checks), checks } };
   })() : readiness;
-  const input = { state: 'unknown', reason: 'No applicable saved ticket-input coverage projection is available', coverage: [], contentHash: null, references: [],
+  const input = { ...readSavedTicketInput(dir, ctx.tracker, iid, run?.executionId, run?.ticketInput?.attemptId, run?.ticketInput?.hash),
     readiness: scopedReadiness(ticketReadiness, 'ticket-input') };
   const executionReadiness = { state: 'unknown', reason: 'No structured execution readiness observation is available',
     ...(run ? { execution: runIdentity(run), stage: run.stage, note: run.note ?? null } : {}) };

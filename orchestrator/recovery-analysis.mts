@@ -4,19 +4,19 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { unitHash } from './graph.mts';
+import { freezeTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import type { Manifest, Note } from './graph.mts';
 import type { Ticket } from './tracker.mts';
 import { digest, held } from './recovery-analysis-contract.mts';
 import type { Preparation } from './recovery-analysis-contract.mts';
 import type { DependencyResult } from './dependencies.mts';
 
-export type Inputs = { ticket: Ticket; notes: Note[]; catalogue: Ticket[]; knownProviders: Ticket[]; baseSha: string; base?: string;
+export type Inputs = { ticket: Ticket; input: FrozenTicketInput; notes: Note[]; catalogue: Ticket[]; knownProviders: Ticket[]; baseSha: string; base?: string;
   model: string; provider: string; prompt: string; schema: string; providerDescriptions: unknown; blockers: Manifest['implementerBlockers']; eligibility?: string; policyIdentity?: string };
 /** Include normalized requirements plus the exact catalogue/provider/prompt/model inputs seen by the analyst. */
 export function recoveryAnalysisKey(i: Inputs): string {
   const tickets = (ts: Ticket[]) => [...ts].sort((a,b) => a.iid-b.iid).map(t => [t.iid,t.title,t.description,t.parent,t.state]);
-  return digest(JSON.stringify([1,i.ticket.iid,unitHash(i.ticket,i.notes),i.base,i.baseSha,tickets(i.catalogue),tickets(i.knownProviders),
+  return digest(JSON.stringify([2,i.ticket.iid,i.input.hash,i.base,i.baseSha,tickets(i.catalogue),tickets(i.knownProviders),
     i.policyIdentity,i.model,i.provider,i.prompt,i.schema,i.providerDescriptions,i.blockers ?? [],i.eligibility ?? '']));
 }
 export interface PreparationDeps {
@@ -46,7 +46,7 @@ function prepareCore(d: PreparationDeps): Preparation {
     if (input.eligibility) return held('eligibility',input.eligibility);
     const key = recoveryAnalysisKey(input);
     let next = previous;
-    if (next?.recoveryAnalysisKey !== key || next.base !== d.base || next.baseSha !== input.baseSha || next.hash !== unitHash(input.ticket,input.notes)) {
+    if (next?.recoveryAnalysisKey !== key || next.base !== d.base || next.baseSha !== input.baseSha || next.hash !== input.input.hash) {
       try { next = { ...d.analyse(input), recoveryAnalysisKey:key,
         ...(previous?.actualFootprint ? {actualFootprint:previous.actualFootprint} : {}),
         ...(previous?.implementerBlockers ? {implementerBlockers:previous.implementerBlockers} : {}) }; }
@@ -75,7 +75,7 @@ function prepareCore(d: PreparationDeps): Preparation {
     return {version:1,state:'ready',code:'ready',scope:'ticket',reason:'Current execution analysis and prerequisites validated',
       project:d.project,root:resolve(d.root),ticket:d.ticket,base:d.base,requirementsHash:next.hash,baseSha:input.baseSha,
       analysisKey:key,manifestDigest:d.manifestDigest()};
-  } catch (e) { return held('config',String(e),'project'); }
+  } catch (e) { return e instanceof TicketInputHold ? held('ticket-input', e.message, 'ticket') : held('config',String(e),'project'); }
 }
 /** Cleanup uncertainty overrides readiness, including a dirty invocation-owned analysis worktree. */
 export function prepareRecoveryAnalysis(d: PreparationDeps): Preparation {
@@ -110,16 +110,17 @@ async function main(): Promise<Preparation> {
   const read = (): Inputs => {
     runtime.context.assertCurrent();
     tracker.setDeliveryDeadline(Date.now()+20_000);
-    const t = tracker.ticket(ticket), parent = tracker.parentOf(ticket);
-    if (parent !== undefined) { const p = tracker.ticket(parent); t.parent = {iid:p.iid,title:p.title,description:p.description}; }
-    const notes = tracker.notes(ticket), catalogue = tracker.workCatalogue(runtime.SUBTASKS.enabled).tickets;
+    const input = freezeTicketInput(tracker.contextSource, ticket);
+    const t = { ...tracker.ticket(ticket), title: input.context.child.title, description: input.context.child.description }, parent = input.context.parent?.iid;
+    if (parent !== undefined) { const p = input.context.parent!; t.parent = {iid:p.iid,title:p.title,description:p.description}; }
+    const notes = input.context.child.notes, catalogue = tracker.workCatalogue(runtime.SUBTASKS.enabled).tickets;
     const previous = store.readManifest(project,ticket);
     const ids = new Set([...(previous?.requires ?? []).map(r => r.providedBy), ...(previous?.implementerBlockers ?? []).map(r => r.iid)]);
     const knownProviders: Ticket[] = [];
     for (const id of ids) if (id != null && !catalogue.some(t => t.iid === id)) knownProviders.push(tracker.ticket(id));
     git(['fetch','origin',`refs/heads/${base}:refs/remotes/origin/${base}`]);
     const baseSha = git(['rev-parse',`refs/remotes/origin/${base}`]);
-    return {ticket:t,notes,catalogue,knownProviders,base,baseSha,policyIdentity:runtime.context.policyIdentity,model:runtime.GRAPH.model,provider:runtime.AGENT.provider,
+    return {ticket:t,input,notes,catalogue,knownProviders,base,baseSha,policyIdentity:runtime.context.policyIdentity,model:runtime.GRAPH.model,provider:runtime.AGENT.provider,
       prompt:runtime.context.templates['prompt.analyze.md'],schema:JSON.stringify(ANALYSIS_SCHEMA),
       providerDescriptions:catalogue.filter(t => t.iid !== ticket).map(t => [t.iid,store.readManifest(project,t.iid)?.provides ?? []]).sort((a,b) => Number(a[0])-Number(b[0])),blockers:previous?.implementerBlockers,
       eligibility:!['open','opened'].includes(t.state ?? '') ? 'Ticket is closed or eligibility unknown' :
@@ -131,7 +132,7 @@ async function main(): Promise<Preparation> {
       console.error(`Invocation-owned analysis workspace: ${workspace.path}; preserve if this process does not finish cleanup`);
       lease.pendingCleanup();
       workspace = analysisWorktree(project,base,workspace.path);
-      return analyse({project,base,worktree:workspace,ticket:i.ticket,
+      return analyse({project,base,worktree:workspace,ticket:i.ticket,input:i.input,
       notes:i.notes,catalogue:i.catalogue,manifests:store.readManifests(project),knownProviders:i.knownProviders,keepImplementerBlockers:true}); },
     publish:store.publishManifest,
     dependency:iid => { tracker.setDeliveryDeadline(Date.now()+20_000); return dependencyState(iid,{ticket:tracker.ticket,mergedInto:tracker.mergedInto,base,

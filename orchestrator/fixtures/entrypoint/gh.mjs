@@ -29,8 +29,23 @@ if (a === "issue" && b === "comment") out("");
 if (a === "api" && b === "graphql") {
   const q = args.find((x) => x.startsWith("query="));
   const repo = {};
-  for (const m of q.matchAll(/i(\d+): issue/g)) repo[`i${m[1]}`] = { parent: null, subIssues: { nodes: [] } };
+  const single = /issue\(number: (\d+)\)/.exec(q);
+  const contextParent = process.env.FAKE_CONTEXT_PARENT ? {number:Number(process.env.FAKE_CONTEXT_PARENT)} : null;
+  if (single) repo.issue = { parent: changed && process.env.SCENARIO === 'parent' ? {number:9} : contextParent };
+  for (const m of q.matchAll(/i(\d+): issue/g)) repo[`i${m[1]}`] = { parent: changed && process.env.SCENARIO === 'parent' ? {number:9} : contextParent, subIssues: { nodes: [] } };
   out({ data: { repository: repo } });
+}
+// Complete context uses bounded REST reads, not human issue views.
+if (a === 'api' && /^repos\/(?:owner\/repo|other\/project)\/issues\/\d+$/.test(b)) {
+  const number = Number(b.split('/').at(-1));
+  out(number === 90 ? {number,title:'Parent specification',body:'Complete parent body with packaging requirements'} : {...ticket,number});
+}
+if (a === 'api' && /repos\/(?:owner\/repo|other\/project)\/issues\/\d+\/comments\?/.test(b)) {
+  if (b.includes('/90/')) {
+    if (process.env.SCENARIO === 'parent-read-failed') process.exit(2);
+    out([{id:2,body:changed && process.env.SCENARIO === 'parent-plan' ? 'Changed parent plan' : '<details>Agreed parent decisions and implementation plan</details>',user:{login:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'}]);
+  }
+  out(changed && process.env.SCENARIO === 'comment' ? [{id:1,body:'Human added requirements',user:{login:'human'},created_at:'2026-01-01',updated_at:'2026-01-01'}] : []);
 }
 const prFile = join(state, 'opened-pr.json');
 if (a === 'api' && args.some(x => x === 'repos/owner/repo/pulls/9')) out(JSON.parse(readFileSync(prFile, 'utf8')));
