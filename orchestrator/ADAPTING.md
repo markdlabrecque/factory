@@ -162,9 +162,8 @@ manual migration procedure](../docs/project-config.md).
 Use `factory selection explain <ticket> [--project <name|path>] [--json]` to inspect
 eligibility separately from historical/unknown execution holds, without analysis,
 state writes, label creation or launches. `factory dispatch --max N` requires a
-positive safe integer and rejects invalid caps before shell preflight. Exit 0 means evaluated eligible/excluded;
-exit 1 means invalid config, failed reads or unknown. Legacy SELECT is honestly
-unsupported, never executed to guess settings.
+positive safe integer and rejects invalid caps before shell preflight. Explanation validates the selected workflow root and identity, then uses Factory-owned native tracker reads. In project mode eligibility describes configured selection intent; the custom workflow's actual selection is opaque and unknown. Exit 0 means evaluated eligible/excluded;
+exit 1 means invalid config, failed reads or unknown. Legacy SELECT is unsupported and never executed to guess settings.
 
 Init never overwrites TOML and never creates it in an existing legacy scaffold.
 Update treats it as project-owned even when missing. Upgrade/review customized
