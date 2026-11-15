@@ -394,7 +394,7 @@ for (const [n, d] of launch.entries()) {
   }
   const out = openSync(resolve(logDir, `run-${iid}.log`), "a");
   const childRuntime = runtimeLease.childLease();
-  const child = spawn(process.execPath, [context.tsx, context.codePath('main.mts'), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {
+  const child = spawn(process.execPath, [context.tsx, '--tsconfig', context.codePath('runtime.tsconfig.json'), context.codePath('main.mts'), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {
     cwd: process.cwd(),
     detached: true,
     stdio: ["ignore", out, out],

@@ -99,7 +99,7 @@ test('dispatch.sh --issue runs main.mts for that ticket after the checks, loggin
   const { root, sh, runtime } = sandcastleProject(t);
   const r = sh('--issue', '15', '--no-push');
   assert.equal(r.status, 4, r.stderr);
-  assert.equal(readFileSync(join(root, 'bundled-called'), 'utf8').trim(), `${join(runtime.directory, 'main.mts')} --base dev --issue 15 --no-push`);
+  assert.equal(readFileSync(join(root, 'bundled-called'), 'utf8').trim(), `--tsconfig ${join(runtime.directory, 'runtime.tsconfig.json')} ${join(runtime.directory, 'main.mts')} --base dev --issue 15 --no-push`);
   assert.equal(existsSync(join(root, 'npx-called')), false);
   assert.match(r.stdout, /run output/);
   assert.match(readFileSync(join(root, '.sandcastle/logs/run-15.log'), 'utf8'), /run output/);

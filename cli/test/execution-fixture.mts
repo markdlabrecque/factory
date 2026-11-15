@@ -22,7 +22,7 @@ export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env
   const bundle = prepareRuntimeBundle({ sourceRoot: source, runtimeStore: runtimes, install: dir => {
     installPackages(dir);
     // tsx fixture only imports the selected absolute entrypoint; it performs no package resolution.
-    writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {pathToFileURL} from 'node:url'; const entry=process.argv[2]; process.argv.splice(1,1); await import(pathToFileURL(entry).href);\n`);
+    writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {pathToFileURL} from 'node:url'; if(process.argv[2]==='--tsconfig') process.argv.splice(2,2); const entry=process.argv[2]; process.argv.splice(1,1); await import(pathToFileURL(entry).href);\n`);
     const sdk = join(root, 'node_modules/@ai-hero/sandcastle');
     if (existsSync(sdk)) {
       const pkg = JSON.parse(readFileSync(join(dir, 'node_modules/@ai-hero/sandcastle/package.json'), 'utf8'));

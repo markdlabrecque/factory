@@ -30,6 +30,12 @@ An opt-in smoke test exercises the real locked tsx, esbuild platform binary and 
 node scripts/test-runtime-packages.mts /path/to/npm-cache /path/to/npm/bin/npm-cli.js
 ```
 
+The smoke test also poisons the project tsconfig with an SDK path alias. An
+unconfigured real-tsx control must execute the poison, while the explicit
+inventoried runtime tsconfig must load the private locked SDK instead. Ordinary
+context tests assert both production launchers pass that config and its mutation
+invalidates authority.
+
 The implementation was smoke-tested with Node 22.23.2 and 24.20.0. This is not an execution test of the exact 22.18.0 patch release.
 
 ## Shared workflow execution

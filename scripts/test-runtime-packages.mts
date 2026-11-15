@@ -41,7 +41,16 @@ assert(Object.keys(sandcastle).length > 0);
 assert.match(transformSync('const n: number = 7', { loader: 'ts' }).code, /const n = 7/);
 console.log('locked packages usable');
 `);
-  const result = spawnSync(process.execPath, [join(bundle.directory, 'node_modules/tsx/dist/cli.mjs'), entry], { cwd: home, env, encoding: 'utf8' });
+  // A project alias must not redirect any static SDK import before context validation.
+  writeFileSync(join(home, 'poison.mts'), 'throw Error("PROJECT CODE EXECUTED");');
+  writeFileSync(join(home, 'tsconfig.json'), JSON.stringify({ compilerOptions: {
+    baseUrl: '.', paths: { '@ai-hero/sandcastle': ['./poison.mts'] },
+  } }));
+  const tsx = join(bundle.directory, 'node_modules/tsx/dist/cli.mjs');
+  const unsafe = spawnSync(process.execPath, [tsx, entry], { cwd: home, env, encoding: 'utf8' });
+  assert.notEqual(unsafe.status, 0);
+  assert.match(unsafe.stderr, /PROJECT CODE EXECUTED/, 'control proves real tsx reads project aliases');
+  const result = spawnSync(process.execPath, [tsx, '--tsconfig', join(bundle.directory, 'runtime.tsconfig.json'), entry], { cwd: home, env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || String(result.error));
   assert.match(result.stdout, /locked packages usable/);
   console.log(`PASS: Node ${process.versions.node}, private locked tsx/esbuild/Sandcastle, offline npm ci --ignore-scripts`);

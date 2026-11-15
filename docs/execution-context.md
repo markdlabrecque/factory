@@ -35,7 +35,10 @@ scalars, not generated shell or arbitrary settings JSON.
 
 Runtime code, executable helpers and all four Factory prompt templates come from
 the selected bundle. SDK entrypoints use Node with the bundle's absolute
-`node_modules/tsx/dist/cli.mjs`. Interactive image builds use the bundle's absolute
+`node_modules/tsx/dist/cli.mjs` with explicit `--tsconfig` pointing to the
+inventoried `runtime.tsconfig.json`. This alias-free configuration never extends
+project settings, so a project tsconfig cannot redirect static runtime imports
+before context validation. Interactive image builds use the bundle's absolute
 Sandcastle executable. Dispatch never installs project dependencies and never
 resolves an executable through project `npm`, `npx` or `node_modules`.
 

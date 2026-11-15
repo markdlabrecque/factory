@@ -54,6 +54,19 @@ test('canonical project-root cwd and complete selected runtime identity are mand
   await assert.rejects(f.load(), /Use Factory commands/);
 });
 
+test('both SDK launchers explicitly select the inventoried alias-free tsconfig', async t => {
+  const f = fixture(t), context = await f.load();
+  const config = context.codePath('runtime.tsconfig.json');
+  const parsed = JSON.parse(readFileSync(config, 'utf8'));
+  assert.equal(parsed.extends, undefined);
+  assert.equal(parsed.compilerOptions.paths, undefined);
+  assert.equal(parsed.compilerOptions.baseUrl, undefined);
+  assert.match(readFileSync(context.codePath('dispatch.sh'), 'utf8'), /node "\$tsx" --tsconfig "\$runtime\/runtime\.tsconfig\.json"/);
+  assert.match(readFileSync(context.codePath('dispatch.mts'), 'utf8'), /context\.tsx, '--tsconfig', context\.codePath\('runtime\.tsconfig\.json'\)/);
+  writeFileSync(config, '{}');
+  assert.match(contextHold(context)!, /mismatch/);
+});
+
 test('missing/legacy settings never import code or installed sample configuration', async t => {
   const f = fixture(t), file = join(f.root, '.sandcastle/factory.toml');
   writeFileSync(join(f.root, '.sandcastle/config.mts'), 'throw Error("PROJECT CODE EXECUTED")');

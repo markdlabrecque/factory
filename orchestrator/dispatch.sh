@@ -133,7 +133,7 @@ if [ -n "$issue" ]; then
   log=".sandcastle/logs/run-$issue.log"
   echo "Running #$issue on $base in the foreground; the output also goes to $log."
   set +e
-  node "$tsx" "$runtime/main.mts" --base "$base" --issue "$issue" ${args[@]+"${args[@]}"} 2>&1 | tee -a "$log"
+  node "$tsx" --tsconfig "$runtime/runtime.tsconfig.json" "$runtime/main.mts" --base "$base" --issue "$issue" ${args[@]+"${args[@]}"} 2>&1 | tee -a "$log"
   exit "${PIPESTATUS[0]}"
 fi
 exec node "$runtime/dispatch.mts" --base "$base" ${args[@]+"${args[@]}"}
