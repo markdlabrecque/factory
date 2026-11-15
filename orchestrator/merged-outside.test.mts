@@ -10,6 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { claimRun, readRuns } from "../board/board.mts";
+import { bindExecution } from '../cli/test/execution-fixture.mts';
 import { buildAssets } from "../cli/src/scaffold.mts";
 
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
@@ -38,9 +39,10 @@ test("a pass moves a stopped card whose work merged outside Factory to done, kee
   mkdirSync(fake);
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
     patch: { stage: "stopped", note: "verifier said FAIL", verdict: "FAIL", starting: undefined, branch: "7-fix-login", base: "main" } });
-  const pass = (extra: Record<string, string> = {}) => spawnSync(process.execPath, [".sandcastle/dispatch.mts", "--base", "main", "--max", "3"], {
+  const runtime = bindExecution(root);
+  const pass = (extra: Record<string, string> = {}) => spawnSync(process.execPath, [join(runtime.directory, 'dispatch.mts'), "--base", "main", "--max", "3"], {
     cwd: root, encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SANDCASTLE_STATE_DIR: state, ...extra },
+    env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SANDCASTLE_STATE_DIR: state, ...extra },
   });
   const card = () => readRuns(state).find((r) => r.iid === "7")!;
 

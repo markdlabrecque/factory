@@ -3,12 +3,13 @@
 // real orchestrator/dispatch.sh --issue, with stub tools on the PATH (no tracker, Docker or agent): it runs
 // main.mts for that ticket in the foreground, logs to .sandcastle/logs/run-<n>.log, and rejects pass-only flags.
 // The curl stub drains the piped dummy auth header before returning, avoiding SIGPIPE under dispatch.sh's pipefail.
-import { copyTestRuntime, factoryToml } from './config-fixture.mts';
+import { factoryToml } from './config-fixture.mts';
+import { bindExecution } from './execution-fixture.mts';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { paths } from '../src/paths.mts';
@@ -71,8 +72,6 @@ function sandcastleProject(t: TestContext) {
   execFileSync('git', ['init', '-q', '--bare', origin]);
   const root = join(home, 'site');
   mkdirSync(join(root, '.sandcastle'), { recursive: true });
-  copyTestRuntime(join(root, '.sandcastle'));
-  mkdirSync(join(root, 'node_modules/@ai-hero/sandcastle'), { recursive: true });
   copyFileSync(join(import.meta.dirname, '../../orchestrator/dispatch.sh'), join(root, '.sandcastle/dispatch.sh'));
   copyFileSync(join(import.meta.dirname, '../../orchestrator/capabilities.mts'), join(root, '.sandcastle/capabilities.mts'));
   copyFileSync(join(import.meta.dirname, '../../board/admission.mts'), join(root, '.sandcastle/admission.mts'));
@@ -86,18 +85,22 @@ function sandcastleProject(t: TestContext) {
   git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
   git('remote', 'add', 'origin', origin);
   git('push', '-q', 'origin', 'dev');
-  const sh = (...args: string[]) => spawnSync(join(root, '.sandcastle/dispatch.sh'), args, {
+  const runtime = bindExecution(root, process.env, { overlays: false, install: dir => {
+    writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {writeFileSync} from 'node:fs'; writeFileSync(process.cwd()+'/bundled-called',process.argv.slice(2).join(' ')); console.log('run output'); process.exit(4);`);
+  } });
+  const sh = (...args: string[]) => spawnSync(join(runtime.directory, 'dispatch.sh'), args, {
     cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SANDCASTLE_STATE_DIR: join(home, 'state') },
+    env: { ...runtime.env, PATH: `${bin}:${process.env.PATH}`, SANDCASTLE_STATE_DIR: join(home, 'state') },
   });
-  return { root, sh };
+  return { root, sh, runtime };
 }
 
 test('dispatch.sh --issue runs main.mts for that ticket after the checks, logging to run-<n>.log', t => {
-  const { root, sh } = sandcastleProject(t);
+  const { root, sh, runtime } = sandcastleProject(t);
   const r = sh('--issue', '15', '--no-push');
   assert.equal(r.status, 4, r.stderr);
-  assert.equal(readFileSync(join(root, 'npx-called'), 'utf8').trim(), 'tsx .sandcastle/main.mts --base dev --issue 15 --no-push');
+  assert.equal(readFileSync(join(root, 'bundled-called'), 'utf8').trim(), `${join(runtime.directory, 'main.mts')} --base dev --issue 15 --no-push`);
+  assert.equal(existsSync(join(root, 'npx-called')), false);
   assert.match(r.stdout, /run output/);
   assert.match(readFileSync(join(root, '.sandcastle/logs/run-15.log'), 'utf8'), /run output/);
 });

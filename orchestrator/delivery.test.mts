@@ -8,8 +8,9 @@ import { copyTestRuntime, factoryToml } from '../cli/test/config-fixture.mts';
 import type { DeliveryIdentity } from '../board/delivery.mts';
 const dir = mkdtempSync(join(tmpdir(), 'factory-delivery-'));
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
-const moduleUrl = copyTestRuntime(join(dir, 'runtime'), factoryToml('owner/repo', { kind: 'gitlab', projectId: 42 }));
-const { MERGE, TRACKER } = await import(moduleUrl('runtime-config.mts'));
+// Configure the immutable runtime snapshot before import instead of mutating live execution settings.
+const moduleUrl = copyTestRuntime(join(dir, 'runtime'), factoryToml('owner/repo', { kind: 'gitlab', projectId: 42 }) + '\n[merge]\nauto = true\nrequired_checks = ["test"]\n');
+const { TRACKER } = await import(moduleUrl('runtime-config.mts'));
 const repo = TRACKER.project, host = (TRACKER as any).host ?? 'github.com', labHost = (TRACKER as any).gitlabHost ?? '', id = (TRACKER as any).projectId ?? 0;
 const sha = 'a'.repeat(40);
 const identities: Record<string, DeliveryIdentity> = {
@@ -50,7 +51,7 @@ else process.exit(9);
 `, { mode: 0o755 });
 process.env.PATH = `${dir}:${process.env.PATH}`;
 const github = await import(moduleUrl('tracker.github.mts')), gitlab = await import(moduleUrl('tracker.gitlab.mts'));
-const setup = (s: object = {}, required = ['test']) => { writeFileSync(join(dir, 'scenario'), JSON.stringify(s)); writeFileSync(join(dir, 'calls'), ''); MERGE.auto = true; MERGE.requiredChecks = required; };
+const setup = (s: object = {}) => { writeFileSync(join(dir, 'scenario'), JSON.stringify(s)); writeFileSync(join(dir, 'calls'), ''); };
 const calls = (): string[][] => readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean).map(s => JSON.parse(s));
 const merges = () => calls().filter(a => a.some(x => x.endsWith('/merge')));
 let now = Date.now(); Date.now = () => now;

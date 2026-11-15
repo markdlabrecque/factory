@@ -1,12 +1,12 @@
-// #137: validate authoritative TOML before model/credential preflight.
-// Host preflight for approved description model aliases (#126) and fixed verifier/analysis models.
-// Run by dispatch.sh before a pass. Prints each
-// problem to stderr and exits 1; exits 0 when the configured models need no subscription provider or it is ready.
+// Validate explicit project/runtime context before subscription preflight. Fixed family models never fall back.
+// Hold this process's selected runtime while checking the explicitly loaded provider; never print credentials.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { AGENT, GRAPH } from "./runtime-config.mts"; // #137: validate TOML before credentials
+import { context, AGENT, GRAPH } from "./runtime-config.mts";
+import { retainRuntime } from './context.mts';
 import { subscriptionPreflight } from "./models.mts";
 
+await retainRuntime(context);
 const run = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 60_000 });
 const problems = subscriptionPreflight({
   models: [...Object.values(AGENT.modelAliases), AGENT.model, GRAPH.model],

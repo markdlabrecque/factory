@@ -1,11 +1,10 @@
-// Recovery uses invocation-specific worktrees, bounded git operations and the exported schema fingerprint.
+// Read-only analysis uses selected-runtime templates and binds project manifests to the frozen execution policy.
 // Analysis uses the family's fixed Mid policy model and validated v2 graph settings.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { keyFor, stateDir } from "./board.mts";
-import { GRAPH } from "./runtime-config.mts";
+import { context, GRAPH } from "./runtime-config.mts";
 import { contentHash, isSandcastleNote, unitHash } from "./graph.mts";
 import { piAnalysisArgs } from "./models.mts";
 import type { Manifest, Note, Requirement } from "./graph.mts";
@@ -18,7 +17,6 @@ import type { Ticket } from "./tracker.mts";
 // text is untrusted input. Assessment and recovery preparation may also include reliably read previously named
 // closed providers. Ordinary execution analysis still validates providers against the open catalogue.
 
-const here = dirname(fileURLToPath(import.meta.url));
 const git = (args: string[], cwd?: string) => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 20_000, killSignal: "SIGKILL", stdio: ["ignore", "pipe", "inherit"] }).trim();
 
 /** Detached worktree at origin/<base> (fetch first). Shared by every analysis in a pass. */
@@ -141,7 +139,8 @@ export function analyse(args: {
     TICKET: ticketText(t, args.notes),
   };
   // One pass, so placeholders inside ticket text are left alone.
-  const prompt = readFileSync(resolve(here, "prompt.analyze.md"), "utf8").replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
+  context.assertCurrent();
+  const prompt = context.templates['prompt.analyze.md'].replace(/\{\{(\w+)\}\}/g, (m, k) => vars[k] ?? m);
 
   const so = runPi(t.iid, prompt, args.worktree.path);
 
@@ -159,7 +158,7 @@ export function analyse(args: {
   return {
     iid: t.iid,
     project: args.project,
-    hash: unitHash(t, args.notes),
+    hash: unitHash(t, args.notes), policyIdentity: context.policyIdentity,
     analyzedAt: new Date().toISOString(),
     base: args.base,
     baseSha: args.worktree.sha,

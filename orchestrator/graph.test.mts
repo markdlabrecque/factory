@@ -12,6 +12,18 @@ const manifest = (iid: number, over: Partial<Manifest> = {}): Manifest => ({
 });
 const needs = (from: number, confidence = 0.8) => ({ what: `thing from #${from}`, providedBy: from, evidence: "", confidence });
 
+test('execution policy changes hold historical analyses without erasing saved work or hiding requirement edits', () => {
+  const old = manifest(1, { policyIdentity: 'old', actualFootprint: ['kept.txt'], implementerBlockers: [{ what: 'saved blocker', iid: 2, evidence: 'kept report' }] });
+  const input = { candidates: [{ iid: 1, hash: 'h1' }], manifests: new Map([[1, old]]), dependency: () => ({ state: 'satisfied' as const }), queue: new Set([1]), live: [], room: 1, policyIdentity: 'new' };
+  assert.equal(decide(input).decisions[0].launch, false);
+  assert.equal(staleReason(old, 'h1', new Map(), 'new'), 'execution policy changed');
+  assert.equal(staleReason(old, 'edited', new Map(), 'new'), 'ticket changed');
+  assert.deepEqual(old.actualFootprint, ['kept.txt']); assert.equal(old.implementerBlockers?.length, 1);
+  assert.equal(decide({ ...input, policyIdentity: 'old' }).decisions[0].launch, true);
+  delete old.policyIdentity;
+  assert.equal(decide(input).decisions[0].launch, false, 'legacy analysis is not current runtime authority');
+});
+
 test("path overlap: files, directories, globs", () => {
   assert.ok(pathsOverlap("web/a.php", "web/a.php"));
   assert.ok(!pathsOverlap("web/a.php", "web/a.php.bak"));

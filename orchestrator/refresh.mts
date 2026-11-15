@@ -1,4 +1,4 @@
-// #137: dispatch and refresh share exhaustive selection and excluded-assignee handling.
+// Read-only refresh uses explicit project settings and runtime/template policy identity in assessment freshness.
 // Read-only current assessment adapter (#78). Description models use the shared resolver (#126). Shared by scheduled dispatch and --refresh-only (one card with --ticket,
 // else every card of the project, #93), which exits before
 // tracker writes, run updates, admission or launches. Analysis results go only to assessments; execution manifests
@@ -12,7 +12,7 @@ import { analyse, analysisWorktree } from "./analyze.mts";
 import { readRuns, stateDir } from "./board.mts";
 import { assessed, beginAssessment, pickRefreshes, publishAssessment, readAssessment, readAssessments, refreshCards, writeAssessment, pendingRequests, clearRequest } from "./assessment.mts";
 import { selectCandidates, unitEligibility } from "./selection.mts";
-import { effectiveConfig, AGENT, GRAPH, LABELS, SUBTASKS, TRACKER } from "./runtime-config.mts";
+import { context, effectiveConfig, AGENT, GRAPH, LABELS, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { contentHash, expandUnits, unitHash } from "./graph.mts";
 import { readManifests } from "./manifests.mts";
 import { resolveTicketModel } from "./models.mts";
@@ -40,7 +40,7 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
     const select = effectiveConfig?.selection ?? o.select;
     const parents = selectCandidates(tracker.readyList(select), select, tracker.currentUsername);
     const selected = new Set(expandUnits(parents.map((t) => t.iid), work.childrenOf, o.subtasks ?? SUBTASKS.enabled).units.map((t) => t.iid));
-    const catalogueKey = contentHash({ title: JSON.stringify(catalogue.map((t) => [t.iid, t.title, t.description, t.parent]).sort((a, b) => Number(a[0]) - Number(b[0]))) });
+    const catalogueKey = contentHash({ description: context.policyIdentity, title: JSON.stringify(catalogue.map((t) => [t.iid, t.title, t.description, t.parent]).sort((a, b) => Number(a[0]) - Number(b[0]))) });
     const dependencyCache = new Map<number, DependencyResult>();
     let worktree: ReturnType<typeof analysisWorktree> | undefined;
     refreshCards(runs.filter((r) => attempts.has(r.key)), {

@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildAssets } from '../cli/src/scaffold.mts';
-import { copyTestRuntime, factoryToml } from '../cli/test/config-fixture.mts';
+import { factoryToml } from '../cli/test/config-fixture.mts';
+import { bindExecution } from '../cli/test/execution-fixture.mts';
 
 for (const generated of [false, true]) for (const kind of ['github', 'gitlab']) {
   for (const origin of ['implemented', 'repaired']) for (const verdict of ['PASS', 'FAIL', 'INCONCLUSIVE']) {
@@ -105,15 +106,16 @@ if (${JSON.stringify(cmd)} === 'glab') {
 } else if (${JSON.stringify(cmd)} !== 'gh' || args[0] !== 'issue' || args[1] !== 'comment') process.exit(92);
 `, { mode: 0o755 });
   }
-  let modules = join(root, 'canonical-runtime');
-  if (!generated) copyTestRuntime(modules, factoryToml('test/media', { kind: kind as 'github' | 'gitlab', host: kind === 'github' ? 'github.com' : 'git.example.test', projectId: kind === 'gitlab' ? 42 : undefined }));
+  mkdirSync(join(root, '.sandcastle'));
+  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('test/media', { kind: kind as 'github' | 'gitlab', host: kind === 'github' ? 'github.com' : 'git.example.test', projectId: kind === 'gitlab' ? 42 : undefined }));
   if (generated) {
     for (const file of buildAssets({ profile: kind === 'github' ? 'personal' : 'client', repo: 'test/media', image: 'unused', host: 'git.example.test', projectId: 42 }, join(root, 'state'))) {
       const p = join(root, file.path); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, file.content);
     }
-    modules = join(root, '.sandcastle');
   }
-  return { root, bin, evidence, media, log, modules, generated, kind };
+  const runtime = bindExecution(root);
+  t.after(() => rmSync(runtime.staging, { recursive: true, force: true }));
+  return { root, bin, evidence, media, log, modules: runtime.directory, env: runtime.env, generated, kind };
 }
 function run(f: ReturnType<typeof fixture>, o: { origin: string; verdict: string; noPush: boolean; failure?: string }) {
   // Policy 1 fixture: media is listed explicitly, with command assertions for command PASS.
@@ -140,7 +142,7 @@ const out = await postAndDeliver({ identity, state, proofId: frozen.id, recheck:
 });
 console.log(JSON.stringify({ out, stages, delivery }));
 `);
-  const child = spawnSync(process.execPath, [driver], { cwd: f.root, encoding: 'utf8', env: { PATH: f.bin, HOME: f.root, CALLS: f.log, FAILURE: o.failure ?? '' } });
+  const child = spawnSync(process.execPath, [driver], { cwd: f.root, encoding: 'utf8', env: { ...f.env, PATH: f.bin, HOME: f.root, CALLS: f.log, FAILURE: o.failure ?? '' } });
   assert.equal(child.status, 0, child.stderr);
   const result = JSON.parse(child.stdout.trim().split('\n').at(-1)!);
   const calls: Call[] = readFileSync(f.log, 'utf8').trim().split('\n').map(l => JSON.parse(l));

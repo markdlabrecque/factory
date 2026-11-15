@@ -2,7 +2,6 @@
 // No assessments, run verdicts, saved implementation, ownership receipts or recovery budgets are written here.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { unitHash } from './graph.mts';
@@ -13,12 +12,12 @@ import type { Preparation } from './recovery-analysis-contract.mts';
 import type { DependencyResult } from './dependencies.mts';
 
 export type Inputs = { ticket: Ticket; notes: Note[]; catalogue: Ticket[]; knownProviders: Ticket[]; baseSha: string; base?: string;
-  model: string; provider: string; prompt: string; schema: string; providerDescriptions: unknown; blockers: Manifest['implementerBlockers']; eligibility?: string };
+  model: string; provider: string; prompt: string; schema: string; providerDescriptions: unknown; blockers: Manifest['implementerBlockers']; eligibility?: string; policyIdentity?: string };
 /** Include normalized requirements plus the exact catalogue/provider/prompt/model inputs seen by the analyst. */
 export function recoveryAnalysisKey(i: Inputs): string {
   const tickets = (ts: Ticket[]) => [...ts].sort((a,b) => a.iid-b.iid).map(t => [t.iid,t.title,t.description,t.parent,t.state]);
   return digest(JSON.stringify([1,i.ticket.iid,unitHash(i.ticket,i.notes),i.base,i.baseSha,tickets(i.catalogue),tickets(i.knownProviders),
-    i.model,i.provider,i.prompt,i.schema,i.providerDescriptions,i.blockers ?? [],i.eligibility ?? '']));
+    i.policyIdentity,i.model,i.provider,i.prompt,i.schema,i.providerDescriptions,i.blockers ?? [],i.eligibility ?? '']));
 }
 export interface PreparationDeps {
   project: string; root: string; base: string; ticket: number;
@@ -97,6 +96,8 @@ async function main(): Promise<Preparation> {
   if (!Number.isSafeInteger(ticket) || ticket <= 0 || !base || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(base) || base.includes('..'))
     return held('config','Expected numeric ticket and recorded base','project');
   const runtime = await import('./runtime-config.mts');
+  const { retainRuntime } = await import('./context.mts');
+  const lease = await retainRuntime(runtime.context);
   const tracker = await import('./tracker.mts');
   const store = await import('./manifests.mts');
   const { analyse, analysisWorktree, ANALYSIS_SCHEMA } = await import('./analyze.mts');
@@ -107,6 +108,7 @@ async function main(): Promise<Preparation> {
   let workspace: {path:string;sha:string} | undefined;
   // Tracker calls have individual deadlines and the parent process owns the total preparation deadline.
   const read = (): Inputs => {
+    runtime.context.assertCurrent();
     tracker.setDeliveryDeadline(Date.now()+20_000);
     const t = tracker.ticket(ticket), parent = tracker.parentOf(ticket);
     if (parent !== undefined) { const p = tracker.ticket(parent); t.parent = {iid:p.iid,title:p.title,description:p.description}; }
@@ -117,8 +119,8 @@ async function main(): Promise<Preparation> {
     for (const id of ids) if (id != null && !catalogue.some(t => t.iid === id)) knownProviders.push(tracker.ticket(id));
     git(['fetch','origin',`refs/heads/${base}:refs/remotes/origin/${base}`]);
     const baseSha = git(['rev-parse',`refs/remotes/origin/${base}`]);
-    return {ticket:t,notes,catalogue,knownProviders,base,baseSha,model:runtime.GRAPH.model,provider:runtime.AGENT.provider,
-      prompt:readFileSync(new URL('./prompt.analyze.md',import.meta.url),'utf8'),schema:JSON.stringify(ANALYSIS_SCHEMA),
+    return {ticket:t,notes,catalogue,knownProviders,base,baseSha,policyIdentity:runtime.context.policyIdentity,model:runtime.GRAPH.model,provider:runtime.AGENT.provider,
+      prompt:runtime.context.templates['prompt.analyze.md'],schema:JSON.stringify(ANALYSIS_SCHEMA),
       providerDescriptions:catalogue.filter(t => t.iid !== ticket).map(t => [t.iid,store.readManifest(project,t.iid)?.provides ?? []]).sort((a,b) => Number(a[0])-Number(b[0])),blockers:previous?.implementerBlockers,
       eligibility:!['open','opened'].includes(t.state ?? '') ? 'Ticket is closed or eligibility unknown' :
         (t.labels ?? []).some(l => l === runtime.LABELS.needsHuman || runtime.LABELS.exclude.includes(l)) ? 'Ticket is excluded or needs human review' : undefined};
@@ -127,6 +129,7 @@ async function main(): Promise<Preparation> {
     analyse:i => {
       workspace = {path:resolve(stateDir(),'worktrees',`recovery-${randomUUID()}`),sha:i.baseSha};
       console.error(`Invocation-owned analysis workspace: ${workspace.path}; preserve if this process does not finish cleanup`);
+      lease.pendingCleanup();
       workspace = analysisWorktree(project,base,workspace.path);
       return analyse({project,base,worktree:workspace,ticket:i.ticket,
       notes:i.notes,catalogue:i.catalogue,manifests:store.readManifests(project),knownProviders:i.knownProviders,keepImplementerBlockers:true}); },
@@ -134,7 +137,7 @@ async function main(): Promise<Preparation> {
     dependency:iid => { tracker.setDeliveryDeadline(Date.now()+20_000); return dependencyState(iid,{ticket:tracker.ticket,mergedInto:tracker.mergedInto,base,
       run:id => readRuns(stateDir(),false).find(r => r.project === project && Number(r.iid) === id)}); },
     cleanup:() => { if (!workspace) return; if (git(['status','--porcelain','--untracked-files=all'],workspace.path)) return `Analysis workspace is not clean; preserved at ${workspace.path}`;
-      git(['worktree','remove',workspace.path]); },
+      git(['worktree','remove',workspace.path]); lease.confirmedCleanup(); },
   });
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

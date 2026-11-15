@@ -1,6 +1,7 @@
+// Recovery mounts project helpers and reads absolute selected-runtime prompts, never project template overrides.
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import type { RecoveryDeps, RecoverySandbox, SandboxSpec } from "./recovery.mts";
 
 // The recovery attempt's own sandbox and Git boundary (slice four, #74), used by main.mts --recover through
@@ -120,7 +121,8 @@ export async function createOwnedSandbox(spec: SandboxSpec, cfg: OwnedSandboxCon
     },
     async run(o) {
       const agent = o.agent as AgentLike;
-      const prompt = fill(readFileSync(join(cfg.root, o.promptFile), "utf8"), o.promptArgs);
+      if (!isAbsolute(o.promptFile)) throw Error('Recovery prompt must be an absolute runtime path');
+      const prompt = fill(readFileSync(o.promptFile, "utf8"), o.promptArgs);
       const print = agent.buildPrintCommand({ prompt, dangerouslySkipPermissions: true });
       const before = await head();
       const log = join(spec.evidence, `${o.name}.log`);

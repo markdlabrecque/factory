@@ -36,6 +36,7 @@ export interface Manifest {
   recoveryAnalysisKey?: string;
   iid: number;
   project: string;
+  policyIdentity?: string; // absent historical analyses need fresh execution authority
   hash: string; // contentHash of the ticket when analysed
   analyzedAt: string;
   base: string;
@@ -211,9 +212,10 @@ function findCycle(edges: Edge[]): Edge[] | null {
 // ---- analysis freshness --------------------------------------------------------
 
 /** Why a ticket needs (re-)analysis, or null when its manifest is current. `catalogue` maps open ticket iid -> catalogue hash. */
-export function staleReason(m: Manifest | undefined, hash: string, catalogue: Map<number, string>): string | null {
+export function staleReason(m: Manifest | undefined, hash: string, catalogue: Map<number, string>, policyIdentity?: string): string | null {
   if (!m) return "not analysed yet";
   if (m.hash !== hash) return "ticket changed";
+  if (policyIdentity !== undefined && m.policyIdentity !== policyIdentity) return 'execution policy changed';
   for (const [iid, h] of Object.entries(m.blockerHashes)) {
     const now = catalogue.get(Number(iid));
     if (now !== undefined && now !== h) return `blocker #${iid} changed`;
@@ -229,6 +231,7 @@ export function staleReason(m: Manifest | undefined, hash: string, catalogue: Ma
 
 export interface DecideInput {
   candidates: { iid: number; hash: string }[]; // in dispatch order
+  policyIdentity?: string; // executing callers require current runtime/settings/templates, not historical compatibility
   manifests: Map<number, Manifest>;
   dependency: (iid: number) => DependencyResult;
   queue: Set<number>; // tickets Sandcastle will run or is running; blockers outside it need a person
@@ -246,7 +249,8 @@ export function decide(input: DecideInput): { decisions: Decision[]; dropped: Ed
   let room = input.room;
   const decisions: Decision[] = input.candidates.map(({ iid, hash }) => {
     const m = input.manifests.get(iid);
-    if (!m || m.hash !== hash) return { iid, launch: false, reason: "not analysed yet" };
+    if (!m || m.hash !== hash || input.policyIdentity !== undefined && m.policyIdentity !== input.policyIdentity)
+      return { iid, launch: false, reason: "not analysed yet" };
     const open = kept.filter((e) => e.to === iid).map((e) => ({ ...e, result: input.dependency(e.from) })).filter((e) => e.result.state !== "satisfied");
     if (open.length) {
       const why = open.map((e) => e.result.state === "unknown" ? `#${e.from}: ${e.result.reason ?? "dependency information unavailable"}` : `#${e.from}${input.queue.has(e.from) ? "" : " (outside the agent queue)"}: ${e.what}`);

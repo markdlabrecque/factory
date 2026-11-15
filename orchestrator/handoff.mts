@@ -1,4 +1,4 @@
-// Independent verification retains its own browser check even after image and sandbox-setup readiness succeed.
+// Runtime-owned independent verification retains browser, immutable-proof and exact-SHA delivery gates.
 import { browserPreflight } from './capabilities.mts';
 export { browserPreflight, BROWSER_PROBE } from './capabilities.mts';
 // #153: persist exact opened PR identity before CI; later delivery results retain the original host proof.
@@ -10,6 +10,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { readProof, validateEvidence } from './verification.mts';
 import type { Identity } from './verification.mts';
 import { resolve } from "node:path";
+import { fileURLToPath } from 'node:url';
 import type { RunState } from "./board.mts";
 import { edgesOf, SANDCASTLE_MARK } from "./graph.mts";
 import type { Manifest } from "./graph.mts";
@@ -62,7 +63,7 @@ export interface VerifierSandbox {
 /** Who produced the branch: the normal implementer, or a recovery attempt's repair agent. */
 export type Origin = { kind: "implemented" } | { kind: "repaired"; attempt: number };
 
-export const VERIFY_PROMPT = "./.sandcastle/prompt.verify.md";
+export const VERIFY_PROMPT = fileURLToPath(new URL('./prompt.verify.md', import.meta.url));
 
 /** Clear what an earlier run of this ticket left that could pass for this run's verdict, then mark the record verifying. */
 export function beginVerification(host: Pick<Host, "setStage">, iid: string, evidenceHost: string): void {
@@ -253,6 +254,7 @@ export interface PrerequisiteView {
   manifest: Manifest | undefined;
   /** The ticket's current content hash (graph.mts unitHash), to tell an out-of-date analysis. */
   hash: string;
+  policyIdentity?: string;
   /** Shared dependency evidence. Unknown and thrown reads both hold recovery. */
   dependency(iid: number): DependencyResult;
   /** Why prerequisite `iid` is still active (a run in flight, an open PR), or undefined. May throw: unknown. */
@@ -263,6 +265,7 @@ export interface PrerequisiteView {
 export function prerequisiteHold(iid: number, v: PrerequisiteView): string | undefined {
   try {
     if (!v.manifest) return `#${iid} has no ticket analysis, so its prerequisites are unknown`;
+    if (v.policyIdentity !== undefined && v.manifest.policyIdentity !== v.policyIdentity) return `#${iid}'s execution policy changed; fresh analysis required`;
     if (v.manifest.hash !== v.hash) return `#${iid}'s ticket analysis is out of date, so its prerequisites are unknown`;
     for (const e of edgesOf(v.manifest)) {
       if (e.to !== iid) continue;

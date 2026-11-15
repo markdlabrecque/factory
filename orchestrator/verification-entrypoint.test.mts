@@ -6,12 +6,18 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { bindExecution } from '../cli/test/execution-fixture.mts';
 import { buildAssets } from '../cli/src/scaffold.mts';
 import { fixtureReport } from './fixtures/verification.mts';
 import { proofRoot } from './verification.mts';
+import { MODEL_POLICY } from './model-policy.mts';
 
-for (const scenario of ['pass', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt', 'image-bad', 'setup-bad', 'image-changed']) {
-  test(`normal entrypoint ${scenario}: only the proven tip may leave`, t => {
+const cases = [
+  ...['pass', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt', 'image-bad', 'setup-bad', 'image-changed', 'config-family', 'config-setup', 'runtime-template', 'tier-edit'].map(scenario => ({ scenario, family: 'openai' as const, tier: undefined as string | undefined })),
+  ...(['openai', 'anthropic'] as const).flatMap(family => ['small', 'mid', 'large'].map(tier => ({ scenario: 'pass', family, tier }))),
+];
+for (const { scenario, family, tier } of cases) {
+  test(`normal entrypoint ${scenario} ${family}/${tier ?? 'default'}: only the proven tip may leave`, t => {
     const home = mkdtempSync(join(tmpdir(), 'verification-entry-'));
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const root = join(home, 'site'), origin = join(home, 'origin.git'), state = join(home, 'state'), fake = join(home, 'fake'), bin = join(home, 'bin');
@@ -24,6 +30,8 @@ for (const scenario of ['pass', 'title', 'body', 'comment', 'parent', 'closed', 
     for (const f of buildAssets({ profile: 'personal', repo: 'owner/repo', image: 'img' }, state)) {
       const p = join(root, f.path); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, f.content, { mode: f.mode });
     }
+    const config = join(root, '.sandcastle/factory.toml');
+    writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
     const sdk = join(root, 'node_modules/@ai-hero/sandcastle');
     cpSync(join(import.meta.dirname, 'fixtures/entrypoint/sandcastle'), sdk, { recursive: true });
     writeFileSync(join(sdk, 'index.mjs'), `
@@ -49,6 +57,10 @@ export async function createSandbox(o) {
       if (o.name === 'implementer') {
         writeFileSync(join(fake,'implementer-started'),'yes');
         writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
+        if (scenario === 'config-family') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
+        if (scenario === 'config-setup') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('setup = []','setup = [{command="changed setup"}]')); }
+        if (scenario === 'runtime-template') writeFileSync(join(process.env.FACTORY_RUNTIME_ROOT,'prompt.verify.md'),'changed verifier');
+        if (scenario === 'tier-edit') writeFileSync(join(fake,'changed'),'yes');
         if (scenario === 'missing-baseline') rmSync(join(root,'.git/objects',${JSON.stringify(baseline.slice(0, 2))},${JSON.stringify(baseline.slice(2))}));
         return {commits:['implementation']};
       }
@@ -81,6 +93,7 @@ export async function createSandbox(o) {
 const ticket =`).replace("const out = (v)", `if (changed) {
  if (scenario === 'title') ticket.title += ' edited';
  if (scenario === 'body') ticket.body += ' edited';
+ if (scenario === 'tier-edit') ticket.body = 'Model tier: large\\nThe login form must work.';
  if (scenario === 'closed') ticket.state = 'CLOSED';
  if (scenario === 'excluded') ticket.labels.push({name:'needs-human'});
 }
@@ -96,8 +109,11 @@ if (!fs.existsSync(path.join(process.env.FAKE_STATE,'live'))) { console.error('N
 console.log('sha256:'+'a'.repeat(64));
 `, { mode: 0o755 });
     writeFileSync(join(bin, 'pi'), '#!/bin/sh\n[ "$1" = auth ] || exit 90\nprintf "fixture-token\\n"\n', { mode: 0o755 });
-    const result = spawnSync(process.execPath, ['.sandcastle/main.mts', '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state,
+    const runtime = bindExecution(root);
+    for (const name of ['main.mts', 'dispatch.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
+    rmSync(join(root, 'node_modules'), { recursive: true });
+    const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
+      cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
@@ -108,16 +124,23 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(run.verification.tip, tip);
       assert.equal(run.implementationBaseSha, baseline);
       assert.ok(run.executionId);
-      assert.equal(run.implementationModel, 'openai/gpt-6.1-terra');
-      assert.equal(run.modelChoice.family, 'openai');
-      assert.equal(run.modelChoice.tier, 'mid');
+      const expectedTier = tier ?? 'mid';
+      const expectedModel = MODEL_POLICY[family][expectedTier as 'small' | 'mid' | 'large'];
+      assert.equal(run.implementationModel, expectedModel);
+      assert.equal(run.modelChoice.family, family);
+      assert.equal(run.modelChoice.tier, expectedTier);
+      assert.equal(run.modelChoice.source, tier ? 'ticket-tier' : 'factory-default');
       assert.equal(run.modelChoice.policyIdentity, 'factory-model-policy-v1');
       assert.equal(run.modelChoice.resolvedModel, run.implementationModel);
-      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: 'openai/gpt-6.1-terra', thinking: 'high' });
-      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: 'openai/gpt-6.1-sol', thinking: 'high' });
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: expectedModel, thinking: 'high' });
+      assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: MODEL_POLICY[family].large, thinking: 'high' });
       const proof = JSON.parse(readFileSync(join(proofRoot(state, 'owner/repo', '7', run.verification.id), 'proof.json'), 'utf8'));
       assert.equal(proof.provenance.imageId, `sha256:${'a'.repeat(64)}`);
       assert.equal(proof.provenance.settings.image, 'img', 'configured settings stay comparable for existing-delivery continuation');
+      assert.deepEqual(proof.provenance.settings.execution.runtime, { id: runtime.id, dependencies: runtime.manifest.dependencies });
+      assert.deepEqual(proof.provenance.settings.execution.additive, {});
+      assert.deepEqual(Object.keys(proof.provenance.settings.execution.templates).sort(), ['prompt.analyze.md','prompt.md','prompt.recover.md','prompt.verify.md']);
+      assert.deepEqual(proof.provenance.code, Object.fromEntries(runtime.manifest.files.map(file => [file.path,file.sha256])));
     } else if (['image-bad', 'setup-bad', 'image-changed'].includes(scenario)) {
       assert.notEqual(result.status, 0, result.stdout + result.stderr);
       assert.equal(existsSync(join(fake, 'implementer-started')), false);
@@ -135,8 +158,13 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', result.stdout + result.stderr);
       const log = readFileSync(join(fake, 'gh.jsonl'), 'utf8');
       assert.ok(!log.includes('"merge"'), result.stdout + result.stderr);
-      assert.equal(existsSync(join(fake, 'verifier-started')), scenario !== 'missing-baseline', result.stdout + result.stderr);
-      const reason = ({title:/Requirements changed/,body:/Requirements changed/,comment:/Requirements changed/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
+      assert.equal(existsSync(join(fake, 'verifier-started')), !['missing-baseline', 'config-family', 'config-setup', 'runtime-template', 'tier-edit'].includes(scenario), result.stdout + result.stderr);
+      if (['config-family', 'config-setup', 'runtime-template', 'tier-edit'].includes(scenario)) {
+        const record = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+        assert.equal(record.modelChoice.family, 'openai'); assert.equal(record.modelChoice.tier, 'mid');
+        assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.mid, thinking: 'high' });
+      }
+      const reason = ({'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Requirements changed/,title:/Requirements changed/,body:/Requirements changed/,comment:/Requirements changed/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
       assert.match(result.stdout + result.stderr, reason);
     }
   });

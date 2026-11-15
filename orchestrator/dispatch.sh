@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Readiness probes only the exact owned local image, then pins startup; no implementation starts on a readiness hold.
-# #137: validate authoritative TOML before credentials/Docker/npm; scalar argv/stdout bridge, no eval.
+# Validate explicit project/runtime context before credentials or Docker. Only bundled dependencies execute.
 # One dispatcher pass with the defaults, against the branch checked out in the current directory.
-#   .sandcastle/dispatch.sh [--dry-run] [--max N] [--whole-issues]
-#   .sandcastle/dispatch.sh --issue N [--no-push]
+#   <selected-runtime>/dispatch.sh [--dry-run] [--max N] [--whole-issues]
+#   <selected-runtime>/dispatch.sh --issue N [--no-push]
 # Extra arguments go to dispatch.mts. With --issue N it runs that one ticket now instead, in the
 # foreground (main.mts --issue N, extra arguments to main.mts), after the same checks; the output also
 # goes to .sandcastle/logs/run-N.log, where a dispatched run's log goes. `factory run N` uses this.
@@ -19,6 +19,7 @@ export SANDCASTLE_STATE_DIR="${SANDCASTLE_STATE_DIR:-$HOME/.local/state/factory}
 fail() { echo "dispatch.sh: $*" >&2; exit 1; }
 
 # --issue N picks one ticket. Parsed before the checks so a bad argument fails at once.
+original_args=("$@")
 issue=""
 args=()
 while [ $# -gt 0 ]; do
@@ -35,72 +36,66 @@ if [ -n "$issue" ]; then
   done
 fi
 
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "not inside a git repository."
-cd "$root"
-[ -f .sandcastle/dispatch.mts ] || fail "no .sandcastle/dispatch.mts in $root."
-
-# Validate before tools, credentials or project npm installation. No executable-config fallback.
-node .sandcastle/config-read.mts "$root/.sandcastle" validate || exit 1
-toml=1
+root="${FACTORY_PROJECT_ROOT:-}"
+runtime="${FACTORY_RUNTIME_ROOT:-}"
+[ -n "$root" ] && [ -n "$runtime" ] || fail "missing execution context. Use Factory commands."
+[ "$(pwd -P)" = "$root" ] || fail "cwd must be the canonical project root. Use Factory commands."
+[ "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" = "$runtime" ] || fail "script is not from the selected runtime."
+node "$runtime/config-read.mts" "$root/.sandcastle" validate || exit 1
+if [ "${FACTORY_CONTEXT_BOOTSTRAPPED:-}" != 1 ]; then
+  exec node "$runtime/context-process.mts" ${original_args[@]+"${original_args[@]}"}
+fi
 
 base="$(git branch --show-current)"
 [ -n "$base" ] || fail "detached HEAD. Check out the integration branch first."
 git ls-remote --exit-code --heads origin "$base" >/dev/null || fail "branch $base isn't on origin. Push it, or check out the integration branch."
 
 # Read validated, allowlisted data only.
-toml_value() { node .sandcastle/config-read.mts "$root/.sandcastle" "$1"; }
+toml_value() { node "$runtime/config-read.mts" "$root/.sandcastle" "$1"; }
 kind="$(toml_value kind)"
 agent="$(toml_value agent)"
 image="$(toml_value image)"
 host="$(toml_value host)"
 uses_subscription="$(toml_value subscription)"
-[ -n "$image" ] || fail "couldn't read CONFIG.image from .sandcastle/main.mts."
-case "$kind" in gitlab) tracker_cli=glab ;; github) tracker_cli=gh ;; *) fail "unknown TRACKER.kind \"$kind\" in .sandcastle/config.mts." ;; esac
-case "$agent" in claude | pi) ;; *) fail "unknown AGENT.provider \"$agent\" in .sandcastle/config.mts." ;; esac
+[ -n "$image" ] || fail "couldn't read sandbox.image from .sandcastle/factory.toml."
+case "$kind" in gitlab) tracker_cli=glab ;; github) tracker_cli=gh ;; *) fail "unknown tracker.kind in .sandcastle/factory.toml." ;; esac
+[ "$agent" = pi ] || fail "standard workflow requires Pi."
+tsx="$(toml_value tsx)"
+sandcastle="$(toml_value sandcastle)"
 
-for tool in node npm npx git "$tracker_cli" "$agent" docker curl; do
+for tool in node git "$tracker_cli" "$agent" docker curl; do
   command -v "$tool" >/dev/null || fail "$tool isn't on the PATH."
 done
 
 if [ "$kind" = gitlab ]; then
-  if [ "$toml" = 0 ]; then host="$(cfg_value gitlabHost)"; fi
-  [ -n "$host" ] || fail "couldn't read TRACKER.gitlabHost from .sandcastle/config.mts."
+  [ -n "$host" ] || fail "couldn't read tracker.host from .sandcastle/factory.toml."
   glab auth status --hostname "$host" >/dev/null 2>&1 || fail "glab isn't logged in to $host. Run: glab auth login --hostname $host"
 else
-  if [ "$toml" = 0 ]; then host="$(cfg_value host)"; host="${host:-github.com}"; fi
   gh auth status --hostname "$host" >/dev/null 2>&1 || fail "gh isn't logged in to $host. Run: gh auth login --hostname $host"
 fi
 # The ticket analysis runs this agent on the host with its own login. With pi and the pi-claude-subscription
 # provider that login is claude's, and the container runs use CLAUDE_CODE_OAUTH_TOKEN (checked below).
 subscription=0
-if [ "$agent" = claude ]; then
-  claude auth status 2>/dev/null | grep -q '"loggedIn": *true' || fail "claude isn't logged in. Run: claude auth login"
-elif [ "$uses_subscription" = true ]; then
+if [ "$uses_subscription" = true ]; then
   subscription=1
-  [ -f .sandcastle/preflight.mts ] || fail "no .sandcastle/preflight.mts in $root."
-  node .sandcastle/preflight.mts >&2 || exit 1
+  node "$runtime/preflight.mts" >&2 || exit 1
 else
-  # A custom pi config on openai/ models: the container runs use the host's pi login.
+  # The OpenAI family passes a per-run token from the host's Pi login to the container.
   pi auth check --provider openai >/dev/null 2>&1 || fail "pi has no working OpenAI login. Run pi, then /login, and pick Sign in with ChatGPT."
 fi
 docker info >/dev/null 2>&1 || fail "Docker isn't running, or this user can't reach it."
 
-# Claude Code in the container logs in with .sandcastle/.env, not the host's login: the client config's
-# agent, and the CLI behind pi-claude-subscription. Check the credential with an empty Messages request: a
-# bad one gets 401, a good one 400. No tokens are used, and the value is never printed or put on a command
-# line. A pi config on openai/ models needs nothing here: each run gets a fresh token from the host's pi
-# login, checked above.
+# The CLI behind pi-claude-subscription uses the project's .env, not the host login.
+# An empty Messages request checks the credential: bad gets 401, good gets 400.
+# No tokens are used, and the secret is never printed or placed on a command line.
+# OpenAI needs no container credential here; each run receives a token from the host login.
 env_file=.sandcastle/.env
 [ -f "$env_file" ] || fail "no $env_file. Run: cp .sandcastle/.env.example $env_file, then fill it in."
-if [ "$agent" = claude ] || [ "$subscription" = 1 ]; then
+if [ "$subscription" = 1 ]; then
   env_value() { sed -nE "s/^[[:space:]]*(export[[:space:]]+)?$1=[\"']?([^\"'#[:space:]]*).*/\2/p" "$env_file" | tail -n 1; }
   if token="$(env_value CLAUDE_CODE_OAUTH_TOKEN)" && [ -n "$token" ]; then
     key_name=CLAUDE_CODE_OAUTH_TOKEN
     auth_header="Authorization: Bearer $token"
-  elif [ "$agent" = claude ] && token="$(env_value ANTHROPIC_API_KEY)" && [ -n "$token" ]; then
-    # Only the client config's Claude Code accepts an API key. pi-claude-subscription strips ANTHROPIC_API_KEY.
-    key_name=ANTHROPIC_API_KEY
-    auth_header="x-api-key: $token"
   else
     fail "CLAUDE_CODE_OAUTH_TOKEN in $env_file is empty. Run: claude setup-token, and paste the token there."
   fi
@@ -123,29 +118,22 @@ elif [ -n "$user" ] && [ "${user%%:*}" != "$(id -u)" ]; then
   problem="image $image was built for UID ${user%%:*}, not $(id -u)"
 fi
 if [ -n "$problem" ]; then
-  build="npx sandcastle docker build-image --image-name $image"
+  build="node '$sandcastle' docker build-image --image-name '$image'"
   [ -t 0 ] || fail "$problem. Build it from a terminal in $root: $build"
   echo "$problem; building it (takes a few minutes)."
-  npx sandcastle docker build-image --image-name "$image"
+  node "$sandcastle" docker build-image --image-name "$image"
 fi
 
 # No agent installation or dispatch starts until the isolated image capability probe succeeds.
-ready_image="$(node .sandcastle/capabilities.mts "$image" "$(id -u)" "$(id -g)" "$SANDCASTLE_STATE_DIR")" || fail "image readiness failed; provision/rebuild the configured image before retrying."
+ready_image="$(node "$runtime/capabilities.mts" "$image" "$(id -u)" "$(id -g)" "$SANDCASTLE_STATE_DIR")" || fail "image readiness failed; provision/rebuild the configured image before retrying."
 export FACTORY_READY_IMAGE="$ready_image"
-
-# The pass imports @ai-hero/sandcastle from the project's node_modules. Install when it's missing or
-# older than the lockfile; quick enough to run under the timer too.
-if [ ! -d node_modules/@ai-hero/sandcastle ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
-  echo "node dependencies missing or out of date; installing."
-  if [ -f package-lock.json ]; then npm ci; else npm install; fi
-fi
 
 if [ -n "$issue" ]; then
   mkdir -p .sandcastle/logs
   log=".sandcastle/logs/run-$issue.log"
   echo "Running #$issue on $base in the foreground; the output also goes to $log."
   set +e
-  npx tsx .sandcastle/main.mts --base "$base" --issue "$issue" ${args[@]+"${args[@]}"} 2>&1 | tee -a "$log"
+  node "$tsx" "$runtime/main.mts" --base "$base" --issue "$issue" ${args[@]+"${args[@]}"} 2>&1 | tee -a "$log"
   exit "${PIPESTATUS[0]}"
 fi
-exec node .sandcastle/dispatch.mts --base "$base" ${args[@]+"${args[@]}"}
+exec node "$runtime/dispatch.mts" --base "$base" ${args[@]+"${args[@]}"}

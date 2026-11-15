@@ -3,7 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ownerOf, ownerState, withAdmissionLock, writeDurable } from '../../board/admission.mts';
+// The same helper ships flat in a runtime; source CLI callers use the source Board module.
+const { ownerOf, ownerState, withAdmissionLock, writeDurable } = await import(existsSync(new URL('./admission.mts', import.meta.url)) ? './admission.mts' : '../../board/admission.mts');
 import type { Owner } from '../../board/admission.mts';
 import { validateRuntimeBundle } from './runtime-bundle.mts';
 import type { Paths } from './paths.mts';
@@ -160,10 +161,11 @@ export function acquireRuntimeLease(p: Paths, id: string, owner: Owner = ownerOf
     return lease;
   });
 }
-export function transferRuntimeLease(p: Paths, token: string, owner: Owner): RuntimeLease {
+export function transferRuntimeLease(p: Paths, token: string, owner: Owner, expectedId?: string): RuntimeLease {
   return withRuntimeLock(p, () => {
     assertRuntimeStore(p);
     const lease = readLease(p, token);
+    if (expectedId !== undefined && lease.id !== expectedId) throw new Error('Runtime lease identity mismatch');
     if (ownerState(lease.owner) !== 'alive' || ownerState(owner) !== 'alive') throw new Error('Runtime lease owner is not confirmed alive');
     lease.owner = owner;
     writeRuntimeMetadata(p, leasePath(p, token), JSON.stringify(lease) + '\n');

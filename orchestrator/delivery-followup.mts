@@ -1,5 +1,5 @@
 // #153: import-safe single observation of a host-recorded PR; no agents, repair charge, comments or creation.
-// Continuation provenance includes the copied execution-event helper, without granting telemetry any authority.
+// Continuation compares the complete selected inventory and normalized execution inputs before exact-SHA authorization.
 // All production subprocesses share one 30s deadline and a 10s per-command limit; locks cover only local CAS.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -39,6 +39,7 @@ export interface FollowupHost {
   merge(identity: DeliveryIdentity, authorize: () => string | undefined, deadline: number): Promise<DeliveryObservation>;
   state: string;
   workflow: string;
+  inventory: Record<string, string>;
   settings: Record<string, unknown>;
 }
 /** Missing/malformed proof/config is an operator hold. Only a tracker transport/read failure remains retryable. */
@@ -56,10 +57,10 @@ export async function observeWaitingDelivery(run: RunState, host: FollowupHost):
         branch: d.branch, base: d.base, baseline: owned.implementationBaseSha ?? '', tip: d.sha, requirementsHash: owned.verification.requirementsHash }, d.proofId);
       if (frozen.report.verdict !== 'PASS') return 'Host proof is not PASS';
       const code = frozen.proof.provenance.code;
-      const required = ['delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'model-policy.mts', 'models.mts', 'selection.mts', 'main.mts', 'capabilities.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'];
-      if (!required.every(k => typeof code[k] === 'string')) return 'Workflow proof inputs missing; fresh verification required';
+      if (!host.inventory || !Object.keys(host.inventory).length || JSON.stringify(Object.entries(code).sort()) !== JSON.stringify(Object.entries(host.inventory).sort()))
+        return 'Workflow proof inputs missing or changed; fresh verification required';
       for (const [path, hash] of Object.entries(code)) {
-        if (!/^[a-zA-Z0-9.-]+$/.test(path) || sha256(readFileSync(resolve(host.workflow, path))) !== hash) return `Workflow changed: ${path}; fresh verification required`;
+        if (!/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(path) || path.split('/').some(p => p === '.' || p === '..') || sha256(readFileSync(resolve(host.workflow, path))) !== hash) return `Workflow changed: ${path}; fresh verification required`;
       }
       if (JSON.stringify(frozen.proof.provenance.settings) !== JSON.stringify(host.settings)) return 'Verification/merge settings changed; fresh verification required';
       return host.authorize(owned, deadline);

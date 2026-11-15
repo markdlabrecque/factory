@@ -14,7 +14,6 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { paths } from '../src/paths.mts';
 import { Fake } from '../src/platform/fake.mts';
 import { install } from './runtime-fixture.mts';
@@ -22,12 +21,13 @@ import { uninstall } from '../src/commands/uninstall.mts';
 import { init } from '../src/commands/init.mts';
 import { readRegistry } from '../src/projects.mts';
 import { buildAssets } from '../src/scaffold.mts';
+import { bindExecution } from './execution-fixture.mts';
 import { readReview, recoveryCopyProblem } from '../src/recovery-review.mts';
 
 const personal = { profile: 'personal', repo: 'me/site', image: 'sandcastle-site' };
 const client = { profile: 'client', repo: 'group/sub/site', image: 'sandcastle-client', host: 'git.example.com', 'project-id': '42' };
 // Fresh and repaired scaffolds ship both dependency evaluation and delivery continuation.
-const EXPECTED = ['capabilities.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts', 'factory.toml', 'project-config.mts', 'model-policy.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
+const EXPECTED = ['context.mts', 'context-process.mts', 'capabilities.mts', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'delivery.mts', 'delivery-followup.mts', 'verification.mts', 'factory.toml', 'project-config.mts', 'model-policy.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(f => `vendor/smol-toml/${f}`), '.env', '.env.example', '.gitignore', 'admission.mts', 'analyze.mts', 'assessment.mts', 'board.mts', 'board.template.html', 'ci.mts', 'config.mts', 'dispatch.mts',
   'dispatch.sh', 'execution-events.mts', 'factory-dispatch.sh', 'graph.mts', 'handoff.mts', 'journal.mts', 'main.mts', 'manifests.mts', 'models.mts', 'ownership.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.md',
   'prompt.recover.md', 'prompt.verify.md', 'recovery-sandbox.mts', 'recovery.mts', 'refresh.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'tracker.mts'].sort();
@@ -85,7 +85,11 @@ test('generated runtimes derive model tiers and preserve tracker and merge polic
   const a = repo('a'); const b = repo('b');
   await quiet(() => init(p, a, personal));
   await quiet(() => init(p, b, client));
-  const pc = await import(pathToFileURL(join(a, '.sandcastle/runtime-config.mts')).href);
+  const settings = (root: string) => {
+    const runtime = bindExecution(root);
+    return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `const c=await import(${JSON.stringify(join(runtime.directory, 'runtime-config.mts'))}); console.log(JSON.stringify({...c,labels:c.allLabels()}));`], { cwd: root, env: runtime.env, encoding: 'utf8' }));
+  };
+  const pc = settings(a);
   assert.equal(pc.TRACKER.kind, 'github');
   assert.equal(pc.TRACKER.project, 'me/site');
   assert.equal(pc.TRACKER.milestone, undefined);
@@ -93,11 +97,11 @@ test('generated runtimes derive model tiers and preserve tracker and merge polic
   assert.equal(pc.AGENT.family, 'openai');
   assert.equal(pc.AGENT.thinking, 'high');
   assert.deepEqual(pc.AGENT.modelAliases, { small: 'openai/gpt-6-luna', mid: 'openai/gpt-6.1-terra', large: 'openai/gpt-6.1-sol' });
-  assert.ok(!pc.allLabels().some((l: string) => l.startsWith('model:')));
+  assert.ok(!pc.labels.some((l: string) => l.startsWith('model:')));
   assert.equal(pc.AGENT.model, 'openai/gpt-6.1-sol');
   assert.equal(pc.GRAPH.model, 'openai/gpt-6.1-terra');
   assert.equal(pc.MERGE.auto, true);
-  const cc = await import(pathToFileURL(join(b, '.sandcastle/runtime-config.mts')).href);
+  const cc = settings(b);
   assert.deepEqual([cc.TRACKER.kind, cc.TRACKER.gitlabHost, cc.TRACKER.project, cc.TRACKER.projectId, cc.TRACKER.milestone], ['gitlab', 'git.example.com', 'group/sub/site', 42, undefined]);
   assert.equal(cc.AGENT.provider, 'pi');
   assert.equal(cc.AGENT.family, 'openai');

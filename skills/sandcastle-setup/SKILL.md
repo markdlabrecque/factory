@@ -3,7 +3,8 @@ name: sandcastle-setup
 description: Set up a project's Sandcastle scaffold from composable layers - GitLab or GitHub tracker, agent and standard Playwright browser provisioning, with optional web runtime and CMS layers and the Factory workflow. Use when setting up Sandcastle with GitLab or for a Drupal/WordPress project, or when `.sandcastle/` still holds the Custom tracker sentinels.
 ---
 
-<!-- Deferred recovery maintenance is CLI-owned; install normally, preserve project pauses and require reviewed workflows.
+<!-- Shared Factory setup keeps project environment assets separate from leased runtime code and templates.
+Deferred recovery maintenance is CLI-owned; install normally, preserve project pauses and require reviewed workflows.
 Upgrade CLI/checkpoints/observer/admission/proof together for scheduler-authorized CI continuation. -->
 <!-- #140: compact current red blockers replace the Current ticket panel and manual refresh button; backend checks remain required. -->
 <!-- Scheduler stub reads are concurrent-safe; browser preflight uses a Node-owned process group, independent of host timeout. CI retains TAP failures. -->
@@ -20,6 +21,23 @@ Upgrade CLI/checkpoints/observer/admission/proof together for scheduler-authoriz
 <!-- #122: Both trackers support opt-in MERGE.auto and requiredChecks; copy adapters/ci/handoff/dispatch together and remove the old main.mts GitHub-only guard. -->
 <!-- #150: structured proof is a coherent manual workflow/prompt upgrade, never a historical PASS migration. -->
 # Sandcastle setup (layers)
+
+## Shared Factory execution boundary
+
+For the standard Factory workflow, read the
+[execution context contract](../../docs/execution-context.md) before preparing a
+project. Keep `.env`, image/setup settings, Dockerfile and explicitly chosen sandbox
+helpers in the checkout. Use the selected complete runtime for executable code,
+Factory templates and private dependencies. Build through its absolute Sandcastle
+executable; dispatch performs no project npm install or npx resolution.
+
+Prepare project-root v2 TOML and the confirmed environment layers only. Top-level
+CLI/Board/scheduler routing and complete overrides remain #164; data-only scaffolding
+and additive instruction loading remain #165. If no launcher supplies the required
+context, report that boundary instead of running a copied entrypoint. Nonempty
+instruction lists currently hold execution. The older copied-workflow recipes below
+are migration reference, not setup instructions for this shared runtime. Keep
+existing customizations, saved work, evidence, budgets and schedules unchanged.
 
 The Factory checkout's `.pi/settings.json` sets `defaultProvider` to `openai` for interactive Pi use. Configure orchestrator models separately; this is not a scaffold model setting.
 
@@ -75,13 +93,15 @@ base, expose proof storage to an agent mount, or auto-resume schedules.
 ## Factory configuration
 
 For a new/empty workflow, use `factory init --profile personal|client`; review the
-commented `.sandcastle/factory.toml`. It owns tracker, agent/model aliases, labels,
+commented `.sandcastle/factory.toml`. It owns tracker, agent family, labels,
 selection, work units, dispatch, merge, graph, CI and sandbox startup steps. Read
-[the complete v1 schema/defaults, tracker capabilities and migration mapping](../../docs/project-config.md)
-before changing settings. Present TOML is authoritative with **no legacy per-field
-fallback**. Unknown/invalid keys and unsupported tracker options fail before
-credentials, Docker/npm, tracker mutation or admission. Without TOML, legacy
-config/SELECT/CONFIG customizations keep working.
+[the v2 schema, model policy and manual migration](../../docs/project-config.md)
+before changing settings. Shared execution requires this project-root v2 file;
+missing/v1 data fails with manual-migration guidance, never executable config fallback.
+Unknown/invalid keys and unsupported tracker options fail before credentials, Docker,
+tracker mutation or admission. Pi is fixed. Tickets may declare `Model tier: small`,
+`mid` or `large`, with Mid as the default. Analysis uses family Mid; verification and
+recovery use Large. The later legacy model-alias recipes do not apply to v2.
 
 Do not silently migrate an existing scaffold: init repair skips TOML if workflow
 files already exist; update never creates or overwrites it. Have the human review
@@ -170,7 +190,10 @@ Factory verification always needs Playwright and headless Chromium, even for sta
 3. Verify: build the image (`npx sandcastle docker build-image`); a `maxIterations: 1` run on a throwaway ticket where the agent starts the web layer, loads the page with Playwright, and closes the ticket.
 4. Prompt conventions (the init template's prompt; skip with the workflow, which ships its own): state the label; commit messages start with the ticket ref (`#425: ...`); `glab mr create` titles start `#<iid>: `; tell the agent to check its work with the web server and Playwright before committing.
 
-### Workflow (if chosen)
+### Legacy copied workflow (reference only)
+
+For shared execution, use the boundary above instead of this copy procedure.
+
 Source: a sandcastle-helper checkout. Ask for its path (default `~/Projects/sandcastle-helper`); if there is none, `gh repo clone markdlabrecque/sandcastle-helper` into a temp dir. Follow its `orchestrator/ADAPTING.md` ("Install into a project" and "What to adapt per project"):
 1. Prefer `factory init` (adds the missing files, never overwrites). Otherwise copy the files ADAPTING.md lists into `.sandcastle/`, overwriting the init template's `main.mts` and `prompt.md` (the base install's list/close substitutions and `LABEL` go with them; the workflow's host-side code does that work with the host's `glab` login, so `GITLAB_TOKEN` in `.env` stays unused). Delete the template's other prompt files if it shipped any.
 For automatic merging, set `[merge] auto = true` in `factory.toml` (legacy-only: `MERGE.auto` in `config.mts`); automatic merging works on GitHub and GitLab; `false` leaves merging to a person. Optional `MERGE.requiredChecks` lists exact check/job names that must pass, not skip. GitLab opens the MR before waiting for its head pipeline and jobs on the pushed SHA. Unmet gates comment the reason and park the run as `waiting`; GitHub failed CI still drafts the PR and fails the run. Factory adds no label/approval gate. See `orchestrator/ADAPTING.md`, "The CI gate", for merge strategy and upgrade details. Upgrades copy the tracker facade, both adapters, `ci.mts`, `handoff.mts` and `dispatch.mts` together. In project-owned `main.mts`, remove the old GitHub-only auto-merge guard and include any open PR/MR branch in the host's `live` predicate, so waiting merges retain conflict protection. This setting has no init prompt or CLI flag.

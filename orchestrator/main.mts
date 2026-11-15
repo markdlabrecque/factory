@@ -1,9 +1,10 @@
-// Image readiness pins sandbox construction to immutable input; setup and independent verifier probes remain mandatory.
+// Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
+// Image readiness pins sandbox construction; setup and independent verifier probes remain mandatory.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 // #153: proofs also bind continuation, checkpoint and admission code; upgrades require fresh verification.
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
-// V2 TOML owns sandbox/CI settings. Resolve the ticket tier once at attempt start; refresh cannot change it.
-// Provenance covers the copied local-observation helper along with its board/admission imports.
+// Project-root v2 TOML owns sandbox/CI settings. Ticket choice and runtime/template inputs stay fixed per attempt.
+// Provenance covers the complete selected inventory, including local-observation and admission helpers.
 // #149: unknown dependency reads hold implementer and recovery work without needs-human labels.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
 import { recordModelResolution } from "./assessment.mts";
@@ -18,21 +19,22 @@ import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, se
 import { readAdmission } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { parentText } from "./analyze.mts";
-import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
+import { context, effectiveConfig, AGENT, allLabels, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { piEnvFor, resolveTicketModel } from "./models.mts";
+import { contextHold, retainRuntime } from './context.mts';
 import { blockedOutcome, expandUnits, SANDCASTLE_MARK, unitHash } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest, readManifest } from "./manifests.mts";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
-import { assertProofStoreOutsideMounts, createProof, sha256 } from './verification.mts';
+import { assertProofStoreOutsideMounts, createProof } from './verification.mts';
 import type { Provenance } from './verification.mts';
 import type { Host } from "./handoff.mts";
 import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
 import { createOwnedSandbox, gitWorkspace, readDotEnv, realProc } from "./recovery-sandbox.mts";
 import * as tracker from "./tracker.mts";
 
-// End-to-end loop for one ticket (run from the repo root):
-//   npx tsx .sandcastle/main.mts --base sal-develop [--issue 695] [--no-push]
+// End-to-end loop for one ticket, launched from the project root through the selected bundle's absolute tsx:
+//   <runtime>/main.mts --base <integration-branch> [--issue N] [--no-push]
 // 1. branch <iid>-<slug> off origin/<base>   2. implementer run   3. verifier run (screenshots/video + verdict)
 // 4. host posts the evidence to the ticket   5. on PASS: push and deliver (tracker adapter).
 //    Steps 3-5 live in handoff.mts, shared with recovery runs so a repaired branch is verified and delivered the same way:
@@ -62,11 +64,12 @@ import * as tracker from "./tracker.mts";
 // (ownership.mts) and fills in the branch's commit once they exist. The normal path keeps its branch-exists protection.
 
 // Sandbox and CI settings are data, never executable project configuration.
+const runtimeLease = await retainRuntime(context);
 const CONFIG = effectiveConfig.config;
 const PROJECT = TRACKER.project;
 // What the container's Pi run needs depends on its model's provider (models.mts). pi-claude-subscription (the
 // personal config) needs nothing from here: the image's Claude Code CLI logs in with CLAUDE_CODE_OAUTH_TOKEN,
-// which Sandcastle reads from .sandcastle/.env itself. Only an `openai/` model (a custom config) gets a
+// which Sandcastle reads from the project's .sandcastle/.env. The OpenAI family gets a
 // per-run token from the host's pi login, handed over as OPENAI_API_KEY for that one run.
 function openaiCredential(): string {
   for (const cmd of [["print-bearer-token", "--min-expiry", "50m"], ["print-api-key"]]) {
@@ -94,6 +97,7 @@ process.on("exit", (code) => {
 const readinessCancel = new AbortController();
 const cancelReadiness = () => readinessCancel.abort();
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelReadiness);
+context.assertCurrent();
 const readiness = await checkImageCapabilities({ image: CONFIG.image, uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
   stateDir: stateDir(), signal: readinessCancel.signal });
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelReadiness);
@@ -162,7 +166,6 @@ if ("error" in picked && !recovering) {
   queueModelProblem(iid, { title: startTicket.title, ticketUrl: tracker.ticketUrl(iid), base, note: picked.error }, process.env.FACTORY_LAUNCH_CLAIM);
   fail(`#${iid} ${picked.error} Not started.`);
 }
-const implementerModel = "error" in picked ? AGENT.model : picked.model; // recovery never uses it
 const ticket = [tracker.viewText(Number(iid)), parentText(startTicket)].filter(Boolean).join("\n\n");
 // The version of the ticket this run builds from; compared again before the MR opens.
 const ticketHash = (t = withParent(tracker.ticket(Number(iid)))) => ({ hash: unitHash(t, tracker.notes(Number(iid))), description: t.description });
@@ -175,8 +178,8 @@ const provenance = async (sandbox: { exec(cmd: string): Promise<{ stdout: string
   const imageId = sh('docker', ['container', 'inspect', '--format', '{{.Image}}', name]);
   if (imageId !== IMAGE) throw Error('Sandbox image differs from admitted immutable image; fresh readiness required');
   return { imageId, nodeVersion: (await sandbox.exec('node --version')).stdout.trim(),
-    code: Object.fromEntries(['factory.toml', 'model-policy.mts', 'models.mts', 'graph.mts', 'config-read.mts', 'delivery-followup.mts', 'delivery.mts', 'board.mts', 'admission.mts', 'execution-events.mts', 'dispatch.mts', 'runtime-config.mts', 'project-config.mts', 'selection.mts', 'main.mts', 'capabilities.mts', 'handoff.mts', 'verification.mts', 'recovery.mts', 'recovery-sandbox.mts', 'tracker.mts', 'tracker.github.mts', 'tracker.gitlab.mts', 'ci.mts', 'prompt.verify.md'].map(f => [f, sha256(readFileSync(resolve('.sandcastle', f)))])),
-    settings: { image: CONFIG.image, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: CONFIG.ciWaitMinutes, noPipelineMinutes: CONFIG.noPipelineMinutes } };
+    code: Object.fromEntries(context.manifest.files.map((file: { path: string; sha256: string }) => [file.path, file.sha256])),
+    settings: { image: CONFIG.image, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: CONFIG.ciWaitMinutes, noPipelineMinutes: CONFIG.noPipelineMinutes, execution: context.identity } };
 };
 const catalogue = work.tickets.filter((t) => String(t.iid) !== iid);
 const slug = String(issue.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "");
@@ -217,6 +220,7 @@ if (recovering) {
   mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true });
   const evidenceBox = `/home/agent/evidence/${iid}`;
   const recheck = () => {
+    const hold = contextHold(context); if (hold) return hold;
     const now = withParent(tracker.ticket(Number(iid)));
     if (now.state === "closed") return `#${iid} is closed`;
     if (!['open', 'opened'].includes(now.state ?? '')) return `#${iid}'s eligibility is unknown`;
@@ -230,7 +234,7 @@ if (recovering) {
     const openMrs = tracker.openMrBranches();
     const runOf = (b: number) => readRuns().find((x) => x.project === PROJECT && x.iid === String(b));
     return prerequisiteHold(Number(iid), {
-      manifest: readManifest(PROJECT, Number(iid)), hash: ticketHash(now).hash,
+      manifest: readManifest(PROJECT, Number(iid)), hash: ticketHash(now).hash, policyIdentity: context.policyIdentity,
       dependency: (b) => dependencyState(b, { ticket: tracker.ticket, run: runOf, mergedInto: tracker.mergedInto, base }),
       active: (b) => {
         const dep = runOf(b);
@@ -239,8 +243,10 @@ if (recovering) {
       },
     });
   };
+  runtimeLease.pendingCleanup();
   const result = await runRecoveryAttempt({
-    root: process.cwd(), record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
+    root: context.projectRoot, record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
+    repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
     proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash },
     provenance: (sb) => provenance(sb, rec.container),
     promptArgs: {
@@ -264,6 +270,7 @@ if (recovering) {
     agent,
     log: (line) => console.log(line),
   });
+  if (!result.cleanupPending) runtimeLease.confirmedCleanup();
   finished = true;
   // The recovery claim stays in the admission record either way; settleRecovery releases it once the container is confirmed gone.
   if (result.outcome !== "delivered" || result.cleanupPending) {
@@ -273,6 +280,9 @@ if (recovering) {
   process.exit(result.outcome === "delivered" && !result.cleanupPending ? 0 : result.outcome === "interrupted" ? 143 : 1);
 }
 
+// Recovery has exited using its fixed role default. Normal work has no model/provider fallback.
+if ('error' in picked) fail(`#${iid} ${picked.error} Not started.`);
+const implementerModel = picked.model;
 const branch = `${iid}-${slug}`;
 
 sh("git", ["fetch", "origin", base]);
@@ -292,7 +302,7 @@ currentIid = iid;
 const executionId = claimToken ?? randomUUID();
 setStage(iid, {
   title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
-  implementationModel: implementerModel, modelChoice: 'error' in picked ? undefined : picked.choice,
+  implementationModel: implementerModel, modelChoice: picked.choice,
   implementationBaseSha: baseSha, verification: undefined,
   executionId,
   evidenceDir: resolve('.sandcastle/evidence', iid, executionId), ticketHash: startVersion.hash, verdict: undefined, mr: undefined,
@@ -334,6 +344,8 @@ const receipt = recordIntent(stateDir(), {
   root: process.cwd(), tracker: { kind: tracked.kind ?? "gitlab", host: tracked.host ?? tracked.gitlabHost ?? "", project: PROJECT },
   ticket: iid, branch, base, implementationBaseSha: baseSha, runId: claimToken ?? randomUUID(), branchToCreate: true, worktreeToCreate: true,
 });
+context.assertCurrent();
+runtimeLease.pendingCleanup();
 const sandbox = await createSandbox({
   branch,
   baseBranch: `origin/${base}`,
@@ -371,6 +383,7 @@ const promptArgs = {
 };
 
 const recheck = () => {
+  const hold = contextHold(context); if (hold) return hold;
   const nowParent = tracker.parentOf(Number(iid));
   if (nowParent !== parentIid) return 'Ticket parent changed; fresh verification required';
   const now = withParent(tracker.ticket(Number(iid)));
@@ -396,7 +409,7 @@ try {
   setStage(iid, { stage: "implementing" });
   const impl = await sandbox.run({
     agent: agent(implementerModel),
-    promptFile: "./.sandcastle/prompt.md",
+    promptFile: context.codePath('prompt.md'),
     promptArgs,
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
@@ -430,6 +443,7 @@ if (tip) {
   const gone = spawnSync('docker', ['container', 'inspect', verifierContainer], { encoding: 'utf8' });
   if (gone.status === null || gone.status === 0 || !/No such (object|container)/i.test(gone.stderr)) fail('Verifier container teardown is unconfirmed; not freezing or delivering evidence');
 }
+runtimeLease.confirmedCleanup();
 
 // ---- implementer reported a missing prerequisite ----------------------------------
 if (blockers) {
