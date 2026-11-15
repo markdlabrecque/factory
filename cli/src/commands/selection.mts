@@ -1,6 +1,6 @@
-// #137: read-only explanation. Never imports main/dispatch, creates labels, analyzes, or writes state.
+// Read-only explanation consumes an already selected explicit runtime; launcher selection remains separate.
+// Never imports project executables/main/dispatch, creates labels, analyzes, or writes state.
 // Native-filter membership must be complete; uncertain reads produce unknown rather than false reasons.
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Paths } from '../paths.mts';
@@ -21,12 +21,12 @@ export async function selectionExplain(p: Paths, action: string | undefined, tic
   let inheritedFrom: number | undefined;
   if (!c) eligibility.reasons.push({ code: 'legacy-unsupported', message: 'Cannot safely infer a customized legacy SELECT block. Review workflow upgrades and manually migrate to factory.toml; no executable legacy config was loaded.' });
   else try {
-    // An old adapter would execute config.mts despite TOML; adding TOML alone is not a workflow upgrade.
-    for (const name of ['tracker.mts','tracker.github.mts','tracker.gitlab.mts']) {
-      const source = readFileSync(join(ctx.scaffold, name), 'utf8');
-      if (/from\s+["']\.\/config\.mts["']/.test(source)) throw new Error('Workflow is not TOML-aware. Review and upgrade tracker/runtime helpers together before explaining or scheduling.');
-    }
-    const tracker: typeof import('../../../orchestrator/tracker.mts') = await import(pathToFileURL(join(ctx.scaffold, 'tracker.mts')).href);
+    // Runtime selection belongs to the launcher. Until all CLI paths supply it, refuse rather than execute a project copy.
+    const runtime = process.env.FACTORY_RUNTIME_ROOT;
+    if (!runtime || process.env.FACTORY_PROJECT_ROOT !== ctx.root) throw Error('Explicit execution context required; upgrade Factory launch routing.');
+    const { executionContext } = await import(pathToFileURL(join(runtime, 'context.mts')).href);
+    await executionContext();
+    const tracker: typeof import('../../../orchestrator/tracker.mts') = await import(pathToFileURL(join(runtime, 'tracker.mts')).href);
     const t = tracker.ticket(iid);
     const ready = tracker.readyList(c.selection);
     const excluded = excludedAssignees(c.selection, tracker.currentUsername);

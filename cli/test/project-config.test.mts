@@ -1,5 +1,6 @@
 // Copied-scaffold v2 authority, fail-closed configuration and bootstrap integration.
 // Strict tracker/launch stubs, temporary Git projects/state; no credentials, Docker, agents or services.
+import { bindExecution } from './execution-fixture.mts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -45,10 +46,11 @@ else if(a[0] === 'api' && a[1] === 'graphql') {
 } else { console.error('UNEXPECTED TRACKER CALL: '+JSON.stringify(a)); process.exit(97); }
 `;
   for (const cmd of ['gh','glab']) writeFileSync(join(bin,cmd),stub,{mode:0o755});
-  const env = { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: p.state, PATH: `${bin}:${process.env.PATH}` };
+  const runtime = bindExecution(root, { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: p.state, PATH: `${bin}:${process.env.PATH}` });
+  const env = runtime.env;
   const run = (args: string[], extra: Record<string,string> = {}) => spawnSync(process.execPath,[cli,...args],{cwd:root,env:{...env,...extra},encoding:'utf8'});
   const explain = (extra: Record<string,string> = {}) => run(['selection','explain','7','--json'],extra);
-  return {base,root,sc,p,toml,calls,run,explain,env};
+  return {base,root,sc,p,toml,calls,run,explain,env,runtime};
 }
 function snapshot(dir: string) {
   if (!existsSync(dir)) return [];
@@ -56,7 +58,7 @@ function snapshot(dir: string) {
 }
 test('copied runtime ignores executable config; missing, v1 and invalid TOML fail closed', t => {
   const f = fixture(t);
-  const code = `import { TRACKER, effectiveConfig } from './.sandcastle/runtime-config.mts'; console.log(JSON.stringify([TRACKER.project,effectiveConfig.source.mode]));`;
+  const code = `import { TRACKER, effectiveConfig } from ${JSON.stringify(join(f.runtime.directory, 'runtime-config.mts'))}; console.log(JSON.stringify([TRACKER.project,effectiveConfig.source.mode]));`;
   const run = () => spawnSync(process.execPath,['--input-type=module','-e',code],{cwd:f.root,env:f.env,encoding:'utf8'});
   assert.deepEqual(JSON.parse(run().stdout),['new/project','toml']);
   for (const version of [1, 999]) {
@@ -70,7 +72,7 @@ test('copied runtime ignores executable config; missing, v1 and invalid TOML fai
   assert.notEqual(missing.status,0); assert.match(missing.stderr,/factory.toml/);
   assert.doesNotMatch(missing.stderr,/EXECUTED_LEGACY/);
   writeFileSync(join(f.sc,'config.mts'),`export const TRACKER={project:'legacy/project'},AGENT={},MERGE={},LABELS={},SUBTASKS={},GRAPH={}; export const allLabels=()=>['custom legacy label'];`);
-  const legacy = spawnSync(process.execPath,['--input-type=module','-e',`import { TRACKER, allLabels, effectiveConfig } from './.sandcastle/runtime-config.mts'; console.log(JSON.stringify([TRACKER.project,allLabels(),effectiveConfig ?? null]));`],{cwd:f.root,env:f.env,encoding:'utf8'});
+  const legacy = spawnSync(process.execPath,['--input-type=module','-e',`import { TRACKER, allLabels, effectiveConfig } from ${JSON.stringify(join(f.runtime.directory, 'runtime-config.mts'))}; console.log(JSON.stringify([TRACKER.project,allLabels(),effectiveConfig ?? null]));`],{cwd:f.root,env:f.env,encoding:'utf8'});
   assert.notEqual(legacy.status,0); assert.match(legacy.stderr,/factory.toml/);
   assert.equal(legacy.stdout,'');
 });
@@ -163,11 +165,10 @@ if(tool==='curl' && a.includes('https://api.anthropic.com/v1/messages')) { conso
 console.error('unexpected '+tool+' '+JSON.stringify(a));process.exit(91);
 `;
   for(const name of ['glab','pi','docker','curl','npm','npx']) writeFileSync(join(bin,name),script,{mode:0o755});
-  // Avoid dependency bootstrap without borrowing any source-checkout dependencies.
-  mkdirSync(join(f.root,'node_modules/@ai-hero/sandcastle'),{recursive:true});
   writeFileSync(join(f.sc,'.env'),'CLAUDE_CODE_OAUTH_TOKEN=fixture-only\n');
   writeFileSync(join(f.sc,'dispatch.mts'),`import { TRACKER, AGENT, effectiveConfig } from './runtime-config.mts'; console.log(JSON.stringify([TRACKER.project,AGENT.provider,effectiveConfig.config.image]));`);
-  const r = spawnSync('bash',[join(f.sc,'dispatch.sh'),'--dry-run'],{cwd:f.root,env:f.env,encoding:'utf8'});
+  const runtime = bindExecution(f.root, f.env);
+  const r = spawnSync('bash',[join(runtime.directory,'dispatch.sh'),'--dry-run'],{cwd:f.root,env:runtime.env,encoding:'utf8'});
   assert.equal(r.status,0,r.stdout+r.stderr);
   assert.deepEqual(JSON.parse(r.stdout.trim()),['new/project','pi','sandcastle-test']);
   assert.ok(!readFileSync(log,'utf8').includes('"npm"'));
@@ -176,7 +177,7 @@ console.error('unexpected '+tool+' '+JSON.stringify(a));process.exit(91);
 
 test('shell validates malformed TOML before credential, Docker, npm or dispatch calls', t => {
   const f = fixture(t); writeFileSync(f.toml,'version = 0');
-  const r = spawnSync('bash',[join(f.sc,'dispatch.sh')],{cwd:f.root,env:f.env,encoding:'utf8'});
+  const r = spawnSync('bash',[join(f.runtime.directory,'dispatch.sh')],{cwd:f.root,env:f.env,encoding:'utf8'});
   assert.equal(r.status,1); assert.match(r.stderr,/factory.toml.*version/);
   assert.equal(existsSync(f.calls),false);
   assert.equal(existsSync(join(f.root,'node_modules')),false);
@@ -200,6 +201,6 @@ test('metadata resolves the linked worktree version without executing legacy con
 test('bootstrap scalar helper safely returns data with spaces and never interprets commands', t => {
   const f = fixture(t);
   writeFileSync(f.toml,readFileSync(f.toml,'utf8').replace('image = "sandcastle-test"','image = "image with spaces $(touch BAD)"'));
-  const r = spawnSync(process.execPath,[join(f.sc,'config-read.mts'),f.sc,'image'],{cwd:f.root,env:f.env,encoding:'utf8'});
+  const r = spawnSync(process.execPath,[join(f.runtime.directory,'config-read.mts'),f.sc,'image'],{cwd:f.root,env:f.env,encoding:'utf8'});
   assert.equal(r.status,0,r.stderr); assert.equal(r.stdout,'image with spaces $(touch BAD)'); assert.equal(existsSync(join(f.root,'BAD')),false);
 });

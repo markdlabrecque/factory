@@ -1,4 +1,5 @@
 // Recovery admission requires preparation; the pass scenario reproduces current assessment plus stale execution analysis offline.
+import { bindExecution } from '../cli/test/execution-fixture.mts';
 import {preparedFixture} from '../cli/test/prepared-fixture.mts';
 import {prepareRecovery} from '../cli/src/recovery-prepare.mts';
 // #153: exact-SHA REST merge remains bound to the original recovery verification.
@@ -41,8 +42,11 @@ const ID = "5b1f3c2a-9d8e-4f70-8a6b-0c1d2e3f4a5b";
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 
-for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'dirty', 'legacy-prompt', 'dependency-unknown', 'setup-bad']) {
- test(`real recovery entrypoint: ${scenario}`, async (t) => {
+for (const { scenario, tier } of [
+  ...['pass', 'missing-baseline', 'title', 'closed-before', 'dirty', 'legacy-prompt', 'dependency-unknown', 'setup-bad'].map(scenario => ({ scenario, tier: 'mid' })),
+  { scenario: 'pass', tier: 'small' }, { scenario: 'pass', tier: 'large' },
+]) {
+ test(`real recovery entrypoint: ${scenario} implementer tier ${tier}`,  async (t) => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-entry-")));
   const children: ChildProcess[] = [];
   t.after(() => { for (const c of children) c.kill("SIGKILL"); rmSync(home, { recursive: true, force: true }); });
@@ -90,7 +94,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   const fake = join(home, "fake");
   mkdirSync(fake);
   const env = {
-    PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake,
+    PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, FAKE_TICKET_BODY: `Model tier: ${tier}\nThe login form must work.`,
     FAKE_SETUP_BROWSER_BAD: scenario === 'setup-bad' ? 'yes' : '',
     FAKE_DEPENDENCY_ERROR: scenario === 'dependency-unknown' ? 'yes' : '',
     FAKE_MUTATION: scenario === 'closed-before' ? 'closed' : scenario === 'title' ? 'title' : '',
@@ -114,12 +118,16 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   observePass(p, root, { pass: "a", at: at(0), jam: [7] });
   observePass(p, root, { pass: "b", at: at(5), jam: [7] });
 
-  // The dispatcher's analysis of #7 (no prerequisites), at the ticket's current hash as the scaffolded code computes it.
+  const runtime = bindExecution(root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state });
+  Object.assign(env, runtime.env);
+  const { loadExecutionContext } = await import('./context.mts');
+  const policy = (await loadExecutionContext({ env: runtime.env, cwd: root, moduleRoot: runtime.directory })).policyIdentity;
+  // The dispatcher's analysis of #7, with the same explicit runtime context.
   const hash = execFileSync(process.execPath, ["--input-type=module", "-e",
-    `const t = await import("./.sandcastle/tracker.mts"); const g = await import("./.sandcastle/graph.mts"); process.stdout.write(g.unitHash(t.ticket(7), t.notes(7)));`],
+    `const t = await import(${JSON.stringify(join(runtime.directory, 'tracker.mts'))}); const g = await import(${JSON.stringify(join(runtime.directory, 'graph.mts'))}); process.stdout.write(g.unitHash(t.ticket(7), t.notes(7)));`],
   { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   mkdirSync(join(state, "graph"), { recursive: true });
-  writeFileSync(join(state, "graph", "owner_repo--7.json"), JSON.stringify({ iid: 7, project: "owner/repo", hash, analyzedAt: at(1), base: "main", baseSha: "",
+  writeFileSync(join(state, "graph", "owner_repo--7.json"), JSON.stringify({ iid: 7, project: "owner/repo", hash, policyIdentity: policy, analyzedAt: at(1), base: "main", baseSha: "",
     provides: [], requires: scenario === 'dependency-unknown' ? [{ providedBy: 12, what: 'provider', evidence: 'ticket', confidence: 1 }] : [], footprint: ["app.txt"], catalogueIids: [], blockerHashes: {} }));
 
   // The launcher's own spawn, minus npx/tsx: node runs the scaffolded main.mts directly.
@@ -127,7 +135,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   const spawner: Spawner = (cmd, args, o) => {
     assert.deepEqual([cmd, args[0], args[1]], ["npx", "tsx", ".sandcastle/main.mts"]);
     const out = openSync(o.log, "a");
-    child = spawn(process.execPath, args.slice(1), { cwd: o.cwd, env: { ...o.env, ...env }, stdio: ["ignore", out, out] });
+    child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), ...args.slice(2)], { cwd: o.cwd, env: { ...o.env, ...env }, stdio: ["ignore", out, out] });
     children.push(child);
     return child.pid!;
   };
@@ -144,7 +152,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
     const extension=join(home,'subscription-fixture.mjs');writeFileSync(extension,'// fixture only');
     writeFileSync(join(bin,'pi'),`#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify({provides:['fix'],requires:[],footprint:['app.txt']})));\n`,{mode:0o755});
     const ready=await prepareRecovery(p,{root,tracker:'owner/repo',ticket:7,base:'main',dir:state,
-      spawn:(node,args,o)=>spawn(node,args,{...o,env:{...o.env,...env,FACTORY_PI_SUBSCRIPTION_EXTENSION:extension}})});
+      spawn:(node,args,o)=>spawn(node,[join(runtime.directory, args[0].split('/').at(-1)!), ...args.slice(1)],{...o,env:{...o.env,...env,FACTORY_PI_SUBSCRIPTION_EXTENSION:extension}})});
     assert.equal(ready.state,'ready',JSON.stringify(ready));if(ready.state!=='ready')throw Error(ready.reason);preparation=ready;
     assert.equal(readRecovery(p,root).attempts.length,0,'preparation did not charge');
     assert.deepEqual(readAssessment(state,'owner_repo--7'),assessment,'execution preparation never rewrites assessment');
@@ -216,14 +224,14 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
 
   // The guard: the same attempt record cannot start a second run, and nothing touches Docker.
   const before = readFileSync(join(fake, "docker.jsonl"), "utf8").trim().split("\n").length;
-  const again = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", "7", "--base", "main", "--recover", "1", "--attempt-record", join(p.recovery, "attempts", `${ID}.json`)],
+  const again = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "7", "--base", "main", "--recover", "1", "--attempt-record", join(p.recovery, "attempts", `${ID}.json`)],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   assert.equal(again.status, 1);
   assert.match(again.stderr, /not claimed for recovery attempt 1/);
   assert.equal(readFileSync(join(fake, "docker.jsonl"), "utf8").trim().split("\n").length, before);
 
   // Ordinary runs keep their protection: a normal start of #7 refuses the existing branch and never reaches Docker.
-  const normal = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", "7", "--base", "main"],
+  const normal = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "7", "--base", "main"],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   assert.equal(normal.status, 1);
   assert.match(normal.stderr, /Branch 7-fix-login already exists locally or on origin/);
@@ -233,7 +241,7 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   // (here the stubbed Sandcastle docker() throws, as a crash right after the receipt would leave it); stopping releases the claim.
   const pre = claimRun({ dir: state, project: "owner/repo", iid: "9", pid: process.pid, cap: 99 });
   assert.equal(pre.ok, true);
-  const n9 = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", "9", "--base", "main"],
+  const n9 = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "9", "--base", "main"],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   assert.notEqual(n9.status, 0);
   assert.match(n9.stderr, /docker\(\) must not be used/);
@@ -243,14 +251,14 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
   const rec9 = readRuns(state).find((r) => r.iid === "9")!;
   assert.deepEqual([rec9.stage, rec9.claim], ["stopped", (pre as { run: { claim: string } }).run.claim]);
   assert.equal(readAdmission(state).claims["owner_repo--9"], undefined, "a stopped run released its launch claim");
-  assert.equal(rec9.implementationModel, "pi-claude-subscription/claude-sonnet-5-5");
+  assert.equal(rec9.implementationModel, `pi-claude-subscription/${({small:'claude-haiku-5-5',mid:'claude-sonnet-5-5',large:'claude-opus-5-5'} as any)[tier]}`);
 
   // Direct invalid starts preserve actionable internal state, even if dispatched just before a body edit.
   for (const [n, body, status] of [[10, "Model tier: unknown", "unsupported"], [11, "Model: sonnet", "unsupported"],
     [12, "Model tier: small\nModel tier: large", "conflicting"]] as const) {
     const pending = claimRun({ dir: state, project: "owner/repo", iid: String(n), pid: process.pid, cap: 99 });
     assert.equal(pending.ok, true);
-    const result = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", String(n), "--base", "main"],
+    const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", String(n), "--base", "main"],
       { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: body,
         FACTORY_LAUNCH_CLAIM: pending.ok ? pending.run.claim : '' } });
     assert.equal(result.status, 1, result.stdout + result.stderr);
@@ -263,11 +271,11 @@ for (const scenario of ['pass', 'missing-baseline', 'title', 'closed-before', 'd
     assert.equal(readAdmission(state).claims[`owner_repo--${n}`], undefined);
     assert.equal(git(root, "branch", "--list", `${n}-*`), "");
   }
-  const fixed = spawnSync(process.execPath, [".sandcastle/main.mts", "--issue", "10", "--base", "main"],
+  const fixed = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "10", "--base", "main"],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: large' } });
   assert.match(fixed.stderr, /docker\(\) must not be used/);
   assert.equal(readRuns(state).find(r => r.iid === '10')?.implementationModel, 'pi-claude-subscription/claude-opus-5-5');
-  const defaulted = spawnSync(process.execPath, ['.sandcastle/main.mts', '--issue', '13', '--base', 'main'],
+  const defaulted = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '13', '--base', 'main'],
     { cwd: root, encoding: 'utf8', env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'No model tier declaration' } });
   assert.match(defaulted.stderr, /docker\(\) must not be used/);
   assert.equal(readRuns(state).find(r => r.iid === '13')?.implementationModel, 'pi-claude-subscription/claude-sonnet-5-5');

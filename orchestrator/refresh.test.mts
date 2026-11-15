@@ -1,7 +1,11 @@
 // #153: real copied dispatch observes durable CI waits only on authorized scheduled passes.
 // #149: dispatch retries unknown dependencies for both trackers without labels or launches.
-import { createProof, sha256 } from './verification.mts';
-import { pathToFileURL } from 'node:url';
+import { createProof } from './verification.mts';
+import { bindExecution, executionSnapshot } from '../cli/test/execution-fixture.mts';
+import { modelForRole } from './model-policy.mts';
+import { prepareRuntimeBundle } from '../cli/src/runtime-bundle.mts';
+import { installPackages } from '../cli/test/runtime-fixture.mts';
+import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../cli/src/runtime-ownership.mts';
 // #137: scaffolded fixtures use authoritative TOML for settings, shared-board capacity and CLI overrides.
 // #126: dispatch/refresh resolve description models on both trackers, preserving running attempt models.
 // #78 integration: real scaffolded dispatcher, adapters, read-only analysis and HTTP board against local Git and
@@ -55,6 +59,13 @@ function fixture(t: any, kind = "github") {
   writeFileSync(extension, 'throw new Error("Fixture extension must not execute");\n');
   const env = { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: dir, FAKE_STATE: fake, FAKE_TRACKER: kind,
     FACTORY_PI_SUBSCRIPTION_EXTENSION: extension, PATH: `${bin}:/usr/bin:/bin` };
+  const runtime = bindExecution(root, env, { install: dir => {
+    writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {appendFileSync,writeFileSync} from 'node:fs'; writeFileSync(process.env.FAKE_STATE+'/launch-context',JSON.stringify({project:process.env.FACTORY_PROJECT_ROOT,runtime:process.env.FACTORY_RUNTIME_ROOT,id:process.env.FACTORY_RUNTIME_ID})); appendFileSync(process.env.FAKE_STATE+'/launches',process.argv.slice(2).join(' ')+'\\n'); await new Promise(r=>setTimeout(r,1000));`);
+  } });
+  Object.assign(env, runtime.env);
+  const snapshot = executionSnapshot(runtime, root);
+  // Temporary caller bridge for Board routing, which is owned by the next task.
+  writeFileSync(join(root, '.sandcastle/dispatch.mts'), `await import(${JSON.stringify(join(runtime.directory, 'dispatch.mts'))});`);
   const data: any = { tickets: [ticket(7), ticket(20, { description: "Provider", labels: [] }), ticket(21, { description: "New provider", labels: [] })], ready: [7], notes: {}, parents: {} };
   const save = () => writeFileSync(join(fake, "tracker.json"), JSON.stringify(data));
   const key = (iid: number) => `owner_repo--${iid}`;
@@ -67,18 +78,22 @@ function fixture(t: any, kind = "github") {
   };
   const manifest = (iid: number) => {
     const ti = data.tickets.find((x: any) => x.iid === iid), p = data.parents[iid] && data.tickets.find((x: any) => x.iid === data.parents[iid]);
-    const m = { iid, project: "owner/repo", hash: unitHash({ ...ti, ...(p ? { parent: p } : {}) }, data.notes[iid]), analyzedAt: new Date().toISOString(),
+    const m = { iid, project: "owner/repo", policyIdentity: snapshot.policyIdentity, hash: unitHash({ ...ti, ...(p ? { parent: p } : {}) }, data.notes[iid]), analyzedAt: new Date().toISOString(),
       base: "main", baseSha: "", provides: [], requires: [], footprint: [], actualFootprint: [], catalogueIids: data.tickets.filter((t: any) => !t.contextOnly).map((t: any) => t.iid), blockerHashes: {} };
     writeFileSync(join(dir, "graph", `${key(iid)}.json`), JSON.stringify(m));
   };
   const pass = (args: string[] = [], extra = {}) => {
     save();
-    const r = spawnSync(node, [".sandcastle/dispatch.mts", "--base", "main", ...args], { cwd: root, encoding: "utf8", env: { ...env, ...extra }, timeout: 20_000 });
+    const r = spawnSync(node, [join(runtime.directory, 'dispatch.mts'), "--base", "main", ...args], { cwd: root, encoding: "utf8", env: { ...env, ...extra }, timeout: 20_000 });
     assert.equal(r.status, 0, r.stdout + r.stderr);
+    if (/launching/.test(r.stdout) && !/not launched/.test(r.stdout)) {
+      const deadline = Date.now() + 2000;
+      while (!existsSync(join(fake, 'launches')) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
     return r;
   };
   const bytes = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "absent";
-  return { home, root, dir, fake, env, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
+  return { home, root, dir, fake, env, runtime, snapshot, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
 }
 
 test('scheduled copied dispatch: pending then green uses the same proof/PR; manual and refresh do not observe', async t => {
@@ -87,16 +102,15 @@ test('scheduled copied dispatch: pending then green uses the same proof/PR; manu
   f.data.openBranches = ['7-topic']; f.manifest(7);
   git(f.root,'branch','7-topic'); git(f.root,'push','-q','origin','7-topic');
   const tip = git(f.root,'rev-parse','7-topic');
-  const runtime = await import(pathToFileURL(join(sc, 'runtime-config.mts')).href);
-  const cfg = { ...runtime.effectiveConfig, AGENT: runtime.AGENT, MERGE: runtime.MERGE };
+  const cfg = { ...f.snapshot.config, AGENT: { model: modelForRole('anthropic', 'verification').model, thinking: 'high' } };
   const evidence = join(f.home,'evidence'); mkdirSync(evidence);
   writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\n'); writeFileSync(join(evidence,'out.txt'),'verified');
   writeFileSync(join(evidence,'verification.json'),JSON.stringify({version:1,verdict:'PASS',changeKind:'feature',evidenceKind:'command',interactive:false,criteria:[{requirement:'behavior',result:'pass',evidence:['out.txt']}],artifacts:[{path:'out.txt',kind:'command-output',phase:'check'}],limitations:[]}));
-  const names = ['factory.toml','main.mts','capabilities.mts','handoff.mts','verification.mts','recovery.mts','recovery-sandbox.mts','tracker.mts','tracker.github.mts','tracker.gitlab.mts','ci.mts','prompt.verify.md','delivery-followup.mts','delivery.mts','board.mts','admission.mts','execution-events.mts','dispatch.mts','runtime-config.mts','project-config.mts','model-policy.mts','models.mts','selection.mts'];
-  const settings = {image:cfg.config.image,model:cfg.AGENT.model,thinking:cfg.AGENT.thinking??null,merge:{auto:cfg.MERGE.auto,method:cfg.MERGE.method,requiredChecks:cfg.MERGE.requiredChecks??[]},ciWaitMinutes:cfg.config.ciWaitMinutes,noPipelineMinutes:cfg.config.noPipelineMinutes};
+  const code = Object.fromEntries(f.runtime.manifest.files.map(file => [file.path, file.sha256]));
+  const settings = {image:cfg.config.image,model:cfg.AGENT.model,thinking:cfg.AGENT.thinking??null,merge:{auto:cfg.MERGE.auto,method:cfg.MERGE.method,requiredChecks:cfg.MERGE.requiredChecks??[]},ciWaitMinutes:cfg.config.ciWaitMinutes,noPipelineMinutes:cfg.config.noPipelineMinutes,execution:f.snapshot.identity};
   const hash = unitHash(f.data.tickets[0], []);
   const identity = {project:'owner/repo',ticket:'7',executionId:'execution',branch:'7-topic',base:'main',baseline:tip,tip,requirementsHash:hash};
-  const proof = createProof(f.dir,evidence,identity,{imageId:`sha256:${'a'.repeat(64)}`,nodeVersion:'v22',settings,code:Object.fromEntries(names.map(n=>[n,sha256(readFileSync(join(sc,n)))]))});
+  const proof = createProof(f.dir,evidence,identity,{imageId:`sha256:${'a'.repeat(64)}`,nodeVersion:'v22',settings,code});
   const at = new Date().toISOString(), path = join(f.dir,`${f.key(7)}.json`);
   writeFileSync(path,JSON.stringify({iid:'7',project:'owner/repo',stage:'waiting',stageSince:at,startedAt:at,updatedAt:at,pid:process.pid,executionId:'execution',branch:'7-topic',base:'main',implementationBaseSha:tip,verdict:'PASS',verification:{id:proof.id,tip,requirementsHash:hash},delivery:{version:1,kind:'github',host:'github.com',repository:'owner/repo',number:1,url:'https://github.com/owner/repo/pull/1',branch:'7-topic',base:'main',sha:tip,project:'owner/repo',ticket:'7',executionId:'execution',proofId:proof.id,state:'ci-waiting',reasonCode:'opened',observedAt:at}}));
   f.data.delivery={sha:tip,pending:true};
@@ -180,9 +194,10 @@ for (const kind of ["github", "gitlab"]) {
         }};
       };
     `);
+    const mainRuntime = bindExecution(f.root, f.env, { overlays: false });
     for (const errorMessage of ["authentication failed secret-token", "rate limit exceeded secret-token", "transport timeout secret-token"]) {
       f.data.errorMessage = errorMessage; f.save();
-      const r = spawnSync(f.node, [".sandcastle/main.mts", "--issue", "7", "--base", "main"], { cwd: f.root, env: f.env, encoding: "utf8", timeout: 20_000 });
+      const r = spawnSync(f.node, [join(mainRuntime.directory, 'main.mts'), "--issue", "7", "--base", "main"], { cwd: f.root, env: mainRuntime.env, encoding: "utf8", timeout: 20_000 });
       assert.equal(r.status, 0, r.stdout + r.stderr);
       const record = JSON.parse(f.bytes(join(f.dir, `${f.key(7)}.json`)));
       assert.equal(record.stage, "waiting");
@@ -462,7 +477,7 @@ test("#135: capped GitHub selection preserves queued cards and last-good facts",
 
 test("refresh-only rejects a malformed --ticket", (t) => {
   const f = fixture(t); f.save();
-  const r = spawnSync(f.node, [".sandcastle/dispatch.mts", "--refresh-only", "--ticket", "x"], { cwd: f.root, encoding: "utf8", env: f.env, timeout: 20_000 });
+  const r = spawnSync(f.node, [join(f.runtime.directory, 'dispatch.mts'), "--refresh-only", "--ticket", "x"], { cwd: f.root, encoding: "utf8", env: f.env, timeout: 20_000 });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /--ticket <iid>/);
 });
@@ -519,6 +534,33 @@ test("manual worker has a bounded process group and coalesces overlapping reques
   assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
 });
 
+test('a running dispatcher keeps bundle A for detached children after descriptor B publication', async t => {
+  const f = fixture(t), gate = join(f.fake, 'replacement-gate');
+  f.data.tickets = [ticket(7, { description: 'Implement this change' })]; f.save();
+  writeFileSync(join(f.home, 'bin/pi'), `#!/bin/sh\ntouch '${gate}.ready'\nwhile [ ! -f '${gate}.release' ]; do sleep 0.02; done\nexec '${f.node}' '${join(FIXTURES, 'refresh-analysis.mjs')}' "$@"\n`, { mode: 0o755 });
+  const child = spawn(f.node, [join(f.runtime.directory, 'dispatch.mts'), '--base', 'main'], { cwd: f.root, env: f.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = ''; child.stdout.on('data', s => { output += s; }); child.stderr.on('data', s => { output += s; });
+  const finished = once(child, 'close');
+  t.after(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} });
+  const deadline = Date.now() + 10000;
+  while (!existsSync(`${gate}.ready`) && child.exitCode === null && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+  assert.ok(existsSync(`${gate}.ready`), output);
+  const source = join(f.runtime.staging, 'source'), store = dirname(f.runtime.directory);
+  writeFileSync(join(source, 'cli/templates/project/prompt.md'), 'Bundle B implementation prompt');
+  const b = prepareRuntimeBundle({ sourceRoot: source, runtimeStore: store, install: installPackages });
+  const paths = { data: dirname(store), runtimes: store, runtimeDescriptor: join(dirname(store), 'runtime.json') } as any;
+  withRuntimeLock(paths, () => { recordRuntimeOwnership(paths, b.id); writeRuntimeDescriptor(paths, b.id); });
+  writeFileSync(`${gate}.release`, '');
+  const [code] = await finished; assert.equal(code, 0, output);
+  const launched = join(f.fake, 'launch-context'), limit = Date.now() + 3000;
+  while (!existsSync(launched) && Date.now() < limit) await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(f.bytes(launched)), { project: f.root, runtime: f.runtime.directory, id: f.runtime.id });
+  assert.match(f.bytes(join(f.fake, 'launches')), new RegExp(`${f.runtime.id}/main\\.mts`));
+  assert.equal(existsSync(join(f.root, '.sandcastle/logs/run-7.log')), true);
+  assert.equal(existsSync(join(f.runtime.directory, 'logs')), false);
+  assert.equal(JSON.parse(readFileSync(paths.runtimeDescriptor, 'utf8')).id, b.id);
+});
+
 for (const olderManual of [false, true]) {
   test(`out-of-order ${olderManual ? "manual then scheduled" : "scheduled then manual"} refresh keeps newer facts and analysis`, async (t) => {
     const f = fixture(t), record = f.record(7, "stopped"), gate = join(f.fake, "gate");
@@ -531,7 +573,7 @@ if [ -n "$REFRESH_TEST_GATE" ]; then
 fi
 exec "${f.node}" "${join(FIXTURES, "refresh-analysis.mjs")}" "$@"
 `, { mode: 0o755 });
-    const older = spawn(f.node, [".sandcastle/dispatch.mts", "--base", "main", ...(olderManual ? ["--refresh-only", "--ticket", "7"] : [])], {
+    const older = spawn(f.node, [join(f.runtime.directory, 'dispatch.mts'), "--base", "main", ...(olderManual ? ["--refresh-only", "--ticket", "7"] : [])], {
       cwd: f.root, detached: true, env: { ...f.env, REFRESH_TEST_GATE: gate }, stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";
@@ -574,7 +616,7 @@ if [ -n "$REFRESH_TEST_GATE" ] && [ "$1" = "issue" ] && [ "$2" = "list" ]; then
 fi
 exec "${f.node}" "${join(FIXTURES, "refresh-tracker.mjs")}" "$@"
 `, { mode: 0o755 });
-  const older = spawn(f.node, [".sandcastle/dispatch.mts", "--refresh-only", "--ticket", "7", "--base", "main"], {
+  const older = spawn(f.node, [join(f.runtime.directory, 'dispatch.mts'), "--refresh-only", "--ticket", "7", "--base", "main"], {
     cwd: f.root, detached: true, env: { ...f.env, REFRESH_TEST_GATE: gate }, stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

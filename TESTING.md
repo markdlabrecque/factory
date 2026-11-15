@@ -32,6 +32,39 @@ node scripts/test-runtime-packages.mts /path/to/npm-cache /path/to/npm/bin/npm-c
 
 The implementation was smoke-tested with Node 22.23.2 and 24.20.0. This is not an execution test of the exact 22.18.0 patch release.
 
+## Shared workflow execution
+
+```sh
+node --test orchestrator/context.test.mts orchestrator/models.test.mts orchestrator/v2-contract.test.mts cli/test/runtime-bundle.test.mts cli/test/runtime-ownership.test.mts
+node --test orchestrator/verification-entrypoint.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
+```
+
+`cli/test/execution-fixture.mts` assembles complete temporary bundles from the
+single runtime inventory with fake private dependencies. The tsx stand-in imports
+only the supplied absolute entrypoint; no package manager or real agent runs.
+Fixtures stage any test-specific workflow/provider changes before publication,
+then validate the same manifest and dependency hashes as production. They never
+write settings into the source checkout or modify an installed app.
+
+Context tests reject missing/noncanonical roots, wrong cwd, missing/mismatched
+runtime identity, escaped settings and changed dependency/template bytes. Two
+projects share runtime bytes while retaining separate settings and artifacts.
+Real local Node children test independent lease tokens, a detached child's cleanup
+boundary, uninstall refusal while owners are alive and bundle A remaining selected
+after descriptor B publication. This is a process/metadata contract test, not a
+real service-manager or container test.
+
+Entrypoint fixtures poison project modules/templates, remove project dependencies,
+and exercise both model families and all implementation tiers plus default Mid.
+They preserve the independent verifier, immutable evidence, historical baseline,
+claim, dependency, readiness, recovery-budget and exact-SHA delivery assertions.
+Settings/template changes revoke authority without changing the running model
+snapshot. The recovery fixture checks Large repair/verification regardless of
+Small/Mid/Large implementation tier. Existing CLI/Board callers use fixture-only
+bridges where top-level routing is still owned by #164; no production resolver or
+instruction-file loader is implied by these tests. Instruction loading is #165.
+Run the full suite above after these focused tests.
+
 ## Local event observations
 
 ```sh

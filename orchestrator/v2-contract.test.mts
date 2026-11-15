@@ -1,4 +1,5 @@
 // Offline tests for the v2 data contract and tier policy.
+import { bindExecution } from '../cli/test/execution-fixture.mts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
@@ -123,19 +124,21 @@ test('path validators check lexical paths, type, dangling and escaping links', (
 });
 
 test('scalar bridge derives fixed agent and provider without evaluating project code', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bridge-'));
+  const root = mkdtempSync(join(tmpdir(), 'bridge-'));
+  const dir = join(root, '.sandcastle'); mkdirSync(dir);
+  const runtime = bindExecution(root, process.env, { overlays: false });
   try {
     writeFileSync(join(dir, 'config.mts'), 'throw new Error("executed")');
     for (const [family, provider, subscription] of [['openai', 'openai', 'false'], ['anthropic', 'pi-claude-subscription', 'true']]) {
       writeFileSync(join(dir, 'factory.toml'), base + `\n[agent]\nfamily = "${family}"\n`);
       for (const [key, expected] of Object.entries({ agent: 'pi', provider, family, subscription, kind: 'github', image: 'test' })) {
-        const p = spawnSync(process.execPath, [new URL('./config-read.mts', import.meta.url).pathname, dir, key], { encoding: 'utf8' });
+        const p = spawnSync(process.execPath, [join(runtime.directory, 'config-read.mts'), dir, key], { cwd: root, env: runtime.env, encoding: 'utf8' });
         assert.equal(p.status, 0, p.stderr); assert.equal(p.stdout, expected);
       }
-      const p = spawnSync(process.execPath, [new URL('./config-read.mts', import.meta.url).pathname, dir, 'config'], { encoding: 'utf8' });
+      const p = spawnSync(process.execPath, [join(runtime.directory, 'config-read.mts'), dir, 'config'], { cwd: root, env: runtime.env, encoding: 'utf8' });
       assert.notEqual(p.status, 0); assert.match(p.stderr, /Unsupported metadata field/);
     }
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(runtime.staging, { recursive: true, force: true }); }
 });
 
 test('resolution metadata snapshots survive assessment refresh and old records remain readable', () => {

@@ -1,4 +1,4 @@
-<!-- Version 2 configuration authority, runtime model policy and manual migration. -->
+<!-- Project-root v2 data, fixed model policy, shared execution identity and manual migration. -->
 # Project settings: `.sandcastle/factory.toml`
 
 New Factory projects use versioned TOML, not edits to Factory implementation files.
@@ -15,6 +15,13 @@ converter or per-field legacy fallback. Syntax errors identify the file and loca
 without echoing source text. Runtime, dispatch, analysis, recovery, refresh,
 scaffolding and selection use v2. The runtime derives all agent settings from the
 selected family's Factory policy. It never imports `config.mts` as a fallback.
+
+Shared entrypoints load this file from the explicit canonical project context, not
+from the installed module directory. They require a complete selected runtime and
+project-root cwd. Runtime templates and private dependencies stay in the bundle;
+`.env`, sandbox helpers and artifacts stay in the project. See the
+[execution context contract](execution-context.md) for launcher inputs, leases,
+analysis/proof invalidation and the routing boundary.
 
 Unknown keys (including nested keys), duplicate keys/tables, unsupported versions,
 wrong types/enums/ranges, empty optional strings and unsupported tracker options
@@ -101,7 +108,11 @@ fresh verification.
 
 Path shape is checked while parsing. Consumers must call the exported checkout
 path resolver before use to reject missing paths, escaping symlinks and wrong file
-types. Instruction composition and workflow loading belong to later tasks.
+types. Instruction composition and workflow selection belong to later tasks.
+The current shared runtime accepts empty instruction lists only. Nonempty lists
+produce an explicit execution hold until the instruction-file consumer is available;
+the parser still validates their v2 shape. The empty frozen text/hash interface does
+not read files or replace Factory templates.
 
 Selected parents with children confer eligibility on open children without requiring
 child readiness labels. Child exclusion labels still veto. Parents with all children

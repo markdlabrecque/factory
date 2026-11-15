@@ -1,17 +1,18 @@
-// Data-only v2 settings and isolated canonical module copies. Never write config into the source checkout.
-import { cpSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+// Data-only v2 settings and complete fixture-owned runtimes. Never write config into the source checkout.
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { bindExecution } from './execution-fixture.mts';
+import { pathToFileURL } from 'node:url';
 
 export function copyTestRuntime(directory: string, config = factoryToml('owner/repo')) {
   mkdirSync(directory, { recursive: true });
-  const source = fileURLToPath(new URL('../../orchestrator/', import.meta.url));
-  for (const entry of readdirSync(source, { withFileTypes: true })) {
-    if (entry.name === 'vendor' || entry.isFile() && !entry.name.endsWith('.test.mts')) cpSync(join(source, entry.name), join(directory, entry.name), { recursive: true });
-  }
-  cpSync(new URL('../../board/', import.meta.url), join(dirname(directory), 'board'), { recursive: true });
-  writeFileSync(join(directory, 'factory.toml'), config);
-  return (name: string) => pathToFileURL(join(directory, name)).href;
+  const project = join(directory, 'project');
+  mkdirSync(join(project, '.sandcastle'), { recursive: true });
+  writeFileSync(join(project, '.sandcastle/factory.toml'), config);
+  const bundle = bindExecution(project, process.env, { overlays: false });
+  Object.assign(process.env, bundle.env);
+  process.chdir(project);
+  return (name: string) => pathToFileURL(join(bundle.directory, name)).href;
 }
 
 export function factoryToml(project: string, options: { kind?: 'github' | 'gitlab'; host?: string; projectId?: number; image?: string } = {}) {

@@ -1,4 +1,4 @@
-<!-- Workflow content identity is diagnostic only; scheduler/recovery observations do not certify executable compatibility. -->
+<!-- Shared execution requires explicit canonical project/runtime roots and complete bundle validation. Historical copy recipes below are not the shared-runtime launch contract. -->
 <!-- Recovery follow-through is CLI-owned, including local settlement during a project pause; project review stays mandatory.
 Delivery checkpoints and claims continue exact-head CI waits only with fresh proof/settings/scheduler authority. -->
 <!-- #149: ship shared dependency evaluation and its callers as one reviewed upgrade. -->
@@ -17,6 +17,23 @@ Delivery checkpoints and claims continue exact-head CI waits only with fresh pro
 <!-- #122: GitLab MR-first auto delivery, shared required checks, blocked gates wait for a person. -->
 <!-- #150: upgrade structured proof, prompts and executable delivery dependencies together. -->
 # Orchestrator
+
+## Current shared execution boundary
+
+The standard entrypoints now require a complete selected runtime, its content ID,
+an explicit canonical project root and project-root cwd. They do not execute copied
+project modules or prompts, infer the checkout from their module directory, or run
+project npm/npx installs. Ordinary settings come only from project-root v2 TOML;
+Pi models and role defaults remain Factory-owned. Runtime inventory, normalized
+settings and frozen template/additive hashes participate in analysis and proof
+identity. See the [execution context contract](../docs/execution-context.md).
+
+The copy/update/install recipes retained below describe the older copied-workflow
+layout, not a supported way to launch the new shared entrypoints. Adding context
+variables to an incomplete copy is not sufficient. Top-level CLI/Board/scheduler
+selection and complete overrides are the separate #164 task; minimal project assets
+and additive instruction loading are #165. Until those callers supply context,
+they fail closed. No existing project is migrated by these source changes.
 
 ## Comparing workflow copies before an upgrade
 
@@ -226,9 +243,9 @@ Missing checks/pipelines or pending CI leave the PR/MR open with a host `ci-wait
 
 When upgrading, copy `tracker.mts`, both tracker adapters, `ci.mts`, `handoff.mts` and `dispatch.mts` together. In project-owned `main.mts`, include any open PR/MR branch in the host's `live` predicate, not only `done` runs, so parked merges still reserve their conflicts. Remove the old GitHub-only `MERGE.auto` guard from the project-owned `main.mts` by hand. Add `requiredChecks` to your project-owned config only if needed. There is no init prompt or CLI flag.
 
-```
-npx tsx .sandcastle/main.mts --base <integration-branch> [--issue N] [--no-push]
-```
+Direct copied-module commands are unsupported by the shared entrypoint. A trusted
+launcher must select the complete bundle and use its absolute private executable,
+with the [explicit context](../docs/execution-context.md#launcher-contract).
 
 ## Install into a project
 
@@ -307,6 +324,14 @@ older **legacy-only** copies for manual migration:
 7. **Integration branch:** `--base` is required. Some projects use a different integration branch per epic.
 
 ## Running many tickets: the dispatcher
+
+For shared execution, dispatch and every detached child use the same selected
+runtime even after another bundle is published. Logs remain in the checkout;
+leases, claims, cleanup and proof authorization are independent. The shell validates
+context before credentials and Docker. It invokes only the bundle's absolute tsx
+and Sandcastle executables, never a project npm/npx command. The copied-launch
+commands in the historical description below require the separate routing upgrade
+before they can launch this runtime.
 
 `dispatch.mts` lists the tickets that qualify and starts one detached `main.mts --issue N` run for each, up to a cap on concurrent runs.
 

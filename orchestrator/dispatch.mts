@@ -1,4 +1,5 @@
-// #153: only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
+// Pinned runtime code launches detached children with independent leases; artifacts stay in the explicit project.
+// Only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
 import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthorization } from './delivery-followup.mts';
 import { validDelivery } from './delivery.mts';
 import { readAdmission } from './admission.mts';
@@ -8,15 +9,15 @@ import { dependencyState, type DependencyResult } from "./dependencies.mts";
 // #126: description model resolutions are persisted independently of immutable running attempt choices.
 import { recordModelResolution } from "./assessment.mts";
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { closeSync, mkdirSync, openSync, renameSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { claimDelivery, finishDelivery, claimRun, markMergedOutside, PARKED, queueModelProblem, readRuns, removeRun, reserveRun, setProject, setStage, stateDir, keyFor, TERMINAL } from "./board.mts";
 import type { BoardRun } from "./board.mts";
-import { effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
+import { context, effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { resolveTicketModel } from "./models.mts";
+import { retainRuntime } from './context.mts';
 import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason, unitHash } from "./graph.mts";
 import type { Note } from "./graph.mts";
 import { readManifests, removeManifest, writeManifest } from "./manifests.mts";
@@ -62,6 +63,7 @@ import type { Ticket } from "./tracker.mts";
 // passes are not asked for one. The report changes nothing here; the tick decides what to do with it.
 
 // All filters and launch limits come from validated v2 data. --max overrides only the cap.
+const runtimeLease = await retainRuntime(context);
 const SELECT = { ...effectiveConfig.selection, ...effectiveConfig.dispatch };
 
 const { values: opts } = parseArgs({
@@ -84,7 +86,7 @@ const subtasks = SUBTASKS.enabled && !opts["whole-issues"];
 const PROJECT = TRACKER.project;
 const cap = Number(opts.max ?? SELECT.maxConcurrent);
 if ((opts.max !== undefined || effectiveConfig) && (!Number.isSafeInteger(cap) || cap <= 0)) throw new Error('--max must be a positive safe integer');
-const here = dirname(fileURLToPath(import.meta.url));
+const here = context.runtimeRoot;
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 const sh = (cmd: string, args: string[]) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
 
@@ -179,12 +181,13 @@ if (!dry && process.env.FACTORY_SCHEDULED === '1' && MERGE.auto) {
   for (const r of waits) {
     try {
       const message = await observeWaitingDelivery(r, {
-        state: stateDir(), workflow: here,
-        settings: { image: effectiveConfig?.config.image ?? null, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: effectiveConfig?.config.ciWaitMinutes ?? null, noPipelineMinutes: effectiveConfig?.config.noPipelineMinutes ?? null },
+        state: stateDir(), workflow: here, inventory: Object.fromEntries(context.manifest.files.map((file: { path: string; sha256: string }) => [file.path, file.sha256])),
+        settings: { image: effectiveConfig?.config.image ?? null, model: AGENT.model, thinking: AGENT.thinking ?? null, merge: { auto: MERGE.auto, method: MERGE.method, requiredChecks: MERGE.requiredChecks ?? [] }, ciWaitMinutes: effectiveConfig?.config.ciWaitMinutes ?? null, noPipelineMinutes: effectiveConfig?.config.noPipelineMinutes ?? null, execution: context.identity },
         claim: run => claimDelivery({ iid: run.iid, project: PROJECT, pid: process.pid, cap }),
         finish: (run, token, checkpoint, note) => finishDelivery(stateDir(), PROJECT, run.iid, token, checkpoint, note),
         merge: tracker.mergeExistingDelivery,
         authorize: (run, deadline) => {
+          context.assertCurrent();
           tracker.setDeliveryDeadline(deadline);
           const d = run.delivery!;
           if (d.base !== base || bounded('git', ['symbolic-ref', '--short', 'HEAD'], deadline) !== d.base) return 'Current base branch changed';
@@ -270,7 +273,7 @@ for (const t of tracked) {
 }
 
 const stale = tracked
-  .map((t) => ({ t, why: staleReason(manifests.get(t.iid), hashOf.get(t.iid)!, catalogueHash) }))
+  .map((t) => ({ t, why: staleReason(manifests.get(t.iid), hashOf.get(t.iid)!, catalogueHash, context.policyIdentity) }))
   .filter((s): s is { t: Ticket; why: string } => !!s.why);
 const batch = stale.slice(0, GRAPH.maxAnalysesPerPass);
 if (stale.length) log(`${stale.length} ticket(s) need analysis; analysing ${batch.length} this pass`);
@@ -306,6 +309,7 @@ const dependency = (iid: number): DependencyResult => {
 
 const { decisions, dropped } = decide({
   candidates: candidates.map((c) => ({ iid: c.iid, hash: hashOf.get(c.iid)! })),
+  policyIdentity: context.policyIdentity,
   manifests,
   dependency,
   queue: new Set([...candidates.map((c) => c.iid), ...runs.filter((r) => r.stage !== "stopped").map((r) => Number(r.iid))]),
@@ -375,13 +379,13 @@ if (jamReport && !dry) {
 // ---- launch ------------------------------------------------------------------
 const launch = decisions.filter((d) => d.launch);
 if (dry || !launch.length) process.exit(0);
-const npx = resolve(dirname(process.execPath), "npx");
-const logDir = resolve(here, "logs");
+const logDir = context.projectPath('.sandcastle/logs');
 mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);
   const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base };
   // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
+  context.assertCurrent();
   const claim = claimRun({ iid, pid: process.pid, cap, patch: meta });
   if (!claim.ok) {
     log(`#${iid} not launched: ${claim.reason}`);
@@ -389,12 +393,16 @@ for (const [n, d] of launch.entries()) {
     continue;
   }
   const out = openSync(resolve(logDir, `run-${iid}.log`), "a");
-  const child = spawn(existsSync(npx) ? npx : "npx", ["tsx", resolve(here, "main.mts"), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {
+  const childRuntime = runtimeLease.childLease();
+  const child = spawn(process.execPath, [context.tsx, context.codePath('main.mts'), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {
     cwd: process.cwd(),
     detached: true,
     stdio: ["ignore", out, out],
-    env: { ...process.env, FACTORY_LAUNCH_CLAIM: claim.run.claim! },
+    env: { ...process.env, ...context.env, FACTORY_RUNTIME_LEASE: childRuntime.token, FACTORY_LAUNCH_CLAIM: claim.run.claim! },
   });
+  closeSync(out);
+  child.once('error', error => { runtimeLease.releaseChild(childRuntime.token); removeRun(iid, claim.run.claim); log(`Launch failed: ${error.message}`); });
+  if (child.pid) runtimeLease.transfer(childRuntime.token, child.pid);
   child.unref();
   // The claim goes to the child (main.mts adopts it); a launch that failed to spawn releases it.
   if (child.pid) reserveRun(iid, child.pid, { ...meta, claim: claim.run.claim });

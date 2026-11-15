@@ -1,8 +1,9 @@
-// Persisted phase observations are separate from attempt evidence and never control cleanup or delivery.
+// Runtime-owned repair/verifier templates share the fixed recovery lifecycle; project evidence never controls authority.
 import { eventIdFor, observeEvent } from './execution-events.mts';
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from 'node:url';
 // Setup readiness runs before repair and does not replace the later independent verifier probe or refund admission.
 import { browserPreflight } from './capabilities.mts';
 // #150: a repair binds fresh proof to its execution, historical baseline and exact attempt UUID after teardown.
@@ -50,7 +51,7 @@ import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 
 export const REPAIR_MINUTES = 15;
 export const REPAIR_DEADLINE_MS = 900_000;
-export const REPAIR_PROMPT = "./.sandcastle/prompt.recover.md";
+export const REPAIR_PROMPT = fileURLToPath(new URL('./prompt.recover.md', import.meta.url));
 
 export type Phase = "claimed" | "setup" | "repairing" | "verifying" | "delivering" | "finished" | "cleanup-pending";
 export type RecoveryOutcome = "delivered" | "unresolved" | "failed" | "timed-out" | "interrupted" | "host-followup" | "ownership-refused";
@@ -280,6 +281,8 @@ export interface RecoveryContext {
   provenance: (sandbox: RecoverySandbox) => Promise<Provenance>;
   parentIid?: number;
   promptArgs: Record<string, string>;
+  repairPrompt?: string;
+  verifyPrompt?: string;
   previousRun: unknown;
   diagnostics?: unknown;
   logs: string[];
@@ -289,7 +292,7 @@ export interface RecoveryContext {
 }
 export type AttemptResult = { outcome: RecoveryOutcome; reason: string; cleanupPending: boolean; record: AttemptRecord };
 
-const VERIFY_PROMPT = "./.sandcastle/prompt.verify.md";
+const VERIFY_PROMPT = fileURLToPath(new URL('./prompt.verify.md', import.meta.url));
 const READONLY = ["recovery-context.json", "previous-run.json", "previous-logs", "history", "input"];
 
 /** Copy the ticket's earlier evidence (everything except other recovery attempts) into `to`. */
@@ -392,7 +395,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   let repair: Bounded<{ commits: unknown[] }>;
   try {
     repair = await repairWithin(ms, ctx.cancel, (signal) => sb.run({
-      agent: deps.agent(ctx.model), promptFile: REPAIR_PROMPT, promptArgs: ctx.promptArgs, maxIterations: 1,
+      agent: deps.agent(ctx.model), promptFile: ctx.repairPrompt ?? REPAIR_PROMPT, promptArgs: ctx.promptArgs, maxIterations: 1,
       completionSignal: "<promise>COMPLETE</promise>", name: "repair", signal,
     }), deps.clock, (t) => save("repairing", { deadline: { ms, startedAt: new Date(t).toISOString(), endsAt: new Date(t + ms).toISOString() } }));
   } catch (e) {
@@ -427,7 +430,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
     if (!/^[0-9a-f]{40,64}$/.test(ctx.baseSha) || (await sb.exec(`git cat-file -e ${ctx.baseSha}^{commit} && git cat-file -e ${tip}^{commit}`)).exitCode !== 0) return finish('unresolved', 'Missing recorded historical baseline or tip Git object; verifier not started');
     verifiedProvenance = await ctx.provenance(sb);
     const refused = await runVerifier(sb, { setStage: (_iid, patch) => deps.setStage(patch) },
-      { iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), promptArgs: { ...ctx.promptArgs, TIP_SHA: tip }, tip, promptFile: VERIFY_PROMPT });
+      { iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), promptArgs: { ...ctx.promptArgs, TIP_SHA: tip }, tip, promptFile: ctx.verifyPrompt ?? VERIFY_PROMPT });
     rec.verifier = { tip, ...(refused ? { refused } : {}) };
     if (ctx.cancel.aborted) return finish("interrupted", `cancelled during verification; ${preserved}`);
     if (refused) return finish("failed", `${refused}; ${preserved}`);

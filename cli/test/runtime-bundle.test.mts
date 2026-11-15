@@ -19,13 +19,13 @@ function fixture() {
 }
 const prepare = (f: ReturnType<typeof fixture>) => prepareRuntimeBundle({ sourceRoot: f.source, runtimeStore: f.store, install });
 
-test('flat inventory contains local imports, except the deliberately excluded legacy config', () => {
+test('flat inventory contains executable imports and the source-layout admission bridges', () => {
   const paths = new Set(RUNTIME_ASSETS.map(a => a.destination));
   for (const asset of RUNTIME_ASSETS.filter(a => /\.(mts|js)$/.test(a.source))) {
-    const text = readFileSync(join(repo, asset.source), 'utf8');
+    const text = readFileSync(join(repo, asset.source), 'utf8').replace(/^import type .*;$/gm, '');
+    if (asset.destination === 'runtime-ownership.mts') assert.ok(paths.has('admission.mts'), 'flat ownership imports its inventoried admission helper');
     for (const match of text.matchAll(/(?:from\s*|import\s*\()\s*['"](\.{1,2}\/[^'"]+)['"]/g)) {
       const target = posix.normalize(posix.join(posix.dirname(asset.destination), match[1]));
-      if (asset.destination === 'runtime-config.mts' && target === 'config.mts') continue;
       if (asset.destination === 'capabilities.mts' && target === '../board/admission.mts') continue; // Source-tree type import; runtime uses colocated admission.
       assert(paths.has(target), `${asset.destination} references missing ${target}`);
     }
