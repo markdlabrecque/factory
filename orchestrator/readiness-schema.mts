@@ -13,6 +13,8 @@ export interface ObservationOwner { invocationId: string; ownerId: string; gener
 export interface ReadinessCheck {
   id: string;
   scope: ReadinessScope;
+  /** Explicit ticket attribution. Never infer it from a path, check ID or owner. */
+  ticket?: string;
   phase: ReadinessPhase;
   observedAt: string;
   status: ReadinessStatus;
@@ -67,7 +69,8 @@ export function validReport(v: any): v is ReadinessReport {
   return !!(keys(v, ['version', 'identity', 'owner', 'observedAt', 'phase', 'status', 'checks']) && v.version === 1 && validIdentity(v.identity) && keys(v.owner, ['invocationId', 'ownerId', 'generation']) &&
     ['invocationId', 'ownerId', 'generation'].every(k => nonempty(v.owner[k])) && date(v.observedAt) &&
     one(v.phase, ['passive', 'active', 'sandbox']) && Array.isArray(v.checks) && v.checks.length <= 256 &&
-    v.checks.every((c: any) => keys(c, ['id', 'scope', 'phase', 'observedAt', 'status', 'required', 'operation', 'path', 'errno', 'reason', 'nextActor', 'nextAction', 'automaticRecheck', 'capacity']) && nonempty(c.id) && one(c.scope, ['project', 'ticket-input', 'ticket-workspace', 'sandbox']) &&
+    v.checks.every((c: any) => keys(c, ['id', 'scope', 'ticket', 'phase', 'observedAt', 'status', 'required', 'operation', 'path', 'errno', 'reason', 'nextActor', 'nextAction', 'automaticRecheck', 'capacity']) && nonempty(c.id) && one(c.scope, ['project', 'ticket-input', 'ticket-workspace', 'sandbox']) &&
+      (c.ticket === undefined || (c.scope !== 'project' && typeof c.ticket === 'string' && /^[1-9]\d{0,19}$/.test(c.ticket))) &&
       c.phase === v.phase && date(c.observedAt) && one(c.status, ['ready', 'blocked', 'unknown']) && typeof c.required === 'boolean' &&
       nonempty(c.operation) && text(c.path) && text(c.reason) && text(c.nextAction) &&
       one(c.nextActor, ['operator', 'factory', 'none']) && one(c.automaticRecheck, ['next-launch', 'none']) &&

@@ -139,10 +139,12 @@ test('the authoritative flat runtime inventory supports probe workers and the di
   for (const asset of RUNTIME_ASSETS.filter(a => a.source.includes('/readiness'))) {
     fs.copyFileSync(new URL(`../${asset.source}`, import.meta.url), join(runtime, asset.destination));
   }
-  assert.deepEqual(fs.readdirSync(runtime).sort(), ['readiness-schema.mts', 'readiness-store.mts', 'readiness.mts']);
+  assert.deepEqual(fs.readdirSync(runtime).sort(), ['readiness-schema.mts', 'readiness-store.mts', 'readiness-view.mts', 'readiness.mts']);
   const script = `
     import { probeFilesystem } from ${JSON.stringify(new URL(`file://${join(runtime, 'readiness.mts')}`).href)};
     import { beginReadiness, publishReadiness, readReadiness } from ${JSON.stringify(new URL(`file://${join(runtime, 'readiness-store.mts')}`).href)};
+    const { buildReadinessData } = await import(${JSON.stringify(new URL(`file://${join(runtime, 'readiness-view.mts')}`).href)});
+    if (!buildReadinessData(${JSON.stringify(f.state)}, ${JSON.stringify(join(f.root, 'missing-registry'))}).reason) throw Error('Missing registry must be unknown');
     const identity = ${JSON.stringify(f.identity)};
     const token = beginReadiness(${JSON.stringify(f.state)}, identity, ${JSON.stringify(f.owner)});
     const report = await probeFilesystem({ ...token, paths: [{ id: 'state', role: 'state', scope: 'project', path: ${JSON.stringify(f.state)}, trustedRoot: ${JSON.stringify(f.state)}, access: 'write-directory' }] });

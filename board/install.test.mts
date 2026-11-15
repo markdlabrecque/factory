@@ -52,10 +52,10 @@ if (actual[0] === 'launchctl' && calls.length === 0) process.exit(113);
     const install = () => execFileSync('bash', [script], { cwd: home, env, encoding: 'utf8' });
     install();
     // #153: standalone imports need the checkpoint schema on fresh installs and updates.
-    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'project-config.mts', 'model-policy.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor', 'workflow.mts', 'runtime-assets.mts', 'runtime-bundle.mts'].sort();
+    const files = ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'board-server.mts', 'board.mts', 'board.template.html', 'journal.mts', 'readiness.mts', 'readiness-view.mts', 'readiness-schema.mts', 'project-config.mts', 'model-policy.mts', 'refresh-worker.mts', 'tickets.mts', 'vendor', 'workflow.mts', 'runtime-assets.mts', 'runtime-bundle.mts'].sort();
     assert.deepEqual(readdirSync(app).sort(), files);
     // Simulate a partial/outdated install. Updating must restore every runtime dependency too.
-    for (const file of ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'refresh-worker.mts', 'tickets.mts']) rmSync(join(app, file));
+    for (const file of ['execution-events.mts', 'delivery.mts', 'admission.mts', 'assessment.mts', 'journal.mts', 'readiness.mts', 'readiness-view.mts', 'readiness-schema.mts', 'refresh-worker.mts', 'tickets.mts']) rmSync(join(app, file));
     install();
     const descriptor = join(home, '.local/share/sandcastle-board-runtime/runtime.json');
     const selected = JSON.parse(readFileSync(descriptor, 'utf8'));
