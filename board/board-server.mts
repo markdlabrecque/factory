@@ -1,14 +1,18 @@
+// Passive GET snapshots use trusted registered identities and never reconcile runs, read agent logs or probe.
 import { createServer } from "node:http";
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { pathToFileURL } from 'node:url';
 import { closeSync, createReadStream, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import { buildBoardData, buildEvidencePage, buildPage, readRuns, requestRefreshFor, stateDir } from "./board.mts";
+import { buildBoardData, buildReadinessData, buildEvidencePage, buildPage, readRuns, requestRefreshFor, stateDir } from "./board.mts";
 import { executeRefresh } from "./refresh-worker.mts";
 import { ArchiveRefused, archiveTicket } from "./tickets.mts";
 import { startAction } from './execution-events.mts';
 // Only an authenticated archive request records an explicit control, with actor identity unknown.
 
 // Always-on board: GET / renders the page from the shared state dir on every request.
-// GET /api/runs returns the same run snapshot as uncached JSON; the page polls it every 10s.
+// GET /api/runs preserves its existing run snapshot. GET /api/readiness is a separate bounded stored projection.
+// Neither endpoint accepts project paths or initiates probes. The page polls every 10s.
 // POST /api/projects/<project>/tickets/<iid>/archive requires x-factory: 1 and validates current history eligibility
 // under the admission lock. Only journal state changes; raw records and evidence remain accessible. Errors are JSON.
 // GET /api/timers returns the scheduler strip's data (timers.mts): each factory-tick timer's state and next run, read-only
@@ -53,7 +57,7 @@ async function timerSnapshot() {
   }
 }
 
-const server = createServer((req, res) => {
+export function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   try {
     const url = new URL(req.url || "/", "http://x");
     const archive = /^\/api\/projects\/([^/]+)\/tickets\/(\d+)\/archive$/.exec(url.pathname);
@@ -100,6 +104,11 @@ const server = createServer((req, res) => {
       });
       return;
     }
+    if (url.pathname === '/api/readiness') {
+      if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }); return void res.end('GET required'); }
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      return void res.end(JSON.stringify(buildReadinessData(stateDir())));
+    }
     if (url.pathname === "/api/runs") {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
       return void res.end(JSON.stringify(buildBoardData("http")));
@@ -107,7 +116,7 @@ const server = createServer((req, res) => {
     const m = /^\/evidence\/([^/]+)\/(.*)$/.exec(url.pathname);
     if (m) {
       const key = decodeURIComponent(m[1]);
-      const run = readRuns().find((r) => r.key === key);
+      const run = readRuns(stateDir(), false).find((r) => r.key === key);
       if (!run?.evidenceDir || !existsSync(run.evidenceDir)) throw new Error("not found");
       const name = decodeURIComponent(m[2]);
       if (!name) {
@@ -133,8 +142,12 @@ const server = createServer((req, res) => {
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("not found");
   }
-});
-server.listen(PORT, HOST, () => {
-  const address = server.address();
-  console.log(`Sandcastle board at http://${HOST}:${typeof address === "object" && address ? address.port : PORT}`);
-});
+}
+// Importable handler lets offline fixtures exercise production routing without opening a socket.
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const server = createServer(handleRequest);
+  server.listen(PORT, HOST, () => {
+    const address = server.address();
+    console.log(`Sandcastle board at http://${HOST}:${typeof address === "object" && address ? address.port : PORT}`);
+  });
+}

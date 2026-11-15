@@ -10,6 +10,7 @@ export interface SandboxProbeInput {
   state: string;
   identity: ReadinessIdentity;
   invocationId: string;
+  ticket?: string;
   baseline: string;
   tip: string;
   evidence: string;
@@ -175,7 +176,7 @@ export async function probeSandbox(input: SandboxProbeInput, proc: Proc = bounde
     facts = { checks: [{ id: 'probe-execution', status: 'unknown', operation: 'bounded-agent-user-probe', path: '',
       reason: `Probe incomplete; work/probe cleanup unconfirmed; container=${input.container}`, errno: input.signal?.aborted ? 'ECANCELED' : safeErrno(error) }] };
   }
-  const checks = facts.checks.map((c: any) => ({ ...c, scope: 'sandbox', phase: 'sandbox', observedAt, required: true,
+  const checks = facts.checks.map((c: any) => ({ ...c, ...(input.ticket ? { ticket: input.ticket } : {}), scope: 'sandbox', phase: 'sandbox', observedAt, required: true,
     nextActor: c.status === 'ready' ? 'none' : 'operator', nextAction: c.status === 'ready' ? 'No action required' : 'Inspect the failed operation; preserve work and confirm exact-container cleanup', automaticRecheck: 'next-launch' }));
   const report: ReadinessReport = { version: 1, identity: token.identity, owner: token.owner, observedAt, phase: 'sandbox', status: reportStatus(checks), checks };
   if (!validReport(report)) throw Error('Invalid sandbox readiness report; launch held');
@@ -185,7 +186,7 @@ export async function probeSandbox(input: SandboxProbeInput, proc: Proc = bounde
 
 /** Add teardown facts without dropping the primary probe failure. Superseded reports stay fenced. */
 export function recordSandboxCleanup(state: string, report: ReadinessReport, confirmed: boolean): void {
-  const check = { id: 'container-cleanup', scope: 'sandbox' as const, phase: 'sandbox' as const,
+  const check = { id: 'container-cleanup', ...(report.checks[0]?.ticket ? { ticket: report.checks[0].ticket } : {}), scope: 'sandbox' as const, phase: 'sandbox' as const,
     observedAt: new Date().toISOString(), status: confirmed ? 'ready' as const : 'blocked' as const, required: true,
     operation: 'confirm-exact-container-absent', path: report.owner.ownerId,
     reason: confirmed ? 'Exact container confirmed absent' : 'Exact container cleanup unconfirmed; ownership hold retained',

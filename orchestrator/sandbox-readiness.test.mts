@@ -58,13 +58,16 @@ test('missing baseline and identity mismatch fail closed', t => {
 });
 test('shared sandbox report uses exact-container default user execution and publishes no file bodies', async t => {
   const f = fixture(t), calls: string[][] = [];
-  const report = await probeSandbox({container:'fixture-container',state:f.root,identity:{projectRoot:f.root,runtimeIdentity:'fixture',configIdentity:'fixture',contextFingerprint:'fixture'},invocationId:'test',...f.input}, async (cmd,args,o) => {
+  const report = await probeSandbox({container:'fixture-container',state:f.root,identity:{projectRoot:f.root,runtimeIdentity:'fixture',configIdentity:'fixture',contextFingerprint:'fixture'},invocationId:'test',ticket:'7',...f.input}, async (cmd,args,o) => {
     assert.equal(cmd,'docker'); calls.push(args);
     assert.deepEqual(args.slice(0,4),['exec','fixture-container','node','-e']);
     return realProc(process.execPath,args.slice(3),{...o,cwd:f.root});
   });
   assert.equal(report.status,'ready',JSON.stringify(report)); assert.ok(validReport(report));
   assert.equal(calls.length,1); assert.equal(sandboxReadinessHold(report),undefined);
+  assert.ok(report.checks.every(c => c.ticket === '7'));
+  recordSandboxCleanup(f.root,report,true);
+  assert.equal(report.checks.at(-1)!.ticket,'7');
   assert.ok(!JSON.stringify(report).includes('UNIQUE_PRIVATE_FILE_CONTENT'));
 });
 test('cancel/timeout produces unknown work and cleanup, never success', async t => {

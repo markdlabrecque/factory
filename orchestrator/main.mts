@@ -272,7 +272,7 @@ if (recovering) {
     sandboxReadiness: async (sb) => {
       recoveryReport = await probeSandbox({ container: sb.id, state: stateDir(),
         identity: { projectRoot: context.projectRoot, runtimeIdentity: context.manifest.id, configIdentity: context.policyIdentity, contextFingerprint: context.policyIdentity },
-        invocationId: rec.id, baseline: baseSha, tip: rec.startSha, evidence: evidenceBox,
+        invocationId: rec.id, ticket: iid, baseline: baseSha, tip: rec.startSha, evidence: evidenceBox,
         uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
         files: { ...context.additive.recovery.hashes }, signal: cancel.signal });
       return sandboxReadinessHold(recoveryReport);
@@ -421,7 +421,7 @@ try {
   if (setupHold) { lastMessage = setupHold; throw Error(setupHold); }
   sandboxReport = await probeSandbox({ container: sandbox.sandboxId ?? '', state: stateDir(),
     identity: { projectRoot: context.projectRoot, runtimeIdentity: context.manifest.id, configIdentity: context.policyIdentity, contextFingerprint: context.policyIdentity },
-    invocationId: executionId, baseline: baseSha, tip: baseSha, evidence: evidenceBox,
+    invocationId: executionId, ticket: iid, baseline: baseSha, tip: baseSha, evidence: evidenceBox,
     uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
     files: { ...context.additive.implementation.hashes }, signal: sandboxCancel.signal });
   const sandboxHold = sandboxReadinessHold(sandboxReport);
