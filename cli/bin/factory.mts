@@ -43,7 +43,7 @@ import { tick, tickExitCode } from '../src/commands/tick.mts';
 import { superviseProcess } from '../src/commands/supervise.mts';
 import { scheduleBackend } from '../src/platform/scheduler.mts';
 const USAGE = `factory install [--link]
-factory doctor
+factory doctor [--project <name|path>] [--probe-filesystem] [--json]
 factory board start|stop|status
 factory uninstall [--dry-run] [--purge | --keep-state]
 factory project add|ls|rm [path] [--json (ls)]
@@ -68,7 +68,7 @@ factory ticket archive|restore|show <ticket> [--project <name|path>] [--json (sh
 factory ticket archived [--project <name|path>] [--json]
 factory telemetry export [--project <name|path>] [--ticket <iid>] [--since <ISO-8601>] [--format json|jsonl]`;
 const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short?: string }>> = {
-  install: { link: { type: 'boolean' } }, doctor: {}, board: {},
+  install: { link: { type: 'boolean' } }, doctor: { project: { type: 'string' }, 'probe-filesystem': { type: 'boolean' }, json: { type: 'boolean' } }, board: {},
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
   project: { json: { type: 'boolean' } },
   init: { profile: { type: 'string' }, repo: { type: 'string' }, image: { type: 'string' }, host: { type: 'string' }, 'project-id': { type: 'string' } },
@@ -166,7 +166,7 @@ try {
       if (second || extra.length || (first && command !== 'board')) throw new Error('Unexpected arguments');
       if (v.purge && v['keep-state']) throw new Error('Choose --purge or --keep-state');
       if (command === 'install') await install(p, backend(p), { link: v.link });
-      else if (command === 'doctor') process.exitCode = await doctor(p, scheduleBackend(p));
+      else if (command === 'doctor') process.exitCode = await doctor(p, scheduleBackend(p), { project: v.project, probeFilesystem: v['probe-filesystem'], json: v.json });
       else if (command === 'uninstall') await uninstall(p, backend(p), { dryRun: v['dry-run'], purge: v.purge });
       else if (command === 'board') await board(backend(p), first);
     }
