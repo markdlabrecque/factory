@@ -1,4 +1,4 @@
-<!-- Project-root v2 data, fixed model policy, shared execution identity and manual migration. -->
+<!-- Project-root v2 configuration, fixed model policy and shared execution identity. -->
 # Project settings: `.sandcastle/factory.toml`
 
 New Factory projects use versioned TOML, not edits to Factory implementation files.
@@ -16,7 +16,7 @@ Project overrides have opaque behavior: configured values do not prove which mod
 ## Authority and validation
 
 The v2 data loader requires `factory.toml` and never imports project code. Missing
-or version 1 configuration fails with manual migration guidance. There is no
+or version 1 configuration is unsupported and fails validation. There is no
 converter or per-field legacy fallback. Syntax errors identify the file and location
 without echoing source text. Runtime, dispatch, analysis, recovery, refresh,
 scaffolding and selection use v2. The runtime derives all agent settings from the
@@ -229,17 +229,6 @@ strings use TOML escapes. For multiline commands use triple-single-quoted litera
 strings or triple-double-quoted basic strings. Do not put credentials in commands.
 The host parser never evaluates the strings or interpolates environment variables;
 the sandbox's shell interprets them only at normal startup.
-
-## Existing projects
-
-This is a breaking change. Version 1 and missing configuration are unsupported by the v2 loader. The project owner must review and migrate existing settings and customized workflow behavior manually before using the upgraded workflow. There is no automatic converter or general upgrade recipe; adding TOML alone does not establish that an old custom workflow is compatible. Init does not overwrite settings or migrate a legacy scaffold, and update does not repair project data or workflow overrides. No deployed project is changed automatically.
-
-Replace custom agent providers, model IDs, aliases and thinking settings with
-`[agent] family = "openai"` or `"anthropic"`. Remove `graph.model`. Replace ticket
-`Model:` / `Pi model:` fields with `Model tier: small|mid|large`, or omit the field
-for Mid. Review the schema table above for selection, sandbox and CI settings;
-move old executable `SELECT` and `CONFIG` values into the corresponding TOML tables.
-Prompts and script bodies stay separate. Review the selected workflow and its safety behavior before authorizing recovery or resuming scheduling.
 
 ## Parser maintenance
 

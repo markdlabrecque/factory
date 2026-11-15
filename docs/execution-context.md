@@ -30,7 +30,7 @@ commands rather than guessing a checkout.
 
 The context loads only `<project>/.sandcastle/factory.toml`, schema version 2.
 The asset directory must be canonical; config symlinks cannot escape the checkout.
-Missing or v1 settings require manual migration. Validation runs before credential,
+Missing or v1 settings are unsupported. Validation runs before credential,
 Docker or admission work. The data-only `config-read.mts` bridge returns allowlisted
 scalars, not generated shell or arbitrary settings JSON.
 
@@ -151,7 +151,7 @@ node --input-type=module -e '
   import { regenerateRuntimeManifest } from "/path/to/factory/orchestrator/workflow.mts";
   const directory = "/path/to/project/workflow";
   writeFileSync(directory + "/runtime-manifest.json",
-    JSON.stringify(regenerateRuntimeManifest(directory), null, 2) + "\\n");
+    JSON.stringify(regenerateRuntimeManifest(directory), null, 2) + "\n");
 '
 ```
 
@@ -161,7 +161,7 @@ It does not install packages, migrate projects or confer review authority. Confi
 confirm recovery review after inspecting the complete override. A stale manifest
 is an error, never a reason to run Factory code instead.
 
-## Remaining integration boundaries
+## Diagnostic and instruction boundaries
 
 Low-level entrypoints consume explicit context; they do not discover descriptors.
 `factory config explain` resolves and validates the selected runtime without importing

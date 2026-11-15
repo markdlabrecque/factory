@@ -1,18 +1,11 @@
-<!-- Branch-only design record: one functional dot tracker per unfinished ticket, vertically centered connectors through the current stage,
-     solid green healthy/red unhealthy current dots with soft halos and clock-driven outward sonar pulses,
-     filtered queue blockers, one latest-ten Shipped section and interval-based stats with system/light/dark themes.
-     Implemented directly after human design review, without Factory. The approved design now also powers
-     board.template.html, with persisted visits in board.mts and regression coverage in board.test.mts.
-     Stats return focus to the invoking control. #141: production recorded episodes use concise summaries only,
-     with no full details; current blockers and persisted reasons stay unchanged. The simulated prototype is unchanged.
-     This source change does not deploy files or restart installed services. -->
+<!-- Retained simulated Board prototype and its design history, plus current production presentation contracts. Runtime selection, readiness and operator controls are owned by their linked feature references. -->
 # Board design prototype
 
-Status: the approved tracker design replaces Assembly and Megastructure. At the user's request, it now also powers the real Board template.
+Status: implemented in the production Board template. The retained prototype is simulated design history, not the live operations console. The production section below records current presentation and links to the operational contracts.
 
 - Source: [`board/board-prototype.html`](../board/board-prototype.html), one self-contained HTML file with inline CSS and JavaScript.
 - Model regression tests: [`board/board-prototype.test.mjs`](../board/board-prototype.test.mjs), using Node's built-in test runner.
-- Branch: `prototype/board-three-concepts`.
+- Original design branch: `prototype/board-three-concepts`, retained here as history rather than pending work.
 - No fetches, storage, CDN or build step. This is a throwaway visual prototype, never a scaffold or install input.
 
 ## Accepted design
@@ -54,7 +47,9 @@ npm run prototype:board
 
 Open <http://127.0.0.1:4455/board-prototype.html>. The server binds to loopback and serves only `board/`. Opening the HTML file directly also works. Old `?variant=A|C` links now open the single tracker design.
 
-## Verification
+## Original prototype verification
+
+The observations in this section were recorded during the design review. They are not a claim that browser checks ran against the current revision.
 
 Run the retained model tests without installing dependencies:
 
@@ -88,7 +83,7 @@ The real template uses the existing stage sequence: Queue, Setup, Build, Verify,
 
 Blocked and stopped runs stay in In progress; only `done` records enter Shipped. Shipped starts collapsed, sits at the bottom, and selects the ten latest completions after status/project filtering. Ties use the run key. Summary and filter counts remain Board-wide; the section count is the displayed count. Open ticket stats remain available through completion or removal from the visible ten. Close or Escape returns focus to the invoking title or View stats button; a blank-card click uses the title. Removed or hidden controls fall back to the Shipped summary.
 
-Live records do not all contain full historical measurements. `board.mts` now persists `stageHistory` visits with stage, timestamp and recorded blocker reasons, plus `historyComplete`. Stage changes, launch claims, detected crashes and parked-reason changes create visits; heartbeats do not. Resuming stopped work keeps prior visits. Reopening a completed ticket starts a new lifecycle. History is bounded at 1,000 visits, with truncation marked incomplete. Old records retain their known current-stage start, but their history remains incomplete. If an older writer changes a stage without extending history, the writer/page also mark that history incomplete. New writers must be copied alongside the template to collect future measurements; the page cannot reconstruct earlier visits.
+Live records do not all contain full historical measurements. `board.mts` now persists `stageHistory` visits with stage, timestamp and recorded blocker reasons, plus `historyComplete`. Stage changes, launch claims, detected crashes and parked-reason changes create visits; heartbeats do not. Resuming stopped work keeps prior visits. Reopening a completed ticket starts a new lifecycle. History is bounded at 1,000 visits, with truncation marked incomplete. Old records retain their known current-stage start, but their history remains incomplete. If an older writer changes a stage without extending history, the writer/page also mark that history incomplete. New measurements require a runtime containing the current writer as well as the current Board template. Publish a complete runtime through the documented install path, or maintain a complete project override; copying individual helpers is not an upgrade. The page cannot reconstruct earlier visits.
 
 The stats dialog sums recorded running stages across repeated visits, excludes queue/hold intervals, names blocker episodes and counts backward stage transitions as bounces. A hold within one stage does not create an extra stage visit. Finished or stopped elapsed time freezes at its recorded terminal timestamp. Incomplete records explicitly show Unavailable for full running/queued/blocked totals and unknown stage measurements; known current-stage time remains visible as recorded time. The page does not invent bounce reasons or historical blockers.
 
@@ -98,7 +93,19 @@ Queue rows use optional structured `queueReasons`, with the existing writer's `n
 
 The existing JSON endpoint, ten-second polling, last-good-data behavior, project/status filters, safe links, activity text, appearance storage, keyboard access, local snapshots and evidence previews remain. Evidence pages never start a poller. Local snapshot stats use the embedded generation time rather than adding work time since the file was saved. Details use text nodes, including blocker reasons, titles and notes. Source changes are limited to the Board writer, template, tests and their documentation.
 
-### Promotion verification
+### Current operational additions
+
+The Board no longer has a separate Current ticket/assessment panel or manual assessment-refresh button. Current non-satisfied dependencies appear as unique red ticket numbers with safe tracker links, or one unlinked-blocker warning. Empty or stale dependency results hide that container. Backend assessment and selection still operate; the compact card display is not launch authority.
+
+The scheduler summary shows its next scheduled tick when known. Merged-outside-Factory cards retain their original verdict and show the merged PR/MR and merge time. Shipped cards can archive through a validated project-scoped POST endpoint; file snapshots hide that control. Corrected verdicts are marked and preserve the original in their tooltip. Archive browsing and restore remain CLI-only. See [ticket journal](factory-cli.md#slice-five-ticket-journal) and [merged-work reconciliation](factory-cli.md#merged-work-reconciliation-and-local-cleanup).
+
+Registered-project readiness is a separate stored-observation section, including projects with no run cards. Its bounded `/api/readiness` polling is passive and pauses in hidden tabs. Missing, invalid, stale or failed observations are unknown, not healthy. It does not probe filesystems, fetch ticket context or start work. See [Board readiness](factory-cli.md#board-readiness) and [report projection](ticket-readiness.md#board-projection).
+
+The Board service receives a trusted runtime descriptor for explicit refresh paths; missing descriptors do not fall back to copied project code. GET snapshots do not reconcile dead processes or read agent-log excerpts. See [workflow selection](execution-context.md#workflow-selection). A dedicated interactive recovery interface and live agent terminal controls are not implemented.
+
+### Original promotion verification
+
+The counts and browser observations below describe the promotion revision, not the current complete suite. Use [TESTING.md](../TESTING.md) for the maintained suite inventory and commands.
 
 ```sh
 node --test board/board.test.mts board/board-prototype.test.mjs

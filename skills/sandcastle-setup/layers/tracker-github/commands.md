@@ -1,4 +1,6 @@
-# Command substitutions
+# Historical GitHub command substitutions
+
+These substitutions belong to the old copied-prompt setup. They are retained as examples, not instructions for the standard Factory workflow. Current Factory reads complete ticket context and performs tracker mutations on the host; sandbox agents receive frozen input without tracker credentials. Configure GitHub in v2 `factory.toml` and follow [environment setup](../../SKILL.md) rather than inserting these commands into shared prompts or automatically closing tickets from a sandbox. A complete custom override owns its own reviewed behavior.
 
 `<ID>` is the issue number (the `#425` number).
 

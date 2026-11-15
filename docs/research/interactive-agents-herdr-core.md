@@ -1,7 +1,9 @@
 <!-- Spike #6 report: attaching to and steering a running interactive agent through herdr-core. Experimental; not wired into Factory. -->
 # Interactive agents under herdr-core (spike #6)
 
-**Status: experimental, not supported.** Nothing in Factory's runner or dispatcher changed.
+**Status: adoption approved, production integration not implemented.** The owner accepted herdr-core for the attach/steer layer in [the spike decision](https://github.com/markdlabrecque/factory/issues/6). This report preserves the experimental evidence; it is not a supported setup procedure. The spike changed no production runner or dispatcher behavior.
+
+The current standard Factory workflow uses noninteractive Pi, while this experiment used interactive Claude Code. A production design must address that compatibility gap as well as the gaps below. See the [current roadmap](../factory-cli.md#roadmap) and [agent policy](../project-config.md).
 
 **Recommendation: adopt for the attach/steer layer, behind Factory-side work on completion, failure reporting and cleanup (see Gaps).** Persistent terminal, attach, steering, resize and detach worked end to end. The follow-up run added multiple containers and core restart/crash recovery; both passed. Only reboot recovery and a person's real terminal remain untested.
 
@@ -77,7 +79,7 @@ hc send --wait spike-r5 "<text>"; hc interrupt spike-r5; hc get spike-r5; hc eve
 - The token file must be `chmod 600`; it was `644` when first created.
 - Anyone who can attach to a session can type as the agent. Keep sessions per-run or per-user.
 
-## Gaps before this could be adopted
+## Gaps before production integration
 
 1. **Completion:** the marker is agent-written, so a non-compliant agent can skip or forge it. Real acceptance needs commits plus the verifier verdict. Idle, done and detach must stay separate from it.
 2. **Failure reporting:** Factory's runner must pass the Sandcastle exit code through (137 above), or container loss reads as success.

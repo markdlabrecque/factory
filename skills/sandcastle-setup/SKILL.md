@@ -1,6 +1,6 @@
 ---
 name: sandcastle-setup
-description: Set up Factory project environments and Sandcastle image layers for GitHub or GitLab, including Pi, Playwright, optional web, Drupal, WordPress and ddev compatibility. Use when preparing or adapting a project's Factory sandbox or migrating its environment assets.
+description: Set up Factory project environments and Sandcastle image layers for GitHub or GitLab, including Pi, Playwright, optional web, Drupal, WordPress and ddev compatibility. Use when preparing or adapting a project's Factory sandbox.
 ---
 
 <!-- Project environment setup uses v2 data and a selected shared runtime; custom executable workflows require a complete reviewed override. -->
@@ -29,8 +29,7 @@ Read [project configuration](../../docs/project-config.md) for the schema and [a
 ## Prepare the project
 
 1. For a new project, use `factory init [path] --profile personal|client --repo <namespace/project> --image <image>`. Client also requires `--host <gitlab-host> --project-id <number>`. Confirm the inputs before running it. Init creates v2 TOML, an empty private `.env`, `.env.example`, `.gitignore` and a dispatch wrapper. It registers the project after successful writes, preserves existing files and does not build an image, install project runtime dependencies, authenticate or copy workflow code and prompts. Both profiles use OpenAI Pi. Personal enables automatic merge; client leaves merge to a person. Review the generated selection and merge values.
-2. For an existing legacy project, stop and follow the owner-led [manual migration](../../docs/project-config.md#existing-projects). Missing or v1 TOML has no executable fallback. Preserve existing code, credentials, work, evidence, recovery budgets and schedule state. Init and update do not migrate legacy settings or repair executable copies. Do not resume scheduling as part of setup.
-3. Configure `sandbox.image`, selection and merge settings in TOML. Keep startup scripts separate. For web setup, remove the existing `setup = []` before adding a setup table. This is a fragment, not a complete configuration:
+2. Configure `sandbox.image`, selection and merge settings in TOML. Keep startup scripts separate. For web setup, remove the existing `setup = []` before adding a setup table. This is a fragment, not a complete configuration:
 
    ```toml
    [sandbox]
@@ -42,10 +41,12 @@ Read [project configuration](../../docs/project-config.md) for the schema and [a
    ```
 
    Substitute the confirmed docroot and make the helper available in the sandbox. Setup commands are trusted project code executed inside the sandbox, not a security boundary. See the schema for quoting and optional timeouts.
-4. Put test and fixture guidance in contained Markdown, with common instructions before implementation, verification, analysis or recovery instructions. Configure their paths in `[instructions]`; see [adapting Factory](../../orchestrator/ADAPTING.md#project-data-and-instructions). Factory reads literal text and retains its own templates and gates. Instruction edits can require fresh analysis or verification.
-5. Provision the selected Pi family on host and image. OpenAI needs a working host Pi login and a Pi-capable image. Anthropic needs the `pi-claude-subscription` provider and its host login, plus the provider, Claude Code CLI and a user-supplied container credential. The provider uses Claude Code internally; direct Claude Code is not a selectable Factory agent. Never obtain credentials on the user's behalf. A missing provider or credential is a hold, not a reason to switch families.
+3. Put test and fixture guidance in contained Markdown, with common instructions before implementation, verification, analysis or recovery instructions. Configure their paths in `[instructions]`; see [adapting Factory](../../orchestrator/ADAPTING.md#project-data-and-instructions). Factory reads literal text and retains its own templates and gates. Instruction edits can require fresh analysis or verification.
+4. Provision the selected Pi family on host and image. OpenAI needs a working host Pi login and a Pi-capable image. Anthropic needs the `pi-claude-subscription` provider and its host login, plus the provider, Claude Code CLI and a user-supplied container credential. The provider uses Claude Code internally; direct Claude Code is not a selectable Factory agent. Never obtain credentials on the user's behalf. A missing provider or credential is a hold, not a reason to switch families.
 
 The standard policy uses Pi with high thinking. Ticket descriptions may declare `Model tier: small`, `mid` or `large`; missing means Mid. Factory code owns exact mappings, analysis uses Mid, and verification and recovery use Large. No project model aliases or per-role model settings are supported. The [model policy](../../docs/project-config.md) lists the current mappings and parsing rules.
+
+If asked about interactive attach/steer, consult the [herdr-core experiment](../../docs/research/interactive-agents-herdr-core.md). Adoption was approved, but production integration is not implemented. The experiment used interactive Claude Code rather than the current standard Pi workflow. Keep it separate from normal environment setup; it is not a supported backend or an installation prerequisite.
 
 ## Image layers
 
@@ -54,7 +55,7 @@ Use the confirmed snippets in `layers/`, pinning versions and adapting the proje
 | Layer | Source | When |
 | --- | --- | --- |
 | Pi | `layers/agent-pi/pi.Dockerfile.snippet` | All standard Factory images. The subscription-provider section is for the Anthropic family, regardless of profile. |
-| Tracker | `layers/tracker-github/` or `layers/tracker-gitlab/` | When the sandbox needs tracker tooling; Factory's host tracker calls use the host CLI. |
+| Tracker | `layers/tracker-github/` or `layers/tracker-gitlab/` | Optional CLI packages for an explicitly reviewed custom environment. Standard Factory tracker reads/writes run on the host; do not inject tracker credentials into standard agent sandboxes. The command-substitution notes are historical. |
 | Browser | `layers/browser-playwright/` | Every standard Factory verifier, including static projects and recovery. |
 | Web | `layers/runtime-web/` | PHP/web projects needing services. |
 | CMS | `layers/cms-drupal/` or `layers/cms-wordpress/` | As detected and confirmed. |

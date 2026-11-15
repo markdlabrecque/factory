@@ -13,8 +13,8 @@ Use this table to find the authoritative document, not as a list of mandatory ed
 | Behavior | Document |
 | --- | --- |
 | Operator CLI, recovery and scheduler contracts | `docs/factory-cli.md` |
-| Configuration schema and migration | `docs/project-config.md` |
-| Workflow adaptation and project-copy upgrades | `orchestrator/ADAPTING.md` |
+| Configuration schema | `docs/project-config.md` |
+| Workflow adaptation and complete overrides | `orchestrator/ADAPTING.md` |
 | Environment and setup layers | `skills/sandcastle-setup/SKILL.md` |
 | Test boundaries and commands | `TESTING.md` |
 | Overview and quick start | `README.md` |
