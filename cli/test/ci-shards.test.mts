@@ -12,6 +12,12 @@ const script = 'scripts/test-shard.sh';
 const workflow = readFileSync(new URL('../../.github/workflows/test.yml', import.meta.url), 'utf8');
 const runner = readFileSync(new URL('../../scripts/test-shard.sh', import.meta.url), 'utf8');
 
+test('unchanged CI gates run for PRs targeting main and develop', () => {
+  const targets = workflow.match(/^on:\n  pull_request:\n    branches: \[([^\]]+)\]/m);
+  assert.ok(targets, 'explicit pull_request base-branch list required');
+  assert.deepEqual(targets[1].split(',').map(branch => branch.trim()), ['main', 'develop']);
+});
+
 test('CI shards assign every current regular test file exactly once, including new files', () => {
   const expected = ['orchestrator', 'board', 'cli/test'].flatMap(directory =>
     readdirSync(`${root}/${directory}`).filter(name => name.endsWith('.test.mts')).map(name => `${directory}/${name}`)
