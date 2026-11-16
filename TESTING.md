@@ -68,6 +68,22 @@ host notification/stop bridge and reviewer worker prerequisites; these remain
 blocking for downstream action activation. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
+## Supervisor durable state
+
+```sh
+node --test cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Pure transition tests use injected PID/start observations and timestamps for stable
+incident/event identity, retained denial and supersession, finite diagnosis/review
+reservations, shared capacity, fencing and observation-only intent reconciliation.
+One disposable filesystem boundary covers restart, revision CAS, corrupt/foreign
+records, unknown ownership, and actual writer interruption immediately before and
+after rename followed by stale-lock reclamation and exact-event replay. No sleeps,
+paid workers, tracker calls, recovery resets, notification adapters or actions run.
+The state asset joins the complete inventory; existing run/proof/recovery suites
+remain mandatory in all four commit shards and the separate lifecycle gate.
+
 ## Runtime bundle preparation
 
 ```sh

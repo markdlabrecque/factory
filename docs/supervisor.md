@@ -1,6 +1,6 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. This first increment supplies **import-safe records, validation and a bounded authority investigation**, not a running supervisor. There is no new worker, configuration switch, CLI, notification service, gate applicator or pilot rollout here. Existing Factory gates remain unchanged. The contract module is shipped in the complete runtime inventory; importing it performs no I/O.
+This is the authoritative reference for the project supervisor feature. The implemented foundation supplies **import-safe records, validation, a bounded authority investigation and host-owned durable state**, not a running supervisor. There is no new worker, configuration switch, CLI, notification service, gate applicator or pilot rollout here. Existing Factory gates remain unchanged. The contract and state modules ship in the complete runtime inventory. The contract performs no I/O; state persistence is explicit and importing the state module starts no work.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. A future action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
@@ -40,7 +40,7 @@ These are schema-supported proposal categories, **not currently executable gate 
 | --- | --- |
 | `ProjectIdentity`, `Scope` | Canonical absolute checkout root plus tracker kind/host/project. Host verifies physical canonicality; schema checks lexical shape. Hosts are lowercase, no URL; GitHub owner/repo is lowercase, no `.git`; GitLab subgroup paths retain tracker spelling. Ticket scope has one positive ticket number; project scope has none. These do not reuse Board's lossy display key as authority. |
 | `Snapshot` | Host-supplied observed inputs: scope, mode, time, run/base/baseline/tip, runtime/dependencies, policy, settings, ticket-input hash, admission generation; original sources; separate explicit project guidelines and nonwaivable Factory constraints. It is observation, not permission. |
-| `Incident` | One bounded progress/problem episode, snapshot identity, reason and lifecycle, with at most two diagnosis calls for unchanged inputs. A ticket incident and a project/environment incident are distinct. State persistence/budgets/fencing belong to the next increment. |
+| `Incident` | One bounded progress/problem episode, snapshot identity, reason and lifecycle, with at most two diagnosis calls for unchanged inputs. A ticket incident and a project/environment incident are distinct. State persistence/budgets/fencing are specified in the durable-state section below. |
 | `Proposal`, `GateChange` | Exact substitution plus rationale, alternatives, risks, incident, snapshot identity and project/scope. Effect owns exactly one ticket/run and has an explicit expiry. Proposal ID is the canonical SHA-256 of the entire proposal except `id`. Changes require a new ID and review, never mutation of an approved record. |
 | `ReviewInput` | Entire snapshot and exact proposal. Original child, immediate-parent context, human planning, project guidelines, Factory rules, gate/failure evidence and prior decisions are required source roles. Include full relevant human/parent comments in order, not just summaries. `missing` and `truncated` are explicit nonapprovable states. `not-applicable` is allowed only for genuinely absent parent/human-planning/prior-decisions roles; host collection must establish that absence. |
 | `IndependentReview` | Audit of one host-assigned fresh invocation: reviewer/model/invocation identities, start/completion, exact input hash/proposal ID, approve/deny/inconclusive and reason. Agent output alone cannot establish provenance. Timeout, parser failure, missing context or uncertain output holds; none means approval. |
@@ -79,7 +79,7 @@ Offline evidence: `supervisor-contract.test.mts` exercises the existing `piAnaly
 The proposed host boundary is `HumanRequest` plus the following required semantics, **not an implemented bridge**:
 
 1. On denial, required Factory-wide change, unavailable primitive or unresolved authority, durably fence the affected ticket/project's new supervisor work and persist an immutable actionable request **before** external notification. Include exact review/proposal IDs, bounded findings, original evidence locations, the human question and next action. Preserve all existing saved work and owners.
-2. Retain `delivery.state = pending` and attempts on failure/crash. A log message, Board badge, issue label, successful local write or agent statement is not delivery. A future outbox writer must use host-owned atomic durable publication outside agent mounts; outbox loss/corruption holds action. Tests here validate only the record, not durability.
+2. Retain `delivery.state = pending` and attempts on failure/crash. A log message, Board badge, issue label, successful local write or agent statement is not delivery. A future outbox writer must use host-owned atomic durable publication outside agent mounts; outbox loss/corruption holds action. Contract tests validate the record; the durable-state foundation below persists pending requests but does not deliver them.
 3. Deliver to an explicitly operator-approved unattended channel with a stable request idempotency key. Record `notified` only after an actual adapter acknowledgement/receipt, channel and time. Notification errors remain pending and stopped; bounded redelivery must not restart work or spend agent/recovery budgets. Notification acceptance and human resolution are separate events.
 4. An authenticated operator resolves/resumes explicitly with retained audit and fresh gates. No automatic reviewer shopping, model escalation, Factory-wide edit, global rollout or authority renewal follows notification.
 
@@ -87,11 +87,133 @@ The proposed host boundary is `HumanRequest` plus the following required semanti
 
 This finding does not block source-only contracts, state, snapshot or configuration work that preserves observe-only/inert defaults. It **does** block dependent action activation. No live pilot, paid runtime probe, service/registry mutation, production access or secret retrieval was performed.
 
+## Durable supervisor state and accounting
+
+`cli/src/supervisor-state.mts` is a bookkeeping API, not a worker, mode switch,
+notification bridge, admission replacement or action authorizer. Nothing calls it
+from the scheduler or enables paid work. A persisted proposal, review or intent
+never authorizes a run, gate edit, proof, push, merge or recovery attempt. Existing
+run/receipt/proof/delivery/recovery stores and saved evidence are not modified.
+
+### Host journal and short transitions
+
+The caller supplies the same **host-owned state directory**, outside project and
+agent mounts, used for admission/recovery. `<state>/supervisor/state.json` is a
+version-1 host journal with project-scoped records keyed by the SHA-256 of the
+canonical project root. Each record repeats the shared `ProjectIdentity` (root
+and tracker); a changed tracker at an existing root holds rather than adopting
+old authority. This single journal is intentional: one atomic replacement
+commits project accounting and shared capacity together, without a cross-file
+charge/claim crash gap. Project identity must be physically canonicalized by the
+host, as for the shared contract; this API validates lexical canonicality only.
+
+`readSupervisor` is read-only: only missing storage means empty. Malformed JSON,
+unknown versions/fields, foreign identity, invalid PID/start owners, inconsistent
+charges/counters and I/O uncertainty throw without overwriting anything. An
+unrelated valid project can coexist in the journal; an invalid project record
+holds the entire journal. No automatic migration, deletion or reset is offered.
+
+`commitSupervisor(stateDir, project, expectedRevision, event)` uses the existing
+admission PID/start-identity lock and durable writer, in a **separate supervisor
+lock namespace**. Contention fails immediately; callers must reread rather than
+spin inside a scheduler lock. The revision CAS is checked under that short lock.
+The only effect under it is a synchronous journal transition and 0600 temporary
+file + fsync + rename publication (0700 directories, directory fsync where
+supported by the existing writer). There are no agents, tracker reads or other
+asynchronous effects under this lock. Dead lock holders may be reclaimed by
+PID/start identity, never age; unreadable or unknown lock ownership holds.
+
+The pure `transitionSupervisor` takes injected process observations. Active worker
+and pending-intent ownership uncertainty blocks new transitions. Reservation
+completion requires the exact recorded PID/start, fence, active reservation and
+unexpired deadline. PID reuse or a stale fence cannot settle another worker.
+Dead workers become `ambiguous` only through an explicit observation. Their
+charges and capacity stay held; this increment has no authority to release them,
+refund them or launch a replacement. Future settlement needs authoritative
+resource/worker observations, not a timeout-based assumption of safety.
+
+### Incidents, idempotency, decisions and inert intents
+
+Stable incident identity hashes the shared project/scope plus relevant requirement,
+gate, run and failure fact identities. These are explicit host-collected inputs,
+not supervisor prose, timestamps, unrelated queue activity or unrelated base
+movement. Snapshot hashes remain attached original context references; changing
+an observation's prose/time does not change the incident, renew budgets or rewrite
+its original snapshot. Snapshot collection and deciding which changed facts are
+relevant belong to the snapshot/worker layers, not this store.
+
+Changed relevant facts create a new incident and mark prior incidents in that
+scope superseded; returning to old facts never resurrects the old incident.
+All old incidents, exact proposals, independent-review audits, pending human
+requests and intent observations remain retained. Denials and Factory-wide
+classifications hold subsequent new decisions conservatively at project scope,
+including after a material change. There is no resume/clear-denial API. A future
+authenticated operator integration must retain its own explicit audit and fresh
+authority; notification alone can never clear a hold.
+
+Each event has a stable host idempotency ID and exact canonical payload digest.
+Exact replay is a no-op, including after restart or display-history eviction;
+reusing an ID with different bytes holds. Repeated observations with different
+event IDs still reuse the stable incident. One pending `HumanRequest` is kept per
+incident; rephrasing cannot replace it, notify it, resume it or request another
+reviewer. The state module accepts no invented notification receipt.
+
+Only **proposed/inert** shared `Intent` records may be inserted. Intent IDs cannot
+be reused. The durable commit must precede any future separately authorized side
+effect; this module has no effect callback or authorize/apply operation. A dead
+owner's ambiguous intent can only be reconciled by recording explicit retained
+observation references (`observed-applied`, `observed-not-applied`, or `unknown`).
+Even observed-applied leaves the shared intent `proposed`: it is audit, not host
+application authority. Reconciliation never executes or retries the effect;
+observed-not-applied is not permission to replay it. Existing admission, exact
+preimages, containment, current fences and fresh proof remain downstream gates.
+
+### Resource reservations and retained accounting
+
+Before a future worker launch, the host must commit a reservation with a stable
+invocation identity, PID/start owner, fence, finite token/cost upper bound and
+explicit deadline. Diagnosis defaults are enforced at **two reservations per
+unchanged incident and at most 600,000 ms per call**. Independent reviews have
+separate counters and require an explicit finite call limit and timeout. There
+is one unsettled decision per project; ambiguous workers also block replacement.
+Each review reservation binds exactly one invocation ID (the reservation ID)
+and one retained review result; another distinct result cannot reuse its charge.
+A fenced result for an already-superseded incident is still retained, and a denial
+still latches the project hold. An actual reviewer result is audit only; the store does not prove independent
+context, fixed Large role, provenance, semantic approval or applicability.
+
+Reservations check finite positive project and shared token/cost ceilings and
+shared capacity against **all journal projects under the same lock**. Costs use
+host-selected integer accounting units (for example micro-units of currency),
+not floating point estimates. Missing/unknown/zero paid bounds hold. Counters
+charge the full upper bound before work; actual usage is recorded separately
+within that bound, with **no refund** for short, failed, denied, interrupted or
+inconclusive work. Diagnosis and review usage never touches recovery attempts.
+A future worker must enforce its reserved token/cost/deadline at its provider
+boundary; a state reservation alone is not evidence that a paid call is safe or
+authorization to launch it. Validated limits/role configuration and real worker
+cancellation remain owned by their downstream layers. No model/provider fallback
+or budget renewal exists in this module.
+
+Only the last 100 display events are retained in `history`. Incident counters,
+charged reservations, event-deduplication IDs, denials, proposals, reviews, human
+requests and intents are **not** truncated with display history. Storage growth
+is deliberate; there is no unsafe compaction or reset/refund path here. A future
+retention design must preserve every safety index and charge before removing
+original records. Supervisor activity never renews recovery budgets or rewrites
+saved work.
+
+This state foundation does **not** discharge the approved-channel/acknowledgement/
+authentication decision for unattended FlagAHuman, the fresh read-only fixed-Large
+review worker evidence, or atomic contained/preimage/fenced application with new
+proof. All remain prerequisites for action activation. Defaults remain inert;
+there is no running supervisor or pilot opt-in in this change.
+
 ## Reproduce offline evidence
 
 ```sh
 node --test orchestrator/supervisor-contract.test.mts orchestrator/models.test.mts
-node --test cli/test/runtime-bundle.test.mts
+node --test cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
 ```
 
 Policy and schema matrices are unit tests; one minimal local Node process fixture tests argv/stdin. There is no browser E2E or notification E2E because no notification implementation exists. Run all commit-tier shards and the separate browser lifecycle command in [TESTING.md](../TESTING.md) before delivery. Passing offline tests does not constitute a pilot or prove an unavailable SDK primitive.
