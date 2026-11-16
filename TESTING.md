@@ -17,7 +17,7 @@ node --test board/board-prototype.test.mjs
 
 It is not included in the three `.mts` globs above or the CI shard inventory. Run it when checking the prototype or its documented presentation contracts. Historical test counts in design and research reports describe those revisions, not the current suite.
 
-CI runs four parallel jobs through `scripts/test-shard.sh`. The runner expands exactly the three globs above, sorts paths with `LC_ALL=C`, and assigns zero-based file position modulo four to shards 1 through 4. New matching files enter the inventory automatically. Each shard retains `--test-concurrency=4`, the hard 180-second deadline and `--test-timeout=120000`. No test-name filters or exclusions apply.
+CI runs four parallel jobs through `scripts/test-shard.sh`. Normal-entrypoint integration scenarios are partitioned by input, proof, sandbox and model routing across `orchestrator/verification-entrypoint*.test.mts`. They retain the same shared fixture and assertions; separate files distribute their process cost rather than leaving all scenarios serial in one shard. The runner expands exactly the three globs above, sorts paths with `LC_ALL=C`, and assigns zero-based file position modulo four to shards 1 through 4. New matching files enter the inventory automatically. Each shard retains `--test-concurrency=4`, the hard 180-second deadline and `--test-timeout=120000`. No test-name filters or exclusions apply.
 
 Reproduce CI from the repository root with Node 24 and GNU `timeout`:
 
@@ -78,7 +78,7 @@ Init and update fixtures verify data-only assets and preserve project bytes and 
 
 ```sh
 node --test orchestrator/context.test.mts orchestrator/models.test.mts orchestrator/v2-contract.test.mts cli/test/runtime-bundle.test.mts cli/test/runtime-ownership.test.mts
-node --test orchestrator/verification-entrypoint.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
+node --test orchestrator/verification-entrypoint*.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
 ```
 
 `cli/test/shared-runtime.test.mts` exercises a copied install and data-only init
@@ -235,7 +235,7 @@ node --test orchestrator/verification*.test.mts orchestrator/handoff.test.mts or
 ```
 
 `verification.test.mts` checks schema, evidence paths and frozen proof integrity with
-synthetic bytes, not real browser media. `verification-entrypoint.test.mts` runs the
+synthetic bytes, not real browser media. `verification-entrypoint*.test.mts` runs the
 selected fixture runtime's ordinary entrypoint against real temporary Git repositories and fixture-owned
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
@@ -317,7 +317,7 @@ The mandatory existing integration regressions cover successful next-pass select
 Run these focused tests before the full suite:
 
 ```sh
-node --test orchestrator/capabilities.test.mts orchestrator/browser-provisioning.test.mts orchestrator/verification-entrypoint.test.mts orchestrator/recovery-entrypoint.test.mts cli/test/image-config.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/init.test.mts cli/test/update.test.mts
+node --test orchestrator/capabilities.test.mts orchestrator/browser-provisioning.test.mts orchestrator/verification-entrypoint*.test.mts orchestrator/recovery-entrypoint.test.mts cli/test/image-config.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/init.test.mts cli/test/update.test.mts
 ```
 
 The CI browser lifecycle isolation command is separate from the full suite and uses fake browser modules, not a Docker image:

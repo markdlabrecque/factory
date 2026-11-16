@@ -1,9 +1,10 @@
-// Normal entrypoint regression scenarios share fixture-owned external boundaries.
+// Normal entrypoint model-family/tier routing uses fixture-owned external boundaries.
+// Input, proof and sandbox scenarios live in sibling files so bounded CI shards can distribute them.
 import { test } from 'node:test';
 import { normalEntrypointFixture } from './verification-entrypoint-fixture.mts';
 
 const cases = [
-  ...['pass', 'parent-plan', 'parent-read-failed', 'instruction-missing', 'instruction-edit', 'title', 'body', 'comment', 'parent', 'closed', 'excluded', 'claim', 'dirty', 'branch', 'missing-baseline', 'legacy-prompt', 'image-bad', 'setup-bad', 'image-changed', 'sandbox-workspace', 'sandbox-evidence', 'sandbox-baseline', 'sandbox-index', 'sandbox-cancel', 'sandbox-cleanup', 'config-family', 'config-setup', 'runtime-template', 'tier-edit'].map(scenario => ({ scenario, family: 'openai' as const, tier: undefined as string | undefined })),
+  { scenario: 'pass', family: 'openai' as const, tier: undefined as string | undefined },
   ...(['openai', 'anthropic'] as const).flatMap(family => ['small', 'mid', 'large'].map(tier => ({ scenario: 'pass', family, tier }))),
   { scenario: 'pass', family: 'anthropic' as const, tier: undefined },
 ];
