@@ -1,4 +1,4 @@
-// #137: isolated data-only configuration, authority, strict validation and provenance fixtures.
+// Isolated data-only configuration, supervisor ceilings, authority, strict validation and provenance fixtures.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
@@ -137,4 +137,44 @@ test('empty label axes and confidentiality false are preserved; setup is data', 
     assert.deepEqual(c.LABELS.exclude, []); assert.equal(c.warnings.length, 1);
     assert.equal(c.config.sandboxSetup[0].sudo, true); assert.equal(c.config.sandboxSetup[0].timeoutMs, undefined);
   });
+});
+
+const supervisorConfig = `
+[supervisor]
+enabled = true
+max_tokens = 10000
+max_cost_usd = 5
+max_calls = 6
+[supervisor.diagnosis]
+max_tokens = 6000
+max_cost_usd = 3
+max_calls = 4
+[supervisor.review]
+max_tokens = 4000
+max_cost_usd = 2
+max_calls = 2
+timeout_seconds = 300
+`;
+test('supervisor omission/disabled are inert; opt-in requires complete finite project and role limits', () => {
+  fixture(personal(), dir => assert.deepEqual(loadTomlConfig(dir).supervisor, { enabled: false }));
+  fixture(personal() + '\n[supervisor]\nenabled = false\n', dir => assert.deepEqual(loadTomlConfig(dir).supervisor, { enabled: false }));
+  fixture(personal() + supervisorConfig, dir => {
+    const c = loadTomlConfig(dir);
+    assert.equal(c.supervisor.enabled, true);
+    assert.deepEqual(c.supervisor.limits, { maxTokens: 10000, maxCostUsd: 5, maxCalls: 6,
+      diagnosis: { maxTokens: 6000, maxCostUsd: 3, maxCalls: 4, timeoutSeconds: 600 },
+      review: { maxTokens: 4000, maxCostUsd: 2, maxCalls: 2, timeoutSeconds: 300 } });
+    assert.equal(c.sources['supervisor.enabled'], 'explicit');
+    assert.equal(c.sources['supervisor.diagnosis.timeout_seconds'], 'default');
+  });
+  for (const suffix of ['\n[supervisor]\nenabled = true', '\n[supervisor]\nmax_calls = 2',
+    ...['mode = "act"', 'model = "PRIVATE"', 'provider = "other"', 'max_active_decisions = 2'].map(s => supervisorConfig.replace('enabled = true', `enabled = true\n${s}`)),
+    ...['0','-1','inf','nan','1.5','9007199254740992','"100"'].map(v => supervisorConfig.replace('max_tokens = 10000', `max_tokens = ${v}`)),
+    ...['0','-1','inf','nan'].map(v => supervisorConfig.replace('max_cost_usd = 5', `max_cost_usd = ${v}`)),
+    supervisorConfig.replace('max_calls = 6', 'max_calls = 0'), supervisorConfig.replace('max_tokens = 6000','max_tokens = 10001'),
+    ...['0','601','1.5','inf'].map(v => supervisorConfig.replace('timeout_seconds = 300', `timeout_seconds = ${v}`))]) {
+    fixture(personal() + suffix, dir => assert.throws(() => loadTomlConfig(dir), e => {
+      assert.match(String(e), /supervisor|invalid TOML syntax/); assert.doesNotMatch(String(e), /PRIVATE/); return true;
+    }));
+  }
 });

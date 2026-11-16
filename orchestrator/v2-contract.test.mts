@@ -149,7 +149,7 @@ test('resolution metadata snapshots survive assessment refresh and old records r
     assert.deepEqual(JSON.parse(readFileSync(runPath, 'utf8')), old);
     const first = resolveTicketModel('Model tier: SMALL', 'anthropic');
     assert.equal(first.status, 'resolved'); if (first.status !== 'resolved') throw new Error();
-    assert.deepEqual(first.choice, { family: 'anthropic', tier: 'small', source: 'ticket-tier', resolvedModel: 'pi-claude-subscription/claude-haiku-5-5', descriptionRevision: first.revision, policyIdentity: 'factory-model-policy-v1' });
+    assert.deepEqual(first.choice, { family: 'anthropic', tier: 'small', source: 'ticket-tier', resolvedModel: 'pi-claude-subscription/claude-haiku-5-5', descriptionRevision: first.revision, policyIdentity: 'factory-model-policy-v2' });
     const frozen = { ...old, modelChoice: first.choice }; writeFileSync(runPath, JSON.stringify(frozen));
     recordModelResolution(dir, 'p--7', { iid: '7', project: 'p' }, () => first);
     const next = resolveTicketModel('', 'openai'); recordModelResolution(dir, 'p--7', { iid: '7', project: 'p' }, () => next);

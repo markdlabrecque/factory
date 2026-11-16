@@ -57,7 +57,7 @@ are schema defaults; profiles explicitly override some of them.
 | `agent.family` | `openai` or `anthropic`; default `openai` |
 | `workflow.mode` | `factory` or `project`; default `factory` |
 | `workflow.directory` | required repository-relative directory in project mode; rejected in factory mode |
-| `instructions.common`, `.implementation`, `.verification`, `.analysis`, `.recovery` | ordered arrays of repository-relative Markdown paths, default `[]` |
+| `instructions.common`, `.implementation`, `.verification`, `.analysis`, `.recovery`, `.supervisor`, `.gateReview` | ordered arrays of repository-relative Markdown paths, default `[]` |
 | `labels.needs_human` | **required**, workflow human-hold label |
 | `labels.done` | **required**, post-merge stage label |
 | `selection.milestone` | omitted: any milestone; also scopes graph catalogue |
@@ -152,7 +152,7 @@ In the standard Factory workflow, `model-policy.mts` owns the model mapping. Bot
 | `openai` | `openai/gpt-6-luna` | `openai/gpt-6.1-terra` | `openai/gpt-6.1-sol` |
 | `anthropic` | `pi-claude-subscription/claude-haiku-5-5` | `pi-claude-subscription/claude-sonnet-5-5` | `pi-claude-subscription/claude-opus-5-5` |
 
-Implementation uses the ticket tier, analysis uses Mid, and verification and recovery use Large. Put a standalone `**Model tier:** small`, `mid` or `large` in the current unit's description. Plain `Model tier: mid` also works. Values are case-insensitive; repeated identical tiers are accepted. Omission selects Mid. Empty, unsupported or conflicting tiers are rejected. Standalone legacy `Model:` and `Pi model:` fields are rejected even when their value is an exact model ID or a valid tier appears elsewhere. Prose, code blocks, indented code, blockquotes, HTML comments, tracker comments, parent descriptions and labels do not select a tier.
+Implementation uses the ticket tier, analysis and supervisor diagnosis use Mid, and verification, recovery and independent gate review use Large. The new fixed model roles are `supervisor` and `gateReview`; neither inherits a ticket tier or permits fallback/escalation. Put a standalone `**Model tier:** small`, `mid` or `large` in the current unit's description. Plain `Model tier: mid` also works. Values are case-insensitive; repeated identical tiers are accepted. Omission selects Mid. Empty, unsupported or conflicting tiers are rejected. Standalone legacy `Model:` and `Pi model:` fields are rejected even when their value is an exact model ID or a valid tier appears elsewhere. Prose, code blocks, indented code, blockquotes, HTML comments, tracker comments, parent descriptions and labels do not select a tier.
 
 Old TOML keys `agent.provider`, `agent.model`, `agent.thinking`, `agent.model_aliases` and `graph.model` are rejected, not translated. There are no per-role family or model settings. The current description's
 resolution includes family, tier, source, model, description revision and policy
@@ -160,6 +160,36 @@ identity. Normal startup freezes this as `modelChoice` alongside `implementation
 in the run record. Later refreshes change current assessments, not that attempt.
 Delivery proofs bind the model-policy and resolver files, so policy drift requires
 fresh verification.
+
+## Optional supervisor policy
+
+Omission is `{ enabled: false }`; it adds no model calls or scheduler. Logical observation is free of paid diagnosis. `enabled = true` is only a policy prerequisite, **not action mode** or permission to start a worker. Mode belongs to explicit operator state, never ticket readiness or TOML. Disabled/unregistered projects and observe/stopped mode cannot admit paid diagnosis/review. The [supervisor contract](supervisor.md#configuration-model-and-paid-call-foundation) retains the notification/reviewer/application blockers.
+
+This is an optional fragment for an otherwise complete configuration, not recommended production budgets:
+
+```toml
+[supervisor]
+enabled = true
+max_tokens = 100000
+max_cost_usd = 10
+max_calls = 10
+[supervisor.diagnosis]
+max_tokens = 60000
+max_cost_usd = 6
+max_calls = 6
+timeout_seconds = 600
+[supervisor.review]
+max_tokens = 40000
+max_cost_usd = 4
+max_calls = 4
+timeout_seconds = 600
+```
+
+Enabling policy or providing any limit requires **all** project/diagnosis/review token, cost and call limits. Tokens/calls are positive safe integers; cost is positive finite USD. Each role's limits must not exceed project limits. These are cumulative ceilings, not per-call allowances or rolling windows: settled usage plus outstanding worst-case reservations count against both project and role budgets, without an automatic reset. Omitted policy has no implicit paid allowance. Each role's `timeout_seconds` defaults to 600, is a positive safe integer and may only lower that ceiling. Two diagnoses per unchanged incident and one active project decision are nonconfigurable upper bounds. The project call cap is an additional total across incidents and roles.
+
+Unknown pricing, incomplete/unrecorded usage, failed accounting, missing global budget/capacity admission, or an unbounded/unreserved provider request holds new paid work. The future worker must reserve all input/output tokens and worst-case provider charges atomically before spawning, enforce the fixed timeout and retain reservations on unknown completion. Mode/restart/model activity never renew budgets. This policy helper provides necessary checks, not the journal or global admission owner.
+
+Unknown supervisor keys (including `mode`, exact `model`, `provider`, fallback or escalation selectors) are rejected with secret-safe schema errors. Config does not clear denial, authorize Factory-wide changes or replace independent verification.
 
 ## Additive instructions
 
@@ -176,6 +206,8 @@ implementation = ["docs/agent-implementation.md"]
 verification = []
 analysis = []
 recovery = []
+supervisor = []
+gateReview = []
 ```
 
 ## Workflow selection

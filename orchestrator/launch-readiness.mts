@@ -51,7 +51,7 @@ export async function projectLaunchReadiness(o: LaunchReadinessInput): Promise<R
     operation = 'read-instruction';
     for (const path of new Set(Object.values(o.config.instructions).flat())) {
       observedPath = resolve(o.projectRoot, path);
-      Object.assign(assets, loadInstructions(o.projectRoot, { common: [path], analysis: [], implementation: [], verification: [], recovery: [] }, 'analysis').hashes);
+      Object.assign(assets, loadInstructions(o.projectRoot, { common: [path], analysis: [], implementation: [], verification: [], recovery: [], supervisor: [], gateReview: [] }, 'analysis').hashes);
       const actual = resolveCheckoutPath(o.projectRoot, path, 'file');
       add(`instruction:${paths.length}`, 'project-asset', actual, o.projectRoot, 'read-file');
     }

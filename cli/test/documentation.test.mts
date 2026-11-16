@@ -35,12 +35,12 @@ test('every documented TOML fence parses as a complete example or compatible fra
     writeFileSync(join(config, 'factory.toml'), full);
     for (const [, path] of snippet.matchAll(/"(docs\/[^"\n]+\.md)"/g)) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), 'fixture instructions'); }
     const parsed = loadTomlConfig(config)!;
-    if (snippet.includes('[instructions]')) for (const role of ['implementation', 'verification', 'analysis', 'recovery'] as const) loadInstructions(root, parsed.instructions, role);
+    if (snippet.includes('[instructions]')) for (const role of ['implementation', 'verification', 'analysis', 'recovery', 'supervisor', 'gateReview'] as const) loadInstructions(root, parsed.instructions, role);
     if (/kind = "gitlab"/.test(snippet)) { assert.equal(parsed.TRACKER.kind, 'gitlab'); assert.deepEqual(parsed.LABELS.ready, ['Ready to do', 'ready-for-agent']); }
     if (/kind = "github"/.test(snippet)) { assert.equal(parsed.TRACKER.kind, 'github'); assert.equal(parsed.MERGE.auto, true); assert.equal(parsed.AGENT.family, 'openai'); }
     if (/kind = "gitlab"/.test(snippet)) { assert.equal(parsed.AGENT.family, 'anthropic'); assert.equal(parsed.MERGE.auto, false); }
   }
-  assert.equal(count, 9, 'new examples require fixture classification');
+  assert.equal(count, 10, 'new examples require fixture classification');
   for (const key of ['provider', 'model', 'thinking', 'model_aliases']) {
     writeFileSync(join(config, 'factory.toml'), factoryToml('owner/repo') + `\n[agent]\n${key} = "old"\n`);
     assert.throws(() => loadTomlConfig(config));
@@ -52,15 +52,15 @@ test('every documented TOML fence parses as a complete example or compatible fra
 test('documented tiers, roles and rejected legacy declarations use production policy', () => {
   const doc = text('docs/project-config.md');
   assert.match(doc, /Both families use Pi with high thinking/);
-  assert.match(doc, /analysis uses Mid, and verification and recovery use Large/);
+  assert.match(doc, /analysis and supervisor diagnosis use Mid, and verification, recovery and independent gate review use Large/);
   for (const family of ['openai', 'anthropic'] as const) {
     const row = doc.match(new RegExp('^\\| `' + family + '` \\| `([^`]+)` \\| `([^`]+)` \\| `([^`]+)` \\|$', 'm'));
     assert.ok(row, `model table row for ${family}`);
     const documented = { small: row[1], mid: row[2], large: row[3] };
-    for (const role of ['implementation', 'analysis', 'verification', 'recovery'] as const) {
+    for (const role of ['implementation', 'analysis', 'verification', 'recovery', 'supervisor', 'gateReview'] as const) {
       for (const tier of ['small', 'mid', 'large'] as const) {
         const result = modelForRole(family, role, tier);
-        const expectedTier = role === 'implementation' ? tier : role === 'analysis' ? 'mid' : 'large';
+        const expectedTier = role === 'implementation' ? tier : ['analysis','supervisor'].includes(role) ? 'mid' : 'large';
         assert.equal(result.tier, expectedTier); assert.equal(result.model, documented[expectedTier]);
         assert.equal(result.agent, 'pi'); assert.equal(result.thinking, 'high');
       }
@@ -73,7 +73,7 @@ test('documented tiers, roles and rejected legacy declarations use production po
     assert.equal(resolveTicketModel('', family).choice?.tier, 'mid');
     for (const declaration of ['Model: openai/gpt-6.1-sol', 'Pi model: mid', 'Model tier: invalid', 'Model tier: small\nModel tier: large']) assert.notEqual(resolveTicketModel(declaration, family).status, 'resolved');
   }
-  assert.deepEqual(ROLE_TIERS, { analysis: 'mid', verification: 'large', recovery: 'large' });
+  assert.deepEqual(ROLE_TIERS, { analysis: 'mid', verification: 'large', recovery: 'large', supervisor: 'mid', gateReview: 'large' });
 });
 
 test('documented manifest command regenerates a copied fixture bundle and invalidates review', t => {

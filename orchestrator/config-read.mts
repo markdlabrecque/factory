@@ -1,4 +1,4 @@
-// Read-only context validation and allowlisted v2 scalars. No project executable imports.
+// Read-only context validation and allowlisted v2 metadata. Supervisor policy is data, never operator mode or admission.
 import { executionContext } from './context.mts';
 const [dir, key] = process.argv.slice(2);
 try {
@@ -9,7 +9,7 @@ try {
   const fields: Record<string, string> = { kind: c.TRACKER.kind, host: c.TRACKER.gitlabHost ?? c.TRACKER.host!,
     agent: 'pi', provider: c.AGENT.family === 'openai' ? 'openai' : 'pi-claude-subscription', family: c.AGENT.family,
     image: c.config.image, tsx: context.tsx, sandcastle: context.sandcastle, analysisTimeoutMinutes: String(c.GRAPH.analysisTimeoutMinutes),
-    subscription: String(c.AGENT.family === 'anthropic') };
+    subscription: String(c.AGENT.family === 'anthropic'), supervisorPolicy: JSON.stringify(c.supervisor) };
   if (key === 'validate') { for (const w of c.warnings) console.error(`${c.source.path}: warning: ${w}`); }
   else if (!Object.hasOwn(fields, key)) throw new Error('Unsupported metadata field');
   else process.stdout.write(fields[key]);

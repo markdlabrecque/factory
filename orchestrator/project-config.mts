@@ -3,6 +3,7 @@ import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { PROJECT_ASSET_BASENAME, requireProjectLayout } from './project-layout.mts';
 import type { ModelFamily } from './model-policy.mts';
+import type { SupervisorPolicy, CallLimits } from './supervisor-policy.mts';
 import { parse } from './vendor/smol-toml/index.js';
 
 export type Thinking = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -13,7 +14,8 @@ export type EffectiveConfig = {
   TRACKER: { kind: 'github' | 'gitlab'; project: string; host?: string; gitlabHost?: string; projectId?: number; milestone?: string };
   AGENT: { family: ModelFamily };
   workflow: { mode: 'factory' | 'project'; directory?: string };
-  instructions: Record<'common' | 'implementation' | 'verification' | 'analysis' | 'recovery', string[]>;
+  supervisor: SupervisorPolicy;
+  instructions: Record<'common' | 'implementation' | 'verification' | 'analysis' | 'recovery' | 'supervisor' | 'gateReview', string[]>;
   LABELS: { ready: string[]; exclude: string[]; needsHuman: string; done: string };
   MERGE: { auto: boolean; method: 'merge' | 'squash' | 'rebase'; requiredChecks: string[] };
   SUBTASKS: { enabled: boolean };
@@ -94,7 +96,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
     sources[`${p}.${k}`] = Object.hasOwn(t, k) ? 'explicit' : 'default';
     return t[k] === undefined ? undefined : str(t, k, p);
   };
-  table(raw, '', ['version','tracker','agent','labels','graph','sandbox','selection','work','dispatch','merge','ci','workflow','instructions']);
+  table(raw, '', ['version','tracker','agent','labels','graph','sandbox','selection','work','dispatch','merge','ci','workflow','instructions','supervisor']);
   sources.version = Object.hasOwn(raw, 'version') ? 'explicit' : 'default';
   if (raw.version !== 2) fail('version', 'unsupported configuration; version = 2 required; no conversion is performed');
   const t = section('tracker', ['kind','project','host','project_id'], true);
@@ -112,9 +114,29 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
   if (mode === 'project' && !directory) fail('workflow.directory', 'required in project mode');
   if (mode === 'factory' && directory !== undefined) fail('workflow.directory', 'not allowed in factory mode');
   if (directory) { try { validateRelativePath(directory); } catch { fail('workflow.directory', 'expected a repository-relative path without parent traversal'); } }
-  const inst = section('instructions', ['common','implementation','verification','analysis','recovery']);
+  // No mode/model/provider selector: action mode belongs to authenticated operator state.
+  const sp = section('supervisor', ['enabled','max_tokens','max_cost_usd','max_calls','diagnosis','review']);
+  const enabled = bool(sp, 'enabled', 'supervisor');
+  const hasLimits = ['max_tokens','max_cost_usd','max_calls','diagnosis','review'].some(k => k in sp);
+  let limits: SupervisorPolicy['limits'];
+  if (enabled || hasLimits) {
+    const callLimits = (name: 'diagnosis' | 'review'): CallLimits => {
+      const prefix = `supervisor.${name}`, v = table(sp[name] ?? {}, prefix, ['max_tokens','max_cost_usd','max_calls','timeout_seconds']);
+      const timeoutSeconds = num(v, 'timeout_seconds', prefix, 600, true);
+      if (timeoutSeconds > 600) fail(`${prefix}.timeout_seconds`, 'must not exceed 600 seconds');
+      return { maxTokens: num(v,'max_tokens',prefix,undefined,true), maxCostUsd: num(v,'max_cost_usd',prefix), maxCalls: num(v,'max_calls',prefix,undefined,true), timeoutSeconds };
+    };
+    limits = { maxTokens: num(sp,'max_tokens','supervisor',undefined,true), maxCostUsd: num(sp,'max_cost_usd','supervisor'), maxCalls: num(sp,'max_calls','supervisor',undefined,true), diagnosis: callLimits('diagnosis'), review: callLimits('review') };
+    for (const role of ['diagnosis','review'] as const) {
+      const cap = limits[role];
+      if (cap.maxTokens > limits.maxTokens || cap.maxCostUsd > limits.maxCostUsd || cap.maxCalls > limits.maxCalls)
+        fail(`supervisor.${role}`, 'role limits must not exceed project limits');
+    }
+  }
+  const supervisor: SupervisorPolicy = { enabled, ...(limits ? { limits } : {}) };
+  const inst = section('instructions', ['common','implementation','verification','analysis','recovery','supervisor','gateReview']);
   const instructions = {} as EffectiveConfig['instructions'];
-  for (const role of ['common','implementation','verification','analysis','recovery'] as const) {
+  for (const role of ['common','implementation','verification','analysis','recovery','supervisor','gateReview'] as const) {
     instructions[role] = arr(inst, role, 'instructions');
     for (const p of instructions[role]) {
       try { validateRelativePath(p); if (!/\.md$/i.test(p)) throw new Error(); }
@@ -154,7 +176,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
     return { command: str(st,'command',p), sudo: bool(st,'sudo',p), ...('timeout_ms' in st ? { timeoutMs: num(st,'timeout_ms',p,undefined,true) } : {}) };
   });
   return { source: { mode: 'toml', path }, sources, warnings: exclude.includes(needsHuman) ? [] : ['selection.labels.none does not contain labels.needs_human; add it to prevent human-held tickets from being selected.'],
-    TRACKER: tracker, AGENT: { family }, workflow: { mode, ...(directory ? { directory } : {}) }, instructions, LABELS: { ready, exclude, needsHuman, done },
+    TRACKER: tracker, AGENT: { family }, workflow: { mode, ...(directory ? { directory } : {}) }, supervisor, instructions, LABELS: { ready, exclude, needsHuman, done },
     MERGE: { auto: bool(m,'auto','merge'), method: en(m,'method','merge',['merge','squash','rebase'],'squash'), requiredChecks: arr(m,'required_checks','merge') },
     SUBTASKS: { enabled: en(w,'units','work',['issues','subtasks'],'subtasks') === 'subtasks' },
     GRAPH: { maxAnalysesPerPass: num(g,'max_analyses_per_pass','graph',5,true), analysisTimeoutMinutes: num(g,'analysis_timeout_minutes','graph',10), conflictIgnore: arr(g,'conflict_ignore','graph'), pruneAfterDays: num(g,'prune_after_days','graph',30) },
