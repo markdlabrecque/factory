@@ -32,22 +32,46 @@ Missing, pending, invalid, stale or unavailable observations are unknown, not he
 
 `factory config explain [--project <name|path>] [--json]` validates v2 configuration, instructions and the selected runtime without launching it. A registered name selects its root; an explicit path selects that path, even if unregistered. Without `--project`, it selects the innermost registered root containing the current directory, or searches ancestors for `.sandcastle/factory.toml`. This differs from run and dispatch, which require registered checkout resolution. JSON output has version 1, normalized settings and source attribution, canonical project and config paths, config and instruction hashes, runtime identity and Factory model policy. Setup commands and instruction bodies are not printed. The command reads and hashes local files only: it does not prepare a runtime, access the network, acquire leases or write files. A complete project override reports configured intent and validated identity, but its actual models and behavior are opaque. Invalid inputs exit 1 with sanitized diagnostics; successful validation exits 0. This does not check tracker, image, credentials or service availability. Configuration aliases are rejected, and instruction aliases must resolve to Markdown outside secret paths before any content read. Factory model policy is reported only when its selected inventory hash matches the CLI's known policy bytes; otherwise it is unknown with a warning, never inferred by executing the module.
 
+## Selection explanation
+
+`factory selection explain <ticket> [--project <name|path>] [--json]` explains configured selection without starting work.
+
+```sh
+factory selection explain 42 --project <name-or-path>
+factory selection explain 42 --project <name-or-path> --json
+```
+
+This command requires a positive ticket number and a registered checkout. It validates v2 configuration and the complete selected runtime, then uses Factory-owned native host tracker reads. It never imports custom project executables, creates labels, runs analysis or writes state. Unlike `config explain`, it is not offline and needs existing tracker access.
+
+The result separates configured selection eligibility from execution holds. `eligibility` is `selected`, `not-selected` or `unknown`, with structured reasons, effective settings/source attribution and selected workflow identity. Open child Tasks can inherit eligibility from a selected parent; a parent with children is a container rather than an executable work unit. Ticket-local exclusion and closed-child rules still apply. Failed or incomplete tracker reads are unknown, not proof that a filter excluded the ticket. Selected and not-selected results exit 0; unknown exits 1. Invalid arguments/configuration/runtime/project selection also fail.
+
+JSON includes `source`, `workflow`, `settings`, `eligibilityScope`, `eligibility`, `reasons`, `inheritedFrom` and `executionHolds`. Recorded run/assessment facts are historical only. Capacity, conflicts, prerequisites and admission are not re-evaluated. A complete project override reports configured selection intent with opaque actual behavior, not a guarantee of what its custom dispatcher would select. Selection explanation never authorizes execution.
+
+## Project asset diagnostics
+
+```sh
+factory update --dry-run --project <name-or-path>
+factory update --apply --project <name-or-path>
+```
+
+Both forms validate the project's v2 data and report project-owned `factory.toml`, `.env.example`, `.gitignore` and `factory-dispatch.sh`. Existing assets are never modified; absent assets are never created by update. `--apply` is retained as a supported command form, not permission to repair executable copies or overrides. No automatic v1 migration, partial workflow merge or image rebuild occurs. Explicit project changes belong to the owner; shared runtime publication uses `factory install`, and custom code follows [complete override maintenance](../orchestrator/ADAPTING.md#complete-project-workflow-override). Historical copy drift remains separately available through `factory workflow status`.
+
 ## Local observations
 
-`factory telemetry export [--project <name|path>] [--ticket <iid>] [--since <ISO-8601>] [--format json|jsonl]` exports append-only local execution and explicit-control observations. JSONL is the default, with metadata first. The command writes only stdout, does not reconcile state or take writer locks, and reports coverage as `observed-only`. Missing history is not proof of inactivity. See [local execution observations](telemetry.md) for the event schema, supported controls, unknown attribution, diagnostics, retention and project-copy requirements.
+`factory telemetry export [--project <name|path>] [--ticket <iid>] [--since <ISO-8601>] [--format json|jsonl]` exports append-only local execution and explicit-control observations. JSONL is the default, with metadata first. The command writes only stdout, does not reconcile state or take writer locks, and reports coverage as `observed-only`. Missing history is not proof of inactivity. See [local execution observations](telemetry.md) for the event schema, supported controls, unknown attribution, diagnostics, retention and runtime upgrade requirements.
 
 The sections below document the scheduler, recovery and ticket contracts as well as installation and project commands.
 
 ## Goal
 
-Turn this repo from a set of skills and patterns into a software factory with one command, `factory`, installed in one place and removable in one step. The uninstall must remove every systemd unit and launchd agent that Factory created.
+Factory provides one installed operator command for project execution, scheduling, recovery and observation. Installation records ownership; uninstall removes the services and artifacts in its manifest, preserves projects, and refuses unsafe runtime removal. Unrelated or untracked services are never removed merely because their names match.
 
 ## Principles
 
 - **One install point.** Code, config and state each have one home (see Layout).
 - **The manifest is the source of truth.** Every file, unit or agent Factory creates is recorded in `manifest.json` at the moment it is created. Uninstall removes what the manifest lists and nothing else. It never guesses by name patterns.
 - **Idempotent.** Running `factory install` twice leaves the same result.
-- **Tracer bullet first.** Build the first slice end to end (command, manifest, service, uninstall) before the other commands.
+- **Delivered end to end.** Installation, service ownership and uninstall form the completed first slice; later commands use the same ownership boundaries.
 - **No surprises on uninstall.** Config, run history and `.env` files are kept unless `--purge` is passed. Projects are never edited.
 
 ## Surface
@@ -74,13 +98,16 @@ factory logs [ticket] [-f] [--recovery]   a run's (or with --recovery a repair's
 
 factory recovery status --project <name>   project recovery state, attempts and reports (--json)
 factory recovery reset --project <name>    reset recovery budget and confirmation; launches nothing
-factory schedule on|off [--project <name|path>]   the scheduler, or one project's opt-in (Linux)
+factory recovery review [--confirm] [--project <name|path>]   inspect or explicitly confirm a complete project override
+factory schedule on|off [--project <name|path>]   the scheduler, or one project's opt-in (Linux/macOS)
 factory schedule status [--project <name|path>] [--json]   timer, tick, and why each project would or would not run
 factory legacy status [--json]             enabled legacy sandcastle-dispatch timers and the checkout each runs
 factory legacy retire                      disable them and remove their env files (the only command that touches them)
 factory clean [--dry-run] [--project <name|path>] [--json]   delete merged, clean local Factory branches and their worktrees
-factory board start|stop|status|open        the always-on board
-factory config explain       read-only effective configuration and runtime identity
+factory board start|stop|status             the always-on board; status prints its URL
+factory config explain       read-only effective configuration and runtime identity (--json)
+factory selection explain <ticket>   tracker-backed configured selection explanation (--json)
+factory ticket comment|sync|verdict|archive|archived|show|restore   journal controls and read-only inspection; see ticket journal
 ```
 
 Only commands that list `--json` in their syntax accept it.
@@ -114,13 +141,13 @@ Inventory entries are `{path, status, sha256}`. Status is `present`, `missing`, 
 
 `workflowDigest` is SHA-256 over UTF-8 `JSON.stringify` of `[path, status, sha256]` rows, sorted by relative path in codepoint order. Missing-file markers are part of this encoding. It identifies selected content, not a release. Source/app paths use the source layout; project paths use the scaffold layout, with rendered settings. Do not compare a project digest directly to an app digest to infer drift. Use the per-file comparisons instead. Source and app digests are directly comparable because they use the same inventory.
 
-Project classifications reuse `factory update`'s read-only `classifyCopy`: `current`, `missing`, `outdated`, `modified`, `project`. `outdated` requires an exact historical blob match, not a guess that a differing file is old. Project-owned settings, entrypoint and prompts keep the existing hand-merge rules. An unavailable comparison is `unknown` with a reason, not `current` or `missing`. Source and installed comparisons use their own histories. The command never calls `applyCopy`.
+Historical project-copy diagnostics use read-only `classifyInventory`: `current`, `missing`, `outdated`, `modified`, `project`. `outdated` requires an exact historical blob match, not a guess that a differing file is old. These comparisons do not select the active workflow or authorize a hand merge. An unavailable comparison is `unknown` with a reason, not `current` or `missing`. Source and installed comparisons use their own histories. This differs from `factory update`'s data-only `classifyCopy`; update does not repair executable copies or overrides. The report never calls `applyCopy`.
 
 ### Observations, not compatibility certification
 
 The capability states are `met`, `blocked` and `unknown`. Scheduler observation validates the complete selected workflow, private dependencies and executable dispatch entrypoint. Recovery workflow observation uses the same complete inventory. Factory-mode recovery trusts the validated installed bundle without per-project review. Project-mode review compares the selected mode/root, source identity and dependency hashes to the host-owned review record; edits invalidate review. Missing project reviews block that observation; malformed/unreadable records stay unknown. Unreadable or non-regular legacy copy inventory entries remain unknown diagnostics. These observations do not certify arbitrary custom workflow behavior or authorize an update, review or schedule change.
 
-Image configuration comes from validated v2 TOML through `loadTomlConfig`. Missing, v1, invalid or unreadable TOML is `invalid-config`, with manual migration required and no legacy fallback. Project modules are never executed to discover settings. Dispatch, direct runs, selection, refresh and recovery use the same v2 configuration authority. Factory derives Pi, high thinking and role models from `agent.family`; ticket descriptions select implementation tiers, defaulting to Mid. See [configuration and migration](project-config.md).
+Image configuration comes from validated v2 TOML through `loadTomlConfig`. Missing, v1, invalid or unreadable TOML is `invalid-config`; only v2 configuration is supported, with no legacy fallback. Project modules are never executed to discover settings. Dispatch, direct runs, selection, refresh and recovery use the same v2 configuration authority. Factory derives Pi, high thinking and role models from `agent.family`; ticket descriptions select implementation tiers, defaulting to Mid. See [project configuration](project-config.md).
 
 Image inspection sends only `GET /images/<encoded-reference>/json` to the local Unix socket. The default is `/var/run/docker.sock`; `--docker-socket` must be an absolute local path, not a URL. Remote `DOCKER_HOST` and Docker contexts are ignored. The request has a total 3-second deadline and a 1 MiB body limit. A 404 reports `missing`; inaccessible sockets, daemon errors, malformed/oversized bodies and timeouts report `unknown`. Successful inspection retains only image ID, RepoDigests, OS, architecture and configured user. It excludes image Env, labels and daemon error bodies. Missing optional identity fields remain absent in JSON and unknown in text.
 
@@ -148,7 +175,7 @@ Decided: one `factory-tick.timer` that walks the project list, instead of one ti
 
 ## Language
 
-Proposed: Node and TypeScript. The repo already requires Node 22.18+, which runs `.mts` files directly (type stripping), so there is no build step. Bash would be less code but is harder to test across systemd and launchd.
+Implemented in Node and TypeScript, with shell bootstraps where needed. The repo requires Node 22.18+, which runs `.mts` files directly through type stripping, so there is no application compilation step. The selected workflow uses its private locked runtime dependencies; installation prepares those separately. See [execution context](execution-context.md) and [testing](../TESTING.md).
 
 ## Manifest
 
@@ -177,7 +204,7 @@ Rules:
 
 ## Uninstall behaviour
 
-1. Read the manifest. If it is missing, say so and list any `factory-*` units and `com.factory.*` agents found, but delete nothing without `--force`.
+1. Read the manifest. If it is missing, report that and list any discovered `factory-*` units and `com.factory.*` agents, but delete nothing. There is no `--force` escape hatch; untracked artifacts require separately reviewed manual cleanup.
 2. Stop and disable every `systemd` and `launchd` entry. Reload the manager afterwards (`systemctl --user daemon-reload`).
 3. Delete the unit and agent files.
 4. Delete the app dir and the `factory` symlink.
@@ -190,15 +217,32 @@ Rules:
 
 ## Roadmap
 
-1. **First slice** (spec below): install, doctor, uninstall, board service. Tracked in [#1](https://github.com/markdlabrecque/factory/issues/1), including existing implementation and outstanding verification.
-2. `factory project add|ls|rm` and data-only `factory init`; see "Slice two spec" and [project configuration](project-config.md).
-3. `factory dispatch`, `run`, `retry`, `status`, `logs`, tracked in [#10](https://github.com/markdlabrecque/factory/issues/10). Implemented: the shared lookup ([#13](https://github.com/markdlabrecque/factory/issues/13)), `dispatch` ([#14](https://github.com/markdlabrecque/factory/issues/14)), `run` through the internal selected-runtime `dispatch.sh --issue` entrypoint (with an explicit execution context) ([#15](https://github.com/markdlabrecque/factory/issues/15)), `retry` ([#16](https://github.com/markdlabrecque/factory/issues/16)), `status` ([#17](https://github.com/markdlabrecque/factory/issues/17)), `logs` ([#18](https://github.com/markdlabrecque/factory/issues/18)) and these docs ([#19](https://github.com/markdlabrecque/factory/issues/19)). One project per command; no timers. See "Slice three spec" below.
-4. `factory schedule` with the single tick timer, replacing `install-dispatch.sh`. Implemented so far: project opt-in and launch configuration storage ([#31](https://github.com/markdlabrecque/factory/issues/31)), launch reservations ([#32](https://github.com/markdlabrecque/factory/issues/32)) and the Linux scheduler from enable to uninstall ([#33](https://github.com/markdlabrecque/factory/issues/33)) and its rotating first project ([#34](https://github.com/markdlabrecque/factory/issues/34)), and the macOS scheduler ([#35](https://github.com/markdlabrecque/factory/issues/35)), and bounded timing history ([#36](https://github.com/markdlabrecque/factory/issues/36)), shown with scheduler health in status ([#37](https://github.com/markdlabrecque/factory/issues/37)), and the cutover runbook ([#38](https://github.com/markdlabrecque/factory/issues/38), [scheduler-cutover.md](scheduler-cutover.md)); see "Slice four: scheduler storage", "Slice four: launch admission", "Slice four: the Linux scheduler" and "Slice four: the macOS scheduler" below. Self-recovery is described below; see [self-recovery requirements](#slice-four-self-recovery-requirements) and the recovery contracts below.
-5. `factory update` reports project-owned assets. Ticket archive and verdict corrections use the shared ticket journal; see "Slice five: ticket journal" below.
-6. Retire `install-service.sh`, `install-launchd.sh` and `install-dispatch.sh`. Update `README.md`, `orchestrator/ADAPTING.md` and the setup skill (see `AGENTS.md`).
-7. Migrate project files from `.sandcastle` to `.factory` in a future slice. Plan runtime path changes, compatibility and safe migration separately; do not rename directories in slice two.
+The first five slices are complete in source. Completion here does not mean a particular machine has installed the latest runtime, migrated its configuration or enabled scheduling. Operator deployment and live smoke checks remain separate actions.
 
-The board redesign from [#3](https://github.com/markdlabrecque/factory/issues/3) is implemented: one Factory operations-console design for board and evidence pages with light/dark/system modes, page and navigation transitions, and live updates from a read-only `GET /api/runs` snapshot patched in place every 10s (no reloads; focus, scroll, filters and media playback preserved; reduced motion respected). A local `board.html` stays a static snapshot. Full implementation plans and Q&A are posted on all three tickets.
+| Slice | Status | Delivered behavior |
+| --- | --- | --- |
+| 1. Installation and Board service | Complete, [#1](https://github.com/markdlabrecque/factory/issues/1) | `install`, `doctor`, `board start|stop|status`, ownership manifest and safe `uninstall`, with Linux and macOS service adapters. |
+| 2. Project registration and initialization | Complete, [#2](https://github.com/markdlabrecque/factory/issues/2) | `project add|ls|rm` and `init`. Current init creates data-only v2 configuration and environment assets; see [project configuration](project-config.md). |
+| 3. Manual execution and observation | Complete, [#10](https://github.com/markdlabrecque/factory/issues/10) | `dispatch`, `run`, `retry`, `status` and `logs`, using the selected complete runtime and explicit project context. |
+| 4. Scheduling and self-recovery | Complete, [#30](https://github.com/markdlabrecque/factory/issues/30) | One completion-relative scheduler on Linux/macOS, project opt-in, rotating priority, atomic admission, timing/health reports and bounded recovery with independent verification. See [self-recovery requirements](#slice-four-self-recovery-requirements) and the scheduler contracts below. |
+| 5. Project assets and ticket journal | Complete, [#85](https://github.com/markdlabrecque/factory/issues/85), [#98](https://github.com/markdlabrecque/factory/issues/98) through [#103](https://github.com/markdlabrecque/factory/issues/103) | `update --dry-run|--apply` now report project-owned data without modifying it. Merged-work reconciliation, legacy timer retirement, safe local cleanup, and ticket comments, sync, verdict correction, archive, show and restore are implemented. See [ticket journal](#slice-five-ticket-journal). |
+| 6. Retire legacy installers | Not implemented | The standalone Board and dispatcher installer scripts still exist. `factory legacy retire` disables enabled legacy Linux timers, but does not remove their template units. Full installer retirement is separate work. |
+| 7. Rename project assets to `.factory` | Deferred | `.sandcastle` remains the supported project layout. Compatibility and safe migration need a separate design. |
+
+### Delivered follow-up features
+
+- The live Board uses the approved per-ticket stage tracker, ticket stats and one latest-ten Shipped section, with light/dark/system appearance, reduced-motion support, evidence pages and in-place ten-second run polling. File snapshots remain static. See the [Board design and production behavior](board-design-prototype.md#promotion-to-the-board-template).
+- Existing PR/MR delivery can continue after required checks become ready, under fresh proof, policy, identity and exact-head merge gates. See [existing-delivery follow-through](#existing-delivery-follow-through).
+- Recovery preserves deferred work, refreshes analysis before charging, tries another candidate after a ticket-local refusal and reports stops with explicit resumption guidance. See the recovery contracts below.
+- V2 project data, additive role instructions, fixed family/tier model policy and complete shared or project-owned runtimes replace copied partial workflows. See [project configuration](project-config.md) and [execution context](execution-context.md).
+- Complete frozen child/parent ticket input, host filesystem gates, actual-user sandbox probes, passive CLI/Board readiness and explicit doctor probes are implemented. See [ticket readiness](ticket-readiness.md) and [image readiness](image-readiness.md).
+- Local execution events and read-only telemetry export are implemented. See [telemetry](telemetry.md).
+
+### Approved or deferred work beyond the slices
+
+The [herdr-core spike](research/interactive-agents-herdr-core.md) ended with an adoption decision for interactive attach/steer, not a production integration. The standard workflow remains noninteractive Pi. Completion hand-back, exit propagation, orphan cleanup, initialization and compatibility with the current Pi workflow need separate implementation work. Reboot recovery and a person's real terminal remain untested.
+
+A dedicated recovery Board interface is deferred. Recovery reports and reset are available through CLI commands; passive Board readiness does not provide recovery controls.
 
 ---
 
@@ -226,7 +270,7 @@ Tests: `board/journal.test.mts`, `cli/test/ticket.test.mts`.
 
 Recovery uses the selected complete workflow. Factory mode needs no per-project review; project mode requires a current host-owned review. The following sections describe the current recovery contracts.
 
-Factory should recover jammed work without a human deleting run state or branches:
+The implemented recovery workflow handles eligible jammed work without requiring a human to delete run state or branches:
 
 - Reuse the existing dispatcher timer. After normal dispatch, require the same project jam on two consecutive completed passes: eligible queued demand and no active ticket runs.
 - Include ready stopped tickets and unresolved dependency holds. Respect explicit exclusions, open PRs awaiting merge, progressing prerequisites and shared-capacity limits.
@@ -237,7 +281,7 @@ Factory should recover jammed work without a human deleting run state or branche
 - Add project-scoped `factory recovery status` and `factory recovery reset`. Reset refuses active recovery, preserves ticket work/evidence and leaves reevaluation to the normal timer. Keep it separate from `factory retry`.
 - Show confirmation, attempts and outcomes through `factory status`, repair logs through `factory logs`, and report/reset details through recovery status. Defer a dedicated recovery board UI.
 - Require a complete, reviewed project override when project mode is selected. Owners maintain their customizations; Factory does not merge them automatically.
-- If a repair requires updating the host's copied workflow, report the action and stop. Do not automatically apply it to the host checkout or restart services.
+- If a repair requires updating the host's selected runtime or complete project override, report the action and stop. Do not automatically apply it to the host checkout or restart services.
 
 # Slice four: recovery state
 
@@ -283,6 +327,33 @@ A repaired branch goes through the same hand-off as an implemented one (#58, `or
 - Host calls (board, tracker, git) are passed in, so the module imports no config, tracker or board file and is tested with fakes (`orchestrator/handoff.test.mts`). A custom project workflow owns the complete selected inventory.
 - **Prerequisite recheck** (#75, `prerequisiteHold`). A recovery run calls it before verification and again before delivery with the dispatcher's analysis of the ticket (its manifest under `<state>/graph/`): every analysed requirement and implementer-reported blocker that names another ticket must be closed or merged into its base, so a prerequisite with a run in flight or an open PR holds the ticket (the attempt ends `unresolved`, nothing delivered). A missing or out-of-date analysis, or a tracker lookup that fails, is unknown and holds too. Normal runs do not call it.
 - Not handled here: a preserved branch whose PR is already open (open PRs are not jams, so a recovery should not reach delivery with one), and merging (still the tracker's `deliver` and `MERGE.auto`). The attempt's outcome is recorded by the launcher (see "Slice four: bounded repair attempts").
+
+# Existing-delivery follow-through
+
+A verified branch can have an open PR/MR whose required checks are not ready when the initial delivery wait ends. The host stores a strict version-1 `delivery` checkpoint on the run, binding tracker kind/host/repository, PR/MR number and URL, source/base branches, exact head SHA, project/ticket/execution and host proof ID. States are `ci-waiting`, `operator-required` and `merged`, with a bounded reason code and observation time. Legacy PASS notes and PR URLs do not create a checkpoint or authorize continuation.
+
+Only a non-dry scheduled dispatch with automatic merge enabled continues `ci-waiting` checkpoints. Manual dispatch, direct runs, dry runs and read-only refresh do not perform this continuation. Each pass considers at most ten waits, oldest observation first. It starts no implementer, repair agent or verifier, spends no recovery attempt, posts no new evidence comment and creates no replacement PR/MR.
+
+Continuation takes a delivery admission claim and revalidates the frozen PASS proof, historical baseline, execution/branch identity, complete selected runtime inventory and normalized settings. It also requires unchanged local and remote head SHAs, current complete ticket/parent input, selection/eligibility, no exclusion or needs-human label, the same checked-out base, and live scheduler/project authorization through the trusted saved CLI/Node. Capacity and conflicting ownership can hold the observation. Current checks, review and merge restrictions still apply. Both tracker adapters reauthorize immediately before exact-head merge; a remote ticket edit can still race the last read.
+
+One observation has a total 30-second deadline and at most 10 seconds per subprocess. Pending or missing checks and unknown tracker responses stay retryable on the same recorded PR/MR. Failed checks, identity/proof/settings changes, draft/closed PRs or merge restrictions can require operator action. An ambiguous merge response does not justify a second PR or a blind repair; the next eligible pass observes the same identity. Token-fenced completion discards stale observers. Only confirmed merge records completion.
+
+Inspect the run through `factory status`, its logs and evidence. An `operator-required` checkpoint is not automatically retried as a CI wait. Preserve the branch and proof artifacts, resolve the named gate and obtain fresh verification or owner review when inputs changed. Recovery reset is not delivery authorization. See [verification contracts](#slice-four-shared-verification-and-delivery), [execution context](execution-context.md#frozen-inputs-and-proof) and [continuation tests](../TESTING.md#existing-delivery-continuation-tests).
+
+# Merged-work reconciliation and local cleanup
+
+Dispatch reconciles stopped, queued or waiting records whose recorded work merged outside Factory. With a host checkpoint, it observes that exact PR/MR identity; without one, the adapters can look up a merged change by recorded branch or ticket-title reference into the expected base. A closed ticket alone is not merge evidence. Dry runs report what would change. A live reconciliation updates the card only if its stage and ownership still permit it, preserves its verdict/history, and closes a Task or advances the whole ticket as appropriate. Tracker-update failure is reported separately from the local merge observation. Reconciliation does not launch an agent.
+
+```sh
+factory clean --dry-run --project <name-or-path>
+factory clean --project <name-or-path> --json
+```
+
+Cleanup is offline and project-scoped. A candidate must have a `done` record with `mergedAt`, no recorded recovery/start reservation, and an existing local `<ticket>-<slug>` branch. Its tip must already be contained in a local/origin base ref or the last-fetched origin ticket-branch ref. This permits a pushed squash-merged branch but keeps unpushed commits. Cleanup never fetches, pushes or deletes remote branches.
+
+A branch checked out in the project root or a foreign worktree is kept. Factory-owned worktrees under `.sandcastle/worktrees/` must have no uncommitted or untracked changes. Before mutation, cleanup re-reads the run; it removes clean worktrees without force and deletes the branch only by compare-and-swap against the checked tip. Missing registered worktrees can be pruned. Kept and failed entries include reasons. `--dry-run` reports candidates without deleting anything; JSON contains `project`, `root`, `dryRun`, `removed`, `kept` and `failed`. A failed removal exits 1; safely kept work does not.
+
+The tick runs the same cleanup after each completed scheduled pass. Run records, ownership receipts, evidence, logs, journals and telemetry remain untouched. This is not an arbitrary stale-worktree remover or a substitute for inspecting an ownership/cleanup hold.
 
 # Frozen ticket input
 
@@ -471,7 +542,7 @@ Tests: `board/board.test.mts` ("a launched run counts as active before its child
 - **Existing PR continuation (#153).** The tick exports its absolute CLI entrypoint and saved Node as `FACTORY_CLI_ENTRYPOINT`/`FACTORY_SCHEDULER_NODE` only to scheduled children. A normal non-dry pass observes up to ten host-recorded `ci-waiting` checkpoints once each, oldest first. Exact proof, current requirements/eligibility, workflow/settings and local/remote heads must match; no agents or repair charges. Each observer has a 30-second deadline and 10-second subprocess bounds. Before observation and before merge it runs that exact Node/CLI's `schedule status --project <canonical-root> --json`, requiring version 1, global service enabled/timer active, exactly the registered project enabled on the recorded base and blocker null. Unknown/off/paused/cancelled/base-switched authorization refuses merge, without PATH fallback. Tracker transport ambiguity stays retryable on the same PR; identity/CI/policy failures require an operator. No historical adoption, creates, pushes, reruns or repeated waiting comments. Delivery claims count against shared capacity and advance activity generation without changing execution identity or renewing repair budget; only confirmed merged checkpoints count as progress. Manual/dry-run/refresh-only dispatch does no open-PR continuation. The operator must maintain compatible CLI and runtime code.
 - **`factory schedule status [--project] [--json]`** prints the manager's state (enabled, timer activity, tick activity; `unknown` when the query fails), the last trigger, the last tick and tick timings, health problems, enabled legacy dispatcher timers, and each project's switch, `scheduleBlocker` reason or `ready`, last pass result and pass timings. `--json` adds `scheduler.lastTick`, `scheduler.ticks`, `scheduler.problems` and `projects[].timings`.
 - **Scheduler health** (`cli/src/scheduler-health.mts`, #37), shared by `factory status` and `schedule status`. Read-only: one manager query plus state.json, history.json and schedule.json. `schedulingFrom` gives on/off/unknown by the tick's own rule; the phase is `running` (a tick is active), `waiting` (on, no tick), `off` or `unknown`. Problems: the manager can't be read (scheduled work is blocked), the job is enabled but not running, or running but disabled, a malformed state, history or launch configuration file (reported, left alone, never an error), no launch configuration while the job is installed, and an overdue tick (on, no tick running, nothing started or finished for two 5-minute intervals). Timing summaries are `{count, timed, lastMs?, medianMs?, p90Ms?, maxMs?, results}` over the history's entries (percentiles by nearest rank; interrupted entries have no duration and are only counted). `factory status --json` adds `scheduler: {state, reason?, phase, enabled, timer, tick, loaded?, lastTick, ticks, problems, legacyTimers, logHint}` and `schedule: {switch: on|paused|off, branch?, blocker, last, timings, recent}` (the project's five newest passes, newest first). Tests: `cli/test/status.test.mts`, and the status test in `cli/test/scheduler.test.mts`.
-- **`factory doctor`** checks the manager once the units are in the ledger. Enabled and active passes, enabled but stopped fails, running but disabled warns, an unreadable manager fails, and off is information. It warns about enabled legacy `sandcastle-dispatch` timers (`~/.config/systemd/user/timers.target.wants/`). Nothing disables them automatically; the developer runs `factory legacy retire` (#95, `cli/src/commands/legacy.mts`), following the [cutover runbook](scheduler-cutover.md) (#38), rehearsed by `cli/test/cutover.test.mts`.
+- **`factory doctor`** checks the manager once the units are in the ledger. Enabled and active passes, enabled but stopped fails, running but disabled warns, an unreadable manager fails, and off is information. It warns about enabled legacy `sandcastle-dispatch` timers (`~/.config/systemd/user/timers.target.wants/`). Doctor disables nothing. The separate `factory legacy retire` command is documented below.
 - **`factory legacy status [--json]`** (#95) is read-only and calls no service manager: each enabled `sandcastle-dispatch[@<name>].timer` link in `timers.target.wants`, the `SANDCASTLE_REPO` its `~/.config/sandcastle/dispatch/<name>.env` names, and that checkout's Factory project and opt-in. **`factory legacy retire`** sends exactly `systemctl --user disable --now <timer>` per enabled legacy timer, checks the link is gone, and only then removes that instance's env file. It never stops a running `sandcastle-dispatch@<name>.service`, never removes the template units (slice six) or other env files, and never registers, opts in or arms anything. A failed timer keeps its env file, the rest are still retired, and it exits 1. Tested in `cli/test/legacy.test.mts`.
 - **`factory uninstall`** stops scheduling first, then removes ledgered entries in reverse, routing scheduler units to the schedule backend and the rest to the board adapter. `--dry-run` makes no manager call and sends no signal. **`factory install`** over a ledger with scheduler units stops scheduling first, rewrites the owned units from the saved configuration and leaves the timer disabled.
 
@@ -495,6 +566,8 @@ Trusted, not tested: launchd loading agents at login, honouring `KeepAlive`, `Ex
 ---
 
 # Slice three spec
+
+Status: implemented. This section documents current commands, not a pending implementation plan.
 
 Run and watch one project's work through the selected complete runtime. Commands run with the checkout as their working directory, not the runtime directory.
 
@@ -610,6 +683,8 @@ Prints the ticket's run log, or the project's most recently written `run-*.log` 
 
 # Slice two spec
 
+Status: implemented. V2 data-only init and selected complete runtimes supersede the original copied-workflow scaffold.
+
 ## Registry
 
 `~/.config/factory/projects.json`: `{"version":1,"projects":[{"name","root"}]}`. Identity is the canonical (realpath) Git root; name is its basename. Writes use a temp file plus rename (mode 0600) under an exclusive `projects.json.lock`; contention fails with a retry message. A malformed or unsupported file is reported and never replaced. Missing file means empty. Git worktrees are distinct roots; symlink aliases and subdirectories collapse to the root.
@@ -622,7 +697,7 @@ Prints the ticket's run log, or the project's most recently written `run-*.log` 
 
 `factory init [path] --profile personal|client --repo <namespace/project> --image <image> [--host <gitlab host> --project-id <n>]` (client requires both `--host` and `--project-id`) creates v2 `factory.toml`, `.env`, `.env.example`, `.gitignore` and a convenience wrapper only. Both profiles default to Pi with the OpenAI family; tracker, selection and merge defaults differ. No workflow modules, prompts, parser or dependencies are copied into the project. The wrapper calls `factory dispatch --project` with the canonical root and forwards arguments literally. CLI, scheduler, recovery and Board launch paths select a complete validated workflow through the shared resolver; see [workflow selection](execution-context.md#workflow-selection).
 
-Inputs and existing v2 configuration are validated before writes. Creation is exclusive, existing files are preserved, symlinks and type conflicts are refused, and registration follows successful writes. A partial write can be completed by rerunning init. Unsupported existing configuration requires manual migration; init does not convert it. No tracker calls, logins, image builds, package installs or services are performed. Authenticate Pi and the tracker separately and provision the configured sandbox image. Runtime dependencies are installed with Factory, not in the project.
+Inputs and existing v2 configuration are validated before writes. Creation is exclusive, existing files are preserved, symlinks and type conflicts are refused, and registration follows successful writes. A partial write can be completed by rerunning init. Unsupported existing configuration is refused; init does not convert it. No tracker calls, logins, image builds, package installs or services are performed. Authenticate Pi and the tracker separately and provision the configured sandbox image. Runtime dependencies are installed with Factory, not in the project.
 
 `factory update --dry-run` and `--apply` report project-owned assets without creating or replacing project data or workflow overrides. Install publishes the shared runtime.
 
@@ -638,6 +713,8 @@ Lists each registered project's `.sandcastle` with a quoted removal command it n
 ---
 
 # First slice spec
+
+Status: implemented. The installation contracts below include later runtime-ownership and scheduler integration updates.
 
 ## Scope
 
@@ -716,7 +793,7 @@ interface ServiceBackend {
 6. Print what was installed and the board URL.
 7. If install stopped the scheduler, or any registered project is opted in, end with a reminder that the scheduler is off, naming the opted-in projects waiting, and to resume with `factory schedule on`. Install never turns scheduling back on.
 
-Before replacing the app, install prepares a content-addressed runtime in `~/.local/share/factory/runtimes/` using the checkout's locked package manifests and `npm ci --include=dev --include=optional --ignore-scripts`. Applicable platform dependencies, including esbuild's executable, are mandatory even though npm marks them optional. It atomically updates `runtime.json` only after bundle preparation, app installation and service setup succeed. A failed install leaves the previous descriptor and bundle usable. Runtime ownership is durably reserved before temporary or published directories are created. A later install can remove a recorded temporary directory only when its PID/start identity is confirmed dead, and can reuse a validated published bundle after an interruption. A PID/start-identity transaction fences the entire asynchronous install or uninstall, including service setup. A competing operation fails rather than selecting a descriptor for another operation's app. Atomic metadata writes stage outside the store, so interrupted ledger or lease writes cannot turn known bundles into unrecognized store entries. Copied and linked installs both prepare independent runtime bytes; changes to a linked checkout require another install. Old bundles are retained, not garbage-collected. If a pass selects runtime A and reinstall publishes B, fresh invocations select B while that pass and its children retain A. The source content ID includes inventory bytes, modes and Node metadata; the dependency digest is pinned separately. Linked installs also need reinstall to publish changed runtime bytes; editing the linked checkout does not mutate the active default runtime bundle. The bundle inventory includes `model-policy.mts` alongside its runtime consumers. V2 entrypoints already require explicit TOML settings, so bundling preserves their source bytes rather than rewriting a legacy CONFIG block. The low-level workflow now requires an explicit project root, selected runtime root/content ID and project-root cwd. It uses the bundle's private absolute executables, with process leases and complete inventory/config/template proof identity. See [shared execution context](execution-context.md). CLI run/dispatch, scheduler dispatch and refresh, Board refresh, recovery preparation, image readiness and recovery launch now resolve one complete workflow. Factory mode ignores copied local code. Explicit project mode selects a repository-contained `workflow.directory` and requires the complete closed inventory in `cli/src/runtime-assets.mts`, its manifest and private dependencies. Missing files, extra source entries, source symlinks, stale hashes or invalid dependencies fail without filling any helper from Factory. The manifest identifies bytes and modes, not their safety or trustworthiness. Custom code can change behavior, and its owner is responsible for reviewing and maintaining it. Children retain their parent's selected root/identity and saved scheduler Node/PATH. Factory-mode recovery needs no per-project code review; complete project overrides require host-owned review bound to their current source and dependency identity. Board services receive a trusted descriptor path; missing descriptors produce read-only assessment errors. See [workflow selection and manual override maintenance](execution-context.md#workflow-selection). `factory selection explain <ticket> [--project <name|path>] [--json]` validates the selected workflow and uses Factory-owned read-only native tracker queries without importing project executables. It reports the selected workflow root and content identity. In project mode its eligibility is configured selection intent, not a claim about the opaque custom workflow's actual behavior. Incomplete or failed tracker reads report unknown. New projects contain data-only assets, and role-specific additive instructions are validated and frozen in the selected execution context.
+Before replacing the app, install prepares a content-addressed runtime in `~/.local/share/factory/runtimes/` using the checkout's locked package manifests and `npm ci --include=dev --include=optional --ignore-scripts`. Applicable platform dependencies, including esbuild's executable, are mandatory even though npm marks them optional. It atomically updates `runtime.json` only after bundle preparation, app installation and service setup succeed. A failed install leaves the previous descriptor and bundle usable. Runtime ownership is durably reserved before temporary or published directories are created. A later install can remove a recorded temporary directory only when its PID/start identity is confirmed dead, and can reuse a validated published bundle after an interruption. A PID/start-identity transaction fences the entire asynchronous install or uninstall, including service setup. A competing operation fails rather than selecting a descriptor for another operation's app. Atomic metadata writes stage outside the store, so interrupted ledger or lease writes cannot turn known bundles into unrecognized store entries. Copied and linked installs both prepare independent runtime bytes; changes to a linked checkout require another install. Old bundles are retained, not garbage-collected. If a pass selects runtime A and reinstall publishes B, fresh invocations select B while that pass and its children retain A. The source content ID includes inventory bytes, modes and Node metadata; the dependency digest is pinned separately. Linked installs also need reinstall to publish changed runtime bytes; editing the linked checkout does not mutate the active default runtime bundle. The bundle inventory includes `model-policy.mts` alongside its runtime consumers. V2 entrypoints already require explicit TOML settings, so bundling preserves their source bytes rather than rewriting a legacy CONFIG block. The low-level workflow now requires an explicit project root, selected runtime root/content ID and project-root cwd. It uses the bundle's private absolute executables, with process leases and complete inventory/config/template proof identity. See [shared execution context](execution-context.md). CLI run/dispatch, scheduler dispatch and refresh, Board refresh, recovery preparation, image readiness and recovery launch now resolve one complete workflow. Factory mode ignores copied local code. Explicit project mode selects a repository-contained `workflow.directory` and requires the complete closed inventory in `cli/src/runtime-assets.mts`, its manifest and private dependencies. Missing files, extra source entries, source symlinks, stale hashes or invalid dependencies fail without filling any helper from Factory. The manifest identifies bytes and modes, not their safety or trustworthiness. Custom code can change behavior, and its owner is responsible for reviewing and maintaining it. Children retain their parent's selected root/identity and saved scheduler Node/PATH. Factory-mode recovery needs no per-project code review; complete project overrides require host-owned review bound to their current source and dependency identity. Board services receive a trusted descriptor path; missing descriptors produce read-only assessment errors. See [workflow selection and manual override maintenance](execution-context.md#workflow-selection). See [selection explanation](#selection-explanation) for read-only native tracker diagnostics. New projects contain data-only assets, and role-specific additive instructions are validated and frozen in the selected execution context.
 
 Running install again reuses existing entries and refreshes the files. It never duplicates a manifest entry.
 
@@ -753,17 +830,16 @@ Readiness argument/output and safety boundaries are covered by `cli/test/readine
 
 ## Manual check on a real machine
 
-A temp `FACTORY_HOME` cannot prove the real service works, so do this once per platform:
+These are optional operator-authorized deployment checks, not outstanding source implementation or an automated merge gate. A temp `FACTORY_HOME` alone does not isolate service-manager commands. Inspect existing ownership and active work, and use exact installed identities before running these commands on a real machine:
 
 1. `factory install`, then `systemctl --user status factory-board` (or `launchctl print gui/$UID/com.factory.board`). It is active, and `curl http://127.0.0.1:4444` answers.
 2. `factory doctor` passes.
 3. `factory uninstall --dry-run` lists the service, the symlink and the app dir.
-4. `factory uninstall`, then confirm `systemctl --user list-units 'factory-*'` is empty (or `launchctl list | grep factory` on macOS), `~/.config/systemd/user/factory-*` is gone, and `which factory` finds nothing.
+4. `factory uninstall`, then confirm the exact units/agents and paths from its manifest are gone and its CLI symlink is removed. Unrelated or untracked `factory-*` and `com.factory.*` services must remain untouched; do not require a name-pattern listing to be empty.
 5. `factory uninstall` again says nothing is installed and exits 0.
 
-## Done when
+## First-slice completion
 
-- The three tests pass and CI runs them.
-- The manual check passes on Linux, and on macOS if available.
-- After uninstall, no `factory-*` unit, `com.factory.*` agent, command or app dir remains. Config and state remain unless `--purge` was passed.
-- The README has a short "Install the Factory CLI" section, as `AGENTS.md` requires.
+Implemented and closed in [#1](https://github.com/markdlabrecque/factory/issues/1). Installation, lifecycle, ownership, failure recovery and safe uninstall have offline regression coverage in CI. After successful uninstall, manifest-owned services, command, app and eligible runtime assets are removed; unrelated services and project files remain. Config and state remain unless `--purge` is passed. Runtime lease and unsafe-removal refusals still apply.
+
+The maintained verification commands and optional live-check boundaries are in [TESTING.md](../TESTING.md). Closure is not a claim that the current revision has been installed or smoke-tested on every supported platform.

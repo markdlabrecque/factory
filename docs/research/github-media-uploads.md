@@ -1,17 +1,25 @@
-<!-- Research and live synthetic upload verification: GitHub media hosting without an evidence branch. No Factory behavior changes. -->
+<!-- GitHub attachment research, historical synthetic-upload evidence and current Factory media-publishing prerequisites. -->
 # GitHub media uploads without a Git branch
 
 Researched 2026-11-13 from public documentation, GitHub CLI source and uploader source. Subsequently verified with synthetic PNG/MP4 uploads as recorded below. No browser-session access, credential extraction, installs or production access. Repository and issue operations used `gh-axi`; attachment upload used installed `gh` because the wrapper rejects `--attach`. Public documentation and source used HTTP GET. Except for the explicit live-test results, rendering statements below describe documentation or source evidence.
 
-## Recommendation for Factory
+## Current Factory integration
+
+Implemented in [#128](https://github.com/markdlabrecque/factory/issues/128). `orchestrator/tracker.github.mts` posts one verification issue comment through host `gh issue comment --body-file -`, with one `--attach` per absolute evidence path. Each image/video reference is alone in its Markdown paragraph so the supported CLI can produce native inline media. Factory no longer commits verification media to `sandcastle-evidence` or pushes an evidence branch.
+
+The host needs `gh` 2.99+ with attachment support, repository push access and a credential accepted by GitHub's attachment endpoint. Missing support or upload failure stops delivery; Factory does not silently fall back to Git hosting, browser cookies or external hosting. The sandbox supplies evidence files, not tracker credentials. The offline adapter/handoff tests establish argument construction, one-comment posting and failure propagation, not live playback or compatibility of every token type.
+
+Interactive repository/issue/PR operations still use `gh-axi`; attachment uploads use plain `gh --attach`. Factory runtime tracker operations use host `gh`. The research and live synthetic results below retain their original versions and limits. They are not a fresh upload test of the current runtime or credentials.
+
+## Research recommendation and original integration findings
 
 **Prefer GitHub's first-party attachment flow for screenshots and short videos.** The premise that GitHub CLI cannot attach files is now outdated. GitHub CLI v2.99.0 shipped `--attach` on 2026-09-01 for issue/PR create, edit and comment commands. Official docs explicitly promise inline images and video players without committing media. It requires push access to the target repository. [1][2]
 
-There is a verified local integration gap. Installed `gh-axi 0.1.35` rejects `issue comment --attach` with `VALIDATION_ERROR`; its source allowlists only `--body` and `--body-file` for comments and does not forward attachment arguments. Its `api --help` describes `--input` as a raw JSON body, not a binary upload facility. Installed `gh 2.102.1` successfully uploaded both fixtures with the existing CLI authentication. Factory adoption still needs wrapper support or an explicit direct-CLI integration choice, not browser-cookie extraction.
+There is a verified local integration gap. Installed `gh-axi 0.1.35` rejects `issue comment --attach` with `VALIDATION_ERROR`; its source allowlists only `--body` and `--body-file` for comments and does not forward attachment arguments. Its `api --help` describes `--input` as a raw JSON body, not a binary upload facility. Installed `gh 2.102.1` successfully uploaded both fixtures with the existing CLI authentication. Factory subsequently adopted the explicit direct-CLI integration described above, rather than requiring wrapper support or extracting browser cookies.
 
-For an immediate upload without changing tooling, use the signed-in GitHub web editor manually. Browser automation can drive that same flow when explicitly authorized. For unattended workflows that cannot use the attachment endpoint's credentials, use release assets if permanent download links suffice, or Actions artifacts if expiring downloads suffice. Neither is an equivalent inline-video solution.
+For an operator without a compatible CLI attachment path, the signed-in GitHub web editor is a manual alternative, not Factory's automated fallback. Browser automation can drive that same flow when explicitly authorized. For unattended workflows that cannot use the attachment endpoint's credentials, use release assets if permanent download links suffice, or Actions artifacts if expiring downloads suffice. Neither is an equivalent inline-video solution.
 
-Factory's current `orchestrator/tracker.github.mts`, `uploadEvidence`, commits binaries to `sandcastle-evidence`. Its introductory statement that images cannot be uploaded through the API predates the new CLI flow. `orchestrator/handoff.mts` consumes returned Markdown before posting evidence. This note changes neither file; it records options for a later implementation.
+At the research revision, `orchestrator/tracker.github.mts` used `uploadEvidence` to commit binaries to `sandcastle-evidence`, and its introduction claimed that images could not be uploaded through the API. That path has been replaced by `postVerification` and native attachments. The alternatives below remain research comparisons, not supported Factory upload backends.
 
 ## Options at a glance
 
@@ -83,7 +91,7 @@ Creating/managing a release requires push access and normally fine-grained `Cont
 
 Published public releases expose their assets publicly. Private releases require repository read access. A draft is not a general-purpose reviewer media CDN; do not assume its assets are readable to every commenter. Each release permits up to 1,000 assets, each **under 2 GiB**, with no documented total release-size or bandwidth cap. There is no documented automatic expiry, but deletion and release policies still matter. [9][10]
 
-Use `[Download recording](<browser_download_url>)` as the reliable contract. A public release image URL might be usable in an image reference if response headers and redirects cooperate, but the release documentation does not promise inline comment rendering. Private download URLs cannot generally be fetched by Camo with a reviewer's credentials, and these are not native user-attachment video URLs. I did not test either rendering case. Never put a PAT in a comment URL to make a private download public. [4][8]
+Use a Markdown link labeled `Download recording` targeting the returned `browser_download_url` as the reliable contract. A public release image URL might be usable in an image reference if response headers and redirects cooperate, but the release documentation does not promise inline comment rendering. Private download URLs cannot generally be fetched by Camo with a reviewer's credentials, and these are not native user-attachment video URLs. I did not test either rendering case. Never put a PAT in a comment URL to make a private download public. [4][8]
 
 This is the best documented API fallback for long-lived downloads, not a reason to promise inline screenshot/video parity. A dedicated evidence release also needs cleanup and naming policy so automated evidence does not masquerade as product releases.
 
@@ -117,9 +125,9 @@ On the user's request, created private repository `markdlabrecque/factory-media-
 
 This verifies upload, server-side rendering, authenticated media retrieval and byte integrity. It does not establish browser playback, another user's access, public-repository behavior, alternate credential types, maximum sizes, retries or partial failures. Factory's actual unattended credential was not tested separately.
 
-## What to verify before implementation
+## Remaining live verification boundaries
 
-Verify wrapper support after implementing it, Factory's intended OAuth/PAT/App credential, comment-write versus upload permissions, public anonymous and private second-user viewing, browser playback, limits, retry/partial-upload behavior and cleanup. Do not increase token privileges or switch to browser cookies automatically after a 404.
+Production attachment posting is implemented. The historical live test above does not establish the unattended runtime credential's OAuth/PAT/App compatibility, another user's access, public anonymous viewing, browser playback, limits or partial-failure cleanup. Check those properties with synthetic media and operator authorization when validating a deployment. Uploaded binaries can survive a failed comment operation, so do not blindly retry or promise rollback. Wrapper attachment support remains a tooling limitation, not an unfinished Factory integration. Do not increase token privileges or switch to browser cookies automatically after a 404.
 
 ## Sources
 

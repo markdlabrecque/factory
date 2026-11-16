@@ -11,7 +11,7 @@ Factory selects a complete runtime for each invocation. In the default `factory`
 | Project test commands, fixtures or stack-specific advice for agents | Repository Markdown listed in `[instructions]` |
 | Change workflow stages, model policy, prompts or executable behavior | Complete project workflow override, maintained and reviewed by its owner |
 
-The [project configuration reference](../docs/project-config.md) owns the schema, defaults and manual migration. The [CLI reference](../docs/factory-cli.md) owns operator commands, scheduling and recovery. Environment setup is covered by the [Sandcastle setup skill](../skills/sandcastle-setup/SKILL.md). Do not patch the published shared default for a single project or add Factory runtime dependencies to the project.
+The [project configuration reference](../docs/project-config.md) owns the schema and defaults. The [CLI reference](../docs/factory-cli.md) owns operator commands, scheduling and recovery. Environment setup is covered by the [Sandcastle setup skill](../skills/sandcastle-setup/SKILL.md). Do not patch the published shared default for a single project or add Factory runtime dependencies to the project.
 
 ## Project data and instructions
 
@@ -49,6 +49,8 @@ The standard workflow uses Pi with high thinking. `[agent] family` selects `open
 
 Provision the selected family on the host and in the image. OpenAI uses the host Pi login. Anthropic uses the Pi subscription provider, its host prerequisites, and the container provider and credential. Claude Code is used internally by that provider, not a selectable direct agent. Neither family falls back to the other when provisioning fails. The setup skill covers the image layers and [image readiness](../docs/image-readiness.md) covers browser checks.
 
+The [herdr-core attach/steer experiment](../docs/research/interactive-agents-herdr-core.md) has an adoption decision, but no production integration. It tested interactive Claude Code, not the current standard Pi workflow. It is not a supported agent backend or a setup prerequisite; terminal status, detachment and idle are not Factory completion or delivery authority.
+
 ## Complete project workflow override
 
 Use this only when data and additive instructions cannot express the change. Project mode selects one complete checkout-contained bundle, not a partial overlay. The owner maintains the closed inventory in [`cli/src/runtime-assets.mts`](../cli/src/runtime-assets.mts), including prompts, helpers, package manifests and private `node_modules`. Unknown source files, missing files, symlinks in source assets, invalid dependencies or stale hashes fail validation. No installed file fills a gap.
@@ -82,8 +84,8 @@ The manifest identifies source bytes, modes and Node metadata and separately rec
 
 Factory's host-owned project filesystem gate still runs before selected custom run/dispatch and explicit analysis-refresh entrypoints, including scheduled paths. This is not evidence that an override collects complete child/parent input or probes its actual sandbox user/mounts. Those internals remain opaque. Standard workflows freeze structured ticket input and probe after setup before implementation/repair; an override that retains those helper calls can retain that behavior, but Factory neither supplies missing helpers from the installed runtime nor imposes a new override protocol. Passive status/doctor/Board readers do not execute an override to test it. See [readiness coverage and safe recovery](../docs/ticket-readiness.md#runtime-and-coverage-boundary).
 
-## Existing projects and operation
+## Operation
 
-This is a breaking change. Missing or v1 configuration does not fall back to executable configuration. The owner must preserve existing work and customizations, pause scheduling as appropriate, manually transcribe settings into v2 and decide whether each old customization belongs in data, instructions or a complete override. Init and update do not migrate old code or repair a project override. Follow the [manual migration](../docs/project-config.md#existing-projects); do not copy a few old helpers into the shared runtime or assume old proofs grant new authority.
+Version 2 TOML is required. Missing or v1 configuration is unsupported and does not fall back to executable configuration.
 
 Use `factory dispatch` and `factory run` rather than copied module entrypoints. A dry run can perform analysis and tracker reads; it is not an offline check. For scheduler, recovery, delivery and evidence behavior, use the [CLI reference](../docs/factory-cli.md). Standard Factory verification requires Playwright and headless Chromium even for non-web projects. Custom images remain owner-maintained. Tests and their offline boundaries are in [TESTING.md](../TESTING.md).

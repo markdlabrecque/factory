@@ -1,8 +1,31 @@
-# sandcastle-helper
+# Factory
 
 Factory runs ticket-driven implementation and independent verification in Sandcastle environments. It tracks runs on a local operations Board and can dispatch work manually or on a schedule. See [the glossary](docs/GLOSSARY.md) for the terms used here.
 
 Development implementation in this repository runs through Factory from prepared tickets. Interactive sessions handle investigation, planning, tickets and documentation. See [AGENTS.md](AGENTS.md) for repository policy.
+
+## Project status and feature guide
+
+The first five roadmap slices are implemented: installation, project registration/init, manual execution, scheduling/self-recovery, and project-asset diagnostics/ticket journals. V2 data-only configuration, shared immutable runtimes and complete-input/readiness gates are also implemented. This describes source behavior, not installation on any particular machine. The [roadmap](docs/factory-cli.md#roadmap) separates completed work from deferred work.
+
+| Capability | Reference |
+| --- | --- |
+| Installation, doctor, Board service and safe uninstall | [Factory CLI](docs/factory-cli.md) |
+| V2 configuration, profiles and family/tier policy | [Project configuration](docs/project-config.md) |
+| Shared runtime identity, pinning, leases and complete overrides | [Execution context](docs/execution-context.md), [workflow adaptation](orchestrator/ADAPTING.md) |
+| Selection, dependency/conflict analysis, dispatch, run and retry | [Selection explanation](docs/factory-cli.md#selection-explanation), [execution commands](docs/factory-cli.md#slice-three-spec) |
+| Linux/macOS scheduling, project opt-in, health and timing | [Scheduler contracts](docs/factory-cli.md#slice-four-scheduler-storage) |
+| Bounded recovery, saved-work ownership, reports and explicit reset | [Recovery guide](docs/design/self-recovery.md) |
+| Independent verification, frozen host proof and exact-head delivery | [Verification](docs/factory-cli.md#slice-four-shared-verification-and-delivery), [existing-PR follow-through](docs/factory-cli.md#existing-delivery-follow-through) |
+| Complete frozen ticket/parent context, filesystem holds and no-commit explanations | [Ticket readiness](docs/ticket-readiness.md) |
+| Image capability checks, actual-user sandbox probes and browser provisioning | [Image readiness](docs/image-readiness.md), [environment setup](skills/sandcastle-setup/SKILL.md) |
+| Live Board, evidence, ticket stats and project readiness | [Board presentation](docs/board-design-prototype.md#promotion-to-the-board-template), [readiness](docs/factory-cli.md#board-readiness) |
+| Ticket comments/sync, verdict correction, archive and restore | [Ticket journal](docs/factory-cli.md#slice-five-ticket-journal) |
+| External-merge reconciliation and safe local branch/worktree cleanup | [Reconciliation and cleanup](docs/factory-cli.md#merged-work-reconciliation-and-local-cleanup) |
+| Project-asset reports, read-only workflow diagnostics and local event export | [Update](docs/factory-cli.md#project-asset-diagnostics), [workflow status](docs/factory-cli.md#read-only-workflow-identity-report), [telemetry](docs/telemetry.md) |
+| Domain relationships and terminology | [Domain model](docs/domain-model.md), [glossary](docs/GLOSSARY.md) |
+
+Legacy installer removal and the `.sandcastle` to `.factory` directory migration remain unfinished or deferred. The [herdr-core attach/steer experiment](docs/research/interactive-agents-herdr-core.md) was approved for adoption, but production integration is not implemented. Standard Factory runs remain noninteractive Pi. A dedicated recovery Board UI is also deferred.
 
 ## What belongs where
 
@@ -67,9 +90,9 @@ Implement the acceptance criteria below.
 
 Use only one tier field per ticket. Analysis uses Mid; verification and recovery use Large. Legacy `Model:` and `Pi model:` declarations are rejected. See [model policy and declaration rules](docs/project-config.md) for mappings and validation.
 
-## Existing projects and migration
+## Supported configuration
 
-Version 2 TOML is required. Missing or version 1 configuration and legacy executable settings require an owner-led manual migration; this is a breaking change, not an automatic conversion. Review the old settings and workflow before choosing the shared runtime or maintaining a complete override. See [manual migration](docs/project-config.md) and [workflow adaptation](orchestrator/ADAPTING.md). Do not assume `factory init` or an update will migrate customized code.
+Factory requires [version 2 TOML configuration](docs/project-config.md). Missing or version 1 configuration and legacy executable settings are unsupported.
 
 ## Operations and verification
 
