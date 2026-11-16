@@ -56,6 +56,20 @@ test('source and lock changes produce separate bundles and leave old bundle inta
   const c = prepare(f); assert.notEqual(b.id, c.id); validateRuntimeBundle(b.directory);
 });
 
+test('patch helper and specification participate in source identity without activating the patch', t => {
+  const f = fixture(); t.after(f.cleanup);
+  let previous = prepare(f);
+  for (const name of ['sandcastle-patch.mts', 'sandcastle-patch.json']) {
+    const path = join(f.source, 'cli/src', name);
+    writeFileSync(path, readFileSync(path, 'utf8') + '\n');
+    const next = prepare(f);
+    assert.notEqual(next.id, previous.id);
+    assert.equal(next.manifest.dependencies, previous.manifest.dependencies);
+    validateRuntimeBundle(previous.directory);
+    previous = next;
+  }
+});
+
 test('missing source, symlinks and invalid or colliding destinations fail closed', t => {
   const f = fixture(); t.after(f.cleanup);
   assert.throws(() => validateRuntimeInventory([{ source: '../escape', destination: 'x' }]));

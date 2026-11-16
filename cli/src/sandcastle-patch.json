@@ -1,0 +1,936 @@
+{
+  "schema": 1,
+  "name": "@ai-hero/sandcastle",
+  "version": "0.14.0",
+  "integrity": "sha512-s9B/23nPWL6y2sZkVxksqTge0MqGWr2HtjneGDf/V1npReiqDRlUJUvQ4+7K0oWORLqgHU5wLK0pfukg+UqTqQ==",
+  "files": [
+    {
+      "path": "LICENSE",
+      "before": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+      "after": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+      "edits": []
+    },
+    {
+      "path": "README.md",
+      "before": "dbdd154d0279c1d3625a1ac7b25b864d9b1bfb70fd5ccacbb22412e24587c9e6",
+      "after": "dbdd154d0279c1d3625a1ac7b25b864d9b1bfb70fd5ccacbb22412e24587c9e6",
+      "edits": []
+    },
+    {
+      "path": "dist/LinuxCapability-B_PQfsY_.d.ts",
+      "before": "bbd66ba0cf97fddc556f50222f17924d63d6d2390d9397532d9ea58d1e5d06d1",
+      "after": "bbd66ba0cf97fddc556f50222f17924d63d6d2390d9397532d9ea58d1e5d06d1",
+      "edits": []
+    },
+    {
+      "path": "dist/MountConfig-CmXclHA5.d.ts",
+      "before": "dec006bb544e171f7d0721e067fba2b584a0179f820ccf6e6f189c65cd7d0e18",
+      "after": "dec006bb544e171f7d0721e067fba2b584a0179f820ccf6e6f189c65cd7d0e18",
+      "edits": []
+    },
+    {
+      "path": "dist/SandboxProvider-Chsi-Zs6.d.ts",
+      "before": "f755eb4ca3547dc94941a96e0063164db03f06b9b231597db68502cbfb744c04",
+      "after": "f755eb4ca3547dc94941a96e0063164db03f06b9b231597db68502cbfb744c04",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-6NQPCXSG.js",
+      "before": "23665e153c51c0a6a0d5b1e8c5a8e11247c6ed0cd3d166d900f541ce980b01a8",
+      "after": "23665e153c51c0a6a0d5b1e8c5a8e11247c6ed0cd3d166d900f541ce980b01a8",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-6NQPCXSG.js.map",
+      "before": "f65278964d56e1ae53b70b42c6b9a35c3cac46eb6536d2007239a90c6c5c2e7f",
+      "after": "f65278964d56e1ae53b70b42c6b9a35c3cac46eb6536d2007239a90c6c5c2e7f",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-7N7AMUYA.js",
+      "before": "7e6d9a8c9bbd1870529616d2183bfd258c448e478f7e352bdacbe6abac447f83",
+      "after": "7e6d9a8c9bbd1870529616d2183bfd258c448e478f7e352bdacbe6abac447f83",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-7N7AMUYA.js.map",
+      "before": "d87f6393ea95362ff21f5e259ae7a12ec2aebc102cfc816e997fef4c57a6cd5d",
+      "after": "d87f6393ea95362ff21f5e259ae7a12ec2aebc102cfc816e997fef4c57a6cd5d",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-ATA2V2TC.js",
+      "before": "1c942d7d3fdb4d79a841014571f684fd0919040677b84775e79d07abebdfe547",
+      "after": "1c942d7d3fdb4d79a841014571f684fd0919040677b84775e79d07abebdfe547",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-ATA2V2TC.js.map",
+      "before": "3debb97a4aa86fc3657ec86f9ce7a8d71a9a825c7fc93310b7698d66bbce7c64",
+      "after": "3debb97a4aa86fc3657ec86f9ce7a8d71a9a825c7fc93310b7698d66bbce7c64",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-BIF2X6QB.js",
+      "before": "c3ea0c2b67a508e2e60c43b02bade321b2b7168c61db542c0e829ef02a4a5e41",
+      "after": "c3ea0c2b67a508e2e60c43b02bade321b2b7168c61db542c0e829ef02a4a5e41",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-BIF2X6QB.js.map",
+      "before": "080bd68ab15dac5ff06a5b7db95c947625a4546f4ad0aca7f65e0592f5d319ae",
+      "after": "080bd68ab15dac5ff06a5b7db95c947625a4546f4ad0aca7f65e0592f5d319ae",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-BVZWLFFT.js",
+      "before": "9f29fbd53dfdcc3d03efad1da4a3cd135864e76f3fdf360e8e791b960c87e07a",
+      "after": "9f29fbd53dfdcc3d03efad1da4a3cd135864e76f3fdf360e8e791b960c87e07a",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-BVZWLFFT.js.map",
+      "before": "b266322c37132743b4c8586042941e09d69724fbb5b41f82ecda452e69a3256b",
+      "after": "b266322c37132743b4c8586042941e09d69724fbb5b41f82ecda452e69a3256b",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-EXYXBRCX.js",
+      "before": "4e5f8941a323228a927e9a801222153742bb220f2142f48a061ae223bd0feaa0",
+      "after": "4e5f8941a323228a927e9a801222153742bb220f2142f48a061ae223bd0feaa0",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-EXYXBRCX.js.map",
+      "before": "e8df4c90d09433ce62dda5c6c65ccb27ef856b87942f4efdca02645d6bb07b30",
+      "after": "e8df4c90d09433ce62dda5c6c65ccb27ef856b87942f4efdca02645d6bb07b30",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-G2R53CVZ.js",
+      "before": "3b52ca4a0e96d14931d4b6628c2767659e9fb6852efbb04757fff6e0d99952a2",
+      "after": "1fe1de018518aa0f8f634f8de55e8127f536f1c145327d8eda5aedafe2be3193",
+      "edits": [
+        {
+          "offset": 13007,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 24473,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 25905,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 29100,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 45780,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 45823,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 58507,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 59408,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 66539,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/chunk-G2R53CVZ.js.map",
+      "before": "abf528668fe56002bceb0ebf9a74981ab38c99ff448d8d8d0747b785b7f33517",
+      "after": "abf528668fe56002bceb0ebf9a74981ab38c99ff448d8d8d0747b785b7f33517",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-GCLEXPXG.js",
+      "before": "10eb5d68b58953061ff0375812d76e06c7f9e2455d0bc40293f083aeb34156d1",
+      "after": "10eb5d68b58953061ff0375812d76e06c7f9e2455d0bc40293f083aeb34156d1",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-GCLEXPXG.js.map",
+      "before": "737c24315bcdb1faf092ab022fe8e1ddf902c3c7fa418e738dc0d77027c1f541",
+      "after": "737c24315bcdb1faf092ab022fe8e1ddf902c3c7fa418e738dc0d77027c1f541",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-H2PEFS4W.js",
+      "before": "8bca313b4984facf82517cebfa9aabeb52c1957a9eec83d9e71c2851087f0506",
+      "after": "8bca313b4984facf82517cebfa9aabeb52c1957a9eec83d9e71c2851087f0506",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-H2PEFS4W.js.map",
+      "before": "88a2b2ba22fd74708489b7935f610dbcfbf2503ef97b4e6a81946823997d616e",
+      "after": "88a2b2ba22fd74708489b7935f610dbcfbf2503ef97b4e6a81946823997d616e",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-HSXPRZKG.js",
+      "before": "1d498c0cb09c4a859f889fc1a561902d3c8ed91a4a29834f2f891fc95b1cb9fa",
+      "after": "1d498c0cb09c4a859f889fc1a561902d3c8ed91a4a29834f2f891fc95b1cb9fa",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-HSXPRZKG.js.map",
+      "before": "28c127b36250fdcfab1bcb2faf02d63918ab240efc69ffc26357c47d630eff33",
+      "after": "28c127b36250fdcfab1bcb2faf02d63918ab240efc69ffc26357c47d630eff33",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-IBK2XNSS.js",
+      "before": "6e38eee8e94151b59a253d36671d6747ae45f34c28a7c737bec5f58bd385176c",
+      "after": "6e38eee8e94151b59a253d36671d6747ae45f34c28a7c737bec5f58bd385176c",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-IBK2XNSS.js.map",
+      "before": "d97820b7c0ed740899286c91118f4f5b9b0bcac340d8fa38aa2f82c9c24e4add",
+      "after": "d97820b7c0ed740899286c91118f4f5b9b0bcac340d8fa38aa2f82c9c24e4add",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-RDW7FNN6.js",
+      "before": "4de51d91fc77942d4596b2134918098d03caf528a2d4d9aaaf547cf1606fa6c1",
+      "after": "4de51d91fc77942d4596b2134918098d03caf528a2d4d9aaaf547cf1606fa6c1",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-RDW7FNN6.js.map",
+      "before": "35de119a586eb6e28f5725077235c5dd136bc117f1d77bf22b6728b243eb1634",
+      "after": "35de119a586eb6e28f5725077235c5dd136bc117f1d77bf22b6728b243eb1634",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-S6UHPTRG.js",
+      "before": "5567d98e5584fddd40bf898f7f3ee3f177a03ad5bd5108ad8f2582089cf321b0",
+      "after": "5567d98e5584fddd40bf898f7f3ee3f177a03ad5bd5108ad8f2582089cf321b0",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-S6UHPTRG.js.map",
+      "before": "c9c51e946a1f35c84839837a33d2db8e1eeea8291ea59aedcd9e2da23b4e8223",
+      "after": "c9c51e946a1f35c84839837a33d2db8e1eeea8291ea59aedcd9e2da23b4e8223",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-STB2U7BB.js",
+      "before": "a6fa41976399b4efbc9e63fdb1564aed0c21f369930aea9c515d997170f2bd2b",
+      "after": "a6fa41976399b4efbc9e63fdb1564aed0c21f369930aea9c515d997170f2bd2b",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-STB2U7BB.js.map",
+      "before": "8d04378174acb1982bc76280bb2441d2f4a2d9469a651a10188518c3b8ffd40b",
+      "after": "8d04378174acb1982bc76280bb2441d2f4a2d9469a651a10188518c3b8ffd40b",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-VRXR2T3S.js",
+      "before": "b4a7401b7d56867ebfeb1495903af6a8218141ac54a71e8e9d16475f06f8134a",
+      "after": "b4a7401b7d56867ebfeb1495903af6a8218141ac54a71e8e9d16475f06f8134a",
+      "edits": []
+    },
+    {
+      "path": "dist/chunk-VRXR2T3S.js.map",
+      "before": "01f3446113ed92d0819944fe8b361e8468f2d7dbf83f5eea29c61d855219aa71",
+      "after": "01f3446113ed92d0819944fe8b361e8468f2d7dbf83f5eea29c61d855219aa71",
+      "edits": []
+    },
+    {
+      "path": "dist/index.d.ts",
+      "before": "6f200d76349ab2b271a482ae0f5cb5b3253ceecb4200c0a2ca8052a77255c631",
+      "after": "542fe5bf7fb294e4c7354d875daade954236ac0819d261a50984eaad97db88ad",
+      "edits": [
+        {
+          "offset": 26000,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 26026,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 26046,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 26074,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 27114,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 36820,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 36846,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 46153,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 46179,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/index.js",
+      "before": "31ec57694ecd23f3a5db2e5be57cfb26db1d56bb737a387dddc558dc71a92c6f",
+      "after": "4d0dac5802fcd942d5905e0510ea957048749600ede7290d7789e1be58cf8ce9",
+      "edits": [
+        {
+          "offset": 24262,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 26068,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 45840,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 67406,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 97471,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/index.js.map",
+      "before": "1f532f74b4a216301521520ce8255a876144ba93d88aba61646da5691c209010",
+      "after": "1f532f74b4a216301521520ce8255a876144ba93d88aba61646da5691c209010",
+      "edits": []
+    },
+    {
+      "path": "dist/main.d.ts",
+      "before": "a59c47872b71f12589942892464e764c0db350c20b72228645615cc36e0a0725",
+      "after": "a59c47872b71f12589942892464e764c0db350c20b72228645615cc36e0a0725",
+      "edits": []
+    },
+    {
+      "path": "dist/main.js",
+      "before": "e45ffc2b4f1c3213cf53dcc7e1d28d121da472e7e5f9c5172a933326412f0011",
+      "after": "d4c15e8b942e45d0d9f48068443a7af7e6ad5bca170a14c624172979a86b2805",
+      "edits": [
+        {
+          "offset": 641348,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 663886,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 664546,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 664667,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 664892,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 664914,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 664979,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 665061,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 665192,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 666844,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 666866,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 666992,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 667276,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 667399,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 676507,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 677277,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 677859,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 680043,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 681356,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 681675,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 698227,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/main.js.map",
+      "before": "4a0136fc61585003f32ae903c6b22973a9725902707d586b35982350e2590e1c",
+      "after": "4a0136fc61585003f32ae903c6b22973a9725902707d586b35982350e2590e1c",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/bwrap.d.ts",
+      "before": "a3d811ad4eaf7900599925f73357a97c91304aaa70d1a56e9113cf0e5f7a05cf",
+      "after": "a3d811ad4eaf7900599925f73357a97c91304aaa70d1a56e9113cf0e5f7a05cf",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/bwrap.js",
+      "before": "eb73c00496d4bd59176643f26d0796c56574b54550f8148e376a874875a1c9be",
+      "after": "eb73c00496d4bd59176643f26d0796c56574b54550f8148e376a874875a1c9be",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/bwrap.js.map",
+      "before": "02b2cd632521b3c65bbbbe338f3ebfad8358769a9f168e01433fffc7015b8f1f",
+      "after": "02b2cd632521b3c65bbbbe338f3ebfad8358769a9f168e01433fffc7015b8f1f",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/daytona.d.ts",
+      "before": "722cdde59b3385ea4c73dc188ac1f977e2f3fdf68c4bb6dbd4026210875682ed",
+      "after": "722cdde59b3385ea4c73dc188ac1f977e2f3fdf68c4bb6dbd4026210875682ed",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/daytona.js",
+      "before": "4b1e55eed2e47e14c087be7940099b72acc695b7175cab91e8c7741f7cd789a6",
+      "after": "4b1e55eed2e47e14c087be7940099b72acc695b7175cab91e8c7741f7cd789a6",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/daytona.js.map",
+      "before": "555b9b0019e10d0c18666368688e350779e0f7991da744087bea81a9d2be6c7a",
+      "after": "555b9b0019e10d0c18666368688e350779e0f7991da744087bea81a9d2be6c7a",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/docker.d.ts",
+      "before": "6b7a1cca35259fbeb7388a751b5eb566b64af152d5ab0ec63c99c3b6bc9c27cb",
+      "after": "6b7a1cca35259fbeb7388a751b5eb566b64af152d5ab0ec63c99c3b6bc9c27cb",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/docker.js",
+      "before": "a347ec0ffd488b255b0fb20c9314871e13e320f3a6d2594433701e5d247a9300",
+      "after": "a347ec0ffd488b255b0fb20c9314871e13e320f3a6d2594433701e5d247a9300",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/docker.js.map",
+      "before": "89438cd15759fc8255aaa40ddcf07dcec7c0642856bef1ba9541d85cb5a5fee6",
+      "after": "89438cd15759fc8255aaa40ddcf07dcec7c0642856bef1ba9541d85cb5a5fee6",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/e2b.d.ts",
+      "before": "ef4f5dfac8a4755a54c5804425843ab5b2ec7c15c2ff5b9ff4d287cb9bb6893f",
+      "after": "ef4f5dfac8a4755a54c5804425843ab5b2ec7c15c2ff5b9ff4d287cb9bb6893f",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/e2b.js",
+      "before": "d3e26064dfb8ba455fc1facf40efbd88e8cb54103da69e6f22c38f95a9264d9c",
+      "after": "d3e26064dfb8ba455fc1facf40efbd88e8cb54103da69e6f22c38f95a9264d9c",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/e2b.js.map",
+      "before": "ef7e37792ba115977b59befb266d32893971dfc905093649dc8d91e5af1a7aaf",
+      "after": "ef7e37792ba115977b59befb266d32893971dfc905093649dc8d91e5af1a7aaf",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/modal.d.ts",
+      "before": "8045cff0fd67235dc500562e315619b1c61e398804db42cfed3790f342c6cdbd",
+      "after": "8045cff0fd67235dc500562e315619b1c61e398804db42cfed3790f342c6cdbd",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/modal.js",
+      "before": "add4b29ce886e2db4a81121f692a7586523dfb48181d940de65029494a09cdfb",
+      "after": "add4b29ce886e2db4a81121f692a7586523dfb48181d940de65029494a09cdfb",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/modal.js.map",
+      "before": "e20daec78363c12533b99ce7ce8d63bbb50becb565bdbf2094e9994b044e6f38",
+      "after": "e20daec78363c12533b99ce7ce8d63bbb50becb565bdbf2094e9994b044e6f38",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/no-sandbox.d.ts",
+      "before": "d3dba5372ffdb7254f1b39f8be4944c00e4ffa9e68b97705d2119568222b998b",
+      "after": "d3dba5372ffdb7254f1b39f8be4944c00e4ffa9e68b97705d2119568222b998b",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/no-sandbox.js",
+      "before": "91e38f28bc59f8249a5ce62a2b6e65e5cb10c1472a8b8c5f940142eb0e885176",
+      "after": "91e38f28bc59f8249a5ce62a2b6e65e5cb10c1472a8b8c5f940142eb0e885176",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/no-sandbox.js.map",
+      "before": "ea8f1d4c343a336840d2cb9c13fb0f17a79279aa74e5fd5f1c27ba5ef3b88808",
+      "after": "ea8f1d4c343a336840d2cb9c13fb0f17a79279aa74e5fd5f1c27ba5ef3b88808",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/podman.d.ts",
+      "before": "fd570fac9be4ef694cc729575535e388b917660b5a36f7b44f936f83c84a17f6",
+      "after": "fd570fac9be4ef694cc729575535e388b917660b5a36f7b44f936f83c84a17f6",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/podman.js",
+      "before": "8f8383e0e3b44888a27451f14e0c17fcdd2288cde8b91f8ba31585f96cba12a8",
+      "after": "8f8383e0e3b44888a27451f14e0c17fcdd2288cde8b91f8ba31585f96cba12a8",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/podman.js.map",
+      "before": "1be9d5aa7b15801029ff26722ae85ee6e409a0b9ced9b32a96621a011a13707c",
+      "after": "1be9d5aa7b15801029ff26722ae85ee6e409a0b9ced9b32a96621a011a13707c",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/seatbelt.d.ts",
+      "before": "d17390df93b60aef4b5f6683b2ad1a5015d17fa247cd77d0bb9956ce4e7f679b",
+      "after": "d17390df93b60aef4b5f6683b2ad1a5015d17fa247cd77d0bb9956ce4e7f679b",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/seatbelt.js",
+      "before": "d9668e3fe22d651c0474d5cebad43f35dc14af8ea1792deb75eab588126e0159",
+      "after": "d9668e3fe22d651c0474d5cebad43f35dc14af8ea1792deb75eab588126e0159",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/seatbelt.js.map",
+      "before": "c65c0cfafbcc5cef4cbea557155266a502db5ed575592a2fc5d0ff2c8b4fc420",
+      "after": "c65c0cfafbcc5cef4cbea557155266a502db5ed575592a2fc5d0ff2c8b4fc420",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/sprites.d.ts",
+      "before": "9d7c1d66c35a7e04b9886a7bd48cb8f2619e168fe39be41e826d9013ef9a827a",
+      "after": "9d7c1d66c35a7e04b9886a7bd48cb8f2619e168fe39be41e826d9013ef9a827a",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/sprites.js",
+      "before": "7561a90aa9842200cc0563a4476494e516e02f8a5b3e4f275c0a293c346ff9bd",
+      "after": "7561a90aa9842200cc0563a4476494e516e02f8a5b3e4f275c0a293c346ff9bd",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/sprites.js.map",
+      "before": "28d2d50ad7ff3c9ecf28f3d68e20e1cce61d481d34387b3e37ff1287fbeff885",
+      "after": "28d2d50ad7ff3c9ecf28f3d68e20e1cce61d481d34387b3e37ff1287fbeff885",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/vercel.d.ts",
+      "before": "63c988ec369377fb6fbb960e7e0468e531f018449619ed6356778c36ffcdca84",
+      "after": "63c988ec369377fb6fbb960e7e0468e531f018449619ed6356778c36ffcdca84",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/vercel.js",
+      "before": "7fc77b7f9f7810497230620dd81417d771343649066e47e588f61b54795ed3b5",
+      "after": "7fc77b7f9f7810497230620dd81417d771343649066e47e588f61b54795ed3b5",
+      "edits": []
+    },
+    {
+      "path": "dist/sandboxes/vercel.js.map",
+      "before": "3d3b427feefd06609c73959e27cb72738d384e5d83d0c508a57fa16ba731d6fc",
+      "after": "3d3b427feefd06609c73959e27cb72738d384e5d83d0c508a57fa16ba731d6fc",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/blank/main.mts",
+      "before": "22da7c35a3054807bf64bb85f303e795043614ce221871e6a9b9fe198465fdeb",
+      "after": "2a35bd34129dec424736f569881ab7fa3c4aaca7dff638a0b92769d71ae53f9a",
+      "edits": [
+        {
+          "offset": 212,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 291,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 404,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/blank/prompt.md",
+      "before": "ba8e49d30a235e6b0da4eecf905fa5b998d730027fc0109f83b87a97da1ce468",
+      "after": "ba8e49d30a235e6b0da4eecf905fa5b998d730027fc0109f83b87a97da1ce468",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/blank/template.json",
+      "before": "55a17e60faefa2d82c7eaf5076526371e4f35166b29d9c612e618e801100b210",
+      "after": "55a17e60faefa2d82c7eaf5076526371e4f35166b29d9c612e618e801100b210",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner/implement-prompt.md",
+      "before": "f8793d888c24052e9a4f8d02f3a5e783706167005e2d96e2d5f53bdd6a5fdaa2",
+      "after": "f8793d888c24052e9a4f8d02f3a5e783706167005e2d96e2d5f53bdd6a5fdaa2",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner/main.mts",
+      "before": "f48ef5ad957d556dcfd6cbff6103d57228697d8c61704c4cd78c250229c3a779",
+      "after": "44f478f9b90e0b25ed0eb791661d7a4cd68a8af175e01dfd94af9b779411b96f",
+      "edits": [
+        {
+          "offset": 715,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 804,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 3413,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 5198,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 7380,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/parallel-planner/merge-prompt.md",
+      "before": "1b44a9249f0c3697eb136d66011a1cece395f1ee7f4b35ce4d914c99aeffe97c",
+      "after": "1b44a9249f0c3697eb136d66011a1cece395f1ee7f4b35ce4d914c99aeffe97c",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner/plan-prompt.md",
+      "before": "0328c06657509973883e3bf9c2ae8c40676d653e4e8ac07931f22bff6b05d61e",
+      "after": "0328c06657509973883e3bf9c2ae8c40676d653e4e8ac07931f22bff6b05d61e",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner/template.json",
+      "before": "c92e390b2f14a9e153fd5cc210139fae4ac69d8137a597df80c2fdd5d10c179b",
+      "after": "c92e390b2f14a9e153fd5cc210139fae4ac69d8137a597df80c2fdd5d10c179b",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner-with-review/CODING_STANDARDS.md",
+      "before": "0a4103256daf028e1bf6df39a2471c89a4d9de62ff18ef8b12875ab4230a3200",
+      "after": "4d8e27f1f377f8005e61930313a02d80a0cf018412232fdf77a8736e7166482c",
+      "edits": [
+        {
+          "offset": 140,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/parallel-planner-with-review/implement-prompt.md",
+      "before": "f8793d888c24052e9a4f8d02f3a5e783706167005e2d96e2d5f53bdd6a5fdaa2",
+      "after": "f8793d888c24052e9a4f8d02f3a5e783706167005e2d96e2d5f53bdd6a5fdaa2",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner-with-review/main.mts",
+      "before": "187bfbb1b2d388180cb282c9629f78f66e5477906d5bf1fa786ba0d48ec4bf6c",
+      "after": "ec7fedf712062bb4b91cf2c3ef00ebc28638becd7dee1e2fe0a1bc3c680d884e",
+      "edits": [
+        {
+          "offset": 1101,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 1190,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 3799,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 5525,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 6010,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 8257,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/parallel-planner-with-review/merge-prompt.md",
+      "before": "1b44a9249f0c3697eb136d66011a1cece395f1ee7f4b35ce4d914c99aeffe97c",
+      "after": "1b44a9249f0c3697eb136d66011a1cece395f1ee7f4b35ce4d914c99aeffe97c",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner-with-review/plan-prompt.md",
+      "before": "0328c06657509973883e3bf9c2ae8c40676d653e4e8ac07931f22bff6b05d61e",
+      "after": "0328c06657509973883e3bf9c2ae8c40676d653e4e8ac07931f22bff6b05d61e",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/parallel-planner-with-review/review-prompt.md",
+      "before": "58c86c0e7a4d0e60d001572486516ed5ed83afa397dd13801ec31fdc33c4eb2a",
+      "after": "bf4e857eb6918fea7bbbe9f69b04f0712dec61397e4f021ac1926960e1ea7c1c",
+      "edits": [
+        {
+          "offset": 1632,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/parallel-planner-with-review/template.json",
+      "before": "e3538eb35336ea4891be6eea77ce44222997d99e80dc93a8c222f896e5278977",
+      "after": "e3538eb35336ea4891be6eea77ce44222997d99e80dc93a8c222f896e5278977",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/sequential-reviewer/CODING_STANDARDS.md",
+      "before": "0a4103256daf028e1bf6df39a2471c89a4d9de62ff18ef8b12875ab4230a3200",
+      "after": "4d8e27f1f377f8005e61930313a02d80a0cf018412232fdf77a8736e7166482c",
+      "edits": [
+        {
+          "offset": 140,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/sequential-reviewer/implement-prompt.md",
+      "before": "1e5fb48098650119728144e33913f0c70862a5397c6e6e6c490ab077efc2e937",
+      "after": "1e5fb48098650119728144e33913f0c70862a5397c6e6e6c490ab077efc2e937",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/sequential-reviewer/main.mts",
+      "before": "c949f8b60ab763807b555983c98fa92c920cbda74dca0027c1be77a08e491604",
+      "after": "fe6dd0a5a7f868ec5ce111ddaf4b0e3f9fab1604dc3cb80bf69e6fa29fd9dee3",
+      "edits": [
+        {
+          "offset": 985,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 1074,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 3645,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 4657,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/sequential-reviewer/review-prompt.md",
+      "before": "58c86c0e7a4d0e60d001572486516ed5ed83afa397dd13801ec31fdc33c4eb2a",
+      "after": "bf4e857eb6918fea7bbbe9f69b04f0712dec61397e4f021ac1926960e1ea7c1c",
+      "edits": [
+        {
+          "offset": 1632,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/sequential-reviewer/template.json",
+      "before": "5e746a27428faddf7c4d7c930211aa1208ffab83f41901058de0c395e89976c6",
+      "after": "5e746a27428faddf7c4d7c930211aa1208ffab83f41901058de0c395e89976c6",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/simple-loop/main.mts",
+      "before": "7a36bf897488b7a22f7383be597e742cc423b03ab37336f14d8ab47ed6d3776f",
+      "after": "a7d3b840b86f1ee6f4cecf68ec77fda3f99ef73432ea99d4c08b8337f62aeff2",
+      "edits": [
+        {
+          "offset": 221,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 300,
+          "before": ".sandcastle",
+          "after": ".factory"
+        },
+        {
+          "offset": 943,
+          "before": ".sandcastle",
+          "after": ".factory"
+        }
+      ]
+    },
+    {
+      "path": "dist/templates/simple-loop/prompt.md",
+      "before": "1e5fb48098650119728144e33913f0c70862a5397c6e6e6c490ab077efc2e937",
+      "after": "1e5fb48098650119728144e33913f0c70862a5397c6e6e6c490ab077efc2e937",
+      "edits": []
+    },
+    {
+      "path": "dist/templates/simple-loop/template.json",
+      "before": "f03783238cd834b1f306cd7866e064aa9eb2647c8c68c0a2b5bc279066957768",
+      "after": "f03783238cd834b1f306cd7866e064aa9eb2647c8c68c0a2b5bc279066957768",
+      "edits": []
+    },
+    {
+      "path": "package.json",
+      "before": "1ce2a8c196580397a1a5bc52bede865af74d0ba68ae488b38e91187b8851efce",
+      "after": "1ce2a8c196580397a1a5bc52bede865af74d0ba68ae488b38e91187b8851efce",
+      "edits": []
+    }
+  ]
+}

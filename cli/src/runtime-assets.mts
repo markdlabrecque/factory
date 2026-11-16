@@ -17,7 +17,7 @@ export const RUNTIME_ASSETS: readonly RuntimeAsset[] = Object.freeze([
   ...FROM_BOARD.map(name => ({ source: `board/${name}`, destination: name })),
   // The flat runtime keeps the probe entrypoint and board store under distinct names.
   { source: 'board/readiness.mts', destination: 'readiness-store.mts' },
-  ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts'].map(name => ({ source: `cli/src/${name}`, destination: name })),
+  ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts', 'sandcastle-patch.mts', 'sandcastle-patch.json'].map(name => ({ source: `cli/src/${name}`, destination: name })),
   { source: 'orchestrator/main.mts', destination: 'main.mts' },
   ...['prompt.md', 'prompt.verify.md'].map(name => ({ source: `cli/templates/project/${name}`, destination: name })),
   { source: 'package.json', destination: 'package.json' },
