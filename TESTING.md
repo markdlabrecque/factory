@@ -84,6 +84,26 @@ paid workers, tracker calls, recovery resets, notification adapters or actions r
 The state asset joins the complete inventory; existing run/proof/recovery suites
 remain mandatory in all four commit shards and the separate lifecycle gate.
 
+## Bounded supervisor diagnosis
+
+```sh
+node --test orchestrator/supervisor.test.mts orchestrator/supervisor-policy.test.mts cli/test/supervisor-worker.test.mts cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Pure tests prove strict typed proposals, problem/evidence/expectation separation,
+original frozen context with bounded supplemental memory, basis freshness and
+observation-time-only reuse, old-journal preservation, exact completion fences,
+finite accounting and failure refusal. One disposable worker boundary injects Pi
+process/termination/accounting adapters and clocks/deadlines, without sleeps. It
+proves reserve-before-spawn, both configured-family Mid roles, no tools or action/
+review/tracker effects, shared capacity, cancellation/timeout/stale/malformed/failed
+output, unknown cleanup/usage holds, retained output, exhaustion and restart reuse.
+The complete-runtime fixture imports the actual flat worker/prompt inventory.
+No live Pi, provider enforcement, notification adapter, tracker, Docker, service,
+credential, install or paid probe is exercised. An absent demonstrated provider
+ceiling/accounting adapter holds paid work; stub evidence does not supply it.
+All four commit shards and the separate lifecycle gate remain mandatory.
+
 ## Runtime bundle preparation
 
 ```sh

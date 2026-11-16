@@ -10,6 +10,7 @@ import { supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-
 import type { Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
 import { emptySupervisor, incidentIdentity, transitionSupervisor, validateSupervisor, readSupervisor, commitSupervisor, supervisorFile, HISTORY_LIMIT } from '../src/supervisor-state.mts';
 import type { SupervisorState, Event, Reservation, Limits } from '../src/supervisor-state.mts';
+import type { Diagnostic } from '../../orchestrator/supervisor.mts';
 
 const h = 'a'.repeat(64), at = '2026-11-17T12:00:00.000Z';
 const project = { root: '/fixture/project', tracker: { kind: 'github' as const, host: 'github.com', project: 'owner/repo' } };
@@ -277,4 +278,33 @@ test('filesystem boundary: durable restart, CAS race, corruption/foreign/unknown
     assert.equal(records.reduce((n, p) => n + Object.keys(p.reservations).length, 0), 1);
     assert.deepEqual(readFileSync(savedWork), savedWorkBytes);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('diagnosis retention preserves old journals and requires exact fence, finite accounting and timely current basis', () => {
+  const old = initial(); delete old.diagnostics;
+  validateSupervisor(JSON.parse(JSON.stringify(old)), project);
+  const r = reservation(); const state = apply(old, reserve(r));
+  const body: Omit<Diagnostic, 'id'> = { reservationId: r.id, incidentId: iid, basisHash: h, snapshotHash: h, fence: r.fence, startedAt: at, completedAt: at,
+    inputRef: 'host:retained-original', outcome: 'proposed', reason: 'Wait for CI', stdout: '{}', stderr: '',
+    decision: { version: 1, incidentId: iid, basisHash: h, classification: 'evidence-mechanism', rationale: 'Wait for CI', alternatives: ['Inspect original output'], action: { kind: 'wait', expectation: 'CI completes' } } };
+  const record = (overrides: Partial<typeof body> = {}): Diagnostic => { const b = { ...body, ...overrides }; return { ...b, id: supervisorHash(b) }; };
+  const event = (diagnostic = record()): Event => ({ kind: 'diagnosis', id: 'diagnosis', at: diagnostic.completedAt, diagnostic, owner, actual: { tokens: 10, cost: 10 }, processConfirmed: true,
+    request: diagnostic.outcome === 'proposed' ? null : { ...human(), proposalId: diagnostic.id, reason: 'authority-uncertain' } });
+  const saved = apply(state, event());
+  assert.equal(saved.reservations[supervisorHash(r.id)].state, 'finished'); assert.deepEqual(saved.incidents, state.incidents);
+  assert.equal(Object.keys(saved.diagnostics!).length, 1); assert.equal(saved.charged.diagnosis.tokens, 100);
+  assert.deepEqual(apply(saved, event()), saved);
+  assert.throws(() => apply(state, event(record({ fence: 'foreign' }))), /fence/);
+  assert.throws(() => apply(state, event(record({ completedAt: r.deadline }))), /late/);
+  assert.throws(() => apply(state, { ...event(), processConfirmed: false } as Event), /unknown/);
+  assert.throws(() => apply(state, { ...event(), actual: null } as Event), /unknown/);
+  const failed = record({ outcome: 'timeout', decision: null, completedAt: r.deadline, reason: 'Deadline exhausted' });
+  const ambiguous = apply(state, { ...event(failed), actual: null } as Event);
+  assert.equal(ambiguous.reservations[supervisorHash(r.id)].state, 'ambiguous');
+  assert.throws(() => apply(ambiguous, reserve(reservation('replacement'))), /unsettled|human-held/);
+  assert.equal(ambiguous.humans[iid].delivery.state, 'pending');
+  assert.throws(() => apply(state, { ...event(failed), request: null } as Event), /atomically/);
+  const malformed = structuredClone(saved); Object.values(malformed.diagnostics!)[0].decision!.action = { kind: 'approve' } as any;
+  assert.throws(() => validateSupervisor(malformed, project));
+  assert.deepEqual(saved.proposals, {}); assert.deepEqual(saved.intents, {}); assert.deepEqual(saved.reviews, {});
 });

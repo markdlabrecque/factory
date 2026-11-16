@@ -24,7 +24,7 @@ const cap = (v: BudgetLimits) => v && integer(v.maxTokens) && v.maxTokens > 0 &&
  */
 export function supervisorCallHold(policy: SupervisorPolicy, role: SupervisorCallRole, input: PaidCallInput): string | undefined {
   if (policy?.enabled !== true || input?.registered !== true) return 'Supervisor disabled or project unregistered';
-  if (input.mode !== 'act' || input.globalAllowed !== true) return 'Operator/global admission holds paid work';
+  if (input.mode === 'stopped' || !['observe','act'].includes(input.mode) || role === 'review' && input.mode !== 'act' || input.globalAllowed !== true) return 'Operator/global admission holds paid work';
   const limits = policy.limits, selected = limits?.[role];
   if (!limits || !selected || !cap(limits) || !cap(selected) || !Number.isSafeInteger(selected.timeoutSeconds) || selected.timeoutSeconds <= 0 || selected.timeoutSeconds > SUPERVISOR_BOUNDS.timeoutSeconds)
     return 'Finite supervisor limits required';

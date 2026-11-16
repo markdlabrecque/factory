@@ -1,11 +1,14 @@
 // Host-owned supervisor journal: atomic CAS transitions, retained incidents/denials and separately charged resources.
-// No worker, notification, gate application, recovery mutation or launch authority is provided by this module.
+// Retains bounded diagnosis output and pending requests; no notification, gate application, recovery mutation or launch authority.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
 import type { ProjectIdentity, Scope, Incident, Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
 const { ownerState, withAdmissionLock, writeDurable } = await import(existsSync(new URL('./admission.mts', import.meta.url)) ? './admission.mts' : '../../board/admission.mts');
 const { supervisorHash, validateProject, validateScope, validateIncident, validateProposal, validateIndependentReview, validateIntent, validateHumanRequest } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
+
+import type { Diagnostic } from '../../orchestrator/supervisor.mts';
+const { validateDiagnostic } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
 
 export const HISTORY_LIMIT = 100;
 export const DIAGNOSIS_TIMEOUT_MS = 600_000;
@@ -22,6 +25,8 @@ export type SupervisorState = {
   version: 1; project: ProjectIdentity; revision: number;
   incidents: Record<string, IncidentMemory>; proposals: Record<string, Proposal>; reviews: Record<string, IndependentReview>;
   intents: Record<string, IntentMemory>; humans: Record<string, HumanRequest>; reservations: Record<string, Reservation>;
+  /** Absent only in pre-diagnosis version-1 journals. Added without discarding any old safety indexes. */
+  diagnostics?: Record<string, Diagnostic>;
   // Safety indexes and counters are never truncated with the display history.
   events: Record<string, string>; charged: Record<'diagnosis' | 'review', Resources>;
   history: { event: string; at: string; kind: string }[];
@@ -35,6 +40,7 @@ export type Event = { id: string; at: string } & (
   | { kind: 'human'; request: HumanRequest }
   | { kind: 'reserve'; reservation: Reservation; limits: Limits }
   | { kind: 'finish'; reservationId: string; fence: string; owner: Owner; actual: Resources }
+  | { kind: 'diagnosis'; diagnostic: Diagnostic; owner: Owner; actual: Resources | null; processConfirmed: boolean; request: HumanRequest | null }
   | { kind: 'reconcile-worker'; reservationId: string }
   | { kind: 'intent'; intent: Intent; owner: Owner }
   | { kind: 'reconcile-intent'; intentId: string; outcome: IntentMemory['outcome']; evidence: string[] }
@@ -58,7 +64,7 @@ export function incidentIdentity(project: ProjectIdentity, input: Facts): string
 export const emptySupervisor = (project: ProjectIdentity): SupervisorState => {
   validateProject(project);
   return { version: 1, project, revision: 0, incidents: {}, proposals: {}, reviews: {}, intents: {}, humans: {}, reservations: {}, events: {},
-    charged: { diagnosis: { tokens: 0, cost: 0 }, review: { tokens: 0, cost: 0 } }, history: [] };
+    charged: { diagnosis: { tokens: 0, cost: 0 }, review: { tokens: 0, cost: 0 } }, diagnostics: {}, history: [] };
 };
 function entries(x: any): [string, any][] {
   demand(x && typeof x === 'object' && !Array.isArray(x), 'expected index');
@@ -66,7 +72,7 @@ function entries(x: any): [string, any][] {
 }
 /** Strict read validation; no recovery/reset from unknown versions, foreign identities or malformed owners. */
 export function validateSupervisor(s: any, project: ProjectIdentity): SupervisorState {
-  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history']);
+  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history', ...(Object.hasOwn(s, 'diagnostics') ? ['diagnostics'] : [])]);
   validateProject(s.project); demand(s.version === 1 && same(s.project, project) && count(s.revision), 'version/project/revision mismatch');
   for (const [id, m] of entries(s.incidents)) {
     object(m, ['incident','facts','superseded','denied']); validateIncident(m.incident); facts(m.facts);
@@ -74,12 +80,20 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
       && typeof m.superseded === 'boolean' && typeof m.denied === 'boolean' && (!m.denied || m.incident.state === 'human-required'), 'invalid incident memory');
   }
   for (const [id, p] of entries(s.proposals)) { validateProposal(p); demand(id === p.id && same(p.project, project) && s.incidents[p.incidentId]
-      && same(p.scope, s.incidents[p.incidentId].incident.scope) && p.snapshotHash === s.incidents[p.incidentId].incident.snapshotHash, 'foreign proposal'); }
+      && same(p.scope, s.incidents[p.incidentId].incident.scope) && (p.snapshotHash === s.incidents[p.incidentId].incident.snapshotHash
+        || Object.values<Diagnostic>(s.diagnostics ?? {}).some(d => d.outcome === 'proposed' && d.incidentId === p.incidentId && d.snapshotHash === p.snapshotHash
+          && d.decision?.action.kind === 'gate-change' && same(d.decision.action.proposal, p))), 'foreign proposal'); }
   for (const [id, r] of entries(s.reviews)) {
     validateIndependentReview(r); const p = s.proposals[r.proposalId];
     demand(id === supervisorHash(r.id) && p && Object.values<any>(s.reservations).some(call => call.kind === 'review'
       && call.id === r.invocationId && call.reviewId === r.id && call.incidentId === p.incidentId)
       && (r.disposition !== 'deny' || s.incidents[p.incidentId].denied), 'orphan review or lost denial');
+  }
+  for (const [id, d] of entries(s.diagnostics ?? {})) {
+    validateDiagnostic(d); const r = s.reservations[supervisorHash(d.reservationId)];
+    demand(id === d.id && r?.kind === 'diagnosis' && r.incidentId === d.incidentId && r.fence === d.fence, 'foreign diagnostic');
+    if (d.outcome !== 'proposed' || d.decision?.action.kind === 'escalate') demand(s.humans[d.incidentId] && s.incidents[d.incidentId].incident.state === 'human-required', 'lost diagnosis human stop');
+    if (d.decision?.action.kind === 'gate-change') demand(s.proposals[d.decision.action.proposal.id] && same(s.proposals[d.decision.action.proposal.id], d.decision.action.proposal), 'lost exact diagnosis proposal');
   }
   for (const [id, h] of entries(s.humans)) { validateHumanRequest(h); demand(id === h.incidentId && s.incidents[id] && same(h.project, project), 'foreign human request'); }
   for (const [id, m] of entries(s.intents)) {
@@ -127,6 +141,14 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
     const r = s.reservations[supervisorHash(id)]; liveOwner(o);
     demand(r && r.state === 'active' && r.fence === fence && same(r.owner, o) && event.at >= r.at && event.at < r.deadline, 'stale reservation/fence'); return r;
   };
+  const putHuman = (h: HumanRequest) => {
+    validateHumanRequest(h); const m = s.incidents[h.incidentId];
+    demand(m && same(h.project, s.project) && (same(h.scope, m.incident.scope) || h.scope.kind === 'project')
+      && (s.proposals[h.proposalId]?.incidentId === h.incidentId || s.diagnostics?.[h.proposalId]?.incidentId === h.incidentId), 'human request binding mismatch');
+    demand(h.delivery.state === 'pending' && h.delivery.attempts === 0, 'no notification adapter exists');
+    if (!s.humans[h.incidentId]) s.humans[h.incidentId] = h;
+    m.incident.state = 'human-required';
+  };
   switch (event.kind) {
     case 'observe': {
       const id = incidentIdentity(s.project, event.facts); demand(hash(event.snapshotHash) && text(event.reason), 'invalid observation');
@@ -169,6 +191,31 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       demand(event.actual.tokens <= r.reserved.tokens && event.actual.cost <= r.reserved.cost, 'actual exceeds reserved ceiling');
       r.actual = event.actual; r.state = 'finished'; break; // No refund, including failed calls.
     }
+    case 'diagnosis': {
+      const d = validateDiagnostic(event.diagnostic), r = s.reservations[supervisorHash(d.reservationId)];
+      liveOwner(event.owner);
+      demand(r?.kind === 'diagnosis' && r.state === 'active' && r.fence === d.fence && same(r.owner, event.owner)
+        && r.incidentId === d.incidentId && d.startedAt === r.at && d.completedAt === event.at, 'stale diagnostic owner/fence');
+      const m = s.incidents[r.incidentId];
+      demand(d.outcome !== 'proposed' || event.processConfirmed && event.actual !== null && event.at < r.deadline
+        && !m.superseded && !m.denied && m.incident.state !== 'human-required' && !Object.keys(s.humans).length, 'late/unknown diagnosis cannot succeed');
+      s.diagnostics ??= {}; demand(!Object.values(s.diagnostics).some(x => x.reservationId === r.id), 'diagnosis already recorded');
+      s.diagnostics[d.id] = d;
+      if (d.decision?.action.kind === 'gate-change') {
+        const p = validateProposal(d.decision.action.proposal);
+        demand(p.incidentId === d.incidentId && p.snapshotHash === d.snapshotHash && same(p.project, s.project)
+          && same(p.scope, m.incident.scope) && p.change.owner.runId === m.facts.runId, 'diagnosis proposal binding mismatch');
+        demand(!s.proposals[p.id] || same(s.proposals[p.id], p), 'proposal changed'); s.proposals[p.id] = p;
+      }
+      const needsHuman = d.outcome !== 'proposed' || d.decision?.action.kind === 'escalate';
+      demand(needsHuman ? event.request !== null && event.request.proposalId === d.id && event.request.incidentId === d.incidentId : event.request === null, 'diagnosis and required human stop must publish atomically');
+      if (event.request) putHuman(event.request);
+      if (event.actual !== null && event.processConfirmed) {
+        resources(event.actual); demand(event.actual.tokens <= r.reserved.tokens && event.actual.cost <= r.reserved.cost, 'accounting overflow');
+        r.actual = event.actual; r.state = 'finished';
+      } else r.state = 'ambiguous'; // Unknown usage/cleanup retains full charge and capacity; never replay.
+      break;
+    }
     case 'reconcile-worker': {
       const r = s.reservations[supervisorHash(event.reservationId)]; demand(r && r.state === 'active', 'no active reservation');
       demand(environment.ownerState(r.owner) === 'dead', 'unknown/live owner holds reconciliation');
@@ -185,11 +232,7 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       break; // Audit only, not provenance verification or approval/application authority.
     }
     case 'human': {
-      const h = validateHumanRequest(event.request); const m = s.incidents[h.incidentId];
-      demand(m && same(h.project, s.project) && (same(h.scope, m.incident.scope) || h.scope.kind === 'project') && s.proposals[h.proposalId]?.incidentId === h.incidentId, 'human request binding mismatch');
-      demand(h.delivery.state === 'pending' && h.delivery.attempts === 0, 'no notification adapter exists');
-      if (!s.humans[h.incidentId]) s.humans[h.incidentId] = h;
-      m.incident.state = 'human-required'; break;
+      putHuman(event.request); break;
     }
     case 'intent': {
       const i = validateIntent(event.intent); const m = current(i.incidentId); liveOwner(event.owner);
