@@ -10,7 +10,7 @@
 // - at most one worktree with the branch checked out, and only inside Sandcastle's worktree folder
 //   (`<root>/.factory/worktrees/` by default), present on disk. A dirty worktree is accepted and its changes are
 //   listed so the repair keeps them; none means Sandcastle checks the branch out afresh;
-// - the record's evidence folder, when set, being the ticket's own `<root>/.factory/evidence/<ticket>`.
+// - the recorded evidence folder being the ticket root or its exact recorded execution directory, contained on disk.
 // Anything else (no recorded branch, a diverged origin copy, the branch checked out in the project's main checkout or a
 // worktree outside that folder, a missing registered worktree) is ambiguous ownership: the attempt is refused with the
 // reason and nothing is touched. Read-only; the recovery launcher (#60) calls it before claimRecovery.
@@ -24,8 +24,8 @@
 // the receipt. A branch only on origin is refused with `remoteOnly`; fetchRecordedBranch then fetches exactly that branch
 // and creates the local ref without force (refusing several matching refs or a mismatch), and the check runs again.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
-import { join, relative, resolve, isAbsolute } from 'node:path';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { dirname, join, relative, resolve, isAbsolute } from 'node:path';
 import type { RunState } from '../../board/board.mts';
 import { gitCommonDir } from '../../orchestrator/ownership.mts';
 import { projectLayoutPaths } from '../../orchestrator/project-layout.mts';
@@ -58,6 +58,17 @@ function ok(root: string, args: string[]): boolean {
   throw new Error(`git ${args[0]} failed: ${r.stderr.trim() || r.signal || r.status}`);
 }
 const real = (p: string) => { try { return realpathSync(p); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return resolve(p); throw e; } };
+// Resolve existing ancestors too: a missing leaf must not hide an escaping parent symlink.
+const realWithMissing = (p: string): string => {
+  try { return realpathSync(p); } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    // A dangling symlink is an unknown identity, not an absent evidence directory.
+    if (lstatSync(p, { throwIfNoEntry: false })) throw e;
+    const parent = dirname(p);
+    if (parent === p) throw e;
+    return join(realWithMissing(parent), relative(parent, p));
+  }
+};
 const inside = (dir: string, p: string) => { const r = relative(dir, p); return !!r && !r.startsWith('..') && !isAbsolute(r); };
 
 function worktrees(root: string): Worktree[] {
@@ -74,13 +85,13 @@ function worktrees(root: string): Worktree[] {
 
 /** The ticket's recorded branch and Factory-owned worktree a repair may continue, or why it may not. `root` is the
  *  project's canonical checkout root; `worktreeDir` overrides Sandcastle's worktree folder (tests). */
-export function resumeTarget(root: string, run: Pick<RunState, 'iid' | 'branch' | 'base' | 'evidenceDir'>,
+export function resumeTarget(root: string, run: Pick<RunState, 'iid' | 'branch' | 'base' | 'evidenceDir' | 'executionId'>,
   o: { worktreeDir?: string; receipt?: Receipt | null } = {}): ResumeCheck {
   try { return validateTarget(root, run, o); }
   catch (e) { return { ok: false, kind: 'project-stopped', code: 'validation-uncertain', reason: `#${run.iid}: ${(e as Error).message}` }; }
 }
 
-function validateTarget(root: string, run: Pick<RunState, 'iid' | 'branch' | 'base' | 'evidenceDir'>,
+function validateTarget(root: string, run: Pick<RunState, 'iid' | 'branch' | 'base' | 'evidenceDir' | 'executionId'>,
   o: { worktreeDir?: string; receipt?: Receipt | null }): ResumeCheck {
   const no = (code: RefusalCode, reason: string): ResumeCheck => ({ ok: false,
     kind: code === 'ownership-unknown' ? 'project-stopped' : 'ticket-refused', code, reason: `#${run.iid}: ${reason}` });
@@ -95,9 +106,18 @@ function validateTarget(root: string, run: Pick<RunState, 'iid' | 'branch' | 'ba
       !ok(root, ['rev-parse', '--verify', '--quiet', `${run.base}^{commit}`])) {
     return no('base-invalid', `recorded base ${run.base} is not an existing commit or branch`);
   }
-  const evidenceDir = resolve(projectLayoutPaths(root).evidence, run.iid);
-  if (run.evidenceDir && real(run.evidenceDir) !== real(evidenceDir)) {
-    return no('evidence-mismatch', `recorded evidence folder ${run.evidenceDir} is not the ticket's own (${evidenceDir})`);
+  const evidenceRoot = resolve(projectLayoutPaths(root).evidence);
+  const ticketDir = resolve(evidenceRoot, run.iid);
+  const execution = run.executionId;
+  const executionDir = execution && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(execution)
+    ? join(ticketDir, execution) : undefined;
+  const evidenceDir = run.evidenceDir || ticketDir;
+  const expectedTicket = join(realWithMissing(evidenceRoot), run.iid);
+  if (realWithMissing(evidenceRoot) !== evidenceRoot ||
+      (evidenceDir !== ticketDir && evidenceDir !== executionDir) ||
+      realWithMissing(ticketDir) !== expectedTicket ||
+      realWithMissing(evidenceDir) !== (evidenceDir === ticketDir ? expectedTicket : join(expectedTicket, execution!))) {
+    return no('evidence-mismatch', `recorded evidence folder ${run.evidenceDir} is not the ticket's own (${ticketDir}) or its recorded execution`);
   }
 
   const receipt = o.receipt ?? null;

@@ -240,6 +240,7 @@ if (recovering) {
   const owned = (() => { try { const r = relative(realpathSync(layout.worktrees), realpathSync(rec.worktree)); return !!r && !r.startsWith("..") && !r.includes("/"); } catch { return false; } })();
   if (rec.iid !== iid || rec.seq !== seq || rec.project !== PROJECT || rec.base !== base || rec.phase !== "claimed"
     || rec.executionId !== claimed?.executionId || rec.implementationBaseSha !== claimed?.implementationBaseSha
+    || (rec.previousEvidence !== undefined && rec.previousEvidence !== (claimed?.evidenceDir || resolve(layout.evidence, iid)))
     || claimed?.recovery?.attempt !== seq || claimed.recovery.id !== rec.id || claimed.branch !== rec.branch || !owned
     || admitted?.kind !== "recovery" || admitted.attempt !== rec.id || admitted.token !== claimed.claim) {
     fail(`#${iid} is not claimed for recovery attempt ${seq} (${rec.id}); only Factory's recovery launcher starts --recover, once per attempt.`);

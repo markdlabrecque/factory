@@ -219,6 +219,12 @@ test('recorder failure during setup, verification and settlement never prevents 
 
 test("a committed repair is verified separately and the exact tip delivered; attempt recorded once", async (t) => {
   const f = fixture(t, { setup: [{ command: SETUP_SLOW }] });
+  const saved = join(f.evidenceRoot, OTHER_ID);
+  mkdirSync(saved);
+  for (const name of ['verdict.md', 'blocked.json', 'before-1.png']) copyFileSync(join(f.evidenceRoot, name), join(saved, name));
+  writeFileSync(join(f.evidenceRoot, 'unrelated-execution.txt'), 'not this execution');
+  writeAttemptRecord(f.record, { ...f.rec(), previousEvidence: saved });
+  f.oldEvidence = hashTree(f.evidenceRoot);
   const otherRef = git(f.root, "rev-parse", "8-other");
   const r = await f.run();
   assert.equal(r.outcome, "delivered", r.reason);
@@ -252,6 +258,9 @@ test("a committed repair is verified separately and the exact tip delivered; att
     "history/before-1.png", "input/status.txt", "input/staged.diff", "recovery-report.json", "recovery-report.md", "verdict.md", "repair.log"]) {
     assert.ok(existsSync(join(rec.evidence, a)), `${a} kept in the attempt's evidence`);
   }
+  assert.equal(readFileSync(join(rec.evidence, 'history/verdict.md'), 'utf8'), 'VERDICT: FAIL\nold\n');
+  assert.equal(existsSync(join(rec.evidence, 'history/unrelated-execution.txt')), false, 'history is the saved execution, not the ticket root');
+  assert.equal(existsSync(join(rec.evidence, 'history', OTHER_ID)), false, 'execution evidence is not nested under its ID again');
   // A record is never run twice.
   await assert.rejects(f.run(), /already started/);
 });
