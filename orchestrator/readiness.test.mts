@@ -20,7 +20,7 @@ function fixture(t: any) {
       { id: 'instructions', role: 'project-asset', scope: 'ticket-input', path: join(project, 'instructions.md'), trustedRoot: project, access: 'read-file' },
       { id: 'runtime', role: 'runtime', scope: 'project', path: join(runtime, 'main.mts'), trustedRoot: runtime, access: 'read-file' },
       { id: 'state', role: 'state', scope: 'project', path: state, trustedRoot: state, access: 'write-directory' },
-      { id: 'logs', role: 'artifact', scope: 'project', path: join(project, '.sandcastle', 'logs'), trustedRoot: project, access: 'write-directory', create: true },
+      { id: 'logs', role: 'artifact', scope: 'project', path: join(project, '.factory', 'logs'), trustedRoot: project, access: 'write-directory', create: true },
     ] };
   return { root, project, state, runtime, input };
 }
@@ -36,12 +36,12 @@ test('passive is byte-preserving and unproven; active creates only intended dirs
   const passive = await observeReadiness(f.input);
   assert.equal(passive.status, 'unknown'); assert.ok(validReport(passive));
   assert.equal(passive.checks.find(c => c.id === 'logs')?.operation, 'write-unproven');
-  assert.deepEqual(snapshot(f.root), before); assert.equal(fs.existsSync(join(f.project, '.sandcastle')), false);
+  assert.deepEqual(snapshot(f.root), before); assert.equal(fs.existsSync(join(f.project, '.factory')), false);
   const active = await probeFilesystem(f.input);
   assert.equal(active.status, 'ready', JSON.stringify(active)); assert.ok(validReport(active));
   assert.deepEqual(snapshot(f.root), before);
-  assert.deepEqual(fs.readdirSync(join(f.project, '.sandcastle')), ['logs']);
-  assert.deepEqual(fs.readdirSync(join(f.project, '.sandcastle', 'logs')), []);
+  assert.deepEqual(fs.readdirSync(join(f.project, '.factory')), ['logs']);
+  assert.deepEqual(fs.readdirSync(join(f.project, '.factory', 'logs')), []);
   assert.deepEqual(fs.readdirSync(f.state), []);
   assert.equal(displayFreshness(active, f.input.identity, Date.parse(active.observedAt)), 'current');
   assert.equal(displayFreshness(active, { ...f.input.identity, configIdentity: 'other' }, Date.parse(active.observedAt)), 'stale');

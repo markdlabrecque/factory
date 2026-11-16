@@ -77,7 +77,7 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
   expected?: RunState; generation?: number; episode?: string; validate?: () => void;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
   afterCommit?: () => void }): RecoveryClaim {
-  const toml = loadTomlConfig(join(o.root, '.sandcastle'));
+  const toml = loadTomlConfig(join(o.root, '.factory'));
   const cap = o.cap ?? toml?.dispatch.maxConcurrent ?? DEFAULT_CAP;
   if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('Recovery cap must be a positive safe integer');
   const dir = o.dir ?? runStateDir(p);

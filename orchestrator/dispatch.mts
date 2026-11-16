@@ -411,7 +411,7 @@ if (dry || !launch.length) process.exit(0);
 projectReadiness = await projectLaunchReadiness({ projectRoot: context.projectRoot, runtimeRoot: context.runtimeRoot, runtimeIdentity: context.manifest.id, runtimeDependencies: context.manifest.dependencies, config: effectiveConfig, stateRoot: stateDir(), base });
 const admissionProjectHold = readinessReason(projectReadiness);
 if (admissionProjectHold) { log(`project held before admission: ${admissionProjectHold}`); process.exit(1); }
-const logDir = context.projectPath('.sandcastle/logs');
+const logDir = context.projectPath('.factory/logs');
 mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);

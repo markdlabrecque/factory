@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
 export type ImageConfig = { ok: true; image: string } | { ok: false; reason: string };
 export function readImageConfig(root: string): ImageConfig {
-  const toml = loadTomlConfig(join(root, '.sandcastle'));
+  const toml = loadTomlConfig(join(root, '.factory'));
   return { ok: true, image: toml.config.image };
 }
 

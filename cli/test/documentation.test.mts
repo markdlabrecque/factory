@@ -25,7 +25,7 @@ function fences(source: string, language: string) {
 function temp(t: any) { const root = mkdtempSync(join(tmpdir(), 'factory-doc-')); t.after(() => rmSync(root, { recursive: true, force: true })); return root; }
 
 test('every documented TOML fence parses as a complete example or compatible fragment', t => {
-  const root = temp(t), config = join(root, '.sandcastle'); mkdirSync(config);
+  const root = temp(t), config = join(root, '.factory'); mkdirSync(config);
   let count = 0;
   for (const guide of guides) for (const snippet of fences(text(guide), 'toml')) {
     count++;
@@ -78,10 +78,10 @@ test('documented tiers, roles and rejected legacy declarations use production po
 
 test('documented manifest command regenerates a copied fixture bundle and invalidates review', t => {
   const home = temp(t), root = join(home, 'project'), p = paths(join(home, 'home'));
-  mkdirSync(join(root, '.sandcastle'), { recursive: true }); installedFixture(p);
-  const config = join(root, '.sandcastle/factory.toml'); writeFileSync(config, factoryToml('owner/repo'));
+  mkdirSync(join(root, '.factory'), { recursive: true }); installedFixture(p);
+  const config = join(root, '.factory/factory.toml'); writeFileSync(config, factoryToml('owner/repo'));
   const original = resolveWorkflow(root, p.runtimeDescriptor);
-  const override = join(root, '.sandcastle/workflow'); cpSync(original.root, override, { recursive: true });
+  const override = join(root, '.factory/workflow'); cpSync(original.root, override, { recursive: true });
   const fragment = fences(text('orchestrator/ADAPTING.md'), 'toml').find(s => s.includes('[workflow]'))!;
   writeFileSync(config, factoryToml('owner/repo') + '\n' + fragment);
   recordReview(p, root); assert.equal(recoveryCopyProblem(p, root), null);
@@ -109,7 +109,7 @@ test('README init and config explain examples run against disposable projects', 
     execFileSync('/usr/bin/git', ['init', '-q', root], { env });
     const args = example.replace('/path/to/project', root).split(/\s+/).slice(1);
     execFileSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8' });
-    const c = loadTomlConfig(join(root, '.sandcastle'));
+    const c = loadTomlConfig(join(root, '.factory'));
     assert.equal(c.TRACKER.kind, i ? 'gitlab' : 'github'); assert.equal(c.MERGE.auto, !i);
     const line = fences(text('README.md'), 'sh').flatMap(s => s.split('\n')).find(s => s.startsWith('factory config explain '))!;
     const explain = line.replace('/path/to/project', root).split(/\s+/).slice(1);

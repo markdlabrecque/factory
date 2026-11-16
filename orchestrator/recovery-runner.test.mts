@@ -77,9 +77,9 @@ function fixture(t: TestContext, s: Scenario = {}) {
   const baseSha = git(root, "rev-parse", "HEAD");
   git(root, "branch", "8-other");
   git(root, "branch", "7-fix-login");
-  mkdirSync(join(root, ".sandcastle/worktrees"), { recursive: true });
-  for (const p of ["prompt.recover.md", "prompt.verify.md"]) copyFileSync(join(import.meta.dirname, p), join(root, ".sandcastle", p));
-  const worktree = join(root, ".sandcastle/worktrees/7-fix-login");
+  mkdirSync(join(root, ".factory/worktrees"), { recursive: true });
+  for (const p of ["prompt.recover.md", "prompt.verify.md"]) copyFileSync(join(import.meta.dirname, p), join(root, ".factory", p));
+  const worktree = join(root, ".factory/worktrees/7-fix-login");
   git(root, "worktree", "add", "-q", worktree, "7-fix-login");
   writeFileSync(join(worktree, "app.txt"), "v2\n");
   git(worktree, "commit", "-qam", "half done");
@@ -90,12 +90,12 @@ function fixture(t: TestContext, s: Scenario = {}) {
     writeFileSync(join(worktree, "untracked.txt"), "untracked\n");
   }
   const startSha = git(worktree, "rev-parse", "HEAD");
-  const evidenceRoot = join(root, ".sandcastle/evidence/7");
+  const evidenceRoot = join(root, ".factory/evidence/7");
   mkdirSync(evidenceRoot, { recursive: true });
   writeFileSync(join(evidenceRoot, "verdict.md"), "VERDICT: FAIL\nold\n");
   writeFileSync(join(evidenceRoot, "blocked.json"), '{"blockers":[]}\n');
   writeFileSync(join(evidenceRoot, "before-1.png"), "old media");
-  const logs = join(root, ".sandcastle/logs");
+  const logs = join(root, ".factory/logs");
   mkdirSync(logs, { recursive: true });
   writeFileSync(join(logs, "recover-7.log"), "previous log\n");
 
@@ -166,7 +166,7 @@ function fixture(t: TestContext, s: Scenario = {}) {
   const workspace = { ...gitWorkspace, importRef: (o: Parameters<typeof gitWorkspace.importRef>[0]) => { s.beforeImport?.(f as Fixture); return gitWorkspace.importRef(o); } };
   const deps: RecoveryDeps = {
     clock: clock.clock,
-    createSandbox: (spec) => createOwnedSandbox(spec, { image: "img", setup: s.setup ?? [{ command: "true" }], helpers: join(root, ".sandcastle/sandbox"),
+    createSandbox: (spec) => createOwnedSandbox(spec, { image: "img", setup: s.setup ?? [{ command: "true" }], helpers: join(root, ".factory/sandbox"),
       env: { CLAUDE_CODE_OAUTH_TOKEN: "secret-token" }, uid: 1000, gid: 1000, proc: world.proc, root }),
     containerGone: (name) => ownedContainerGone(name, world.docker),
     // This suite tests recovery lifecycle; embedded actual-UID probe behavior is fixture-tested separately.

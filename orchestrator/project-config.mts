@@ -1,6 +1,7 @@
 // Data-only v2 project configuration. No project code, environment expansion or fallback.
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { PROJECT_ASSET_BASENAME, requireProjectLayout } from './project-layout.mts';
 import type { ModelFamily } from './model-policy.mts';
 import { parse } from './vendor/smol-toml/index.js';
 
@@ -42,6 +43,7 @@ export function resolveCheckoutPath(checkout: string, path: string, kind: 'file'
 }
 /** Missing, malformed and unreadable configurations fail closed. */
 export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
+  if (basename(resolve(scaffoldDir)) === PROJECT_ASSET_BASENAME) requireProjectLayout(dirname(resolve(scaffoldDir)));
   const path = resolve(scaffoldDir, 'factory.toml');
   let text: string;
   try { text = readFileSync(path, 'utf8'); } catch (e) {
@@ -51,7 +53,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
       try { lstatSync(path); present = true; } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${path}: cannot inspect configuration`);
       }
-      if (!present) throw new Error(`${path}: missing version 2 configuration; manually migrate this project`);
+      if (!present) throw new Error(`${path}: missing version 2 configuration; initialize a supported new project`);
     }
     throw new Error(`${path}: cannot read configuration (${(e as NodeJS.ErrnoException).code})`);
   }
@@ -94,7 +96,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
   };
   table(raw, '', ['version','tracker','agent','labels','graph','sandbox','selection','work','dispatch','merge','ci','workflow','instructions']);
   sources.version = Object.hasOwn(raw, 'version') ? 'explicit' : 'default';
-  if (raw.version !== 2) fail('version', 'unsupported configuration; version = 2 required, manually migrate this project');
+  if (raw.version !== 2) fail('version', 'unsupported configuration; version = 2 required; no conversion is performed');
   const t = section('tracker', ['kind','project','host','project_id'], true);
   const kind = en(t, 'kind', 'tracker', ['github','gitlab']);
   const tracker: EffectiveConfig['TRACKER'] = { kind, project: str(t, 'project', 'tracker') };

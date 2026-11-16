@@ -106,8 +106,8 @@ if (${JSON.stringify(cmd)} === 'glab') {
 } else if (${JSON.stringify(cmd)} !== 'gh' || args[0] !== 'issue' || args[1] !== 'comment') process.exit(92);
 `, { mode: 0o755 });
   }
-  mkdirSync(join(root, '.sandcastle'));
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('test/media', { kind: kind as 'github' | 'gitlab', host: kind === 'github' ? 'github.com' : 'git.example.test', projectId: kind === 'gitlab' ? 42 : undefined }));
+  mkdirSync(join(root, '.factory'));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('test/media', { kind: kind as 'github' | 'gitlab', host: kind === 'github' ? 'github.com' : 'git.example.test', projectId: kind === 'gitlab' ? 42 : undefined }));
   if (generated) {
     for (const file of buildAssets({ profile: kind === 'github' ? 'personal' : 'client', repo: 'test/media', image: 'unused', host: 'git.example.test', projectId: 42 }, join(root, 'state'))) {
       const p = join(root, file.path); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, file.content);

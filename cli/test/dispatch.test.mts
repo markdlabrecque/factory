@@ -23,9 +23,9 @@ function fixture(t: TestContext) {
   const p = paths(home);
   const project = (dir: string, exit = 0) => {
     const root = join(home, dir);
-    mkdirSync(join(root, '.sandcastle'), { recursive: true });
+    mkdirSync(join(root, '.factory'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
-    writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`me/${dir}`));
+    writeFileSync(join(root, '.factory/factory.toml'), factoryToml(`me/${dir}`));
     mkdirSync(join(root, '.factory-workflow'), { recursive: true });
     writeFileSync(join(root, '.factory-workflow/dispatch.sh'),
       `#!/usr/bin/env bash\nprintf '%s\\n' "$PWD" "$SANDCASTLE_STATE_DIR" "$*" > "$PWD/called"\nexit ${exit}\n`, { mode: 0o755 });

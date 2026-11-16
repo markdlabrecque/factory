@@ -43,7 +43,7 @@ function fixture(t: any, kind = "github") {
     mkdirSync(dirname(join(root, f.path)), { recursive: true });
     writeFileSync(join(root, f.path), f.content, { mode: f.mode });
   }
-  const configPath = join(root, '.sandcastle/factory.toml');
+  const configPath = join(root, '.factory/factory.toml');
   writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', 'family = "anthropic"'));
   for (const p of [bin, fake, dir, join(dir, "graph"), join(dir, "admission")]) mkdirSync(p, { recursive: true });
   // A fixture-local Node path makes dispatch select our npx rather than the host's. It records the launch only.
@@ -65,14 +65,14 @@ function fixture(t: any, kind = "github") {
   Object.assign(env, runtime.env);
   const snapshot = executionSnapshot(runtime, root);
   // Temporary caller bridge for Board routing, which is owned by the next task.
-  writeFileSync(join(root, '.sandcastle/dispatch.mts'), `await import(${JSON.stringify(join(runtime.directory, 'dispatch.mts'))});`);
+  writeFileSync(join(root, '.factory/dispatch.mts'), `await import(${JSON.stringify(join(runtime.directory, 'dispatch.mts'))});`);
   const data: any = { tickets: [ticket(7), ticket(20, { description: "Provider", labels: [] }), ticket(21, { description: "New provider", labels: [] })], ready: [7], notes: {}, parents: {} };
   const save = () => writeFileSync(join(fake, "tracker.json"), JSON.stringify(data));
   const key = (iid: number) => `owner_repo--${iid}`;
   const record = (iid: number, stage: string) => {
     const r = { iid: String(iid), project: "owner/repo", title: `old ${iid}`, stage, pid: process.pid, base: "main", verdict: "FAIL", branch: `${iid}-topic`,
       ticketHash: "old", archivedAt: "then", correction: "kept", stageSince: "2026-01-01", startedAt: "2026-01-01", updatedAt: "2026-01-01",
-      stageHistory: [{ stage: "queued", at: "2026-01-01" }, { stage, at: "2026-01-02" }], evidenceDir: "/old/evidence", claim: "historical" };
+      stageHistory: [{ stage: "queued", at: "2026-01-01" }, { stage, at: "2026-01-02" }], evidenceDir: join(root, '.factory/evidence', String(iid), 'prior-execution'), claim: "historical" };
     writeFileSync(join(dir, `${key(iid)}.json`), JSON.stringify(r));
     return readFileSync(join(dir, `${key(iid)}.json`), "utf8");
   };
@@ -97,7 +97,7 @@ function fixture(t: any, kind = "github") {
 }
 
 for (const changedInstructions of [false, true]) test(`scheduled copied dispatch: ${changedInstructions ? 'changed instructions revoke existing proof' : 'pending then green uses same proof/PR'}`, async t => {
-  const f = fixture(t), sc = join(f.root, '.sandcastle');
+  const f = fixture(t), sc = join(f.root, '.factory');
   writeFileSync(join(f.root, 'authority.md'), 'original authority');
   const configPath = join(sc, 'factory.toml');
   writeFileSync(configPath, f.bytes(configPath) + '\n[instructions]\ncommon = ["authority.md"]\n');
@@ -116,7 +116,7 @@ for (const changedInstructions of [false, true]) test(`scheduled copied dispatch
   const identity = {project:'owner/repo',ticket:'7',executionId:'execution',branch:'7-topic',base:'main',baseline:tip,tip,requirementsHash:hash};
   const proof = createProof(f.dir,evidence,identity,{imageId:`sha256:${'a'.repeat(64)}`,nodeVersion:'v22',settings,code});
   const at = new Date().toISOString(), path = join(f.dir,`${f.key(7)}.json`);
-  writeFileSync(path,JSON.stringify({iid:'7',project:'owner/repo',stage:'waiting',stageSince:at,startedAt:at,updatedAt:at,pid:process.pid,executionId:'execution',branch:'7-topic',base:'main',implementationBaseSha:tip,verdict:'PASS',verification:{id:proof.id,tip,requirementsHash:hash},delivery:{version:1,kind:'github',host:'github.com',repository:'owner/repo',number:1,url:'https://github.com/owner/repo/pull/1',branch:'7-topic',base:'main',sha:tip,project:'owner/repo',ticket:'7',executionId:'execution',proofId:proof.id,state:'ci-waiting',reasonCode:'opened',observedAt:at}}));
+  writeFileSync(path,JSON.stringify({iid:'7',project:'owner/repo',stage:'waiting',stageSince:at,startedAt:at,updatedAt:at,pid:process.pid,executionId:'execution',evidenceDir:join(f.root,'.factory/evidence/7/execution'),branch:'7-topic',base:'main',implementationBaseSha:tip,verdict:'PASS',verification:{id:proof.id,tip,requirementsHash:hash},delivery:{version:1,kind:'github',host:'github.com',repository:'owner/repo',number:1,url:'https://github.com/owner/repo/pull/1',branch:'7-topic',base:'main',sha:tip,project:'owner/repo',ticket:'7',executionId:'execution',proofId:proof.id,state:'ci-waiting',reasonCode:'opened',observedAt:at}}));
   f.data.delivery={sha:tip,pending:true};
   const cli = join(f.home,'trusted-cli.mjs');
   writeFileSync(cli,`import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(join(f.fake,'status-calls'))},JSON.stringify(process.argv.slice(2))+'\\n'); console.log(JSON.stringify({version:1,scheduler:{serviceEnabled:true,timerActive:true},projects:[{root:${JSON.stringify(f.root)},schedule:{enabled:true,branch:'main'},blocker:null}]}));`);
@@ -229,7 +229,7 @@ for (const kind of ["github", "gitlab"]) {
   test(`${kind}: TOML cap counts other projects and CLI cap/work overrides report their sources`, t => {
     const f = fixture(t, kind);
     f.data.tickets[0].description = 'Model tier: mid';
-    const path = join(f.root, '.sandcastle/factory.toml');
+    const path = join(f.root, '.factory/factory.toml');
     writeFileSync(path, f.bytes(path).replace('max_concurrent = 3', 'max_concurrent = 1').replace('units = "subtasks"', 'units = "issues"'));
     writeFileSync(join(f.dir, 'another_project--99.json'), JSON.stringify({
       iid: '99', project: 'another/project', stage: 'implementing', pid: process.pid,
@@ -338,7 +338,7 @@ test('analysis includes frozen complete child/parent plan bytes and parent edits
 test('refresh analyzes with frozen analysis instructions and invalidates the cache when bytes change', t => {
   const f = fixture(t); f.record(7, 'stopped');
   for (const [name, text] of Object.entries({ common: 'COMMON {{TICKET}} !`literal`', analysis: 'ANALYSIS ONLY', implementation: 'IMPLEMENTATION ONLY', verification: 'VERIFICATION ONLY', recovery: 'RECOVERY ONLY' })) writeFileSync(join(f.root, `${name}.md`), text);
-  const config = join(f.root, '.sandcastle/factory.toml');
+  const config = join(f.root, '.factory/factory.toml');
   writeFileSync(config, f.bytes(config) + '\n[instructions]\ncommon = ["common.md"]\nanalysis = ["analysis.md"]\nimplementation = ["implementation.md"]\nverification = ["verification.md"]\nrecovery = ["recovery.md"]\n');
   const calls = () => f.bytes(join(f.fake, 'analysis.jsonl')).trim().split('\n').map(line => JSON.parse(line));
   f.pass(['--refresh-only', '--ticket', '7']);
@@ -584,7 +584,7 @@ test("analysis timeout is recorded without changing execution or losing the last
   f.pass(["--refresh-only", "--ticket", "7"]);
   const prior = f.assessment().analysis;
   // #137: new fixtures use TOML authoritatively, so changing stale legacy code has no effect.
-  const config = join(f.root, '.sandcastle/factory.toml');
+  const config = join(f.root, '.factory/factory.toml');
   writeFileSync(config, f.bytes(config).replace('analysis_timeout_minutes = 10', 'analysis_timeout_minutes = 0.001'));
   f.data.tickets[0].description = "edited DEP:21";
   f.pass(["--refresh-only", "--ticket", "7"], { FAKE_ANALYSIS_DELAY: "3000" });
@@ -599,7 +599,7 @@ test("analysis timeout is recorded without changing execution or losing the last
 test("manual worker has a bounded process group and coalesces overlapping requests per card", async (t) => {
   const f = fixture(t), record = f.record(7, "stopped");
   // A deliberately hung project command, not a tracker/agent. It stands in for an adapter blocked in network I/O.
-  writeFileSync(join(f.root, ".sandcastle/dispatch.mts"), `import { appendFileSync } from 'node:fs';\nappendFileSync(process.env.FAKE_STATE + '/hung-command', String(process.pid) + '\\n');\nawait new Promise(r => setTimeout(r, 60000));\n`);
+  writeFileSync(join(f.root, ".factory/dispatch.mts"), `import { appendFileSync } from 'node:fs';\nappendFileSync(process.env.FAKE_STATE + '/hung-command', String(process.pid) + '\\n');\nawait new Promise(r => setTimeout(r, 60000));\n`);
   const env = { ...process.env };
   const hung = bindExecution(f.root, f.env);
   for (const [key, value] of Object.entries(hung.env)) if (value !== undefined) process.env[key] = value;
@@ -643,7 +643,7 @@ test('a running dispatcher keeps bundle A for detached children after descriptor
   while (!existsSync(launched) && Date.now() < limit) await new Promise(r => setTimeout(r, 10));
   assert.deepEqual(JSON.parse(f.bytes(launched)), { project: f.root, runtime: f.runtime.directory, id: f.runtime.id });
   assert.match(f.bytes(join(f.fake, 'launches')), new RegExp(`${f.runtime.id}/main\\.mts`));
-  assert.equal(existsSync(join(f.root, '.sandcastle/logs/run-7.log')), true);
+  assert.equal(existsSync(join(f.root, '.factory/logs/run-7.log')), true);
   assert.equal(existsSync(join(f.runtime.directory, 'logs')), false);
   assert.equal(JSON.parse(readFileSync(paths.runtimeDescriptor, 'utf8')).id, b.id);
 });
@@ -799,7 +799,7 @@ test('project hold precedes tracker reads, analysis, queue and admission for man
   const f = fixture(t);
   f.data.tickets.push(ticket(8, { description: 'No dependencies' })); f.data.ready.push(8);
   f.record(8, 'stopped'); const stopped = f.bytes(join(f.dir, f.key(8) + '.json'));
-  const logs = join(f.root, '.sandcastle/logs');
+  const logs = join(f.root, '.factory/logs');
   symlinkSync(f.fake, logs);
   f.save();
   for (const scheduled of [false, true]) {

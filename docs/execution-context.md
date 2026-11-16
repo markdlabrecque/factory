@@ -28,8 +28,8 @@ fail before workflow preflight. There is no adjacent-config, copied-module or
 project-package fallback. Low-level entrypoints tell the caller to use Factory
 commands rather than guessing a checkout.
 
-The context loads only `<project>/.sandcastle/factory.toml`, schema version 2.
-The asset directory must be canonical; config symlinks cannot escape the checkout.
+The context loads only `<project>/.factory/factory.toml`, schema version 2.
+The shared `project-layout.mts` inspection requires canonical project and asset directories and refuses all config symlinks, including contained aliases. Any `.sandcastle` entry or unknown inspection result holds new work without creating reports or artifacts.
 Missing or v1 settings are unsupported. Validation runs before credential,
 Docker or admission work. The data-only `config-read.mts` bridge returns allowlisted
 scalars, not generated shell or arbitrary settings JSON.
@@ -43,11 +43,10 @@ Sandcastle executable. Dispatch never installs project dependencies and never
 resolves an executable through project `npm`, `npx` or `node_modules`.
 
 Git and `.env` use the checkout. Sandbox image/setup settings come from its TOML.
-Logs, evidence, recovery artifacts and implementation worktrees retain their
-`.sandcastle` layout. Analysis worktrees and shared records retain their shared
-state layout. `.sandcastle/sandbox` is an explicitly mounted project helper
+Logs, evidence, recovery artifacts, diagnostic sessions, SDK patches and implementation worktrees use the shared `.factory` layout. New private runtime preparation applies the pinned [Sandcastle patch](sandcastle-patch.md) after npm with scripts disabled and before dependency hashing. Failed preparation leaves prior bundles and descriptor bytes intact. Analysis worktrees and shared records retain their shared
+state layout. `.factory/sandbox` is an explicitly mounted project helper
 directory; an empty project receives no installed sample image or Drupal setup.
-`codePath` and `projectPath` reject lexical traversal between these roots.
+`codePath` and `projectPath` reject lexical traversal between these roots. Existing old-layout run/ownership paths are never rewritten into `.factory` authority. Exact saved-container settlement may proceed while a layout hold blocks new launches; that maintenance does not authorize repair or adopt a branch. Already-running processes keep their immutable selected runtime, even after a new descriptor is published.
 
 ## Frozen inputs and proof
 
@@ -99,7 +98,7 @@ not replace recovery claims, exact-container cleanup or settlement.
 identity, v2 TOML and a trusted installed runtime descriptor. Selection reads data
 and hashes files, never importing project executable modules. CLI run/dispatch,
 scheduler readiness and dispatch/refresh, Board refresh, recovery preparation,
-image readiness and recovery launch use this resolver. Copied `.sandcastle`
+image readiness and recovery launch use this resolver. Copied `.factory`
 main/dispatch files cannot override Factory mode. `cli/src/runs.mts` still resolves
 registered checkout and data-only tracker identity, not executable paths.
 

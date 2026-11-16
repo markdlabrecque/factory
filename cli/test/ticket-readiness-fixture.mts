@@ -13,11 +13,11 @@ import { bindExecution } from './execution-fixture.mts';
 export function readinessFixture(t: TestContext) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'ticket-readiness-'))), p = paths(home);
   const root = join(home, 'site'), bin = join(home, 'bin'), fake = join(home, 'fake');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true }); mkdirSync(bin); mkdirSync(fake);
+  mkdirSync(join(root, '.factory'), { recursive: true }); mkdirSync(bin); mkdirSync(fake);
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git('init', '-q', '-b', 'main');
-  writeFileSync(join(root, '.gitignore'), '.sandcastle/*\n!.sandcastle/factory.toml\n.factory-workflow/\n');
-  const config = join(root, '.sandcastle/factory.toml');
+  writeFileSync(join(root, '.gitignore'), '.factory/*\n!.factory/factory.toml\n.factory-workflow/\n');
+  const config = join(root, '.factory/factory.toml');
   writeFileSync(config, factoryToml('owner/repo'));
   git('add', '.'); git('-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'fixture');
   git('remote', 'add', 'origin', root); git('update-ref', 'refs/remotes/origin/main', 'HEAD');

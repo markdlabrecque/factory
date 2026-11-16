@@ -2,6 +2,8 @@
 
 Factory records local observations of execution transitions, recovery phases and a bounded set of explicit control requests. These files are not an admission ledger, ticket journal, proof store or scheduler history. Nothing reads telemetry to authorize work, renew a budget, accept a verdict or decide whether cleanup is required.
 
+Project artifacts now use `.factory`; global Factory state and telemetry storage are unchanged. Layout refusal never translates historical event, run or ownership paths. Existing execution/runtime identities and exact-container settlement observations remain tied to their original records. A stored observation does not grant a new-layout launch permission.
+
 ## Export
 
 ```sh

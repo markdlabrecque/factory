@@ -13,7 +13,7 @@ function fixture(t: any) {
   const home = mkdtempSync(join(tmpdir(), 'factory-fixture-boundary-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const p = paths(home), root = join(home, 'project');
-  const data = join(root, '.sandcastle'), code = join(root, '.factory-workflow');
+  const data = join(root, '.factory'), code = join(root, '.factory-workflow');
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'factory.toml'), factoryToml('owner/repo'));
   projectFixture(p, root);

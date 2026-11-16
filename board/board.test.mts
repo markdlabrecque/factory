@@ -713,13 +713,13 @@ test("an in-progress run shows the last line of its newest agent log; parked and
   const { latestActivity } = await import("./board.mts");
   const dir = mkdtempSync(resolve(tmpdir(), "board-activity-"));
   try {
-    const logs = resolve(dir, ".sandcastle/logs");
+    const logs = resolve(dir, ".factory/logs");
     mkdirSync(logs, { recursive: true });
     writeFileSync(resolve(logs, "feat-implementer.log"), "old\n");
     writeFileSync(resolve(logs, "other-implementer.log"), "not this branch\n");
     writeFileSync(resolve(logs, "feat-verifier.log"), "\u001b[1mStarted\u001b[0m\nRunning the tests now\n\n");
     utimesSync(resolve(logs, "feat-implementer.log"), 1000, 1000); // older than the verifier's log
-    const run = { iid: "1", stage: "verifying", branch: "feat", evidenceDir: resolve(dir, ".sandcastle/evidence/1") } as any;
+    const run = { iid: "1", stage: "verifying", branch: "feat", evidenceDir: resolve(dir, ".factory/evidence/1") } as any;
     assert.equal(latestActivity(run)?.activity, "Running the tests now");
     assert.equal(latestActivity({ ...run, stage: "queued" }), undefined);
     assert.equal(latestActivity({ ...run, stage: "done" }), undefined);

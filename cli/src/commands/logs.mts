@@ -1,7 +1,7 @@
-// `factory logs [ticket] [-f]`: print a run's log file (`.sandcastle/logs/run-<n>.log`, written by dispatch.mts) for
+// `factory logs [ticket] [-f]`: print a run's log file (`.factory/logs/run-<n>.log`, written by dispatch.mts) for
 // the project picked by runs.mts. Without a ticket, the project's most recently written run log. `-f` keeps printing
 // what is appended (and starts over if the file is truncated) until interrupted. Read-only; reads no journalctl.
-// `--recovery` (#62) shows repair logs instead: `.sandcastle/logs/recover-<n>.log`, appended by every recovery attempt on
+// `--recovery` (#62) shows repair logs instead: `.factory/logs/recover-<n>.log`, appended by every recovery attempt on
 // the ticket (recovery-run.mts), or the project's most recently written one without a ticket.
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';

@@ -17,8 +17,8 @@ function fixture(t:TestContext){
   const home=mkdtempSync(join(tmpdir(),'factory-preparation-')),root=join(home,'project'),sc=join(root,'.factory-workflow'),p=paths(home);
   t.after(()=>rmSync(home,{recursive:true,force:true}));
   for(const f of WORKFLOW.filter(f=>!['package.json','package-lock.json'].includes(f))){mkdirSync(dirname(join(sc,f)),{recursive:true});writeFileSync(join(sc,f),'');}
-  mkdirSync(join(root,'.sandcastle'),{recursive:true});
-  writeFileSync(join(root,'.sandcastle/factory.toml'),factoryToml('proj'));
+  mkdirSync(join(root,'.factory'),{recursive:true});
+  writeFileSync(join(root,'.factory/factory.toml'),factoryToml('proj'));
   writeFileSync(join(sc,'main.mts'),'"attempt-record": { type: "string" }');
   const git = (args:string[]) => execFileSync('git', args, {cwd:root,stdio:'pipe'});
   git(['init','-b','main']); git(['-c','user.name=Fixture','-c','user.email=fixture@example.test','commit','--allow-empty','-m','base']);

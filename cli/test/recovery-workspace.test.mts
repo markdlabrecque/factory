@@ -30,8 +30,8 @@ function fixture(t: TestContext) {
   git('remote', 'add', 'origin', origin);
   git('push', '-q', 'origin', 'main');
   git('branch', '7-fix-login');
-  const run = { iid: '7', branch: '7-fix-login', base: 'main', evidenceDir: join(root, '.sandcastle/evidence/7') };
-  const wt = (name: string) => join(root, '.sandcastle/worktrees', name);
+  const run = { iid: '7', branch: '7-fix-login', base: 'main', evidenceDir: join(root, '.factory/evidence/7') };
+  const wt = (name: string) => join(root, '.factory/worktrees', name);
   return { home, root, git, sh, run, wt };
 }
 const refused = (r: ReturnType<typeof resumeTarget>) => (assert.equal(r.ok, false), (r as { reason: string }).reason);

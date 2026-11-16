@@ -107,12 +107,12 @@ test('opt-in needs an origin that has the branch, an executable dispatch.sh and 
   git(root, 'remote', 'remove', 'origin');
   assert.match(optInProblem(root, 'main')!, /no `origin` remote/);
 
-  mkdirSync(join(root, '.sandcastle'));
+  mkdirSync(join(root, '.factory'));
   mkdirSync(join(root, '.factory-workflow'));
   writeFileSync(join(root, '.factory-workflow/dispatch.sh'), '#!/bin/sh\n', { mode: 0o644 });
   writeFileSync(join(root, '.factory-workflow/dispatch.mts'), 'reserveRun(a, b);');
   writeFileSync(join(root, '.factory-workflow/board.mts'), 'export function reserveRun() {}');
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('fixture'));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('fixture'));
   projectFixture(p, root);
   assert.match(copyProblem(root, p)!, /EACCES|permission denied/);
   chmodSync(join(root, '.factory-workflow/dispatch.sh'), 0o755);

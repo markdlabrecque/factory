@@ -69,8 +69,8 @@ function capture(p: ReturnType<typeof paths>, options: { project?: string; cwd?:
 
 test('config explain: fixture-only lookup, policy, redaction and refusals', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'explain-')); const root = join(tmp, 'project');
-  const p = paths(join(tmp, 'home')); mkdirSync(join(root, '.sandcastle'), { recursive: true });
-  const config = join(root, '.sandcastle/factory.toml');
+  const p = paths(join(tmp, 'home')); mkdirSync(join(root, '.factory'), { recursive: true });
+  const config = join(root, '.factory/factory.toml');
   const base = factoryToml('owner/repo');
   try {
     writeFileSync(config, base + '\n[instructions]\ncommon = ["notes.md"]\n\n[[sandbox.setup]]\ncommand = "SECRET_SETUP_BODY"\n');
@@ -104,7 +104,7 @@ test('config explain: fixture-only lookup, policy, redaction and refusals', () =
     assert.equal(humanProjection, `Factory configuration
   "version": 1,
   "projectRoot": "<TMP>/project",
-    "path": "<TMP>/project/.sandcastle/factory.toml",
+    "path": "<TMP>/project/.factory/factory.toml",
     "schema": 2,
       "project": "owner/repo",
       "family": "openai"
@@ -160,7 +160,7 @@ test('config explain: fixture-only lookup, policy, redaction and refusals', () =
     }
     rmSync(config); const missing = capture(p, { project: root, json: true }); assert.equal(missing.code, 1); assert.equal(missing.value.errors[0].phase, 'configuration');
     writeFileSync(config, base);
-    const policyOverlay = join(root, '.sandcastle/model-policy.mts');
+    const policyOverlay = join(root, '.factory/model-policy.mts');
     writeFileSync(policyOverlay, readFileSync(join(runtime.directory, 'model-policy.mts'), 'utf8').replaceAll('gpt-6.1-terra', 'fixture-selected-model'));
     const changed = bindExecution(root, {}, { paths: p });
     rmSync(policyOverlay);

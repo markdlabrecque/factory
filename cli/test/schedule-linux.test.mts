@@ -271,7 +271,7 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   const other = repo(w.p, 'beta', { script: QUICK });
   // beta is never opted in: each tick runs its dispatch.mts --refresh-only (#94), which records what it got.
   writeFileSync(join(other, '.factory-workflow/dispatch.mts'), "import { writeFileSync } from 'node:fs';\n" +
-    "writeFileSync('.sandcastle/refresh.json', JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), state: process.env.SANDCASTLE_STATE_DIR, scheduled: process.env.FACTORY_SCHEDULED ?? null, jam: process.env.FACTORY_JAM_REPORT ?? null }));\n");
+    "writeFileSync('.factory/refresh.json', JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), state: process.env.SANDCASTLE_STATE_DIR, scheduled: process.env.FACTORY_SCHEDULED ?? null, jam: process.env.FACTORY_JAM_REPORT ?? null }));\n");
   refreshManifest(other);
   const unrelated = join(w.p.home, '.config/systemd/user/unrelated.service');
   mkdirSync(join(w.p.home, '.config/systemd/user'), { recursive: true });
@@ -310,13 +310,13 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   // The tick, started as the service does, with a caller override that must lose.
   const t1 = startTick(w, { PATH: config.path.replace(/^/, `${w.stub.bin}:`), SANDCASTLE_STATE_DIR: '/not/here' });
   assert.equal(await t1.exited, 0, t1.output());
-  const ran = readFileSync(join(root, '.sandcastle/quick.args'), 'utf8').trim();
+  const ran = readFileSync(join(root, '.factory/quick.args'), 'utf8').trim();
   assert.equal(ran, '');
-  assert.equal(readFileSync(join(root, '.sandcastle/quick.cwd'), 'utf8').trim(), root);
-  assert.equal(existsSync(join(other, '.sandcastle/ran')), false, 'a project that was not opted in is not run');
+  assert.equal(readFileSync(join(root, '.factory/quick.cwd'), 'utf8').trim(), root);
+  assert.equal(existsSync(join(other, '.factory/ran')), false, 'a project that was not opted in is not run');
   assert.match(t1.output(), /refresh beta \(main\): start/);
   assert.match(t1.output(), /refresh beta: exit 0/);
-  assert.deepEqual(JSON.parse(readFileSync(join(other, '.sandcastle/refresh.json'), 'utf8')),
+  assert.deepEqual(JSON.parse(readFileSync(join(other, '.factory/refresh.json'), 'utf8')),
     { args: ['--refresh-only', '--base', 'main'], cwd: other, state: w.p.state, scheduled: null, jam: null }, 'a read-only refresh, not a pass, against shared state');
   assert.match(t1.output(), /1 passes, 1 refreshed, 0 skipped, 0 failed/);
   assert.equal(readTickState(w.p).projects[other].reason, 'project not opted in; read-only refresh ok');
@@ -337,11 +337,11 @@ test('cli: install -> project on -> global on -> tick -> status -> off -> uninst
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(w.stub.calls().slice(calls1).filter(c => c[0] !== 'show').map(c => c.join(' ')), ['disable --now factory-tick.timer', 'stop factory-tick.service']);
   assert.match(r.out, /No tick was running/);
-  rmSync(join(root, '.sandcastle/ran'), { force: true });
+  rmSync(join(root, '.factory/ran'), { force: true });
   const t2 = startTick(w);
   assert.equal(await t2.exited, 0);
   assert.match(t2.output(), /tick skipped: scheduler is off \(timer disabled\)/);
-  assert.equal(existsSync(join(root, '.sandcastle/ran')), false, 'no work after off');
+  assert.equal(existsSync(join(root, '.factory/ran')), false, 'no work after off');
 
   const calls2 = w.stub.calls().length;
   r = await cli(w, ['uninstall', '--dry-run']);
@@ -413,7 +413,7 @@ test('cli: a branch change skips the project without touching the checkout; a fa
   const t1 = startTick(w);
   assert.equal(await t1.exited, 0);
   assert.match(t1.output(), /skip alpha: checkout is on feature, scheduled branch is main/);
-  assert.equal(existsSync(join(root, '.sandcastle/ran')), false);
+  assert.equal(existsSync(join(root, '.factory/ran')), false);
   assert.deepEqual([g('rev-parse', 'HEAD'), g('status', '--porcelain'), g('stash', 'list'), g('branch', '--show-current').trim()], [head, status, stashes, 'feature']);
   g('checkout', '-q', 'main');
   const before = w.stub.calls().length;
@@ -433,7 +433,7 @@ test('off cancels a held pass, its nested shell and analysis children, keeps the
   const b = await quickProject(w, 'beta');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   await waitFor('nested children', () => [pids.shell, pids.analysis, pids.ticket].every(up));
   assert.equal(readTickState(w.p).projects[a].pid, pids.dispatcher, 'the pass pid is saved at spawn');
   assert.equal(readLock(w.p)!.pass!.pid, pids.dispatcher, 'and recorded in the lock as the owned group');
@@ -452,7 +452,7 @@ test('off cancels a held pass, its nested shell and analysis children, keeps the
   for (const name of ['dispatcher', 'shell', 'analysis'] as const) assert.equal(up(pids[name]), false, `${name} is gone`);
   assert.equal(groupAlive(pids.dispatcher), false, 'the whole owned group is gone, including the analysis child');
   assert.equal(up(pids.ticket), true, 'the independently detached ticket run keeps going');
-  assert.equal(existsSync(join(b, '.sandcastle/ran')), false, 'no later project started');
+  assert.equal(existsSync(join(b, '.factory/ran')), false, 'no later project started');
   const order = lines(w.stub).filter(l => /disable --now|stop factory-tick.service/.test(l));
   assert.deepEqual(order, ['disable --now factory-tick.timer', 'stop factory-tick.service'], 'timer off before the tick service stop');
   const st = readTickState(w.p);
@@ -469,7 +469,7 @@ test('SIGTERM to the tick alone (what systemctl stop is documented to send under
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   await waitFor('nested children', () => [pids.shell, pids.analysis, pids.ticket].every(up));
   process.kill(tk.child.pid!, 'SIGTERM');
   assert.equal(await tk.exited, 143);
@@ -484,7 +484,7 @@ test('cancellation grace is for cancellation only: a pass that outlives it norma
   const root = repo(w.p, 'stubborn', { script: '#!/bin/sh\n' });
   writeFileSync(join(root, '.factory-workflow/dispatch.sh'), heldScript(root), { mode: 0o755 });
   refreshManifest(root);
-  writeFileSync(join(root, '.sandcastle/ignore-term'), '');
+  writeFileSync(join(root, '.factory/ignore-term'), '');
   assert.equal((await cli(w, ['schedule', 'on', '--project', 'stubborn'])).code, 0);
   w.cleanup.push(() => { try { process.kill(held(root).ticket, 'SIGKILL'); } catch { /* gone */ } });
   writeScheduleConfig(w.p, { path: process.env.PATH!, node: process.execPath });
@@ -493,7 +493,7 @@ test('cancellation grace is for cancellation only: a pass that outlives it norma
   // (a) No timeout: with a 100 ms grace the held pass runs for a full second and is left alone.
   const abort = new AbortController();
   const done = tick(w.p, { backend, signal: abort.signal, log: () => {}, cancel: { graceMs: 100, confirmMs: 100 } });
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(root, '.sandcastle/held.json')) && held(root));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(root, '.factory/held.json')) && held(root));
   await sleep(1000);
   assert.equal(up(pids.dispatcher), true, 'a normally running pass is never timed out');
   assert.equal(readTickState(w.p).projects[root].result, 'running');
@@ -513,7 +513,7 @@ test('cancellation that cannot be confirmed fails, keeps the lock, state, units 
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   const kill = () => { /* a signal that never arrives */ };
   const service = new Fake(w.p);
   const backend = new SystemdSchedule(w.p);
@@ -542,7 +542,7 @@ test('a stop failure or a disable failure aborts before any signal: the active t
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   for (const failing of ['--user stop factory-tick.service', '--user disable --now factory-tick.timer']) {
     w.stub.fail(failing);
     const r = await cli(w, ['schedule', 'off']);
@@ -566,7 +566,7 @@ test('a tick killed outright leaves its pass group alive and recorded: no new pa
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   process.kill(tk.child.pid!, 'SIGKILL'); // systemd's TimeoutStopSec kill of the main process, or an OOM kill
   await tk.exited;
   assert.equal(groupAlive(pids.dispatcher), true, 'the orphaned pass is still running');
@@ -588,7 +588,7 @@ test('off orders the steps: the timer is stopped while the tick is still alive, 
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   const backend = new FakeSchedule(w.p);
   backend.timer = 'active'; backend.enabled = true; backend.tick = 'active';
   const seen: string[] = [];
@@ -609,13 +609,13 @@ test('no tick after off: a timer race may start one tick, which sees the disable
   const t1 = startTick(w);
   assert.equal(await t1.exited, 0);
   assert.match(t1.output(), /tick skipped: scheduler is off \(timer disabled\)/);
-  assert.equal(existsSync(join(root, '.sandcastle/ran')), false);
+  assert.equal(existsSync(join(root, '.factory/ran')), false);
   assert.equal(readLock(w.p), null, 'the racing tick never took the lock');
   w.stub.fail('--user show factory-tick.timer --property=LoadState,ActiveState,UnitFileState,LastTriggerUSec');
   const t2 = startTick(w);
   assert.equal(await t2.exited, 1, 'a manager that cannot be read fails closed');
   assert.match(t2.output(), /scheduler state unknown/);
-  assert.equal(existsSync(join(root, '.sandcastle/ran')), false);
+  assert.equal(existsSync(join(root, '.factory/ran')), false);
 });
 
 test('dry-run uninstall signals and changes nothing, even with a tick running', async t => {
@@ -623,7 +623,7 @@ test('dry-run uninstall signals and changes nothing, even with a tick running', 
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   const before = w.stub.calls().length;
   const r = await cli(w, ['uninstall', '--dry-run']);
   assert.equal(r.code, 0, r.err);
@@ -641,7 +641,7 @@ test('reinstall stops scheduling and cancels the active tick before replacing fi
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   const source = join(w.p.home, 'src');
   for (const d of ['cli', 'board', 'orchestrator', 'skills']) mkdirSync(join(source, d), { recursive: true });
   copyRuntimeSources(source);
@@ -741,7 +741,7 @@ test('off reports the cancelled project when systemd\'s stop (stood in for by SI
   const a = await heldProject(w, 'alpha');
   await armed(w);
   const tk = startTick(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   const backend = new FakeSchedule(w.p);
   backend.timer = 'active'; backend.enabled = true; backend.tick = 'active';
   // `systemctl stop factory-tick.service` is documented to SIGTERM the tick (KillMode=process) and wait for it to exit.
@@ -809,13 +809,13 @@ ticket.unref();
 writeFileSync(dir + 'left.json', JSON.stringify({ dispatcher: process.pid, leftover: leftover.pid, ticket: ticket.pid }));
 process.exit(0);
 `;
-const left = (root: string): Record<'dispatcher' | 'leftover' | 'ticket', number> => JSON.parse(readFileSync(join(root, '.sandcastle/left.json'), 'utf8'));
+const left = (root: string): Record<'dispatcher' | 'leftover' | 'ticket', number> => JSON.parse(readFileSync(join(root, '.factory/left.json'), 'utf8'));
 async function leftoverProject(w: World, name: string, stubborn = false) {
   const root = repo(w.p, name, { script: '#!/bin/sh\n' });
-  writeFileSync(join(root, '.sandcastle/leftover.mjs'), LEFTOVER);
-  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), `#!/bin/sh\nexec "${process.execPath}" "$PWD/.sandcastle/leftover.mjs" "$@"\n`, { mode: 0o755 });
+  writeFileSync(join(root, '.factory/leftover.mjs'), LEFTOVER);
+  writeFileSync(join(root, '.factory-workflow/dispatch.sh'), `#!/bin/sh\nexec "${process.execPath}" "$PWD/.factory/leftover.mjs" "$@"\n`, { mode: 0o755 });
   refreshManifest(root);
-  if (stubborn) writeFileSync(join(root, '.sandcastle/stubborn'), '');
+  if (stubborn) writeFileSync(join(root, '.factory/stubborn'), '');
   assert.equal((await cli(w, ['schedule', 'on', '--project', name])).code, 0);
   return root;
 }
@@ -836,7 +836,7 @@ test('a pass that exits leaving a non-detached child has that group terminated a
   assert.deepEqual([st.result, st.exitCode, st.reason], ['ok', 0, 'left processes running in its process group, terminated']);
   assert.equal(readLock(w.p), null, 'ownership is dropped only once the group is empty');
   // A second tick finds nothing running in the group and a free lock.
-  rmSync(join(root, '.sandcastle/left.json'));
+  rmSync(join(root, '.factory/left.json'));
   const t2 = startTick(w);
   assert.equal(await t2.exited, 0);
   assert.match(t2.output(), /pass alpha: exit 0/);
@@ -856,7 +856,7 @@ test('a leftover that ignores SIGTERM is killed after the grace period (that gro
   assert.equal(up(ids.ticket), true, 'SIGKILL stayed inside the owned group');
   assert.match(readTickState(w.p).projects[root].reason!, /terminated with SIGKILL/);
   // Now signals that never arrive: the group stays alive, so the lock keeps the pass recorded and no pass starts over it.
-  rmSync(join(root, '.sandcastle/left.json'));
+  rmSync(join(root, '.factory/left.json'));
   const r2 = await tick(w.p, { backend, log: () => {}, cancel: { graceMs: 100, confirmMs: 100, kill: () => {} } });
   assert.equal(r2.result, 'failed');
   const ids2 = left(root);

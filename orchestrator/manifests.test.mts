@@ -14,7 +14,7 @@ test('two execution preparers race the original digest; only one can publish and
   const root=mkdtempSync(join(tmpdir(),'factory-manifest-cas-')),state=join(root,'state');t.after(()=>rmSync(root,{recursive:true,force:true}));
   for(const f of buildAssets({profile:'personal',repo:'p/r',image:'fixture'},state)){mkdirSync(dirname(join(root,f.path)),{recursive:true});writeFileSync(join(root,f.path),f.content);}
   populateCopiedWorkflow(root, appRoot);
-  const module=pathToFileURL(join(root,'.sandcastle/manifests.mts')).href;
+  const module=pathToFileURL(join(root,'.factory/manifests.mts')).href;
   const manifest={iid:7,project:'p/r',hash:'h',analyzedAt:'fixture',base:'main',baseSha:'a'.repeat(40),provides:[],requires:[],footprint:[],catalogueIids:[],blockerHashes:{},actualFootprint:['saved.ts']};
   const env={...process.env,SANDCASTLE_STATE_DIR:state};
   const original=execFileSync(process.execPath,['--input-type=module','-e',`const s=await import(${JSON.stringify(module)});s.writeManifest(${JSON.stringify(manifest)});process.stdout.write(s.manifestDigest('p/r',7));`],{env,encoding:'utf8'});

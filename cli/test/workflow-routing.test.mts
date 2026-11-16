@@ -35,16 +35,16 @@ for (const mode of ['factory', 'project'] as const) {
     const home = mkdtempSync(join(tmpdir(), 'factory-routing-')), p = paths(home), root = join(home, 'site');
     t.after(() => rmSync(home, { recursive: true, force: true }));
     t.mock.method(console, 'log', () => {});
-    mkdirSync(join(root, '.sandcastle'), { recursive: true });
+    mkdirSync(join(root, '.factory'), { recursive: true });
     const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test', ...args], { cwd: root, encoding: 'utf8' }).trim();
     git('init', '-q', '-b', 'main'); git('commit', '-q', '--allow-empty', '-m', 'fixture');
     const origin = join(home, 'origin.git'); execFileSync('git', ['init', '-q', '--bare', origin]);
     git('remote', 'add', 'origin', origin); git('push', '-q', 'origin', 'main'); git('branch', '7-saved');
-    const config = join(root, '.sandcastle/factory.toml');
+    const config = join(root, '.factory/factory.toml');
     writeFileSync(config, factoryToml('owner/repo') + (mode === 'project' ? '\n[workflow]\nmode = "project"\ndirectory = "workflow"\n' : ''));
     installedFixture(p);
     const source = join(home, 'workflow-source'), records = join(root, 'selected.jsonl');
-    const recorder = `import {appendFileSync,readFileSync} from 'node:fs'; import {dirname} from 'node:path'; import {fileURLToPath} from 'node:url'; const root=process.env.FACTORY_PROJECT_ROOT; appendFileSync(root+'/selected.jsonl',JSON.stringify({entry:import.meta.url,cwd:process.cwd(),args:process.argv.slice(2),node:process.execPath,path:process.env.PATH,state:process.env.SANDCASTLE_STATE_DIR,project:root,runtime:process.env.FACTORY_RUNTIME_ROOT,id:process.env.FACTORY_RUNTIME_ID,mode:process.env.FACTORY_WORKFLOW_MODE,scheduled:process.env.FACTORY_SCHEDULED,readonly:process.env.FACTORY_REFRESH_ONLY})+'\\n');`;
+    const recorder = `import {appendFileSync,readFileSync} from 'node:fs'; import {dirname} from 'node:path'; import {fileURLToPath} from 'node:url'; const root=process.env.FACTORY_PROJECT_ROOT; appendFileSync(root+'/selected.jsonl',JSON.stringify({entry:import.meta.url,cwd:process.cwd(),args:process.argv.slice(2),node:process.execPath,path:process.env.PATH,state:process.env.SANDCASTLE_STATE_DIR,project:root,runtime:process.env.FACTORY_RUNTIME_ROOT,id:process.env.FACTORY_RUNTIME_ID,dependencies:process.env.FACTORY_RUNTIME_DEPENDENCIES,mode:process.env.FACTORY_WORKFLOW_MODE,scheduled:process.env.FACTORY_SCHEDULED,readonly:process.env.FACTORY_REFRESH_ONLY})+'\\n');`;
     writeFileSync(join(source, 'orchestrator/dispatch.sh'), '#!/bin/sh\nexec node "$FACTORY_RUNTIME_ROOT/dispatch.mts" "$@"\n', { mode: 0o755 });
     writeFileSync(join(source, 'orchestrator/dispatch.mts'), recorder + `if(process.env.FACTORY_REFRESH_KEY){ const a=await import(${JSON.stringify(assessment)});a.clearRequest(process.env.SANDCASTLE_STATE_DIR,process.env.FACTORY_REFRESH_KEY,a.pendingRequests(process.env.SANDCASTLE_STATE_DIR).get(process.env.FACTORY_REFRESH_KEY));}`);
     writeFileSync(join(source, 'orchestrator/config-read.mts'), recorder + `process.stdout.write('0.01');`);
@@ -54,11 +54,14 @@ for (const mode of ['factory', 'project'] as const) {
     withRuntimeLock(p, () => { recordRuntimeOwnership(p, bundle.id); writeRuntimeDescriptor(p, bundle.id); });
     if (mode === 'project') cpSync(bundle.directory, join(root, 'workflow'), { recursive: true });
     // Project-local decoys are never executable overrides, even when a complete explicit override is selected elsewhere.
-    for (const name of ['dispatch.sh', 'dispatch.mts', 'main.mts', 'config-read.mts', 'capabilities.mts']) writeFileSync(join(root, '.sandcastle', name), 'throw Error("DECOY EXECUTED")');
+    for (const name of ['dispatch.sh', 'dispatch.mts', 'main.mts', 'config-read.mts', 'capabilities.mts']) writeFileSync(join(root, '.factory', name), 'throw Error("DECOY EXECUTED")');
     addProject(p, root);
     const selected = projectWorkflow(p, root), ctx = resolveProject(p, { project: root });
     assert.equal(copyProblem(root, p), null); assert.equal(ctx.root, root);
     assert.equal(selected.mode, mode);
+    assert.equal(ctx.scaffold, join(root, '.factory'));
+    assert.equal(selected.config.TRACKER.project, 'owner/repo');
+    assert.equal(selected.config.config.image, 'fixture');
     if (mode === 'project') recordReview(p, root);
     assert.equal(recoveryCopyProblem(p, root), null);
     const env = { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: p.state, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, FACTORY_RUNTIME_DESCRIPTOR: p.runtimeDescriptor };
@@ -79,7 +82,7 @@ for (const mode of ['factory', 'project'] as const) {
     const read = () => readFileSync(records, 'utf8').trim().split('\n').map(l => JSON.parse(l));
     const beforePause = read().length; setProjectSchedule(p, root, false);
     await tick(p, { backend, log: () => {}, maintenance: () => {} }); assert.equal(read().length, beforePause);
-    claimRun({ dir: p.state, project: 'owner/repo', iid: '7', pid: 99999999, cap: 99, patch: { stage: 'stopped', starting: undefined, branch: '7-saved', base: 'main' } });
+    claimRun({ dir: p.state, project: 'owner/repo', iid: '7', pid: 99999999, cap: 99, patch: { stage: 'stopped', starting: undefined, branch: '7-saved', base: 'main', evidenceDir: join(root, '.factory/evidence/7') } });
     const key = 'owner_repo--7'; requestRefresh(p.state, key, '7', 'owner/repo');
     const runFile = join(p.state, key + '.json'), runBytes = readFileSync(runFile);
     const runBoard = (extra = {}) => spawnSync(process.execPath, ['--input-type=module', '-e', `const {executeRefresh}=await import(${JSON.stringify(worker)});await executeRefresh(${JSON.stringify(key)},5000);`], { cwd: root, env: { ...env, ...extra }, encoding: 'utf8' });
@@ -91,8 +94,8 @@ for (const mode of ['factory', 'project'] as const) {
     requestRefresh(p.state, key, '7', 'owner/repo');
     assert.equal(runBoard({ FACTORY_RUNTIME_DESCRIPTOR: '' }).status, 0);
     assert.match(readAssessment(p.state, key)!.error!, /Missing trusted Factory runtime descriptor/);
-    const duplicate = join(home, 'ambiguous'); mkdirSync(join(duplicate, '.sandcastle'), { recursive: true });
-    writeFileSync(join(duplicate, '.sandcastle/factory.toml'), factoryToml('owner/repo'));
+    const duplicate = join(home, 'ambiguous'); mkdirSync(join(duplicate, '.factory'), { recursive: true });
+    writeFileSync(join(duplicate, '.factory/factory.toml'), factoryToml('owner/repo'));
     addProject(p, duplicate); requestRefresh(p.state, key, '7', 'owner/repo');
     assert.equal(runBoard().status, 0);
     assert.match(readAssessment(p.state, key)!.error!, /Several project roots match/);
@@ -126,12 +129,15 @@ for (const mode of ['factory', 'project'] as const) {
     const calls = read(); assert.equal(calls.length, 7);
     for (const c of calls) {
       assert.equal(c.cwd, root); assert.equal(c.project, root); assert.equal(c.runtime, selected.root); assert.equal(c.id, selected.id); assert.equal(c.mode, mode);
+      assert.equal(c.dependencies, selected.manifest.dependencies);
       assert.ok(c.entry.startsWith('file://' + selected.root + '/'));
       assert.equal(c.node, process.execPath); assert.equal(c.path, env.PATH); assert.equal(c.state, p.state);
     }
     assert.deepEqual(calls[0].args, ['--dry-run']); assert.deepEqual(calls[1].args, ['--issue', '7']);
     assert.deepEqual(calls[2].args, ['--refresh-only', '--base', 'main']);
+    assert.equal(calls[2].scheduled, undefined, 'unopted refresh has no launch authorization');
     assert.equal(calls[3].scheduled, '1'); assert.deepEqual(calls[4].args, ['--refresh-only', '--ticket', '7', '--base', 'main']);
+    assert.equal(calls[4].scheduled, undefined, 'Board refresh has no scheduled launch authorization');
     const before = readRuns(p.state, false); assert.equal(before.length, 1);
     child!.kill('SIGKILL'); await once(child!, 'exit');
     // A stale selected override cannot be launched, scheduled, refreshed or reviewed by using Factory as a fallback.

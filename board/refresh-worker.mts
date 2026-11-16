@@ -46,7 +46,7 @@ async function perform(key: string, timeout: number): Promise<void> {
     const matches = [...roots].filter((root) => {
       // Discovery reads identity only. Complete workflow validation follows selection.
       try {
-        const identity = tomlIdentity(resolve(root, '.sandcastle'));
+        const identity = tomlIdentity(resolve(root, '.factory'));
         return identity.project === run.project;
       } catch (error) {
         configErrors.push(error as Error);
@@ -59,7 +59,7 @@ async function perform(key: string, timeout: number): Promise<void> {
     if (!process.env.FACTORY_RUNTIME_DESCRIPTOR) throw Error('Missing trusted Factory runtime descriptor; read-only refresh cannot select a workflow');
     const workflowHelper = existsSync(new URL('./workflow.mts', import.meta.url)) ? './workflow.mts' : '../orchestrator/workflow.mts';
     const { resolveWorkflow } = await import(workflowHelper);
-    const workflow = resolveWorkflow(root, process.env.FACTORY_RUNTIME_DESCRIPTOR);
+    const workflow = resolveWorkflow(root, process.env.FACTORY_RUNTIME_DESCRIPTOR, undefined, dir);
     const readinessHelper = existsSync(new URL('./launch-readiness.mts', import.meta.url)) ? './launch-readiness.mts' : '../orchestrator/launch-readiness.mts';
     const { projectLaunchReadiness, readinessReason } = await import(readinessHelper);
     const hold = readinessReason(await projectLaunchReadiness({ projectRoot: root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id,

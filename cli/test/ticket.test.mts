@@ -31,9 +31,9 @@ function fixture(t: TestContext, config = GITHUB) {
   t.after(() => { rmSync(home, { recursive: true, force: true }); if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved; });
   const p = paths(home);
   const root = join(home, 'site');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  mkdirSync(join(root, '.factory'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  writeFileSync(join(root, '.sandcastle/factory.toml'), config);
+  writeFileSync(join(root, '.factory/factory.toml'), config);
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   t.mock.method(console, 'log', () => {});

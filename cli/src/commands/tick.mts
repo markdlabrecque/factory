@@ -78,6 +78,7 @@ import type { ScheduleBackend, ScheduleStatus } from '../platform/scheduler.mts'
 import { runDispatchSh } from './dispatch.mts';
 import { afterPass } from '../jam-detect.mts';
 import { maintainRecovery } from '../recovery-followup.mts';
+import { ownedRecoveryTracker } from '../recovery-run.mts';
 import type { ProjectContext } from '../runs.mts';
 import { findRun, projectRuns } from '../runs.mts';
 import { cleanProject } from '../clean.mts';
@@ -252,8 +253,9 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       const skip = (reason: string) => { log(`skip ${project.name}: ${reason}`); out.skipped[project.name] = reason; record({ attemptedAt: attempt, result: 'skipped', reason }); };
       let maintenanceOK = true;
       try {
-        const local = resolveProject(p, { project: root });
-        await (o.maintenance ?? maintainRecovery)(p, { root, tracker: local.tracker, dir: p.state, at: wall().toISOString(),
+        // A saved exact attempt may settle while new launches are held by layout/config policy.
+        const tracker = ownedRecoveryTracker(p, root) ?? resolveProject(p, { project: root }).tracker;
+        await (o.maintenance ?? maintainRecovery)(p, { root, tracker, dir: p.state, at: wall().toISOString(),
           paused: !project.schedule?.enabled ? 'Project scheduling is paused or not opted in.' : undefined,
           log: line => log(`recovery ${project.name}: ${line}`) });
       } catch (e) {

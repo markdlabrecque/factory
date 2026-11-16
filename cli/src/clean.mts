@@ -6,7 +6,7 @@
 // exists locally. It is removed only when it is also clean:
 // - every commit on it is already in the base (`origin/<base>` or `<base>`) or in `origin/<branch>` as last fetched, so
 //   a squash-merged branch that was pushed qualifies and one with unpushed commits is kept;
-// - it is not checked out in the project's own checkout or in a worktree outside `<root>/.sandcastle/worktrees/`;
+// - it is not checked out in the project's own checkout or in a worktree outside `<root>/.factory/worktrees/`;
 // - the Factory worktree holding it, if any, has no uncommitted or untracked changes (`git status --porcelain`).
 // Then the worktree goes first (`git worktree remove`, never --force, so Git refuses a dirty or locked one too; a
 // registered worktree whose folder is gone is pruned), and the branch is deleted only at the tip that was checked
@@ -18,10 +18,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { RunState } from '../../board/board.mts';
+import { projectLayoutPaths } from '../../orchestrator/project-layout.mts';
 
 export type CleanEntry = { ticket: string; branch: string; worktree?: string; reason?: string };
 export type CleanResult = { removed: CleanEntry[]; kept: CleanEntry[]; failed: CleanEntry[] };
-type Run = Pick<RunState, 'iid' | 'branch' | 'base' | 'stage' | 'mergedAt' | 'recovery' | 'starting'>;
+type Run = Pick<RunState, 'iid' | 'branch' | 'base' | 'stage' | 'mergedAt' | 'recovery' | 'starting' | 'evidenceDir'>;
 
 const git = (root: string, args: string[]) =>
   execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -43,11 +44,16 @@ function worktrees(root: string) {
  *  re-reads a ticket's run record just before anything is deleted; `worktreeDir` overrides Factory's worktree folder. */
 export function cleanProject(root: string, runs: Run[], o: { dryRun?: boolean; current?: (iid: string) => Run | undefined; worktreeDir?: string } = {}): CleanResult {
   const result: CleanResult = { removed: [], kept: [], failed: [] };
-  const owned = real(o.worktreeDir ?? join(root, '.sandcastle/worktrees'));
+  const layout = projectLayoutPaths(root);
+  const owned = real(o.worktreeDir ?? layout.worktrees);
   for (const run of runs) {
     const branch = run.branch;
     if (!merged(run) || !branch || !branch.startsWith(`${run.iid}-`) || !ref(root, `refs/heads/${branch}`)) continue;
     const keep = (reason: string, worktree?: string) => result.kept.push({ ticket: run.iid, branch, ...(worktree ? { worktree } : {}), reason });
+    const evidence = layout.evidence;
+    if (!run.evidenceDir || run.evidenceDir !== evidence && !inside(evidence, resolve(run.evidenceDir))) {
+      keep('has uncertain or cross-layout evidence identity; historical work is not adopted'); continue;
+    }
     const tip = git(root, ['rev-parse', `refs/heads/${branch}`]);
     const into = [run.base && ref(root, `refs/remotes/origin/${run.base}`), run.base && ref(root, `refs/heads/${run.base}`), ref(root, `refs/remotes/origin/${branch}`)]
       .filter((x): x is string => !!x);

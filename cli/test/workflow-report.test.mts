@@ -41,7 +41,7 @@ function fixture(t: TestContext) {
   git(source, 'commit', '-qam', 'v3');
   const socket = join(base, 'docker.sock');
   const collect = () => collectWorkflowReport(p, { source, projectRoot: root, invokingApp: source, dockerSocket: socket });
-  return { base, p, source, root, sc: join(root, '.sandcastle'), v1, socket, collect };
+  return { base, p, source, root, sc: join(root, '.factory'), v1, socket, collect };
 }
 function snapshot(root: string): unknown[] {
   return readdirSync(root, { recursive: true, withFileTypes: true }).map(e => join(e.parentPath, e.name)).sort().map(path => {

@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 const { probeFilesystem, reportStatus, safeErrno } = await import(existsSync(new URL('./readiness-probe.mts', import.meta.url)) ? './readiness-probe.mts' : './readiness.mts');
 import type { ReadinessInput, ReadinessPath, ReadinessReport } from './readiness.mts';
 import { loadInstructions } from './instructions.mts';
+import { requireProjectLayout, projectLayoutPaths } from './project-layout.mts';
 import { readinessIdentity } from './readiness-identity.mts';
 import type { TicketInputHold, FrozenTicketInput } from './ticket-input.mts';
 import type { ReadinessCheck } from './readiness-schema.mts';
@@ -22,15 +23,17 @@ function ancestor(path: string): string {
   return current;
 }
 export async function projectLaunchReadiness(o: LaunchReadinessInput): Promise<ReadinessReport> {
+  // Unsupported/unknown layouts must not create even a blocked report or artifact directory.
+  requireProjectLayout(o.projectRoot);
   let identity = readinessIdentity(o.projectRoot, o.runtimeIdentity, o.runtimeDependencies, JSON.stringify(o.config), {});
   let owner = { invocationId: randomUUID(), ownerId: String(process.pid), generation: randomUUID() };
   const paths: ReadinessPath[] = [];
   const add = (id: string, role: ReadinessPath['role'], path: string, trustedRoot: string, access: ReadinessPath['access'], create = false) => paths.push({ id, scope: 'project', role, path, trustedRoot, access, ...(create ? { create } : {}) });
   let report: ReadinessReport;
   let observationStarted = false;
-  let operation = 'validate-config', observedPath = join(o.projectRoot, '.sandcastle/factory.toml');
+  let operation = 'validate-config', observedPath = join(o.projectRoot, '.factory/factory.toml');
   try {
-    if (hash(loadTomlConfig(join(o.projectRoot, '.sandcastle'))) !== hash(o.config)) throw Object.assign(Error('Configuration changed'), { code: 'ECONFIGCHANGED' });
+    if (hash(loadTomlConfig(join(o.projectRoot, '.factory'))) !== hash(o.config)) throw Object.assign(Error('Configuration changed'), { code: 'ECONFIGCHANGED' });
     const configBytes = readFileSync(observedPath);
     identity = readinessIdentity(o.projectRoot, o.runtimeIdentity, o.runtimeDependencies, configBytes, {});
     const assets: Record<string, string> = {};
@@ -43,7 +46,7 @@ export async function projectLaunchReadiness(o: LaunchReadinessInput): Promise<R
     operation = 'resolve-base';
     if (o.base) git(o.projectRoot, ['rev-parse', '--verify', `refs/remotes/origin/${o.base}^{commit}`]);
     add('runtime', 'runtime', o.runtimeRoot, o.runtimeRoot, 'read-directory');
-    add('settings', 'project-asset', join(o.projectRoot, '.sandcastle/factory.toml'), o.projectRoot, 'read-file');
+    add('settings', 'project-asset', join(o.projectRoot, '.factory/factory.toml'), o.projectRoot, 'read-file');
     // Loading configured instruction data is host-owned and never imports executable project modules.
     operation = 'read-instruction';
     for (const path of new Set(Object.values(o.config.instructions).flat())) {
@@ -55,7 +58,8 @@ export async function projectLaunchReadiness(o: LaunchReadinessInput): Promise<R
     identity = readinessIdentity(o.projectRoot, o.runtimeIdentity, o.runtimeDependencies, configBytes, assets);
     operation = 'prepare-state'; observedPath = o.stateRoot;
     add('state', 'state', o.stateRoot, ancestor(o.stateRoot), 'write-directory', true);
-    for (const name of ['logs', 'evidence', 'sandbox', 'worktrees', 'recovery']) add(name, 'artifact', join(o.projectRoot, '.sandcastle', name), o.projectRoot, 'write-directory', true);
+    const layout = projectLayoutPaths(o.projectRoot);
+    for (const [name, path] of Object.entries({ logs: layout.logs, evidence: layout.evidence, sandbox: layout.helpers, worktrees: layout.worktrees, recovery: layout.recovery })) add(name, 'artifact', path, o.projectRoot, 'write-directory', true);
     add('analysis-worktrees', 'worktree-parent', join(o.stateRoot, 'worktrees'), ancestor(o.stateRoot), 'write-directory', true);
     // Bootstrap only the explicitly selected state directory, then allocate the publication fence before observation.
     const bootstrap: ReadinessInput = { identity, owner, paths: paths.filter(p => p.id === 'state') };
@@ -136,7 +140,7 @@ export const ticketBranch = (iid: number | string, title: string) => `${iid}-${t
 /** Read actual registrations, not just directory existence. Unrelated and dirty worktrees are valid. No repairs. */
 export function ticketWorkspaceProblem(root: string, branch: string): string | undefined {
   try {
-    const target = join(root, '.sandcastle/worktrees', branch);
+    const target = join(root, '.factory/worktrees', branch);
     const parent = dirname(target);
     if (realpathSync(parent) !== parent || !lstatSync(parent).isDirectory()) return `Unsafe worktree parent: ${parent}`;
     if (existsSync(target) || (() => { try { lstatSync(target); return true; } catch (e) { if (safeErrno(e) !== 'ENOENT') throw e; return false; } })()) return `Worktree location already exists: ${target}`;

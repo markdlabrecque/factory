@@ -27,7 +27,7 @@ export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env
   const descriptor = options.paths?.runtimeDescriptor ?? join(data, 'runtime.json');
   for (const asset of RUNTIME_ASSETS) {
     const target = join(source, asset.source); mkdirSync(dirname(target), { recursive: true });
-    const overlay = join(root, '.sandcastle', asset.destination);
+    const overlay = join(root, '.factory', asset.destination);
     cpSync(options.overlays !== false && existsSync(overlay) && !['package.json', 'package-lock.json'].includes(asset.destination) ? overlay : join(options.sourceRoot ?? repository, asset.source), target);
   }
   const bundle = prepareRuntimeBundle({ sourceRoot: source, runtimeStore: runtimes, install: dir => {
@@ -36,5 +36,5 @@ export function bindExecution(root: string, env: NodeJS.ProcessEnv = process.env
   } });
   const p = { data, runtimes, runtimeDescriptor: descriptor } as any;
   withRuntimeLock(p, () => { recordRuntimeOwnership(p, bundle.id); writeRuntimeDescriptor(p, bundle.id); });
-  return { ...bundle, env: { ...env, FACTORY_RUNTIME_DESCRIPTOR: descriptor, FACTORY_PROJECT_ROOT: root, FACTORY_RUNTIME_ROOT: bundle.directory, FACTORY_RUNTIME_ID: bundle.id, FACTORY_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies, FACTORY_HOST_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies }, staging };
+  return { ...bundle, env: { ...env, SANDCASTLE_STATE_DIR: env.SANDCASTLE_STATE_DIR ?? options.paths?.state ?? join(staging, 'state'), FACTORY_RUNTIME_DESCRIPTOR: descriptor, FACTORY_PROJECT_ROOT: root, FACTORY_RUNTIME_ROOT: bundle.directory, FACTORY_RUNTIME_ID: bundle.id, FACTORY_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies, FACTORY_HOST_RUNTIME_DEPENDENCIES: bundle.manifest.dependencies }, staging };
 }

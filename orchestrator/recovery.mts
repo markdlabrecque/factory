@@ -22,7 +22,7 @@ import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 // runRecoveryAttempt, in order:
 //  1. The worktree's HEAD must still be the tip recorded when the attempt was claimed (else ownership-refused, nothing
 //     touched). The input (HEAD, `git status`, staged/unstaged diff, untracked list) is snapshotted into the attempt.
-//  2. This attempt's evidence folder, `.sandcastle/evidence/<iid>/recovery/<attemptId>/`, is created fresh (never
+//  2. This attempt's evidence folder, `.factory/evidence/<iid>/recovery/<attemptId>/`, is created fresh (never
 //     reused): recovery-context.json, previous-run.json, previous-logs/ (log copies), history/ (a copy of the ticket's
 //     earlier evidence, other attempts excluded) and input/ (the snapshot). Those are mounted read-only; only the rest of
 //     this folder is writable by the agents. Earlier evidence (verdict.md, blocked.json, media) is never removed.
@@ -59,6 +59,8 @@ export const OUTCOMES: RecoveryOutcome[] = ["delivered", "unresolved", "failed",
 const PHASES: Phase[] = ["claimed", "setup", "repairing", "verifying", "delivering", "finished", "cleanup-pending"];
 
 /** Host-owned record of one attempt. Written by the launcher (claimed) and main.mts; never mounted into a container. */
+import { projectLayoutPaths } from './project-layout.mts';
+
 export interface AttemptRecord {
   version: 1;
   id: string;
@@ -94,8 +96,8 @@ export interface AttemptRecord {
 
 export const containerFor = (attemptId: string) => `factory-recovery-${attemptId}`;
 export const CONTAINER_LABEL = "factory.recovery.attempt";
-export const attemptEvidence = (root: string, iid: string, attemptId: string) => resolve(root, ".sandcastle/evidence", iid, "recovery", attemptId);
-export const attemptGitDir = (root: string, attemptId: string) => resolve(root, ".sandcastle/recovery", attemptId, "git");
+export const attemptEvidence = (root: string, iid: string, attemptId: string) => resolve(projectLayoutPaths(root).evidence, iid, "recovery", attemptId);
+export const attemptGitDir = (root: string, attemptId: string) => resolve(projectLayoutPaths(root).recovery, attemptId, "git");
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const str = (x: unknown) => typeof x === "string" && x.length > 0;

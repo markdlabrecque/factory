@@ -27,7 +27,7 @@ cp "$HERE/../orchestrator/project-config.mts" "$HERE/../orchestrator/model-polic
 # Explicit refresh actions need host probes too; keep the Board store's readiness.mts name distinct.
 cp "$HERE/../orchestrator/launch-readiness.mts" "$HERE/../orchestrator/readiness-identity.mts" "$HERE/../orchestrator/instructions.mts" "$APP/"
 cp "$HERE/../orchestrator/readiness.mts" "$APP/readiness-probe.mts"
-cp "$HERE/../cli/src/runtime-assets.mts" "$HERE/../cli/src/runtime-bundle.mts" "$APP/"
+cp "$HERE/../cli/src/runtime-assets.mts" "$HERE/../cli/src/runtime-bundle.mts" "$HERE/../cli/src/sandcastle-patch.mts" "$HERE/../cli/src/sandcastle-patch.json" "$HERE/../orchestrator/project-layout.mts" "$HERE/../orchestrator/ownership.mts" "$APP/"
 mkdir -p "$APP/vendor"
 cp -R "$HERE/../orchestrator/vendor/smol-toml" "$APP/vendor/"
 sed "s#__NODE__#$NODE#" "$HERE/sandcastle-board.service" > "$UNIT"

@@ -1,5 +1,7 @@
 <!-- Project-root v2 configuration, fixed model policy and shared execution identity. -->
-# Project settings: `.sandcastle/factory.toml`
+# Project settings: `.factory/factory.toml`
+
+Supported new projects keep all project data under `.factory`. Shared layout inspection refuses any `.sandcastle` entry, mixed layouts, directory/config symlinks and unknown access before configuration becomes authority. There is no old-layout conversion or fallback. Init may add missing data to an existing safe source-assets-only `.factory` directory; existing commands require a regular, readable `factory.toml` and the usual schema/runtime checks. Historical records and ownership paths are not translated. Global Factory homes, package names and `SANDCASTLE_STATE_DIR` are unchanged.
 
 New Factory projects use versioned TOML, not edits to Factory implementation files.
 `factory init --profile personal|client` creates a commented profile with values from
@@ -35,7 +37,7 @@ are errors. Arrays contain nonempty strings, but may be empty. No includes,
 inheritance, environment interpolation, secret resolution, JavaScript expressions
 or selection expression language is provided. TOML uses snake_case.
 
-Credentials remain in `.sandcastle/.env` / the agent's existing auth store. Prompts,
+Credentials remain in `.factory/.env` / the agent's existing auth store. Prompts,
 script bodies, Dockerfiles, the machine registry (`projects.json`) and scheduler
 files stay separate. Never put secrets in TOML.
 
@@ -181,7 +183,7 @@ recovery = []
 ```toml
 [workflow]
 mode = "project"
-directory = ".sandcastle/workflow"
+directory = ".factory/workflow"
 ```
 
 Workflow selection validates the complete versioned runtime inventory, source hashes and private dependencies. The inventory is defined in `cli/src/runtime-assets.mts`. Broken overrides never fall back to installed code, and copied local main/dispatch files never select an override implicitly. Project-mode recovery review binds the selected source and dependency identity. A valid manifest establishes identity and integrity, not that custom code is safe or follows Factory's gates. Custom workflow behavior is opaque and must be reviewed by its owner. See [workflow selection and manifest maintenance](execution-context.md#workflow-selection).

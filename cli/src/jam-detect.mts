@@ -22,6 +22,7 @@
 // one is not counted.
 // Errors are logged and never fail the pass. The report file is the caller's to remove.
 import {join} from 'node:path';
+import { requireProjectLayout } from '../../orchestrator/project-layout.mts';
 import {prepareRecovery} from './recovery-prepare.mts';
 import {mutateRecovery} from './recovery-state.mts';
 import { appendFileSync,mkdirSync,existsSync, readFileSync } from 'node:fs';
@@ -71,6 +72,7 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
     if (settled.state === 'settled') say(`attempt ${settled.attempt.seq} on #${settled.attempt.ticket} ended: ${settled.attempt.result}`);
     if (settled.state === 'running') return say(`attempt ${settled.attempt.seq} on #${settled.attempt.ticket} is running; pass not counted`);
     if (settled.state === 'unconfirmed') return say(`${settled.reason}; pass not counted`);
+    requireProjectLayout(o.root); // settlement above remains available during a layout hold
     const report = readJamReport(o.report, o.pass, o.tracker);
     if (report === null) return; // an older dispatcher copy: recovery is not evaluated, quietly
     if (typeof report === 'string') return say(`${report}; pass not counted`);
@@ -113,8 +115,8 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
       const prepared=await (o.prepare??prepareRecovery)(p,{root:o.root,tracker:o.tracker,ticket:target,base:current.base??'',dir:o.dir,signal:o.signal,node:o.node,path:o.path,workflowEnv:o.workflowEnv});
       mutateRecovery(p,o.root,s=>{s.preparation={at:now(),ticket:target,state:prepared.state,code:prepared.code,reason:prepared.reason,scope:prepared.scope};return {write:true,value:undefined};});
       if(prepared.state!=='ready'){
-        mkdirSync(join(o.root,'.sandcastle/logs'),{recursive:true});
-        appendFileSync(join(o.root,'.sandcastle/logs',`recover-${target}.log`),`${now()} preparation ${prepared.code}: ${prepared.reason}\n`);
+        mkdirSync(join(o.root,'.factory/logs'),{recursive:true});
+        appendFileSync(join(o.root,'.factory/logs',`recover-${target}.log`),`${now()} preparation ${prepared.code}: ${prepared.reason}\n`);
         return say(`jam on ${jam} confirmed; preparation ${prepared.code} (${prepared.scope} hold): ${prepared.reason}; no attempt charged`);
       }
       if(!(await o.mayLaunch()))return say(`jam on ${jam} confirmed; preparation complete but scheduled work was stopped; no attempt charged`);

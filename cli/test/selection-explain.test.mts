@@ -14,8 +14,8 @@ test('native selection reads filters, validates opaque overrides and never write
   const tmp = mkdtempSync(join(tmpdir(), 'selection-')), root = join(tmp, 'project'), p = paths(join(tmp, 'home'));
   const bin = join(tmp, 'bin'), logPath = join(tmp, 'calls'), marker = join(tmp, 'hostile');
   const oldPath = process.env.PATH, oldLog = process.env.STUB_LOG;
-  mkdirSync(join(root, '.sandcastle'), { recursive: true }); mkdirSync(bin); mkdirSync(p.config, { recursive: true });
-  const config = join(root, '.sandcastle/factory.toml');
+  mkdirSync(join(root, '.factory'), { recursive: true }); mkdirSync(bin); mkdirSync(p.config, { recursive: true });
+  const config = join(root, '.factory/factory.toml');
   const settings = factoryToml('owner/repo') + '\n[selection]\nmilestone = "M"\nassignee = "alice"\nauthor = "bob"\nsearch = "needle"\nexclude_assignees = ["eve"]\n[selection.labels]\nall = ["ready"]\nnone = ["blocked"]\n[work]\nunits = "issues"\n';
   writeFileSync(config, settings);
   const runtime = bindExecution(root, {}, { paths: p, overlays: false });
