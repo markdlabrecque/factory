@@ -54,6 +54,8 @@ If asked about interactive attach/steer, consult the [herdr-core experiment](../
 
 Use the confirmed snippets in `layers/`, pinning versions and adapting the project's Dockerfile and build context. The repository's [`.factory/Dockerfile`](../../.factory/Dockerfile), [environment example](../../.factory/.env.example) and [ignore rules](../../.factory/.gitignore) are source examples. The Dockerfile supplies browser tooling, not a complete standard Pi image; add the selected Pi layer. Keep project-owned Dockerfile/Containerfile inputs and any copied build helpers under `.factory/`. The patched SDK's default build context is that directory, while an explicit file option retains upstream current-directory context. Init neither copies these image sources nor builds them.
 
+The Factory repository's own image also installs Pi 1.5.2 and bakes the reviewed `writing-tests` snapshot from `.factory/skills/writing-tests/SKILL.md` into `/home/agent/.agents/skills/writing-tests/SKILL.md`. A symlink at `/home/agent/.pi/agent/skills/writing-tests` supplies Pi 1.5.2's user-skill discovery path even when a worktree replaces the workspace. Refresh that build-context snapshot from the owner's approved skill when updating the policy, then rebuild the image; host skill changes alone do not update image contents. Verify discovery as the non-root agent before promoting a rebuilt image. Existing containers retain their original image.
+
 Select layers:
 
 | Layer | Source | When |
