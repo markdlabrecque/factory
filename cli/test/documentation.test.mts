@@ -17,7 +17,7 @@ import { installedFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
-const guides = ['README.md', 'TESTING.md', 'docs/factory-cli.md', 'docs/ticket-readiness.md', 'docs/project-config.md', 'docs/execution-context.md', 'docs/sandcastle-patch.md', 'docs/image-readiness.md', 'docs/board-design-prototype.md', 'orchestrator/ADAPTING.md', 'skills/sandcastle-setup/SKILL.md'];
+const guides = ['README.md', 'TESTING.md', 'docs/factory-cli.md', 'docs/ticket-readiness.md', 'docs/project-config.md', 'docs/execution-context.md', 'docs/sandcastle-patch.md', 'docs/image-readiness.md', 'docs/board-design-prototype.md', 'orchestrator/ADAPTING.md', 'skills/factory-setup/SKILL.md'];
 const text = (file: string) => readFileSync(join(repo, file), 'utf8');
 function fences(source: string, language: string) {
   return [...source.matchAll(new RegExp('^\\s*```' + language + '[^\\n]*\\n([\\s\\S]*?)^\\s*```[ \\t]*$', 'gm'))].map(m => m[1].replace(/^ {1,3}/gm, ''));

@@ -62,7 +62,7 @@ export async function init(p: Paths, path: string | undefined, options: InitOpti
     'Not ready to run an agent yet. Remaining steps:',
     `  1. Review labels, selection and merge policy in ${scaffoldName}/factory.toml.`,
     '  2. Log in to Pi with the OpenAI provider and authenticate your tracker CLI.',
-    `  3. Provision image "${settings.image}" and sandbox.setup using the sandcastle-setup skill.`,
+    `  3. Provision image "${settings.image}" and sandbox.setup using the factory-setup skill.`,
     `  4. Check with: factory dispatch --project ${JSON.stringify(root)} --dry-run`,
   ].join('\n'));
 }

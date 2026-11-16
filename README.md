@@ -19,14 +19,14 @@ The first five roadmap slices are implemented: installation, project registratio
 | Bounded recovery, saved-work ownership, reports and explicit reset | [Recovery guide](docs/design/self-recovery.md) |
 | Independent verification, frozen host proof and exact-head delivery | [Verification](docs/factory-cli.md#slice-four-shared-verification-and-delivery), [existing-PR follow-through](docs/factory-cli.md#existing-delivery-follow-through) |
 | Complete frozen ticket/parent context, filesystem holds and no-commit explanations | [Ticket readiness](docs/ticket-readiness.md) |
-| Image capability checks, actual-user sandbox probes and browser provisioning | [Image readiness](docs/image-readiness.md), [environment setup](skills/sandcastle-setup/SKILL.md) |
+| Image capability checks, actual-user sandbox probes and browser provisioning | [Image readiness](docs/image-readiness.md), [environment setup](skills/factory-setup/SKILL.md) |
 | Live Board, evidence, ticket stats and project readiness | [Board presentation](docs/board-design-prototype.md#promotion-to-the-board-template), [readiness](docs/factory-cli.md#board-readiness) |
 | Ticket comments/sync, verdict correction, archive and restore | [Ticket journal](docs/factory-cli.md#slice-five-ticket-journal) |
 | External-merge reconciliation and safe local branch/worktree cleanup | [Reconciliation and cleanup](docs/factory-cli.md#merged-work-reconciliation-and-local-cleanup) |
 | Project-asset reports, read-only workflow diagnostics and local event export | [Update](docs/factory-cli.md#project-asset-diagnostics), [workflow status](docs/factory-cli.md#read-only-workflow-identity-report), [telemetry](docs/telemetry.md) |
 | Domain relationships and terminology | [Domain model](docs/domain-model.md), [glossary](docs/GLOSSARY.md) |
 
-New projects use `.factory` for configuration, environment assets, worktrees and evidence. `.sandcastle`-only and mixed-layout projects are unsupported and are not converted. Tracked image/environment examples now live in `.factory/`; obsolete copied workflow modules have been retired. [Offline layout acceptance](TESTING.md#supported-layout-acceptance) is complete, including preservation of unsupported projects. This is source/test evidence, not a live rollout or proof that the example image has been built. Legacy installer removal remains unfinished. The [herdr-core attach/steer experiment](docs/research/interactive-agents-herdr-core.md) was approved for adoption, but production integration is not implemented. Standard Factory runs remain noninteractive Pi. A dedicated recovery Board UI is also deferred.
+New projects use `.factory` for configuration, environment assets, worktrees and evidence. `.sandcastle`-only and mixed-layout projects are unsupported and are not converted. Tracked image/environment examples now live in `.factory/`; obsolete copied workflow modules have been retired. [Offline layout acceptance](TESTING.md#supported-layout-acceptance) is complete, including preservation of unsupported projects. This is source/test evidence, not a live rollout or proof that the example image has been built. [Slice 6](docs/factory-cli.md#roadmap) is interactive attach/steer. The [herdr-core attach/steer experiment](docs/research/interactive-agents-herdr-core.md) was approved for adoption, but production integration is not implemented. Standard Factory runs remain noninteractive Pi. A dedicated recovery Board UI is also deferred.
 
 ## What belongs where
 
@@ -43,7 +43,7 @@ Installed runtime bytes have a content identity. A running invocation and its ch
 
 ## Start a project
 
-These examples show syntax, not authorization to install, contact a tracker, build an image or start work. They assume Factory has already been installed by an operator. See [installation and operator commands](docs/factory-cli.md) and [environment setup](skills/sandcastle-setup/SKILL.md) for prerequisites.
+These examples show syntax, not authorization to install, contact a tracker, build an image or start work. They assume Factory has already been installed by an operator. See [installation and operator commands](docs/factory-cli.md) and [environment setup](skills/factory-setup/SKILL.md) for prerequisites.
 
 ```sh
 # GitHub personal profile
@@ -99,6 +99,6 @@ Factory requires [version 2 TOML configuration](docs/project-config.md). Missing
 
 The [Factory CLI reference](docs/factory-cli.md) covers dispatch, scheduling, recovery, installation and operator controls. The [execution context](docs/execution-context.md) describes runtime identity and ownership. Factory's host verifies structured evidence and exact delivery identity, but structural checks cannot establish whether an agent's evidence satisfies every acceptance criterion.
 
-Every verification image needs the documented non-root Playwright/Chromium capability. Project-specific layers are optional. See [environment setup](skills/sandcastle-setup/SKILL.md) and [workflow adaptation](orchestrator/ADAPTING.md).
+Every verification image needs the documented non-root Playwright/Chromium capability. Project-specific layers are optional. See [environment setup](skills/factory-setup/SKILL.md) and [workflow adaptation](orchestrator/ADAPTING.md).
 
 For offline tests, fixture boundaries and optional smoke checks, see [TESTING.md](TESTING.md). Interactive agents use `gh-axi` for ordinary GitHub operations; use plain `gh --attach` for screenshot or video uploads. Factory's runtime uses plain `gh`. See [GitHub media upload details](docs/research/github-media-uploads.md).

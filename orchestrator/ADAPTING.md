@@ -11,7 +11,7 @@ Factory selects a complete runtime for each invocation. In the default `factory`
 | Project test commands, fixtures or stack-specific advice for agents | Repository Markdown listed in `[instructions]` |
 | Change workflow stages, model policy, prompts or executable behavior | Complete project workflow override, maintained and reviewed by its owner |
 
-The [project configuration reference](../docs/project-config.md) owns the schema and defaults. The [CLI reference](../docs/factory-cli.md) owns operator commands, scheduling and recovery. Environment setup is covered by the [Sandcastle setup skill](../skills/sandcastle-setup/SKILL.md). Do not patch the published shared default for a single project or add Factory runtime dependencies to the project. The [Sandcastle patch maintenance guide](../docs/sandcastle-patch.md) owns the shared SDK patch, coordinated dependency updates and eventual removal, including private SDK preparation for complete overrides.
+The [project configuration reference](../docs/project-config.md) owns the schema and defaults. The [CLI reference](../docs/factory-cli.md) owns operator commands, scheduling and recovery. Environment setup is covered by the [Factory setup skill](../skills/factory-setup/SKILL.md). Do not patch the published shared default for a single project or add Factory runtime dependencies to the project. The [Sandcastle patch maintenance guide](../docs/sandcastle-patch.md) owns the shared SDK patch, coordinated dependency updates and eventual removal, including private SDK preparation for complete overrides.
 
 ## Project data and instructions
 
