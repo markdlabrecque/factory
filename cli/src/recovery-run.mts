@@ -340,7 +340,7 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
       if (changed) throw new Error(changed);
       const fresh = resumeTarget(o.root, run, { worktreeDir: o.worktreeDir, receipt: readReceipt(receiptPath) });
       if (!fresh.ok) throw new Error(fresh.reason);
-      if (fresh.tip !== validated.tip || fresh.worktree?.path !== validated.worktree?.path) throw new Error('workspace changed before admission');
+      if (fresh.tip !== validated.tip || fresh.worktree?.path !== validated.worktree?.path || fresh.evidenceDir !== validated.evidenceDir) throw new Error('workspace changed before admission');
     },
     afterCommit: () => { committed = true; o.afterCommit?.(); } });
   if (!claim.ok) return stop(claim.code ?? 'admission-rejected', claim.reason,claim.scope);
@@ -363,7 +363,7 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
     }
     const rec: AttemptRecord = { version: 1, id, seq, project: o.tracker, iid: String(o.ticket), branch: target.branch, base: target.base,
       implementationBaseSha: run.implementationBaseSha, executionId: run.executionId, telemetryState: dir,
-      startSha: target.tip, worktree, container, evidence: attemptEvidence(o.root, String(o.ticket), id), gitDir: attemptGitDir(o.root, id),
+      startSha: target.tip, worktree, container, evidence: attemptEvidence(o.root, String(o.ticket), id), previousEvidence: target.evidenceDir, gitDir: attemptGitDir(o.root, id),
       phase: 'claimed', createdAt: at, updatedAt: at, events: [{ at, phase: 'claimed' }] };
     writeAttemptRecord(record, rec);
     mkdirSync(dirname(log), { recursive: true });

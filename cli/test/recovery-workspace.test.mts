@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { projectId, readReceipt, receiptFile, recordIntent } from '../../orchestrator/ownership.mts';
@@ -76,6 +76,48 @@ test('resumes the recorded branch, reusing its Factory worktree and keeping dirt
   // Read-only: the dirty file and the branch are untouched.
   assert.equal(readFileSync(join(wt('7-fix-login'), 'half-done.txt'), 'utf8'), 'work in progress\n');
   assert.equal(git('rev-parse', '7-fix-login'), tip);
+});
+
+test('execution evidence is bound to the recorded identity and contained on disk', t => {
+  const { root, home, run, git, wt } = fixture(t);
+  const id = '3e9af001-2938-47d4-a74b-b48eb668c46f';
+  const evidenceDir = join(run.evidenceDir, id);
+  mkdirSync(evidenceDir, { recursive: true });
+  git('worktree', 'add', '-q', wt(run.branch), run.branch);
+  writeFileSync(join(wt(run.branch), 'unfinished'), 'keep');
+  const result = resumeTarget(root, { ...run, executionId: id, evidenceDir });
+  assert.ok(result.ok);
+  assert.equal(result.evidenceDir, evidenceDir);
+  assert.equal(readFileSync(join(wt(run.branch), 'unfinished'), 'utf8'), 'keep');
+  for (const candidate of [
+    ...[undefined, '', '../other', '/absolute', `${id}/child`, '11111111-1111-4111-8111-111111111111'].map(executionId => ({ executionId, evidenceDir })),
+    { executionId: id, evidenceDir: join(run.evidenceDir, 'other') },
+    { executionId: id, evidenceDir: join(root, '.factory/evidence/8', id) },
+    { executionId: id, evidenceDir: `${run.evidenceDir}/../7/${id}` },
+    { executionId: id, evidenceDir: join(evidenceDir, 'nested') },
+  ]) assert.equal(resumeTarget(root, { ...run, ...candidate }).ok, false);
+  rmSync(run.evidenceDir, { recursive: true });
+  mkdirSync(join(home, 'outside', id), { recursive: true });
+  symlinkSync(join(home, 'outside'), run.evidenceDir);
+  assert.equal(resumeTarget(root, { ...run, executionId: id, evidenceDir }).ok, false);
+});
+
+test('missing evidence stays supported but symlinked roots, leaves and missing leaves cannot escape', t => {
+  const { root, home, run } = fixture(t);
+  const id = '3e9af001-2938-47d4-a74b-b48eb668c46f';
+  const evidenceDir = join(run.evidenceDir, id);
+  assert.ok(resumeTarget(root, { ...run, evidenceDir: undefined }).ok, 'absent legacy evidence defaults to ticket root');
+  assert.ok(resumeTarget(root, { ...run, executionId: id, evidenceDir }).ok, 'missing execution evidence retains absence semantics');
+  const outside = join(home, 'outside');
+  mkdirSync(outside);
+  for (const alias of [join(root, '.factory/evidence'), run.evidenceDir, evidenceDir]) {
+    mkdirSync(join(alias, '..'), { recursive: true });
+    symlinkSync(outside, alias);
+    assert.equal(resumeTarget(root, { ...run, executionId: id, evidenceDir }).ok, false, alias);
+    rmSync(alias);
+  }
+  symlinkSync(join(home, 'missing-outside'), evidenceDir);
+  assert.equal(resumeTarget(root, { ...run, executionId: id, evidenceDir }).ok, false, 'dangling symlink is not absent evidence');
 });
 
 test('refuses a missing, foreign or remote-only branch rather than create or guess one', t => {

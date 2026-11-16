@@ -37,7 +37,7 @@ import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import {preparedFixture, preparedContextSource} from './prepared-fixture.mts';
 import { ContextReadError } from '../../orchestrator/ticket-context.mts';
 import { readStoredReadiness } from '../../board/readiness.mts';
-import { launchRecovery, ownedRecoveryTracker, settleRecovery } from '../src/recovery-run.mts';
+import { inspectRecoveryCandidate, launchRecovery, ownedRecoveryTracker, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
 import { beginAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
 
@@ -249,6 +249,13 @@ test('an attempt is refused without the recovery workflow copy, claiming nothing
 test('a repair runs detached on the recorded branch with its identity fixed first, holds the ticket, and is recorded from its attempt record', async t => {
   const f = fixture(t);
   const tip = f.git(f.root, 'rev-parse', '7-fix-login');
+  const executionId = IDS[2];
+  const saved = join(f.evidence, executionId);
+  mkdirSync(saved);
+  writeFileSync(join(saved, 'before.png'), 'saved execution');
+  const savedRunFile = join(f.dir, 'proj--7.json');
+  writeFileSync(savedRunFile, JSON.stringify({ ...f.run(), executionId, implementationBaseSha: tip, evidenceDir: saved }));
+  assert.deepEqual(inspectRecoveryCandidate(f.p, { ...f.common, ticket: 7 }), { ok: true });
   const r = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
   assert.equal(r.ok, true, (r as { reason?: string }).reason);
   const [l] = f.launched;
@@ -262,6 +269,12 @@ test('a repair runs detached on the recorded branch with its identity fixed firs
   assert.deepEqual([ar.phase, ar.seq, ar.iid, ar.branch, ar.base, ar.startSha, ar.worktree, ar.container],
     ['claimed', 1, '7', '7-fix-login', 'main', tip, f.worktree, containerFor(IDS[0])]);
   assert.equal(ar.evidence, join(f.evidence, 'recovery', IDS[0]));
+  assert.equal(ar.previousEvidence, saved, 'validated execution evidence reaches the repair attempt');
+  assert.equal(ar.executionId, executionId, 'normal execution identity is not the recovery attempt UUID');
+  assert.equal(ar.implementationBaseSha, tip);
+  assert.equal(f.run().evidenceDir, saved);
+  assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
+  assert.equal(readFileSync(join(saved, 'before.png'), 'utf8'), 'saved execution');
   assert.ok(!ar.gitDir.startsWith(ar.evidence) && !f.record(0).startsWith(f.root), 'record and private Git are outside the writable evidence');
   // The claim now belongs to the repair process, so it outlives the launcher.
   const rec = f.run();
@@ -503,7 +516,7 @@ function snapshot(root: string): Record<string, string> {
   return out;
 }
 
-for (const problem of ['branch-missing', 'branch-invalid', 'base-missing', 'base-invalid', 'branches-ambiguous', 'evidence-mismatch', 'worktree-not-owned'] as const) {
+for (const problem of ['branch-missing', 'branch-invalid', 'base-missing', 'base-invalid', 'branches-ambiguous', 'evidence-mismatch', 'execution-mismatch', 'worktree-not-owned'] as const) {
   test(`${problem} is a typed, byte-for-byte read-only refusal`, async t => {
     const f = fixture(t, { worktree: false });
     const file = join(f.dir, 'proj--7.json');
@@ -514,6 +527,7 @@ for (const problem of ['branch-missing', 'branch-invalid', 'base-missing', 'base
     if (problem === 'base-invalid') r.base = 'missing-base';
     if (problem === 'branches-ambiguous') f.git(f.root, 'branch', '7-another');
     if (problem === 'evidence-mismatch') r.evidenceDir = f.home;
+    if (problem === 'execution-mismatch') { r.executionId = IDS[1]; r.evidenceDir = join(f.evidence, IDS[2]); }
     if (problem === 'worktree-not-owned') f.git(f.root, 'worktree', 'add', '-q', join(f.home, 'someone-elses'), '7-fix-login');
     writeFileSync(file, JSON.stringify(r));
     const before = snapshot(f.home);
@@ -521,7 +535,8 @@ for (const problem of ['branch-missing', 'branch-invalid', 'base-missing', 'base
     assert.equal(result.kind, 'ticket-refused');
     if (result.kind !== 'ticket-refused') assert.fail(JSON.stringify(result));
     assert.equal(result.admitted, false);
-    assert.equal(result.code, problem);
+    assert.equal(result.code, problem === 'execution-mismatch' ? 'evidence-mismatch' : problem);
+    assert.equal(readRecovery(f.p, f.root).attempts.length, 0, 'refusal spends no attempt');
     assert.deepEqual(snapshot(f.home), before, 'Git refs, receipts, evidence, run and recovery stores are unchanged');
     assert.equal(f.launched.length, 0);
   });

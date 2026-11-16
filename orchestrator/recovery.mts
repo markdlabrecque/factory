@@ -23,8 +23,8 @@ import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 //  1. The worktree's HEAD must still be the tip recorded when the attempt was claimed (else ownership-refused, nothing
 //     touched). The input (HEAD, `git status`, staged/unstaged diff, untracked list) is snapshotted into the attempt.
 //  2. This attempt's evidence folder, `.factory/evidence/<iid>/recovery/<attemptId>/`, is created fresh (never
-//     reused): recovery-context.json, previous-run.json, previous-logs/ (log copies), history/ (a copy of the ticket's
-//     earlier evidence, other attempts excluded) and input/ (the snapshot). Those are mounted read-only; only the rest of
+//     reused): recovery-context.json, previous-run.json, previous-logs/ (log copies), history/ (the validated saved
+//     execution's evidence, or the legacy ticket root, other attempts excluded) and input/ (the snapshot). Those are mounted read-only; only the rest of
 //     this folder is writable by the agents. Earlier evidence (verdict.md, blocked.json, media) is never removed.
 //  3. The owned container's exact name was recorded before this process started; the host-owned attempt record (outside
 //     every mount) says `setup` before the container is created, and gets its sandbox id as soon as it is known.
@@ -76,6 +76,7 @@ export interface AttemptRecord {
   worktree: string;
   container: string;
   evidence: string;
+  previousEvidence?: string; // validated saved execution evidence; absent in legacy attempt records
   gitDir: string;
   phase: Phase;
   createdAt: string;
@@ -113,6 +114,7 @@ export function readAttemptRecord(file: string): { ok: true; record: AttemptReco
   const ok = d?.version === 1 && typeof d.id === "string" && ID.test(d.id) && Number.isInteger(d.seq) && d.seq > 0
     && [d.project, d.iid, d.branch, d.base, d.startSha, d.worktree, d.container, d.evidence, d.gitDir, d.createdAt, d.updatedAt].every(str)
     && (d.executionId === undefined || str(d.executionId))
+    && (d.previousEvidence === undefined || str(d.previousEvidence))
     && (d.implementationBaseSha === undefined || /^[0-9a-f]{40,64}$/.test(d.implementationBaseSha))
     && d.container === containerFor(d.id) && PHASES.includes(d.phase) && Array.isArray(d.events)
     && (d.outcome === undefined || OUTCOMES.includes(d.outcome)) && (d.intended === undefined || OUTCOMES.includes(d.intended));
@@ -302,7 +304,7 @@ export type AttemptResult = { outcome: RecoveryOutcome; reason: string; cleanupP
 const VERIFY_PROMPT = fileURLToPath(new URL('./prompt.verify.md', import.meta.url));
 const READONLY = ["recovery-context.json", "previous-run.json", "previous-logs", "history", "input"];
 
-/** Copy the ticket's earlier evidence (everything except other recovery attempts) into `to`. */
+/** Copy the validated saved evidence (excluding recovery attempts) into this attempt's read-only history. */
 function copyHistory(from: string, to: string) {
   mkdirSync(to, { recursive: true });
   if (!existsSync(from)) return;
@@ -366,7 +368,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   writeFileSync(join(dir, "previous-run.json"), JSON.stringify(ctx.previousRun ?? null, null, 2) + "\n");
   mkdirSync(join(dir, "previous-logs"), { recursive: true });
   for (const log of ctx.logs) if (existsSync(log) && statSync(log).isFile()) copyFileSync(log, join(dir, "previous-logs", basename(log)));
-  copyHistory(resolve(dir, "../.."), join(dir, "history"));
+  copyHistory(rec.previousEvidence ?? resolve(dir, "../.."), join(dir, "history"));
   writeFileSync(join(dir, "input/head"), `${input.head}\n`);
   writeFileSync(join(dir, "input/status.txt"), input.status);
   writeFileSync(join(dir, "input/staged.diff"), input.staged);
