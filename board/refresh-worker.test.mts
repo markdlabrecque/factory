@@ -26,7 +26,7 @@ for (const stdio of ["ignore", "inherit"] as const) {
   for (const outcome of ["success", "failure", "timeout"] as const) {
     test(`${outcome}: worker cleans child and grandchild with ${stdio} stdio, not detached work`, async (t) => {
       const root = mkdtempSync(resolve(tmpdir(), "refresh-group-")), dir = resolve(root, "state"), key = "p--7";
-      mkdirSync(resolve(root, ".sandcastle")); mkdirSync(dir);
+      mkdirSync(resolve(root, ".factory")); mkdirSync(dir);
       const saved = { ...process.env };
       Object.assign(process.env, { HOME: root, FACTORY_HOME: root, SANDCASTLE_STATE_DIR: dir });
       const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
@@ -41,8 +41,8 @@ for (const stdio of ["ignore", "inherit"] as const) {
         Object.assign(process.env, saved);
         rmSync(root, { recursive: true, force: true });
       });
-      writeFileSync(resolve(root, ".sandcastle/factory.toml"), factoryToml('p'));
-      const record = JSON.stringify({ iid: "7", project: "p", stage: "stopped", pid: process.pid, verdict: "FAIL", branch: "7-topic" });
+      writeFileSync(resolve(root, ".factory/factory.toml"), factoryToml('p'));
+      const record = JSON.stringify({ iid: "7", project: "p", stage: "stopped", pid: process.pid, verdict: "FAIL", branch: "7-topic", evidenceDir: resolve(root, '.factory/evidence/7') });
       writeFileSync(resolve(dir, `${key}.json`), record);
       requestRefresh(dir, key, "7", "p");
       writeAssessment(dir, key, { iid: "7", project: "p", projectRoot: root });
@@ -91,12 +91,12 @@ test('explicit Board refresh applies the host gate before an opaque project over
   const saved = { ...process.env };
   t.after(() => { for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name]; Object.assign(process.env, saved); rmSync(root, {recursive:true,force:true}); });
   Object.assign(process.env, { HOME:root, FACTORY_HOME:root, SANDCASTLE_STATE_DIR:dir });
-  mkdirSync(resolve(root, '.sandcastle')); mkdirSync(dir); mkdirSync(resolve(root, '.factory-workflow')); mkdirSync(resolve(root, 'outside'));
-  writeFileSync(resolve(root, '.sandcastle/factory.toml'), factoryToml('p'));
+  mkdirSync(resolve(root, '.factory')); mkdirSync(dir); mkdirSync(resolve(root, '.factory-workflow')); mkdirSync(resolve(root, 'outside'));
+  writeFileSync(resolve(root, '.factory/factory.toml'), factoryToml('p'));
   writeFileSync(resolve(root, '.factory-workflow/dispatch.mts'), `import {writeFileSync} from 'node:fs'; writeFileSync('started', 'unsafe');`);
   localGit(root); projectFixture(paths(root), root); process.env.FACTORY_RUNTIME_DESCRIPTOR = paths(root).runtimeDescriptor;
-  symlinkSync(resolve(root, 'outside'), resolve(root, '.sandcastle/logs'));
-  const record = JSON.stringify({iid:'7', project:'p', stage:'stopped', verdict:'FAIL', branch:'7-saved'});
+  symlinkSync(resolve(root, 'outside'), resolve(root, '.factory/logs'));
+  const record = JSON.stringify({iid:'7', project:'p', stage:'stopped', verdict:'FAIL', branch:'7-saved', evidenceDir: resolve(root, '.factory/evidence/7')});
   writeFileSync(resolve(dir, `${key}.json`), record); writeAssessment(dir, key, {iid:'7',project:'p',projectRoot:root}); requestRefresh(dir, key, '7', 'p');
   await executeRefresh(key);
   assert.match(readAssessment(dir, key)?.error ?? '', /Factory project held/);

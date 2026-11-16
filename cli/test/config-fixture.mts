@@ -7,8 +7,8 @@ import { pathToFileURL } from 'node:url';
 export function copyTestRuntime(directory: string, config = factoryToml('owner/repo')) {
   mkdirSync(directory, { recursive: true });
   const project = join(directory, 'project');
-  mkdirSync(join(project, '.sandcastle'), { recursive: true });
-  writeFileSync(join(project, '.sandcastle/factory.toml'), config);
+  mkdirSync(join(project, '.factory'), { recursive: true });
+  writeFileSync(join(project, '.factory/factory.toml'), config);
   const bundle = bindExecution(project, process.env, { overlays: false });
   Object.assign(process.env, bundle.env);
   process.chdir(project);

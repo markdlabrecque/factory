@@ -53,7 +53,8 @@ test('init fresh allowance is explicit and existing layouts always retain config
   assert.deepEqual(projectLayoutPolicy(fresh, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
   for (const operation of ['init', 'existing'] as const) {
     assert.deepEqual(projectLayoutPolicy(classify(), operation), { allowed: true, requiresProjectValidation: true });
-    assert.deepEqual(projectLayoutPolicy(classify({ config: missing }), operation), { allowed: false, reason: 'config-missing' });
+    assert.deepEqual(projectLayoutPolicy(classify({ config: missing }), operation), operation === 'init'
+      ? { allowed: true, requiresProjectValidation: false } : { allowed: false, reason: 'config-missing' });
     for (const reason of ['project-unsafe', 'inspection-unavailable', 'legacy-layout', 'mixed-layout', 'factory-unsafe', 'config-unsafe'] as const)
       assert.deepEqual(projectLayoutPolicy({ kind: 'refused', reason }, operation), { allowed: false, reason });
   }

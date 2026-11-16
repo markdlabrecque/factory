@@ -244,7 +244,7 @@ test("manual HTTP refresh with scheduling off records missing v2 config; header 
     assert.equal((await fetch(`${base}/api/refresh/p--7`, { method: "POST" })).status, 405);
     assert.equal((await fetch(`${base}/api/refresh/p--7`, { method: "POST", headers: { "x-factory-refresh": "1" } })).status, 202);
     const api = await (await fetch(`${base}/api/runs`)).json();
-    assert.match(api.runs[0].assessment.error, /missing version 2 configuration.*manually migrate/);
+    assert.match(api.runs[0].assessment.error, /fresh-not-allowed/);
     assert.equal(api.runs[0].assessment.pending, false);
     assert.equal(readFileSync(resolve(f.dir, "p--7.json"), "utf8"), f.record);
   } finally { child.kill(); await once(child, "exit"); }

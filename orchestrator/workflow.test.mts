@@ -16,8 +16,8 @@ import { recoveryCopyProblem, recordReview } from '../cli/src/recovery-review.mt
 function fixture(t: any) {
   const home = mkdtempSync(join(tmpdir(), 'factory-workflow-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  const p = paths(home), root = join(home, 'project'), config = join(root, '.sandcastle/factory.toml');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  const p = paths(home), root = join(home, 'project'), config = join(root, '.factory/factory.toml');
+  mkdirSync(join(root, '.factory'), { recursive: true });
   writeFileSync(config, factoryToml('owner/repo'));
   installedFixture(p);
   const factory = resolveWorkflow(root, p.runtimeDescriptor);
@@ -30,7 +30,7 @@ function fixture(t: any) {
 
 test('factory is the default; copied project executables never select or execute themselves', t => {
   const f = fixture(t);
-  for (const name of ['main.mts', 'dispatch.mts', 'dispatch.sh', 'config.mts']) writeFileSync(join(f.root, '.sandcastle', name), 'throw Error("LOCAL CODE EXECUTED")');
+  for (const name of ['main.mts', 'dispatch.mts', 'dispatch.sh', 'config.mts']) writeFileSync(join(f.root, '.factory', name), 'throw Error("LOCAL CODE EXECUTED")');
   const selected = f.select();
   assert.equal(selected.mode, 'factory'); assert.equal(selected.root, f.factory.root);
   assert.equal(selected.id, f.factory.id);

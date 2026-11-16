@@ -304,7 +304,7 @@ test('supervisor: a tick that races with a disabled label sees it through launch
   await w.stub.using(() => supervise(w.p, { backend: w.backend, signal: abort.signal, log: l => lines.push(l), firstDelayMs: 1, intervalMs: 1,
     wait: async () => { if (ticks === 2) abort.abort(); return !abort.signal.aborted; },
     tick: async (p, o) => { ticks++; const { tick } = await import('../src/commands/tick.mts'); return tick(p, o); } }));
-  assert.equal(existsSync(join(root, '.sandcastle/ran')), false, 'no work while the label is disabled');
+  assert.equal(existsSync(join(root, '.factory/ran')), false, 'no work while the label is disabled');
   assert.equal(lines.filter(l => /tick skipped: scheduler is off \(timer is running but disabled\)/.test(l)).length, 2, lines.join('\n'));
 });
 
@@ -317,11 +317,11 @@ test('off disables, then boots out: the supervisor cancels its held pass and nes
   await armed(w, [a, b]);
   assert.deepEqual(changes(w.stub).slice(-2), [`enable ${SVC}`, `bootstrap gui/UID ${w.p.tickPlist}`]);
   const sup = startSupervisor(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   await waitFor('nested children', () => [pids.shell, pids.analysis, pids.ticket].every(up));
   assert.deepEqual([readLock(w.p)!.tick.pid, readLock(w.p)!.pass!.pid], [sup.child.pid, pids.dispatcher], 'the supervisor holds the lock and owns the pass group');
   await w.stub.using(async () => assert.equal((await w.backend.status()).tick, 'active'));
-  const ran = JSON.parse(readFileSync(join(a, '.sandcastle/ran.log'), 'utf8').split('\n')[0]);
+  const ran = JSON.parse(readFileSync(join(a, '.factory/ran.log'), 'utf8').split('\n')[0]);
   assert.deepEqual([ran.argv, ran.stdin, ran.env.FACTORY_SCHEDULED, ran.env.SANDCASTLE_STATE_DIR], [[], '/dev/null', '1', w.p.state]);
 
   const n = changes(w.stub).length;
@@ -332,7 +332,7 @@ test('off disables, then boots out: the supervisor cancels its held pass and nes
   for (const name of ['dispatcher', 'shell', 'analysis'] as const) assert.equal(up(pids[name]), false, `${name} is gone`);
   assert.equal(groupAlive(pids.dispatcher), false, 'the whole owned group is gone, including the analysis child');
   assert.equal(up(pids.ticket), true, 'the independently detached ticket run keeps going');
-  assert.equal(existsSync(join(b, '.sandcastle/ran')), false, 'no later project started');
+  assert.equal(existsSync(join(b, '.factory/ran')), false, 'no later project started');
   const st = readTickState(w.p);
   assert.deepEqual([st.projects[a].result, st.projects[a].reason, typeof st.projects[a].durationMs], ['interrupted', 'cancelled', 'number']);
   assert.equal(typeof st.finishedAt, 'string', 'the interrupted tick still records its end and duration');
@@ -360,7 +360,7 @@ test('a failed bootout or unconfirmed cancellation fails off and uninstall and k
   const a = heldProject(w, 'alpha');
   await armed(w, [a]);
   const sup = startSupervisor(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   const kept = () => { for (const path of [w.p.tickPlist, w.p.manifest, w.p.app, w.p.scheduleConfig, w.p.tickLock]) assert.equal(existsSync(path), true, `${path} is kept`); };
   const manifest = readFileSync(w.p.manifest, 'utf8');
 
@@ -408,7 +408,7 @@ test('reinstall stops the supervisor and cancels its tick before replacing files
   const a = heldProject(w, 'alpha');
   await armed(w, [a]);
   const sup = startSupervisor(w);
-  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.sandcastle/held.json')) && held(a));
+  const pids = await waitFor('the held dispatcher', () => existsSync(join(a, '.factory/held.json')) && held(a));
   writeFileSync(w.p.tickPlist, 'stale');
   const n = changes(w.stub).length;
   await w.stub.using(() => install(w.p, w.service, { link: true, schedule: w.backend }));

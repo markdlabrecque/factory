@@ -143,7 +143,7 @@ the caller writes the returned value. Explicit override review binds complete so
 dependency and location identity; edits require regeneration and renewed review.
 
 `cli/test/workflow-fixture.mts` publishes complete project overrides in
-`.factory-workflow`, separate from mutable `.sandcastle` configuration, logs,
+`.factory-workflow`, separate from mutable `.factory` configuration, logs,
 evidence and environment files. Tests edit selected code there and explicitly
 regenerate its manifest before renewed review. Initial scaffold fixtures copy only
 inventory assets across the data/code boundary. Re-publishing never restores a

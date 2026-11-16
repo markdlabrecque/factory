@@ -3,16 +3,18 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Paths } from '../paths.mts';
+import { requireProjectLayout } from '../../../orchestrator/project-layout.mts';
 import { addProject, canonicalRoot, listProjects, readRegistry, removeProject } from '../projects.mts';
 export async function project(p: Paths, action: string | undefined, path: string | undefined, options: { json?: boolean } = {}) {
   if (action === 'add') {
     const root = canonicalRoot(path ?? process.cwd());
+    requireProjectLayout(root, 'init'); // Fresh registration remains supported; old/mixed entries do not.
     console.log(addProject(p, root) ? `Added ${root}` : `Already registered: ${root}`);
   } else if (action === 'ls') {
     const rows = listProjects(p);
     if (options.json) console.log(JSON.stringify({ version: 1, projects: rows }, null, 2));
     else if (!rows.length) console.log('No projects registered.');
-    else for (const r of rows) console.log(`${r.name}  ${r.root}${r.exists ? '' : '  [checkout missing]'}${r.exists && !r.scaffold ? '  [no .sandcastle yet]' : ''}${!r.schedule ? '' : r.schedule.enabled ? `  [scheduled: ${r.schedule.branch}]` : '  [schedule paused]'}`);
+    else for (const r of rows) console.log(`${r.name}  ${r.root}${r.exists ? '' : '  [checkout missing]'}${r.exists && !r.scaffold ? '  [no .factory yet]' : ''}${!r.schedule ? '' : r.schedule.enabled ? `  [scheduled: ${r.schedule.branch}]` : '  [schedule paused]'}`);
   } else if (action === 'rm') {
     const target = path ?? process.cwd();
     let root: string;

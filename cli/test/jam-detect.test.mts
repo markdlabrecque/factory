@@ -57,7 +57,7 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const p = paths(home);
   const root = join(home, 'site');
-  const sc = join(root, '.sandcastle');
+  const sc = join(root, '.factory');
   mkdirSync(sc, { recursive: true });
   writeFileSync(join(sc, 'factory.toml'), factoryToml(TRACKER));
   if (o.copy !== false) {
@@ -70,7 +70,7 @@ function fixture(t: TestContext, o: { copy?: boolean } = {}) {
   const dir = p.state;
   mkdirSync(dir, { recursive: true });
   const record = (iid: number, stage: string) => writeFileSync(join(dir, `${keyFor(String(iid), TRACKER)}.json`),
-    JSON.stringify({ iid: String(iid), project: TRACKER, stage, startedAt: at(0), branch: `${iid}-fix`, base: 'main' }));
+    JSON.stringify({ iid: String(iid), project: TRACKER, stage, startedAt: at(0), branch: `${iid}-fix`, base: 'main', evidenceDir: join(root, '.factory/evidence', String(iid)) }));
   const launches: number[] = [];
   const lines: string[] = [];
   let n = 0;

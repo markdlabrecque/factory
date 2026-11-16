@@ -73,7 +73,7 @@ function classifications(p: Paths, root: string, app: ReturnType<typeof identity
     if (app.status !== 'present') return { file, class: 'unknown' as const, reason: 'comparison app is unavailable' };
     if (required.some(path => app.inventory.find(f => f.path === path)?.status !== 'present'))
       return { file, class: 'unknown' as const, reason: 'comparison source content is unavailable' };
-    const target = content(join(root, '.sandcastle'), file);
+    const target = content(join(root, '.factory'), file);
     if (target.status === 'not-regular') return { file, class: PROJECT_OWNED.includes(file) ? 'project' as const : 'modified' as const, reason: 'not a regular file; symlinks are not followed' };
     if (target.status === 'unknown') return { file, class: 'unknown' as const, reason: 'project content is unreadable' };
     try { return classifyInventory(p, root, { app: app.canonicalPath!, history: h, files: [file] })[0]; }
@@ -84,7 +84,7 @@ function observe(fn: () => Observation): Observation {
   try { return fn(); } catch { return { state: 'unknown', reason: 'observation could not be read', evidence: [] }; }
 }
 export function capabilityObservations(p: Paths, root: string) {
-  const unsafe = [...new Set([...WORKFLOW, 'dispatch.sh'])].filter(f => ['not-regular', 'unknown'].includes(content(join(root, '.sandcastle'), f).status));
+  const unsafe = [...new Set([...WORKFLOW, 'dispatch.sh'])].filter(f => ['not-regular', 'unknown'].includes(content(join(root, '.factory'), f).status));
   if (unsafe.length) {
     const unavailable: Observation = { state: 'unknown', reason: 'workflow contains unreadable or non-regular files; checks were not followed through symlinks', evidence: unsafe };
     return { schedulerCopy: unavailable, recoveryWorkflow: unavailable, recoveryReview: unavailable,
@@ -124,7 +124,7 @@ export function configuredImage(scaffold: string) {
   try {
     const toml = loadTomlConfig(scaffold);
     return { state: 'known' as const, mode: 'toml', reference: toml.config.image, reason: 'validated TOML sandbox image' };
-  } catch { return { state: 'invalid-config' as const, mode: 'toml', reference: null, reason: 'TOML is missing, invalid or unreadable; manually migrate to version 2; no legacy fallback' }; }
+  } catch { return { state: 'invalid-config' as const, mode: 'toml', reference: null, reason: 'TOML is missing, invalid or unreadable; no conversion or legacy fallback' }; }
 }
 
 export function localSocket(path = '/var/run/docker.sock'): string {
@@ -179,11 +179,11 @@ export async function collectWorkflowReport(p: Paths, options: { source: string;
       return { ...f, againstSource: f.status === 'present' && reference.status === 'present'
         ? f.sha256 === reference.sha256 ? 'same' : 'different' : 'unknown' };
     }) };
-  const projectCopy = identity(join(options.projectRoot, '.sandcastle'), true);
+  const projectCopy = identity(join(options.projectRoot, '.factory'), true);
   const sourceHistory = history(source.canonicalPath), installedHistory = history(installed.canonicalPath ?? p.app);
   const againstSource = classifications(p, options.projectRoot, source, sourceHistory);
   const againstInstalled = classifications(p, options.projectRoot, installed, installedHistory);
-  const config = configuredImage(join(options.projectRoot, '.sandcastle'));
+  const config = configuredImage(join(options.projectRoot, '.factory'));
   return { version: 1, source, invokingApp, installedApp,
     projectCopy: { ...projectCopy, root: options.projectRoot, files: projectCopy.inventory.map(f => ({ ...f,
       againstSource: againstSource.find(c => c.file === f.path)!, againstInstalled: againstInstalled.find(c => c.file === f.path)! })) },

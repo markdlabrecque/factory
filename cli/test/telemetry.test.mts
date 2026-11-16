@@ -42,7 +42,7 @@ function fixture(t: any) {
   t.mock.method(console,'log',()=>{}); t.mock.method(console,'error',()=>{}); t.mock.method(console,'warn',()=>{});
   const run=(stage: any='done')=>writeRecord(p.state,'owner_repo--1',{iid:'1',project:'owner/repo',stage,pid:process.pid,startedAt:at,stageSince:at,updatedAt:at,executionId:'execution-one',verdict:'FAIL',note:secret});
   const controls=()=>exportEvents(p.state).events.filter(e=>e.eventKind.startsWith('action-'));
-  return {home,p,root,run,controls,o:{cwd:root},sc:join(root,'.sandcastle')};
+  return {home,p,root,run,controls,o:{cwd:root},sc:join(root,'.factory')};
 }
 const posted = () => ({status:0,stdout:'{"id":1}',stderr:''});
 function pairs(events: ReturnType<typeof exportEvents>['events']) {

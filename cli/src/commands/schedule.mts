@@ -21,7 +21,7 @@
 //   already cancelled is reported as stopped, and a failed manager query is reported as unknown, never as "no tick".
 //   `factory uninstall` removes the units.
 // - `on|off --project` flips one project's switch (schedule.mts). `on` saves the branch checked out now and refuses a
-//   project with no `origin` branch of that name, a non-executable or missing dispatch.sh, or a `.sandcastle` copy that
+//   project with no `origin` branch of that name, a non-executable or missing dispatch.sh, or a `.factory` copy that
 //   predates launch reservations (#32); refresh that copy by hand first. `off` touches no project file, keeps the
 //   saved branch, and lets a pass already running finish.
 // - `status` shows the manager's state, the last tick, tick timings and health problems (scheduler-health.mts), and, for

@@ -5,10 +5,12 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSyn
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { RUNTIME_ASSETS, RUNTIME_INVENTORY_VERSION, validateRelativePath, validateRuntimeInventory } from './runtime-assets.mts';
 import type { RuntimeAsset } from './runtime-assets.mts';
+import { prepareSandcastlePackage } from './sandcastle-patch.mts';
 
 export const RUNTIME_MANIFEST = 'runtime-manifest.json';
 export type RuntimeFile = { path: string; sha256: string; mode: number };
 export type RuntimeManifest = { version: 1; inventoryVersion: number; node: { version: string; platform: string; arch: string; minimum: string }; files: RuntimeFile[]; id: string; dependencies: string };
+// Injected installers own complete offline fixture preparation, including SDK layout behavior.
 export type PackageInstaller = (directory: string) => void;
 const hash = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
@@ -118,10 +120,12 @@ function dependencyHash(root: string): string {
 }
 
 type NpmRunner = (command: string, args: string[], options: { cwd: string; stdio: 'inherit' }) => { error?: Error; status: number | null; signal?: string | null };
-export const installRuntimePackages = (directory: string, run: NpmRunner = spawnSync): void => {
+export const installRuntimePackages = (directory: string, run: NpmRunner = spawnSync, prepare: typeof prepareSandcastlePackage = prepareSandcastlePackage): void => {
   const result = run('npm', ['ci', '--include=dev', '--include=optional', '--ignore-scripts'], { cwd: directory, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`npm ci failed (${result.status ?? result.signal})`);
+  // Only the unpublished private staging directory is patched. Hash/publish follows this return.
+  prepare(directory);
 };
 
 /** Recompute complete source/dependency metadata without writing files or executing workflow code.
@@ -176,6 +180,9 @@ export function prepareRuntimeBundle(options: { sourceRoot: string; runtimeStore
     }
     if (JSON.stringify(entries(temp, assets.map(a => ({ source: a.destination, destination: a.destination })))) !== JSON.stringify(files)) throw new Error('Runtime source changed during preparation');
     (options.install ?? installRuntimePackages)(temp);
+    // Patch inputs are loaded by the trusted preparer. Refuse source drift across package preparation
+    // rather than publishing dependencies prepared against a different specification than the snapshot.
+    if (JSON.stringify(entries(source, assets, true)) !== JSON.stringify(files)) throw new Error('Runtime source changed during package preparation');
     const manifest: RuntimeManifest = { version: 1, inventoryVersion: RUNTIME_INVENTORY_VERSION, node, files, id, dependencies: dependencyHash(temp) };
     writeFileSync(join(temp, RUNTIME_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     validateRuntimeBundle(temp, assets);

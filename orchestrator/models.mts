@@ -145,7 +145,7 @@ export function subscriptionExtensionPath(env: Record<string, string | undefined
 
 /**
  * Environment for a container Pi run. The subscription provider needs none from here: the image's Claude
- * Code CLI reads CLAUDE_CODE_OAUTH_TOKEN, which Sandcastle passes from .sandcastle/.env. Only an openai/
+ * Code CLI reads CLAUDE_CODE_OAUTH_TOKEN, which Sandcastle passes from .factory/.env. Only an openai/
  * model (a custom config) gets a per-run OpenAI credential, minted lazily so it is never asked for otherwise.
  */
 export function piEnvFor(model: string, openaiCredential: () => string): Record<string, string> {

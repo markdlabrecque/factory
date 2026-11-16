@@ -53,13 +53,21 @@ export function classifyProjectLayout(projectRoot: string, o: LayoutObservations
 export type LayoutPolicy =
   | { allowed: false; reason: LayoutRefusalReason }
   | { allowed: true; requiresProjectValidation: boolean };
-/** Init alone may accept fresh absence. A directory or structural inspection is not a valid project. */
+/** Init may fill missing config in a safe data-assets directory. Existing operations require config. */
 export function projectLayoutPolicy(inspection: LayoutInspection, operation: 'init' | 'existing'): LayoutPolicy {
   if (inspection.kind === 'refused') return { allowed: false, reason: inspection.reason };
   if (inspection.kind === 'fresh') return operation === 'init'
     ? { allowed: true, requiresProjectValidation: false } : { allowed: false, reason: 'fresh-not-allowed' };
-  if (inspection.config === 'missing') return { allowed: false, reason: 'config-missing' };
+  if (inspection.config === 'missing') return operation === 'init'
+    ? { allowed: true, requiresProjectValidation: false } : { allowed: false, reason: 'config-missing' };
   return { allowed: true, requiresProjectValidation: true };
+}
+
+/** Enforce structural policy without reading configuration or changing project/state bytes. */
+export function requireProjectLayout(root: string, operation: 'init' | 'existing' = 'existing') {
+  const policy = projectLayoutPolicy(inspectProjectLayout(root), operation);
+  if (!policy.allowed) throw new Error(`Unsupported Factory project layout: ${policy.reason}${policy.reason === 'config-missing' ? ' (.factory/factory.toml is missing)' : ''}. No conversion or adoption is performed.`);
+  return projectLayoutPaths(root);
 }
 
 /** Inspect metadata/access only. Never read .env/config bodies, follow entry aliases, run commands or create files.

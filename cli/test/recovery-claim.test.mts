@@ -33,8 +33,8 @@ function fixture(t: TestContext) {
   t.after(() => { sleeper.kill(); rmSync(home, { recursive: true, force: true }); });
   const p = paths(home);
   root = join(home,'project');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true });
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('proj'));
+  mkdirSync(join(root, '.factory'), { recursive: true });
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('proj'));
   const dir = join(home, 'runs');
   observePass(p, root, { pass: 'a', at: at(0), jam: [7, 8] });
   observePass(p, root, { pass: 'b', at: at(5), jam: [7, 8] });

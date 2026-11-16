@@ -34,9 +34,9 @@ function fixture(t: TestContext) {
   t.after(() => { rmSync(home, { recursive: true, force: true }); if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved; });
   const p = paths(home);
   const root = join(home, 'site');
-  mkdirSync(join(root, '.sandcastle/logs'), { recursive: true });
+  mkdirSync(join(root, '.factory/logs'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   const lines: string[] = [], errors: string[] = [];
@@ -49,7 +49,7 @@ function fixture(t: TestContext) {
     observePass(p, r, { pass: 'b', at: '2026-11-12T10:05:00Z', jam: [12] });
     const report = join(root, 'report.md');
     writeFileSync(report, 'cause\n');
-    const a = beginAttempt(p, r, { ticket: 12, at: '2026-11-12T10:06:00Z', branch: '12-fix', log: join(root, '.sandcastle/logs/recover-12.log') });
+    const a = beginAttempt(p, r, { ticket: 12, at: '2026-11-12T10:06:00Z', branch: '12-fix', log: join(root, '.factory/logs/recover-12.log') });
     finishAttempt(p, r, a.seq, { at: '2026-11-12T10:20:00Z', result: 'unresolved', reason: 'needs a credential', report });
   };
   return { p, root: r, jam, out: () => lines.join('\n'), err: () => errors.join('\n'), clear: () => { lines.length = 0; errors.length = 0; } };
@@ -168,8 +168,8 @@ test('reset refuses while an attempt runs or a recovery claim is held', async t 
 
 test('logs --recovery shows the ticket\'s repair log, or the newest one', async t => {
   const { p, root } = fixture(t);
-  writeFileSync(join(root, '.sandcastle/logs/run-12.log'), 'run\n');
-  writeFileSync(join(root, '.sandcastle/logs/recover-12.log'), 'repair\n');
+  writeFileSync(join(root, '.factory/logs/run-12.log'), 'run\n');
+  writeFileSync(join(root, '.factory/logs/recover-12.log'), 'repair\n');
   let out = '';
   const write = (b: Buffer) => { out += b.toString(); };
   await logs(p, '12', { cwd: root, recovery: true, write });

@@ -50,8 +50,8 @@ export function planSandcastlePatch(spec: SandcastlePatch, lock: any, files: Rea
   return { state: [...states][0] as 'original' | 'patched', files: output };
 }
 
-/** Task C calls this ONLY on a newly installed, unpublished private runtime directory.
- * Call after npm ci --ignore-scripts and before runtime-bundle dependency hashing.
+/** Private runtime preparation calls this only on a newly installed, unpublished directory.
+ * Runs after npm ci --ignore-scripts and before runtime-bundle dependency hashing.
  * A failed/interrupted write invalidates the staging directory; discard it, never publish it. */
 export function prepareSandcastlePackage(directory: string): { state: 'original' | 'patched'; changed: string[] } {
   const root = resolve(directory);

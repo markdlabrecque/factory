@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-This is preparation, not activation. `prepareRuntimeBundle()` still installs the original SDK. Merely importing the patch helper or copying it into a runtime does not patch anything. Existing published bundles are never rewritten. The separate offline smoke explicitly opts in on disposable private bytes.
+New private runtime preparation activates this patch. `installRuntimePackages()` runs `npm ci --include=dev --include=optional --ignore-scripts`, then applies the guarded patch before returning to `prepareRuntimeBundle()` for dependency hashing and manifest publication. Existing published bundles are never rewritten. Merely importing the helper does not patch anything.
 
-Coordinated activation must call the helper after private package installation and before dependency hashing/publication, and switch the rest of Factory's layout at the same time. Do not activate against an SDK version without exact-package smoke evidence. No old `.sandcastle` project conversion is provided. Refusing old or mixed project layouts belongs to Factory's project admission checks, not this SDK patch.
+Factory's supported project callers and the patched SDK use `.factory` together. Preparation failures discard only the new staging directory and leave the prior descriptor and bundle usable. Do not activate against an SDK version without exact-package smoke evidence. No old `.sandcastle` project conversion is provided. Refusing old or mixed project layouts belongs to Factory's project admission checks, not this SDK patch.
 
 Upstream 0.14.0 hardcodes the project directory in several independent paths. Changing only worktree creation would leave pruning, managed-worktree Git checks, environment loading, logs, saved patches and image configuration inconsistent. Factory owns a narrow byte patch rather than a fork or a replacement sandbox lifecycle.
 
@@ -48,7 +48,7 @@ Source-tree callers import:
 import { prepareSandcastlePackage } from './sandcastle-patch.mts';
 ```
 
-For activation, add that import to `cli/src/runtime-bundle.mts` and invoke `prepareSandcastlePackage(temp)` immediately after `(options.install ?? installRuntimePackages)(temp)` and before the manifest's `dependencyHash(temp)`. In a flat runtime the import is identical. There is no import-time I/O or automatic activation. The helper reads its specification via `import.meta.url`, so the adjacent JSON must be inventoried and shipped.
+`cli/src/runtime-bundle.mts` imports this helper and calls it at the end of `installRuntimePackages(directory)`, after successful npm installation and before the bundle transaction hashes dependencies. In a flat runtime the import is identical. The injected `PackageInstaller` seam represents complete package preparation for offline synthetic fixtures; it is not a production version-skip or fallback. Complete override maintainers must prepare their private SDK with this same guarded helper before regenerating their reviewed manifest. The helper reads its specification via `import.meta.url`, so the adjacent JSON is inventoried and shipped.
 
 The function takes a canonical, newly installed, unpublished private runtime directory, containing its lockfile and `node_modules`. It returns `{ state: 'original' | 'patched', changed: string[] }`. `state` describes the input. A successful original application currently lists thirteen changed files; a complete repetition returns `patched` and an empty list.
 
@@ -56,11 +56,11 @@ The caller must own the staging directory exclusively. Never pass a project, an 
 
 Safe repetition means every changed file matches its exact postimage and every other package file still matches its original hash. It does not mean accepting an arbitrary package that happens to contain `.factory`. The pure `planSandcastlePatch(spec, lock, files)` function exposes the same validation and deterministic byte plan for cheap fixture tests. Normal preparation must use the pinned `prepareSandcastlePackage` wrapper, not inject a different specification.
 
-`RUNTIME_ASSETS` includes both patch inputs. Editing either changes source identity and creates a new content-addressed runtime path. On activation, dependency hashing will include the altered package bytes because the existing hash walks every private dependency file. Validation and reuse never reapply or repair a bundle. Keep `npm ci --include=dev --include=optional --ignore-scripts`; patching is an explicit preparation step, not an npm lifecycle script. Do not add a permissive catch or version-skip branch.
+`RUNTIME_ASSETS` includes both patch inputs. Editing either changes source identity and creates a new content-addressed runtime path. Dependency hashing includes the altered package bytes because the hash walks every private dependency file. Validation and reuse never reapply or repair a bundle. Keep `npm ci --include=dev --include=optional --ignore-scripts`; patching is an explicit preparation step, not an npm lifecycle script. Do not add a permissive catch or version-skip branch.
 
 ## Offline verification
 
-The regular suite uses small owned synthetic byte fixtures, not a copy of the SDK. They prove lock/version/preimage/postimage guards, complete repetition, partial-state refusal, unchanged bytes and one real temporary package-filesystem boundary. Runtime-bundle tests prove both new assets affect source identity while current installation remains unpatched.
+The regular suite uses small owned synthetic byte fixtures, not a copy of the SDK. They prove lock/version/preimage/postimage guards, complete repetition, partial-state refusal, unchanged bytes and one real temporary package-filesystem boundary. Runtime-bundle tests prove both patch inputs affect source identity, enforce npm-before-patch ordering and propagate patch refusal through the existing publication rollback boundary. Fixture installers use synthetic SDK behavior. The offline real-package smoke exercises the activated production installer with only its npm command redirected to an isolated offline cache.
 
 ```sh
 node --test cli/test/sandcastle-patch.test.mts cli/test/runtime-bundle.test.mts

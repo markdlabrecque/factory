@@ -25,13 +25,13 @@ The first five roadmap slices are implemented: installation, project registratio
 | Project-asset reports, read-only workflow diagnostics and local event export | [Update](docs/factory-cli.md#project-asset-diagnostics), [workflow status](docs/factory-cli.md#read-only-workflow-identity-report), [telemetry](docs/telemetry.md) |
 | Domain relationships and terminology | [Domain model](docs/domain-model.md), [glossary](docs/GLOSSARY.md) |
 
-Legacy installer removal and the `.sandcastle` to `.factory` directory migration remain unfinished or deferred. The [herdr-core attach/steer experiment](docs/research/interactive-agents-herdr-core.md) was approved for adoption, but production integration is not implemented. Standard Factory runs remain noninteractive Pi. A dedicated recovery Board UI is also deferred.
+New projects use `.factory` for configuration, environment assets, worktrees and evidence. `.sandcastle`-only and mixed-layout projects are unsupported and are not converted. Repository image/source-asset relocation and release verification remain separate gates. Legacy installer removal remains unfinished. The [herdr-core attach/steer experiment](docs/research/interactive-agents-herdr-core.md) was approved for adoption, but production integration is not implemented. Standard Factory runs remain noninteractive Pi. A dedicated recovery Board UI is also deferred.
 
 ## What belongs where
 
 | Need | Where it belongs |
 | --- | --- |
-| Change tracker, selection, model family, merge policy or sandbox setup | Project `.sandcastle/factory.toml`. See [project configuration](docs/project-config.md). |
+| Change tracker, selection, model family, merge policy or sandbox setup | Project `.factory/factory.toml`. See [project configuration](docs/project-config.md). |
 | Add project-specific instructions for a role | Contained Markdown files referenced by TOML. They are additive, not replacements for Factory's safety gates. See [instructions](docs/project-config.md). |
 | Change Factory's implementation for all projects | Factory source and a new installed shared runtime. See [execution context](docs/execution-context.md). |
 | Change workflow code for one project | An explicit, complete project override, maintained and reviewed by its owner. See [workflow adaptation](orchestrator/ADAPTING.md). |
@@ -52,7 +52,7 @@ factory init /path/to/project --profile personal --repo owner/repo --image my-im
 factory init /path/to/project --profile client --repo group/project --image my-image --host git.example.com --project-id 42
 ```
 
-Init creates the data-only `.sandcastle/factory.toml`, environment placeholders, ignore file and dispatch wrapper without overwriting existing files. It does not provision an image or contact a tracker. Both profiles default to the OpenAI family; set `[agent] family = "anthropic"` in the TOML to select Anthropic instead. Profiles also differ in tracker, selection and merge defaults. Review the [complete profile and configuration reference](docs/project-config.md) before use.
+Init creates the data-only `.factory/factory.toml`, environment placeholders, ignore file and dispatch wrapper without overwriting existing files. It does not provision an image or contact a tracker. Both profiles default to the OpenAI family; set `[agent] family = "anthropic"` in the TOML to select Anthropic instead. Profiles also differ in tracker, selection and merge defaults. Review the [complete profile and configuration reference](docs/project-config.md) before use.
 
 ```sh
 factory config explain --project /path/to/project --json

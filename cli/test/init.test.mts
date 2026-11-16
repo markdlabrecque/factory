@@ -40,7 +40,7 @@ async function quiet<T>(fn: () => Promise<T>): Promise<{ out: string; result?: T
   console.log = (...a: unknown[]) => { out += a.join(' ') + '\n'; };
   try { const result = await fn(); return { out, result }; } catch (error) { return { out, error }; } finally { console.log = log; }
 }
-const files = (root: string) => readdirSync(join(root, '.sandcastle'), { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => join(e.parentPath, e.name).slice(join(root, '.sandcastle').length + 1)).sort();
+const files = (root: string) => readdirSync(join(root, '.factory'), { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => join(e.parentPath, e.name).slice(join(root, '.factory').length + 1)).sort();
 const mode = (path: string) => statSync(path).mode & 0o777;
 
 test('clean personal init creates exactly the allowlist, no client bootstrap, safe defaults, and registers', async t => {
@@ -49,11 +49,11 @@ test('clean personal init creates exactly the allowlist, no client bootstrap, sa
   const { error, out } = await quiet(() => init(p, root, personal));
   assert.equal(error, undefined);
   assert.deepEqual(files(root), EXPECTED);
-  const s = (f: string) => join(root, '.sandcastle', f);
+  const s = (f: string) => join(root, '.factory', f);
   assert.equal(mode(s('.env')), 0o600);
   assert.equal(readFileSync(s('.env'), 'utf8'), '');
   assert.equal(mode(s('factory-dispatch.sh')) & 0o111, 0o111);
-  const settings = loadTomlConfig(join(root, '.sandcastle'));
+  const settings = loadTomlConfig(join(root, '.factory'));
   assert.equal(settings.config.image, 'sandcastle-site');
   assert.deepEqual(settings.config.sandboxSetup, []);
   for (const f of EXPECTED.filter(f => f.endsWith('.mts') || f.endsWith('.md') || f.endsWith('.example'))) {
@@ -64,7 +64,39 @@ test('clean personal init creates exactly the allowlist, no client bootstrap, sa
   assert.doesNotMatch(example, /OPENAI|sk-/);
   assert.deepEqual(readRegistry(p).projects.map(x => x.root), [root]);
   assert.match(out, /Not ready to run an agent yet/);
-  assert.equal(existsSync(join(root, '.sandcastle/sandbox')), false, 'no Drupal sandbox helpers copied');
+  assert.equal(existsSync(join(root, '.factory/sandbox')), false, 'no Drupal sandbox helpers copied');
+});
+
+test('init completes supported source assets without config and never creates .sandcastle', async t => {
+  const { p, repo } = fixture(t), root = repo();
+  mkdirSync(join(root, '.factory'));
+  for (const name of ['Dockerfile', '.env.example', '.gitignore']) writeFileSync(join(root, '.factory', name), `owned ${name}\n`, {mode:0o640});
+  const result = await quiet(() => init(p, root, personal));
+  assert.equal(result.error, undefined);
+  assert.equal(loadTomlConfig(join(root, '.factory')).TRACKER.project, personal.repo);
+  for (const name of ['Dockerfile', '.env.example', '.gitignore']) {
+    assert.equal(readFileSync(join(root, '.factory', name), 'utf8'), `owned ${name}\n`);
+    assert.equal(mode(join(root, '.factory', name)), 0o640);
+  }
+  assert.equal(existsSync(join(root, '.sandcastle')), false);
+  assert.equal(readRegistry(p).projects.length, 1);
+});
+
+test('old and mixed entries refuse init before any writes or registration, preserving saved work', async t => {
+  const { p, repo } = fixture(t);
+  for (const mixed of [false, true]) {
+    const root = repo(mixed ? 'mixed' : 'old');
+    mkdirSync(join(root, '.sandcastle/worktrees/saved'), {recursive:true});
+    writeFileSync(join(root, '.sandcastle/worktrees/saved/dirty.txt'), 'untracked work');
+    if (mixed) { mkdirSync(join(root, '.factory')); writeFileSync(join(root, '.factory/Dockerfile'), 'owned image'); }
+    const result = await quiet(() => init(p, root, personal));
+    assert.match(String(result.error), mixed ? /mixed-layout/ : /legacy-layout/);
+    assert.equal(readFileSync(join(root, '.sandcastle/worktrees/saved/dirty.txt'), 'utf8'), 'untracked work');
+    assert.equal(existsSync(join(root, '.factory/factory.toml')), false);
+    assert.equal(existsSync(join(root, '.factory')), mixed);
+    if (mixed) assert.deepEqual(readdirSync(join(root, '.factory')), ['Dockerfile']);
+  }
+  assert.equal(existsSync(p.projects), false);
 });
 
 test('generated runtimes derive model tiers and preserve tracker and merge policy', async t => {
@@ -95,14 +127,14 @@ test('generated runtimes derive model tiers and preserve tracker and merge polic
   assert.deepEqual(cc.AGENT, pc.AGENT);
   assert.equal(cc.GRAPH.model, pc.GRAPH.model);
   assert.equal(cc.MERGE.auto, false);
-  assert.match(readFileSync(join(b, '.sandcastle/.env.example'), 'utf8'), /Authenticate Pi/);
+  assert.match(readFileSync(join(b, '.factory/.env.example'), 'utf8'), /Authenticate Pi/);
 });
 
 test('rerun keeps existing bytes and modes, fills gaps, reports skips, never duplicates the registry', async t => {
   const { p, repo } = fixture(t);
   const root = repo();
   await quiet(() => init(p, root, personal));
-  const s = (f: string) => join(root, '.sandcastle', f);
+  const s = (f: string) => join(root, '.factory', f);
   writeFileSync(s('factory.toml'), readFileSync(s('factory.toml'), 'utf8') + '\n# retained\n');
   writeFileSync(s('.gitignore'), 'node_modules\n');
   chmodSync(s('factory.toml'), 0o640); chmodSync(s('.gitignore'), 0o600);
@@ -126,21 +158,21 @@ test('invalid input, symlink escape and type conflicts fail before any write or 
     { ...personal, host: 'x.example.com' }, { ...client, host: undefined }, { ...client, 'project-id': '0' }, { ...client, 'project-id': '4x' },
   ];
   for (const o of bad) assert.ok((await quiet(() => init(p, root, o))).error, JSON.stringify(o));
-  assert.equal(existsSync(join(root, '.sandcastle')), false);
+  assert.equal(existsSync(join(root, '.factory')), false);
 
   const outside = join(base, 'outside'); mkdirSync(outside);
-  symlinkSync(outside, join(root, '.sandcastle'));
-  assert.match(String((await quiet(() => init(p, root, personal))).error), /symlink/);
+  symlinkSync(outside, join(root, '.factory'));
+  assert.match(String((await quiet(() => init(p, root, personal))).error), /factory-unsafe/);
   assert.deepEqual(readdirSync(outside), []);
-  rmSync(join(root, '.sandcastle'));
+  rmSync(join(root, '.factory'));
 
-  mkdirSync(join(root, '.sandcastle/.env'), { recursive: true });
+  mkdirSync(join(root, '.factory/.env'), { recursive: true });
   assert.match(String((await quiet(() => init(p, root, personal))).error), /in the way/);
-  assert.deepEqual(readdirSync(join(root, '.sandcastle')), ['.env'], 'preflight failed before the first write');
-  rmSync(join(root, '.sandcastle'), { recursive: true });
+  assert.deepEqual(readdirSync(join(root, '.factory')), ['.env'], 'preflight failed before the first write');
+  rmSync(join(root, '.factory'), { recursive: true });
 
-  writeFileSync(join(root, '.sandcastle'), 'a file');
-  assert.match(String((await quiet(() => init(p, root, personal))).error), /Expected a directory/);
+  writeFileSync(join(root, '.factory'), 'a file');
+  assert.match(String((await quiet(() => init(p, root, personal))).error), /factory-unsafe/);
   assert.equal(existsSync(p.projects), false, 'nothing registered');
 });
 
@@ -156,7 +188,7 @@ test('a mid-copy failure leaves a repairable scaffold and does not register; rer
   assert.equal(ok.error, undefined);
   assert.deepEqual(files(root), EXPECTED);
   assert.equal(readRegistry(p).projects.length, 1);
-  rmSync(join(root, '.sandcastle/.env.example'));
+  rmSync(join(root, '.factory/.env.example'));
   assert.ok((await quiet(() => init(p, root, personal, { beforeWrite: () => { throw new Error('again'); } }))).error);
   assert.equal(readRegistry(p).projects.length, 1, 'stays registered');
 });
@@ -167,7 +199,7 @@ test('wrapper forwards canonical project and literal arguments', async t => {
   await quiet(() => init(p, root, personal));
   const bin = join(base, 'bin'); mkdirSync(bin);
   writeFileSync(join(bin, 'factory'), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
-  const res = spawnSync(join(root, '.sandcastle/factory-dispatch.sh'), ['--ticket', 'a b', "$(touch nope)"], { cwd: base, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  const res = spawnSync(join(root, '.factory/factory-dispatch.sh'), ['--ticket', 'a b', "$(touch nope)"], { cwd: base, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
   assert.equal(res.status, 0, res.stderr);
   assert.deepEqual(res.stdout.trimEnd().split('\n'), ['dispatch', '--project', root, '--ticket', 'a b', '$(touch nope)']);
   assert.equal(existsSync(join(base, 'nope')), false);
@@ -185,8 +217,8 @@ test('uninstall lists project scaffolds but never deletes them; purge removes on
   t.after(() => { process.env.PATH = oldPath; });
   const before = files(root);
   const plain = await quiet(() => uninstall(p, service));
-  assert.match(plain.out, /Project scaffold, not removed: .*\.sandcastle/);
-  assert.ok(plain.out.includes(`rm -rf '${join(root, '.sandcastle')}'`));
+  assert.match(plain.out, /Project scaffold, not removed: .*\.factory/);
+  assert.ok(plain.out.includes(`rm -rf '${join(root, '.factory')}'`));
   assert.ok(existsSync(p.projects), 'default uninstall keeps the registry');
   await install(p, service);
   const purged = await quiet(() => uninstall(p, service, { purge: true }));
@@ -208,19 +240,19 @@ test('scaffold assets resolve from the installed app, not the working directory'
 
 test('unsupported existing config is not rewritten or registered', async t => {
   const { p, repo } = fixture(t); const root = repo();
-  mkdirSync(join(root, '.sandcastle'));
-  writeFileSync(join(root, '.sandcastle/factory.toml'), 'version = 1\n');
-  assert.match(String((await quiet(() => init(p, root, personal))).error), /manually migrate/);
-  assert.deepEqual(readdirSync(join(root, '.sandcastle')), ['factory.toml']);
+  mkdirSync(join(root, '.factory'));
+  writeFileSync(join(root, '.factory/factory.toml'), 'version = 1\n');
+  assert.match(String((await quiet(() => init(p, root, personal))).error), /no conversion/i);
+  assert.deepEqual(readdirSync(join(root, '.factory')), ['factory.toml']);
   assert.equal(existsSync(p.projects), false);
 });
 
 test('a racing creator is never overwritten or registered', async t => {
   const { p, repo } = fixture(t); const root = repo();
   const result = await quiet(() => init(p, root, personal, { beforeWrite: (path, index) => {
-    if (index === 0) { mkdirSync(join(root, '.sandcastle'), { recursive: true }); writeFileSync(join(root, path), 'racer'); }
+    if (index === 0) { mkdirSync(join(root, '.factory'), { recursive: true }); writeFileSync(join(root, path), 'racer'); }
   } }));
   assert.ok(result.error);
-  assert.equal(readFileSync(join(root, '.sandcastle/factory.toml'), 'utf8'), 'racer');
+  assert.equal(readFileSync(join(root, '.factory/factory.toml'), 'utf8'), 'racer');
   assert.equal(existsSync(p.projects), false);
 });

@@ -2,6 +2,8 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { loadTomlConfig, resolveCheckoutPath } from './project-config.mts';
+import { requireProjectLayout } from './project-layout.mts';
+import { assertProjectRecordLayout } from './ownership.mts';
 // Assembly helpers ship flat beside this module; source callers use the same trusted CLI implementation.
 const helper = existsSync(new URL('./runtime-bundle.mts', import.meta.url)) ? './runtime-bundle.mts' : '../cli/src/runtime-bundle.mts';
 const { validateRuntimeBundle, regenerateRuntimeManifest } = await import(helper);
@@ -16,10 +18,12 @@ function bundle(root: string, project = false) {
   catch (error) { throw Error(`Invalid ${project ? 'project workflow' : 'Factory runtime'} at ${root}: ${(error as Error).message}${project ? '. Review the complete override and regenerate runtime-manifest.json with regenerateRuntimeManifest; no Factory fallback is permitted' : ''}`); }
 }
 /** The descriptor path is trusted launcher configuration, never project data. Children use a pinned selection. */
-export function resolveWorkflow(projectRoot: string, descriptor: string, inherited?: NodeJS.ProcessEnv) {
+export function resolveWorkflow(projectRoot: string, descriptor: string, inherited?: NodeJS.ProcessEnv, stateRoot?: string) {
   canonical(projectRoot, 'Project root');
-  resolveCheckoutPath(projectRoot, '.sandcastle/factory.toml', 'file');
-  const config = loadTomlConfig(join(projectRoot, '.sandcastle'));
+  const layout = requireProjectLayout(projectRoot);
+  resolveCheckoutPath(projectRoot, '.factory/factory.toml', 'file');
+  const config = loadTomlConfig(layout.assets);
+  if (stateRoot) assertProjectRecordLayout(stateRoot, projectRoot, { kind: config.TRACKER.kind, host: config.TRACKER.gitlabHost ?? config.TRACKER.host!, project: config.TRACKER.project });
   let hostRoot: string, hostId: string;
   if (inherited?.FACTORY_PROJECT_ROOT === projectRoot && inherited.FACTORY_RUNTIME_ROOT && inherited.FACTORY_RUNTIME_ID) {
     hostRoot = canonical(inherited.FACTORY_HOST_RUNTIME_ROOT ?? inherited.FACTORY_RUNTIME_ROOT, 'Inherited Factory runtime');

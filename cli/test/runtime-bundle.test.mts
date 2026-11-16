@@ -59,7 +59,7 @@ test('source and lock changes produce separate bundles and leave old bundle inta
   const c = prepare(f); assert.notEqual(b.id, c.id); validateRuntimeBundle(b.directory);
 });
 
-test('patch helper and specification participate in source identity without activating the patch', t => {
+test('patch helper and specification participate in source identity with synthetic prepared packages', t => {
   const f = fixture(); t.after(f.cleanup);
   let previous = prepare(f);
   for (const name of ['sandcastle-patch.mts', 'sandcastle-patch.json']) {
@@ -89,6 +89,20 @@ test('failed installation and corrupt existing bundle never publish or modify an
   assert.throws(() => prepareRuntimeBundle({ sourceRoot: f.source, runtimeStore: f.store, install: () => { throw Error('offline failure'); } }), /offline failure/);
   assert.deepEqual(readFileSync(join(old.directory, 'runtime-manifest.json')), before);
   assert.deepEqual(readdirSync(f.store), [old.id]);
+  // Successful fixture npm followed by the real byte guard must fail transactionally.
+  const descriptor = join(f.root, 'runtime.json'), selected = JSON.stringify({version:1,id:old.id});
+  writeFileSync(descriptor, selected);
+  assert.throws(() => prepareRuntimeBundle({ sourceRoot: f.source, runtimeStore: f.store, install: directory => {
+    installRuntimePackages(directory, () => { install(directory); return {status:0}; });
+  } }), /Unsupported Sandcastle package files/);
+  assert.equal(readFileSync(descriptor, 'utf8'), selected);
+  const spec = join(f.source, 'cli/src/sandcastle-patch.json');
+  assert.throws(() => prepareRuntimeBundle({ sourceRoot: f.source, runtimeStore: f.store, install: directory => {
+    install(directory); writeFileSync(spec, readFileSync(spec, 'utf8') + '\n');
+  } }), /Runtime source changed during package preparation/);
+  assert.equal(readFileSync(descriptor, 'utf8'), selected);
+  assert.deepEqual(readdirSync(f.store), [old.id]);
+  validateRuntimeBundle(old.directory);
   const next = prepare(f); rmSync(join(next.directory, 'node_modules/tsx/dist/cli.mjs'));
   assert.throws(() => prepare(f)); validateRuntimeBundle(old.directory);
 });
@@ -135,8 +149,13 @@ test('separate processes concurrently publish one identical complete bundle', as
 
 test('npm boundary forces dev, optional packages and disabled scripts in the private cwd', () => {
   const calls: unknown[] = [];
-  installRuntimePackages('/fixture/runtime', (command, args, options) => { calls.push({ command, args, options }); return { status: 0 }; });
+  let patched: string | undefined;
+  installRuntimePackages('/fixture/runtime', (command, args, options) => { calls.push({ command, args, options }); return { status: 0 }; }, directory => {
+    assert.equal(calls.length, 1); patched = directory; return { state: 'original', changed: [] };
+  });
+  assert.equal(patched, '/fixture/runtime');
   assert.deepEqual(calls, [{ command: 'npm', args: ['ci', '--include=dev', '--include=optional', '--ignore-scripts'], options: { cwd: '/fixture/runtime', stdio: 'inherit' } }]);
+  assert.throws(() => installRuntimePackages('/fixture', () => ({ status: 0 }), () => { throw Error('patch refused'); }), /patch refused/);
   assert.throws(() => installRuntimePackages('/fixture', () => ({ status: 1 })), /npm ci failed/);
   assert.throws(() => installRuntimePackages('/fixture', () => ({ status: null, error: new Error('missing npm') })), /missing npm/);
 });

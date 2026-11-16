@@ -21,11 +21,11 @@ function fixture(t: TestContext) {
   t.after(() => { rmSync(home, { recursive: true, force: true }); if (saved === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = saved; });
   const p = paths(home);
   const root = join(home, 'site');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  mkdirSync(join(root, '.factory'), { recursive: true });
   const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: root });
   git('init', '-q');
   git('commit', '-q', '--allow-empty', '-m', 'init');
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   const record = (iid: number, stage: string, pid = process.pid) => {

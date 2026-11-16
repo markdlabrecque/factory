@@ -2,7 +2,7 @@
 // registered checkout you are in, or --project). Runs the selected complete workflow's `dispatch.sh --issue <n>`
 // from the checkout root, so the same checks (tools, logins, .env and image) come first, then
 // main.mts takes the ticket through; its output streams through and also lands in
-// `.sandcastle/logs/run-<n>.log` (what `factory logs` reads). SANDCASTLE_STATE_DIR is Factory's run-state
+// `.factory/logs/run-<n>.log` (what `factory logs` reads). SANDCASTLE_STATE_DIR is Factory's run-state
 // folder, so the run shows on the board. The result is dispatch.sh's exit code. Invalid selections fail without fallback.
 import type { Paths } from '../paths.mts';
 import { resolveProject, ticketId } from '../runs.mts';

@@ -2,13 +2,14 @@
 // Read validated TOML tracker identity for run commands without executing any project modules.
 // Shared project and run lookup for the slice 3 commands (dispatch, run, retry, status, logs). Picks the
 // registered project a command is for (`--project <name|path>`, else the registered checkout the caller is
-// standing in), reads its tracker name from v2 `.sandcastle/factory.toml` (the name its run records carry), and
+// standing in), reads its tracker name from v2 `.factory/factory.toml` (the name its run records carry), and
 // finds its run records in the shared run-state folder and its run and repair (recover-<n>.log, #62) log files. Read-only: it never writes a
 // record, the registry or a project file. A run whose process is gone without finishing is reported as
 // stopped (as the board does) but its record is left for the board and dispatcher to update. A launch the
 // dispatcher reserved whose process died before the run started is skipped, as the board drops it. projectRuns and
 // findRun take an optional state folder, for the tick's cleanup (#97), which reads Factory's own whatever its environment says.
 import { tomlIdentity } from '../../orchestrator/project-config.mts';
+import { requireProjectLayout } from '../../orchestrator/project-layout.mts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -65,7 +66,7 @@ export function resolveRegisteredProject(p: Paths, options: { project?: string; 
 export function resolveProject(p: Paths, options: { project?: string; cwd?: string } = {}): ProjectContext {
   const found = resolveRegisteredProject(p, options);
   if (!existsSync(found.root)) throw new Error(`Checkout missing for project ${found.name}: ${found.root}`);
-  const scaffold = join(found.root, scaffoldName);
+  const scaffold = requireProjectLayout(found.root).assets;
   const toml = tomlIdentity(scaffold);
   return { ...found, scaffold, tracker: toml.project };
 }
@@ -113,7 +114,7 @@ export function findRun(p: Paths, ctx: ProjectContext, ticket: string, dir = run
   return { file, run: existsSync(file) ? load(dir, `${key}.json`) : undefined };
 }
 
-/** A ticket's run log, as dispatch.mts writes it (`.sandcastle/logs/run-<n>.log`). It may not exist yet. */
+/** A ticket's run log, as dispatch.mts writes it (`.factory/logs/run-<n>.log`). It may not exist yet. */
 export const runLog = (ctx: ProjectContext, ticket: string) => join(ctx.scaffold, 'logs', `run-${ticketId(ticket)}.log`);
-/** A ticket's repair log, as the recovery launcher writes it (`.sandcastle/logs/recover-<n>.log`, recovery-run.mts). */
+/** A ticket's repair log, as the recovery launcher writes it (`.factory/logs/recover-<n>.log`, recovery-run.mts). */
 export const recoveryLog = (ctx: ProjectContext, ticket: string) => join(ctx.scaffold, 'logs', `recover-${ticketId(ticket)}.log`);

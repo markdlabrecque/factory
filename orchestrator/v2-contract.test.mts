@@ -40,7 +40,7 @@ const base = 'version = 2\n[tracker]\nkind = "github"\nproject = "a/b"\n[labels]
 test('v2 defaults, sources and rejected old settings', () => {
   const dir = mkdtempSync(join(tmpdir(), 'v2-'));
   try {
-    assert.throws(() => loadTomlConfig(dir), /manually migrate/);
+    assert.throws(() => loadTomlConfig(dir), /configuration/);
     const file = join(dir, 'factory.toml');
     writeFileSync(file, base); const c = loadTomlConfig(dir);
     assert.equal(c.AGENT.family, 'openai'); assert.equal(c.sources['agent.family'], 'default');
@@ -53,7 +53,7 @@ test('v2 defaults, sources and rejected old settings', () => {
     for (const extra of ['[agent]\nmodel = "x"', '[agent]\nprovider = "pi"', '[agent]\nthinking = "high"', '[agent.model_aliases]\nx = "y"', '[agent.implementation]\nfamily = "openai"', '[graph]\nmodel = "x"', '[dispatch]\nimplementation_timeout_minutes = 4', '[workflow]\nmode = "project"', '[workflow]\nmode = "factory"\ndirectory = "x"', '[instructions]\ncommon = ["../x.md"]', '[instructions]\nanalysis = ["notes.txt"]']) {
       writeFileSync(file, base + '\n' + extra); assert.throws(() => loadTomlConfig(dir));
     }
-    writeFileSync(file, base.replace('version = 2', 'version = 1')); assert.throws(() => loadTomlConfig(dir), /manually migrate/);
+    writeFileSync(file, base.replace('version = 2', 'version = 1')); assert.throws(() => loadTomlConfig(dir), /configuration/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 test('explicit values report their sources including optional setup fields', () => {
@@ -125,7 +125,7 @@ test('path validators check lexical paths, type, dangling and escaping links', (
 
 test('scalar bridge derives fixed agent and provider without evaluating project code', () => {
   const root = mkdtempSync(join(tmpdir(), 'bridge-'));
-  const dir = join(root, '.sandcastle'); mkdirSync(dir);
+  const dir = join(root, '.factory'); mkdirSync(dir);
   const runtime = bindExecution(root, process.env, { overlays: false });
   try {
     writeFileSync(join(dir, 'config.mts'), 'throw new Error("executed")');

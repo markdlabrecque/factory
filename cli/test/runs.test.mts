@@ -20,9 +20,9 @@ function fixture(t: TestContext) {
   const p = paths(home);
   const project = (dir: string, tracker?: string) => {
     const root = join(home, dir);
-    mkdirSync(join(root, '.sandcastle'), { recursive: true });
+    mkdirSync(join(root, '.factory'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
-    if (tracker) writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(tracker));
+    if (tracker) writeFileSync(join(root, '.factory/factory.toml'), factoryToml(tracker));
     addProject(p, realpathSync(root));
     return realpathSync(root);
   };
@@ -47,7 +47,7 @@ test('project is the registered checkout you stand in, or --project by name or p
   assert.throws(() => resolveProject(p, { cwd: home }), /not a registered project.*--project.*Registered: /);
   assert.throws(() => resolveProject(p, { project: 'nope' }), /No registered project nope/);
   const bare = project('bare');
-  assert.throws(() => resolveProject(p, { cwd: bare }), /factory.toml.*manually migrate/);
+  assert.throws(() => resolveProject(p, { cwd: bare }), /config-missing.*factory.toml/);
 });
 
 test('runs are the project\'s own records; a crashed run reads as stopped without rewriting it; logs follow dispatch.mts', t => {
@@ -64,7 +64,7 @@ test('runs are the project\'s own records; a crashed run reads as stopped withou
   assert.match(run!.note!, /exited without finishing \(last stage: implementing\)/);
   assert.match(execFileSync('cat', [file], { encoding: 'utf8' }), /"implementing"/, 'record untouched');
   assert.equal(findRun(p, ctx, '9').run, undefined);
-  assert.equal(runLog(ctx, '#7'), join(root, '.sandcastle/logs/run-7.log'));
+  assert.equal(runLog(ctx, '#7'), join(root, '.factory/logs/run-7.log'));
   assert.throws(() => ticketId('abc'), /Expected a ticket number/);
   process.env.SANDCASTLE_STATE_DIR = join(p.home, 'elsewhere');
   assert.deepEqual(projectRuns(p, ctx), [], 'SANDCASTLE_STATE_DIR wins, as in factory-dispatch.sh');

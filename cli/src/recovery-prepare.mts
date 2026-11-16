@@ -66,7 +66,7 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
   };
   try {
     const setupMs = o.setupTimeoutMs ?? 60_000, started = Date.now();
-    const config = await run([workflow.entrypoints.config,join(o.root,'.sandcastle'),'analysisTimeoutMinutes'],Math.min(setupMs,20_000));
+    const config = await run([workflow.entrypoints.config,join(o.root,'.factory'),'analysisTimeoutMinutes'],Math.min(setupMs,20_000));
     if (!config.ok) return held(config.code ?? 'config',config.reason || 'Cannot read preparation deadline','project');
     const minutes=Number(config.output.trim());
     if (!Number.isFinite(minutes) || minutes<=0 || minutes*60_000+setupMs>2_147_483_647) return held('config','Invalid preparation deadline','project');

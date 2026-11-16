@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { loadExecutionContext, contextHold, EMPTY_ADDITIVE, freezeAdditive } from './context.mts';
 import { bindExecution } from '../cli/test/execution-fixture.mts';
 import { factoryToml } from '../cli/test/config-fixture.mts';
+import { projectId, receiptFile, recordIntent } from './ownership.mts';
 import { prepareRuntimeBundle } from '../cli/src/runtime-bundle.mts';
 import { installPackages } from '../cli/test/runtime-fixture.mts';
 import { acquireRuntimeLease, releaseRuntimeLease, recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor, preflightRuntimeRemoval } from '../cli/src/runtime-ownership.mts';
@@ -16,8 +17,8 @@ import { acquireRuntimeLease, releaseRuntimeLease, recordRuntimeOwnership, withR
 function fixture(t: any) {
   const home = mkdtempSync(join(tmpdir(), 'factory-context-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  const root = join(home, 'project'); mkdirSync(join(root, '.sandcastle'), { recursive: true });
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('one/project', { image: 'first-image' }));
+  const root = join(home, 'project'); mkdirSync(join(root, '.factory'), { recursive: true });
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('one/project', { image: 'first-image' }));
   const runtime = bindExecution(root, { ...process.env, HOME: home, SANDCASTLE_STATE_DIR: join(home, 'state') });
   const input = { env: runtime.env, cwd: root, moduleRoot: runtime.directory };
   return { home, root, runtime, input, load: () => loadExecutionContext(input) };
@@ -55,30 +56,51 @@ test('canonical project-root cwd and complete selected runtime identity are mand
 });
 
 test('missing/legacy settings never import code or installed sample configuration', async t => {
-  const f = fixture(t), file = join(f.root, '.sandcastle/factory.toml');
-  writeFileSync(join(f.root, '.sandcastle/config.mts'), 'throw Error("PROJECT CODE EXECUTED")');
+  const f = fixture(t), file = join(f.root, '.factory/factory.toml');
+  writeFileSync(join(f.root, '.factory/config.mts'), 'throw Error("PROJECT CODE EXECUTED")');
   rmSync(file);
-  await assert.rejects(f.load(), /factory.toml.*manually migrate/);
+  await assert.rejects(f.load(), /config-missing/);
   writeFileSync(file, factoryToml('one/project').replace('version = 2', 'version = 1'));
-  await assert.rejects(f.load(), /version.*manually migrate/);
+  await assert.rejects(f.load(), /version.*no conversion/);
   writeFileSync(file, factoryToml('one/project') + '\n[agent]\nmodel = "custom"\n');
   await assert.rejects(f.load(), /agent.model/);
   writeFileSync(file, factoryToml('one/project') + '\n[instructions]\ncommon = ["not-loaded.md"]\n');
   await assert.rejects(f.load(), /Cannot load instruction file/);
   rmSync(file); symlinkSync(join(f.runtime.directory, 'package.json'), file);
-  await assert.rejects(f.load(), /escapes checkout/);
-  rmSync(join(f.root, '.sandcastle'), { recursive: true, force: true });
-  await assert.rejects(f.load(), /factory.toml.*manually migrate/);
+  await assert.rejects(f.load(), /config-unsafe/);
+  rmSync(join(f.root, '.factory'), { recursive: true, force: true });
+  await assert.rejects(f.load(), /fresh-not-allowed/);
+});
+
+test('old run and ownership paths cannot acquire new-layout authority or be rewritten', async t => {
+  const f = fixture(t), state = f.input.env.SANDCASTLE_STATE_DIR!;
+  mkdirSync(state, {recursive:true});
+  const runFile = join(state, 'one-project--7.json');
+  const run = JSON.stringify({project:'one/project',iid:'7',stage:'stopped',evidenceDir:join(f.root,'.sandcastle/evidence/7')});
+  writeFileSync(runFile, run);
+  await assert.rejects(f.load(), /cross-layout evidence identity/);
+  assert.equal(readFileSync(runFile, 'utf8'), run);
+  writeFileSync(runFile, JSON.stringify({project:'one/project',iid:'7',stage:'stopped',evidenceDir:42}));
+  await assert.rejects(f.load(), /unknown evidence identity/);
+  rmSync(runFile);
+  const tracker = {kind:'github',host:'github.com',project:'one/project'};
+  const file = receiptFile(state, projectId(f.root,tracker), '7'); mkdirSync(dirname(file), {recursive:true});
+  const at = new Date().toISOString();
+  const receipt = JSON.stringify({version:1,projectId:projectId(f.root,tracker),projectRoot:f.root,gitCommonDir:join(f.root,'.git'),ticket:'7',branch:'7-fix',worktreePath:join(f.root,'.sandcastle/worktrees/7-fix'),runId:'old',creationIntent:{branch:true,worktree:true,at},createdAt:at,updatedAt:at,implementationBaseSha:'a'.repeat(40)});
+  writeFileSync(file, receipt);
+  await assert.rejects(f.load(), /cross-layout identity/);
+  assert.throws(() => recordIntent(state, {root:f.root,tracker,ticket:'7',branch:'7-fix',runId:'new',branchToCreate:true,worktreeToCreate:true}), /cross-layout identity/);
+  assert.equal(readFileSync(file, 'utf8'), receipt);
 });
 
 test('two projects share runtime bytes, not settings, templates, dependencies or artifacts', async t => {
   const f = fixture(t), second = join(f.home, 'second');
-  mkdirSync(join(second, '.sandcastle'), { recursive: true });
-  writeFileSync(join(second, '.sandcastle/factory.toml'), factoryToml('two/project', { image: 'second-image' }) + '\n[agent]\nfamily = "anthropic"\n');
+  mkdirSync(join(second, '.factory'), { recursive: true });
+  writeFileSync(join(second, '.factory/factory.toml'), factoryToml('two/project', { image: 'second-image' }) + '\n[agent]\nfamily = "anthropic"\n');
   for (const root of [f.root, second]) {
     mkdirSync(join(root, 'node_modules/tsx/dist'), { recursive: true });
     writeFileSync(join(root, 'node_modules/tsx/dist/cli.mjs'), 'throw Error("PROJECT DEPENDENCY EXECUTED")');
-    for (const name of ['main.mts', 'dispatch.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.sandcastle', name), 'PROJECT POISON');
+    for (const name of ['main.mts', 'dispatch.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.factory', name), 'PROJECT POISON');
   }
   const one = await f.load(), two = await loadExecutionContext({ ...f.input, cwd: second, env: { ...f.runtime.env, FACTORY_PROJECT_ROOT: second } });
   assert.equal(one.manifest.id, two.manifest.id);
@@ -88,19 +110,19 @@ test('two projects share runtime bytes, not settings, templates, dependencies or
   assert.equal(one.templates['prompt.md'], two.templates['prompt.md']);
   assert.notEqual(one.templates['prompt.md'], 'PROJECT POISON');
   for (const context of [one, two]) {
-    const output = context.projectPath('.sandcastle/logs/proof.txt'); mkdirSync(dirname(output), { recursive: true });
+    const output = context.projectPath('.factory/logs/proof.txt'); mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, context.config.TRACKER.project);
     const result = spawnSync(process.execPath, [context.tsx, context.codePath('config-read.mts'), context.assetRoot, 'image'], { cwd: context.projectRoot, env: { ...f.runtime.env, ...context.env }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout, context.config.config.image);
   }
-  assert.equal(readFileSync(one.projectPath('.sandcastle/logs/proof.txt'), 'utf8'), 'one/project');
-  assert.equal(readFileSync(two.projectPath('.sandcastle/logs/proof.txt'), 'utf8'), 'two/project');
+  assert.equal(readFileSync(one.projectPath('.factory/logs/proof.txt'), 'utf8'), 'one/project');
+  assert.equal(readFileSync(two.projectPath('.factory/logs/proof.txt'), 'utf8'), 'two/project');
 });
 
 test('runtime source, private transitive dependencies, settings and template drift revoke authority', async t => {
   const f = fixture(t), context = await f.load();
   assert.equal(contextHold(context), undefined);
-  const config = join(f.root, '.sandcastle/factory.toml'), original = readFileSync(config, 'utf8');
+  const config = join(f.root, '.factory/factory.toml'), original = readFileSync(config, 'utf8');
   writeFileSync(config, original + '\n# formatting only\n'); assert.equal(contextHold(context), undefined);
   writeFileSync(config, original.replace('first-image', 'different-image'));
   assert.match(contextHold(context)!, /inputs changed/);
@@ -113,7 +135,7 @@ test('runtime source, private transitive dependencies, settings and template dri
 });
 
 test('instruction snapshots remain frozen and edits revoke authority', async t => {
-  const f = fixture(t), config = join(f.root, '.sandcastle/factory.toml');
+  const f = fixture(t), config = join(f.root, '.factory/factory.toml');
   writeFileSync(join(f.root, 'common.md'), 'literal {{TICKET}} $(touch nope)');
   writeFileSync(join(f.root, 'verify.md'), 'verification only');
   writeFileSync(config, factoryToml('one/project') + '\n[instructions]\ncommon = ["common.md"]\nverification = ["verify.md"]\n');

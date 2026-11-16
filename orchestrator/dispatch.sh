@@ -6,8 +6,8 @@
 #   <selected-runtime>/dispatch.sh --issue N [--no-push]
 # Extra arguments go to dispatch.mts. With --issue N it runs that one ticket now instead, in the
 # foreground (main.mts --issue N, extra arguments to main.mts), after the same checks; the output also
-# goes to .sandcastle/logs/run-N.log, where a dispatched run's log goes. `factory run N` uses this.
-# Checks tools, logins and .sandcastle/.env from validated v2 tracker and agent-family data.
+# goes to .factory/logs/run-N.log, where a dispatched run's log goes. `factory run N` uses this.
+# Checks tools, logins and .factory/.env from validated v2 tracker and agent-family data.
 # Both families run Pi. Anthropic also checks Claude's login, the subscription extension and
 # policy models (preflight.mts), plus the container's CLAUDE_CODE_OAUTH_TOKEN. Then checks the image: from a
 # terminal a missing or mismatched image is built; without one (the timer) the pass stops and says
@@ -41,7 +41,7 @@ runtime="${FACTORY_RUNTIME_ROOT:-}"
 [ -n "$root" ] && [ -n "$runtime" ] || fail "missing execution context. Use Factory commands."
 [ "$(pwd -P)" = "$root" ] || fail "cwd must be the canonical project root. Use Factory commands."
 [ "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" = "$runtime" ] || fail "script is not from the selected runtime."
-node "$runtime/config-read.mts" "$root/.sandcastle" validate || exit 1
+node "$runtime/config-read.mts" "$root/.factory" validate || exit 1
 if [ "${FACTORY_CONTEXT_BOOTSTRAPPED:-}" != 1 ]; then
   exec node "$runtime/context-process.mts" ${original_args[@]+"${original_args[@]}"}
 fi
@@ -52,14 +52,14 @@ base="$(git branch --show-current)"
 git ls-remote --exit-code --heads origin "$base" >/dev/null || fail "branch $base isn't on origin. Push it, or check out the integration branch."
 
 # Read validated, allowlisted data only.
-toml_value() { node "$runtime/config-read.mts" "$root/.sandcastle" "$1"; }
+toml_value() { node "$runtime/config-read.mts" "$root/.factory" "$1"; }
 kind="$(toml_value kind)"
 agent="$(toml_value agent)"
 image="$(toml_value image)"
 host="$(toml_value host)"
 uses_subscription="$(toml_value subscription)"
-[ -n "$image" ] || fail "couldn't read sandbox.image from .sandcastle/factory.toml."
-case "$kind" in gitlab) tracker_cli=glab ;; github) tracker_cli=gh ;; *) fail "unknown tracker.kind in .sandcastle/factory.toml." ;; esac
+[ -n "$image" ] || fail "couldn't read sandbox.image from .factory/factory.toml."
+case "$kind" in gitlab) tracker_cli=glab ;; github) tracker_cli=gh ;; *) fail "unknown tracker.kind in .factory/factory.toml." ;; esac
 [ "$agent" = pi ] || fail "standard workflow requires Pi."
 tsx="$(toml_value tsx)"
 sandcastle="$(toml_value sandcastle)"
@@ -69,7 +69,7 @@ for tool in node git "$tracker_cli" "$agent" docker curl; do
 done
 
 if [ "$kind" = gitlab ]; then
-  [ -n "$host" ] || fail "couldn't read tracker.host from .sandcastle/factory.toml."
+  [ -n "$host" ] || fail "couldn't read tracker.host from .factory/factory.toml."
   glab auth status --hostname "$host" >/dev/null 2>&1 || fail "glab isn't logged in to $host. Run: glab auth login --hostname $host"
 else
   gh auth status --hostname "$host" >/dev/null 2>&1 || fail "gh isn't logged in to $host. Run: gh auth login --hostname $host"
@@ -90,8 +90,8 @@ docker info >/dev/null 2>&1 || fail "Docker isn't running, or this user can't re
 # An empty Messages request checks the credential: bad gets 401, good gets 400.
 # No tokens are used, and the secret is never printed or placed on a command line.
 # OpenAI needs no container credential here; each run receives a token from the host login.
-env_file=.sandcastle/.env
-[ -f "$env_file" ] || fail "no $env_file. Run: cp .sandcastle/.env.example $env_file, then fill it in."
+env_file=.factory/.env
+[ -f "$env_file" ] || fail "no $env_file. Run: cp .factory/.env.example $env_file, then fill it in."
 if [ "$subscription" = 1 ]; then
   env_value() { sed -nE "s/^[[:space:]]*(export[[:space:]]+)?$1=[\"']?([^\"'#[:space:]]*).*/\2/p" "$env_file" | tail -n 1; }
   if token="$(env_value CLAUDE_CODE_OAUTH_TOKEN)" && [ -n "$token" ]; then
@@ -130,8 +130,8 @@ ready_image="$(node "$runtime/capabilities.mts" "$image" "$(id -u)" "$(id -g)" "
 export FACTORY_READY_IMAGE="$ready_image"
 
 if [ -n "$issue" ]; then
-  mkdir -p .sandcastle/logs
-  log=".sandcastle/logs/run-$issue.log"
+  mkdir -p .factory/logs
+  log=".factory/logs/run-$issue.log"
   echo "Running #$issue on $base in the foreground; the output also goes to $log."
   set +e
   node "$tsx" "$runtime/main.mts" --base "$base" --issue "$issue" ${args[@]+"${args[@]}"} 2>&1 | tee -a "$log"

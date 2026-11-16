@@ -19,7 +19,7 @@ Inspect the checkout and propose the tracker, image, agent family and optional l
 
 | Task | Place |
 | --- | --- |
-| Image, sandbox startup, selection, merge, tracker or family | v2 `.sandcastle/factory.toml` |
+| Image, sandbox startup, selection, merge, tracker or family | v2 `.factory/factory.toml` |
 | Script bodies and Docker build context | Project-owned environment files and helper scripts |
 | Common or role-specific testing and environment advice | Checkout Markdown referenced by `[instructions]` |
 | Change stages, prompts or executable policy | Complete project workflow override, reviewed by its owner |

@@ -6,7 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareRuntimeBundle, validateRuntimeBundle } from '../cli/src/runtime-bundle.mts';
+import { installRuntimePackages, prepareRuntimeBundle, validateRuntimeBundle } from '../cli/src/runtime-bundle.mts';
 import { prepareSandcastlePackage } from '../cli/src/sandcastle-patch.mts';
 
 const [cacheSource, npmCli] = process.argv.slice(2);
@@ -29,10 +29,12 @@ try {
     npm_config_cache: cache, npm_config_userconfig: config, npm_config_globalconfig: global,
     npm_config_offline: 'true', npm_config_audit: 'false', npm_config_fund: 'false' };
   const bundle = prepareRuntimeBundle({ sourceRoot, runtimeStore: join(root, 'runtimes'), install: directory => {
-    const result = spawnSync(process.execPath, [resolve(npmCli), 'ci', '--include=dev', '--include=optional', '--ignore-scripts', '--offline'], { cwd: directory, env, encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr || String(result.error));
-    const applied = prepareSandcastlePackage(directory);
-    assert.equal(applied.state, 'original'); assert.equal(applied.changed.length, 13);
+    // Exercise the activated production installer and patch ordering, changing only npm's offline boundary.
+    installRuntimePackages(directory, (_command, args, options) => {
+      const result = spawnSync(process.execPath, [resolve(npmCli), ...args, '--offline'], { cwd: options.cwd, env, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr || String(result.error));
+      return result;
+    });
     assert.deepEqual(prepareSandcastlePackage(directory), { state: 'patched', changed: [] });
   } });
   validateRuntimeBundle(bundle.directory); // Dependency identity includes the patched private bytes.

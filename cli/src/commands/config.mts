@@ -23,7 +23,7 @@ function rootFor(p: Paths, project?: string, cwd = process.cwd()): string {
     .sort((a, b) => b.length - a.length);
   if (matches.length) return matches[0];
   for (let dir = here;; dir = dirname(dir)) {
-    if (existsSync(join(dir, '.sandcastle', 'factory.toml'))) return dir;
+    if (existsSync(join(dir, '.factory', 'factory.toml'))) return dir;
     if (dirname(dir) === dir) throw Error('No project found');
   }
 }
@@ -36,9 +36,9 @@ export function configExplain(p: Paths, action: string | undefined, o: { project
     const root = rootFor(p, o.project, o.cwd);
     result.projectRoot = root;
     phase = 'configuration';
-    const configPath = resolveCheckoutPath(root, '.sandcastle/factory.toml', 'file');
-    if (configPath !== join(root, '.sandcastle', 'factory.toml')) throw Error('Configuration aliases are not supported by explanation');
-    const c = loadTomlConfig(join(root, '.sandcastle'));
+    const configPath = resolveCheckoutPath(root, '.factory/factory.toml', 'file');
+    if (configPath !== join(root, '.factory', 'factory.toml')) throw Error('Configuration aliases are not supported by explanation');
+    const c = loadTomlConfig(join(root, '.factory'));
     result.config = { path: configPath, schema: 2, sha256: createHash('sha256').update(readFileSync(configPath)).digest('hex') };
     result.warnings = c.warnings;
     const { sandboxSetup, ...sandbox } = c.config;
@@ -72,11 +72,11 @@ export function configExplain(p: Paths, action: string | undefined, o: { project
     const safeKey = key && key.length <= 100 && /^(?:version|tracker\.(?:kind|project|host|project_id)|agent\.family|workflow\.(?:mode|directory)|instructions\.(?:common|implementation|verification|analysis|recovery)|sandbox\.(?:image|setup(?:\[\d+\](?:\.(?:command|sudo|timeout_ms))?)?))$/.test(key) ? key : undefined;
     const advice: Record<string, string> = {
       'project resolution': 'Check the project path or registration.',
-      configuration: 'Check .sandcastle/factory.toml and its permissions.',
+      configuration: 'Check .factory/factory.toml and its permissions.',
       'instruction files': 'Check the configured instruction paths and their permissions.',
       'workflow runtime': 'Check the selected workflow runtime and its descriptor or manifest.',
     };
-    result.errors = [{ phase, ...(phase === 'configuration' ? { file: '.sandcastle/factory.toml' } : {}), ...(safeKey ? { key: safeKey } : {}), message: `Cannot validate ${phase}. ${advice[phase]}` }];
+    result.errors = [{ phase, ...(phase === 'configuration' ? { file: '.factory/factory.toml' } : {}), ...(safeKey ? { key: safeKey } : {}), message: `Cannot validate ${phase}. ${advice[phase]}` }];
   }
   const failed = (result.errors as unknown[]).length > 0;
   if (o.json) console.log(JSON.stringify(result, null, 2));

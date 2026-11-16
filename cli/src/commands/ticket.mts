@@ -8,7 +8,7 @@ import { controlAction } from '../../../board/execution-events.mts';
 // with none can still be commented on.
 // Posting takes the event with `beginDelivery` (one poster per event) and creates the comment through the project's own
 // tracker CLI on the host (`gh api` for TRACKER.kind "github", `glab api` otherwise, with that CLI's own login; kind, host
-// and project read from `.sandcastle/config.mts`). The body is the text followed by the event's hidden marker
+// and project read from `.factory/config.mts`). The body is the text followed by the event's hidden marker
 // (`markerFor`), so `ticket sync` can find a post whose outcome was lost. The outcome goes to `finishDelivery`:
 // `delivered` with the tracker's comment id; `pending` when the post never started (no tracker CLI, unreadable config);
 // `uncertain` when the CLI ran and failed or gave no comment id, since it may have posted (sync then searches for the
@@ -61,7 +61,7 @@ function actorName(): string {
 import { tomlIdentity } from '../../../orchestrator/project-config.mts';
 type Tracker = { kind: 'github' | 'gitlab'; host: string };
 
-/** The project's tracker kind and host from `.sandcastle/config.mts`, or why it can't be read. */
+/** The project's tracker kind and host from `.factory/config.mts`, or why it can't be read. */
 function trackerOf(ctx: ProjectContext): Tracker | string {
   const toml = tomlIdentity(ctx.scaffold);
   if (toml) return toml;
