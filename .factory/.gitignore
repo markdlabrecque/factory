@@ -1,0 +1,8 @@
+.env
+evidence/
+state/
+logs/
+board.html
+worktrees/
+diagnostic-sessions/
+node_modules/
