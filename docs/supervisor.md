@@ -1,6 +1,6 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The authority and configuration increments supply **import-safe records, validation, optional inert policy and a bounded authority investigation**, not a running supervisor. There is no new worker, action-mode switch, CLI, notification service, gate applicator or pilot rollout here. Existing Factory gates remain unchanged. The contract and policy modules ship in the complete runtime inventory; importing them performs no I/O.
+This is the authoritative reference for the project supervisor feature. The implemented foundation supplies **import-safe records, validation, optional inert policy, read-only work snapshots and a bounded authority investigation**, not a running supervisor. There is no new worker, action-mode switch, CLI, notification service, gate applicator or pilot rollout here. Existing Factory gates remain unchanged. The contract, policy and snapshot modules ship in the complete runtime inventory; importing the contract and policy modules performs no I/O.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. A future action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
@@ -98,6 +98,100 @@ The proposed host boundary is `HumanRequest` plus the following required semanti
 **Blocking prerequisite for dependent action work:** before gate review/application/action activation, implement and independently verify a real host escalation/outbox + approved unattended notification adapter + fail-closed stop/resumption integration. The owner/operator must choose/approve the actual channel and its acknowledgement/authentication contract; this investigation does not authorize a new service, credential, installation or Factory-wide policy change. The downstream review task must either deliver that approved source-only bridge with offline failure/crash/duplicate/stop fixtures, or remain held and call the available human escalation surface. The application/lifecycle/pilot tasks cannot treat merging this investigation as proof of delivery. Until that prerequisite and the reviewer worker evidence above are satisfied, the executable action set remains empty.
 
 This finding does not block source-only contracts, state, snapshot or configuration work that preserves observe-only/inert defaults. It **does** block dependent action activation. No live pilot, paid runtime probe, service/registry mutation, production access or secret retrieval was performed.
+
+## Read-only work snapshots and progress
+
+`cli/src/supervisor-facts.mts` exports `projectSupervisorFacts`, a pure bounded
+projection, and the separate explicit original-input/review-snapshot helpers.
+The projection asset ships in the complete selected runtime, including complete
+project overrides. `cli/src/supervisor-facts-host.mts` is the CLI-side local reader;
+it is not a selected-workflow entrypoint and enables no scheduler/CLI action.
+There is no implicit observation loop or tracker refresh. Omitted authorization,
+selection, runtime or readiness inputs remain unknown and inert.
+
+The facts envelope uses the shared `ProjectIdentity` and `Scope` and retains source
+provenance. It is deliberately **not** an approvable `Snapshot`: the shared review
+schema requires concrete material identities, which cannot be fabricated for
+missing sources. `supervisorReviewSnapshot` constructs that shared schema only
+from explicit material and original `Source` records, always in observe mode.
+Validation does not establish host provenance or permission.
+
+Each source records saved versus live origin, original observation time (local
+file mtime for disk records), and a canonical SHA-256 of the observed JSON value.
+This hash identifies the observation, not necessarily raw file bytes, proof
+freshness or current tracker truth. Combined claim/process observations are live
+and time-stamped with the injected host clock; saved delivery/assessment/readiness
+keep their own times. Missing records differ from unreadable, corrupt, oversized
+or otherwise unknown records. Unknown input cannot manufacture readiness,
+selection, merge progress or authorization. `launchAuthorized` is always false;
+even ready assessment/readiness is not admission authority.
+
+The host adapter reads bounded local run, admission, recovery, assessment and
+graph records. It uses `recoverySummary` and pure `projectFollowups` for existing
+attempt/preparation/budget/follow-up semantics, with injected owner observations.
+It does not use permissive run readers that silently drop corrupt records or
+perform crash reconciliation. Graph conflicts reuse the existing path-overlap
+rules; assessment dependencies remain saved three-state observations, not a new
+provider read. Predicted conflicts are not claims. The host supplies current
+selection, global/project authorization, runtime identity and saved readiness;
+the adapter does not execute project configuration or instruction modules.
+
+Status includes outstanding selected/run/claim/assessment/graph/budget tickets,
+stages, owner certainty, branch/evidence/proof references, attempt log/report
+references, preparation holds, dependency/conflict records, CI/delivery waits and
+confirmed merge progress. No log bodies are read. Classification distinguishes
+incomplete/stopped work, temporary waits, delivery waits, structured gate disputes,
+exhaustion, human holds, active owners and uncertainty. Open PR/CI waits take
+precedence over repair-budget exhaustion; they are not a recovery jam. A failed
+check/operator delivery checkpoint remains a human hold. Only a host run's
+`mergedAt` or a valid execution-bound merged delivery checkpoint confirms merge;
+a done stage, closed issue, PASS verdict or model claim does not. A saved merge
+observation is not a fresh before-merge authorization. Same-execution continuation
+is neither required nor implemented here; existing delivery records are preserved.
+
+Projection limits are 128 tickets/items per source, 2 MiB per host JSON file and
+512 characters per excerpt. Oversized source collections become unknown, not a
+silently complete partial list. A bounded union reports omitted tickets. Status
+omits arbitrary notes, requirements, setup/instruction/environment bodies and
+credentials. Safe opaque references retain original paths or HTTPS locations;
+URL credentials/query/fragment and secret-like paths are removed. Excerpts redact
+common credential assignments/tokens/private keys. Redaction is defense in depth,
+not proof arbitrary prose is secret-free: never feed secret bodies to status.
+Source values are not copied wholesale into the output.
+
+### Original context is a separate collection path
+
+`collectSupervisorTicketInput` calls the existing host-owned `freezeTicketInput`
+collector explicitly, never during status. The supplied tracker source must be
+read-only. It exhaustively retains child and immediate-parent requirements and
+ordered comments, coverage/provenance and exact rendered input/hash. It also
+returns separate child, parent and human-planning `Source` records with complete
+original bodies, not supervisor summaries. Established absent parent/comments
+are `not-applicable`; partial reads throw the existing ticket-input hold. The
+shared review bounds (256 Ki characters/source, 2 MiB total) are checked without
+silent truncation. Overflow holds for an authorized collection design; no
+summarized substitute approves review. Callers must retain originals separately
+and supply guidelines, Factory rules, exact gate/failure and prior decisions for
+future independent review. Status never contains this original-context bundle.
+
+Repeated local observation performs no tracker mutation, report publication,
+refresh, settlement, cleanup, admission, model call, budget charge/reset or
+project/run write. Observation cannot acknowledge a human request, discharge the
+missing notification bridge, prove reviewer provenance or authorize application.
+All downstream action prerequisites above remain in force.
+
+Focused offline evidence:
+
+```sh
+node --test cli/test/supervisor-facts.test.mts cli/test/recovery-followup.test.mts cli/test/recovery-command.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Unit matrices cover waits, stopped/dirty-work preservation, saved merge truth,
+failed/pending CI, unknown ownership/authorization, source failures, original
+parent/human context and redaction. One disposable filesystem boundary compares
+all fixture bytes/mtimes across repeated host reads. The existing runtime-bundle
+boundary imports the actual selected snapshot asset. No live tracker, Docker,
+paid agent, secret store or installed project is used.
 
 ## Reproduce offline evidence
 

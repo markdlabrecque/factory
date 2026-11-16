@@ -40,6 +40,9 @@ test('complete inventory, deterministic identity, private install and validation
   assert(!existsSync(join(a.directory, 'config.mts')));
   const layout = await import(pathToFileURL(join(a.directory, 'project-layout.mts')).href);
   assert.equal(layout.projectLayoutPaths('/fixture-project').assets, '/fixture-project/.factory');
+  const facts = await import(pathToFileURL(join(a.directory, 'supervisor-facts.mts')).href);
+  assert.equal(facts.safeExcerpt('token=private'), '[REDACTED]');
+  assert.equal(facts.observed('fixture', 'saved', '2026-11-16T00:00:00.000Z', []).status, 'known');
   assert.deepEqual(layout.projectLayoutPolicy({ kind: 'fresh' }, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
   for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
