@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Historical unsupported installer for retired copied .sandcastle workflows. Not a .factory setup path.
+# Retained for legacy diagnostics/retirement; use Factory CLI for supported projects. No conversion is provided.
 # Schedule dispatcher passes for one project on Linux (systemd user units). One timer per project;
 # all of them share the run cap and board through ~/.local/state/factory.
 #   install-dispatch.sh [<repo>] [--name <name>]   install or update; <repo> defaults to the current

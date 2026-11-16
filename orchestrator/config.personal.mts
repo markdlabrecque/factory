@@ -1,11 +1,8 @@
-// #137: LEGACY compatibility example only. New projects edit factory.toml; manual migration is reviewed.
-// Project settings shared by main.mts and dispatch.mts. Description declarations select implementation
-// models via modelAliases (#126); tracker model labels are neither required nor created.
-// Reference config for personal projects: GitHub issues and PRs, the Pi agent with Claude subscription
-// models (the pi-claude-subscription provider), and PRs merged automatically once CI passes. `factory init`
-// installs it into a project as .sandcastle/config.mts. The client / Affinity Bridge reference (GitLab,
-// Claude Code, MRs a person merges) is config.mts. Lines tagged `// factory:<name>` are the values
-// `factory init` fills in; keep each tag exactly once.
+// Historical executable personal configuration retained for diagnostic/legacy fixtures only.
+// Current Factory never loads this file or copies it during init. New projects use schema-v2
+// .factory/factory.toml; old executable settings and old/mixed layouts are unsupported, not converted.
+// The provider/model choices, paths and factory tags below describe the retired copied workflow,
+// not supported setup instructions. See docs/project-config.md for the current data-only contract.
 
 export const TRACKER = {
   kind: "github" as "gitlab" | "github", // picks tracker.github.mts

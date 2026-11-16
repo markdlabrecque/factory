@@ -5,4 +5,5 @@ logs/
 board.html
 worktrees/
 diagnostic-sessions/
+patches/
 node_modules/

@@ -64,8 +64,14 @@ The regular suite uses small owned synthetic byte fixtures, not a copy of the SD
 
 ```sh
 node --test cli/test/sandcastle-patch.test.mts cli/test/runtime-bundle.test.mts
-node --test --test-concurrency=4 orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
+bash scripts/test-shard.sh 1 4
+bash scripts/test-shard.sh 2 4
+bash scripts/test-shard.sh 3 4
+bash scripts/test-shard.sh 4 4
+timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
 ```
+
+The shard deadlines and separate browser-lifecycle gate are unchanged; see [TESTING.md](../TESTING.md#supported-layout-acceptance) for supported-layout preservation and the distinction between synthetic acceptance and actual-package evidence. The browser-lifecycle gate uses fixture processes, not the Docker image smoke.
 
 The exact-package check is separate and opt-in:
 

@@ -6,8 +6,7 @@
 // Factory CLI: install (from the checkout it is run from, install.mts), diagnose, control the board, reverse the manifest, register projects, init them, run a
 // dispatcher pass or one ticket for one project (the registered checkout you are in, or --project <name>), clear a
 // failed run so the next pass retries it, show the board service, scheduler health and timings and every run's stage, show a run's or repair's log, show, reset or review a project's self-recovery (`recovery status|reset|review`), classify a project's
-// .sandcastle copy against Factory's (`update --dry-run`: missing, outdated, edited, project-owned; writes nothing) and
-// create the missing and replace the unmodified outdated files (`update --apply`; edited and project-owned files are kept), and
+// data-only .factory assets (`update --dry-run` or `--apply`; both report without modifying project files), and
 // switch the scheduler (and each project's opt-in) on or off, and list or retire install-dispatch.sh's legacy timers (`legacy status|retire`), and
 // remove a project's merged, clean Factory branches and their Factory-owned worktrees (`clean`; remote branches untouched), and
 // save a manual comment on a ticket in the ticket journal, then post it to the tracker (`ticket comment`, #99), and

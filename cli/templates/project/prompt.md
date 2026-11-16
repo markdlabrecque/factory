@@ -19,7 +19,7 @@ You are an autonomous coding agent. Implement ONE ticket on the current branch, 
 2. **Plan** - keep the change as small as possible. Fix root causes, not symptoms.
 3. **Execute** - write a failing test first where the change warrants one (few, focused tests that guard behaviour likely to break; none that restate the implementation), then the implementation.
 4. **Check** - run the project's own tests for the area you changed, and confirm the change works.
-5. **Commit** - one commit, nothing uncommitted left behind. The message starts with `#{{ISSUE_IID}}: ` followed by a plain-English summary, and its body includes key decisions and any blockers. Never commit anything under `.sandcastle/`.
+5. **Commit** - one commit, nothing uncommitted left behind. The message starts with `#{{ISSUE_IID}}: ` followed by a plain-English summary, and its body includes key decisions and any blockers. Never commit private environment files, worktrees, evidence, logs, diagnostic sessions or saved state under `.factory/`. Tracked image/helper source assets are ordinary repository files.
 6. **Stop** - do not start another ticket.
 
 If the ticket needs no code change, or you are blocked, make no commit and explain why in your final message.
