@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { RUNTIME_ASSETS, validateRuntimeInventory } from '../src/runtime-assets.mts';
 import { installRuntimePackages, prepareRuntimeBundle, validateRuntimeBundle } from '../src/runtime-bundle.mts';
 import { installPackages as install } from './runtime-fixture.mts';
@@ -32,12 +32,15 @@ test('flat inventory contains executable imports and the source-layout admission
   }
 });
 
-test('complete inventory, deterministic identity, private install and validation', t => {
+test('complete inventory, deterministic identity, private install and validation', async t => {
   const f = fixture(); t.after(f.cleanup);
   const a = prepare(f), b = prepare(f);
   assert.equal(a.id, b.id); assert.deepEqual(validateRuntimeBundle(a.directory), a.manifest);
   assert.deepEqual(a.manifest.files.map(x => x.path), [...RUNTIME_ASSETS.map(x => x.destination)].sort());
   assert(!existsSync(join(a.directory, 'config.mts')));
+  const layout = await import(pathToFileURL(join(a.directory, 'project-layout.mts')).href);
+  assert.equal(layout.projectLayoutPaths('/fixture-project').assets, '/fixture-project/.factory');
+  assert.deepEqual(layout.projectLayoutPolicy({ kind: 'fresh' }, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
   for (const name of ['main.mts', 'model-policy.mts']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
   }
