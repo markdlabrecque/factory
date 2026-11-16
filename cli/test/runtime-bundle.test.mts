@@ -41,7 +41,7 @@ test('complete inventory, deterministic identity, private install and validation
   const layout = await import(pathToFileURL(join(a.directory, 'project-layout.mts')).href);
   assert.equal(layout.projectLayoutPaths('/fixture-project').assets, '/fixture-project/.factory');
   assert.deepEqual(layout.projectLayoutPolicy({ kind: 'fresh' }, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
-  for (const name of ['main.mts', 'model-policy.mts']) {
+  for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
   }
   assert(!readFileSync(join(a.directory, 'main.mts'), 'utf8').includes('sandcastle-islandhealth'));

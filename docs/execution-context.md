@@ -32,7 +32,7 @@ The context loads only `<project>/.factory/factory.toml`, schema version 2.
 The shared `project-layout.mts` inspection requires canonical project and asset directories and refuses all config symlinks, including contained aliases. Any `.sandcastle` entry or unknown inspection result holds new work without creating reports or artifacts.
 Missing or v1 settings are unsupported. Validation runs before credential,
 Docker or admission work. The data-only `config-read.mts` bridge returns allowlisted
-scalars, not generated shell or arbitrary settings JSON.
+metadata, not generated shell or arbitrary settings JSON. Its `supervisorPolicy` key returns only the validated supervisor policy JSON; it is not operator mode or admission.
 
 ## Code and project paths
 
@@ -54,7 +54,7 @@ Normal startup resolves the implementation tier once from the ticket's current
 description. The run stores `implementationModel` and `modelChoice`, including
 family, tier, source, resolved model, description revision and policy identity.
 Later assessment refreshes do not overwrite those attempt fields. Pi is fixed;
-analysis uses family Mid, verification and recovery use family Large with high
+analysis and supervisor diagnosis use family Mid; verification, recovery and independent gate review use family Large with high
 thinking. Recovery does not inherit the old implementer tier. Provider provisioning
 failure never selects another family or model. OpenAI token handoff and explicit
 subscription-extension loading retain their existing credential boundaries.
@@ -74,6 +74,14 @@ the entire selected inventory and settings before it can reuse a proof. Changing
 settings or templates requires fresh authority; TOML comments alone do not.
 Requirement, historical baseline, immutable verifier, independent browser probe,
 claim, exact-SHA CI and merge checks remain separate mandatory gates.
+
+### Supervisor and independent review inputs
+
+The additive roles `supervisor` and `gateReview` use the same contained Markdown loader as existing roles: common files first, canonical deduplication, literal frozen text and hashes, no secret-path aliases. Their ordered hash maps and normalized supervisor policy participate in `identity`/`policyIdentity` and `assertCurrent`. Edits invalidate authority without rewriting the existing snapshot. These are additional guidelines, not replacement Factory prompts or constraints.
+
+This context supplies only runtime/config/instruction identity. It does not collect or synthesize a supervisor snapshot or review input. A downstream worker must retain the original sources and separate guidelines/Factory constraints required by committed `supervisor-contract.mts`; summaries and additive hashes alone cannot replace them. No supervisor/review prompt or worker is introduced here.
+
+`supervisor-policy.mts` and `supervisor-contract.mts` ship through the single complete runtime inventory, including copied fixture installs and explicit project overrides. Assembly, manifest regeneration, selection and override recovery review already consume that inventory; a missing/changed supervisor module cannot borrow installed code. Future modules/entrypoints/prompts must be added when their actual files land, then receive new complete manifest identity and renewed override review. No absent future asset names or mixed-runtime fallback are supported.
 
 ## Process ownership
 

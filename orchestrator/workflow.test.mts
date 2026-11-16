@@ -52,10 +52,13 @@ test('complete explicit override owns every helper and dependencies; edits need 
   assert.equal(w.tsx, join(f.override, 'node_modules/tsx/dist/cli.mjs'));
   assert.match(recoveryCopyProblem(f.p, f.root)!, /not been reviewed/);
   recordReview(f.p, f.root); assert.equal(recoveryCopyProblem(f.p, f.root), null);
-  writeFileSync(join(f.override, 'prompt.recover.md'), 'changed repair policy');
-  assert.match(recoveryCopyProblem(f.p, f.root)!, /mismatch/);
-  f.publish(); assert.match(recoveryCopyProblem(f.p, f.root)!, /changed since recovery review/);
-  recordReview(f.p, f.root); assert.equal(recoveryCopyProblem(f.p, f.root), null);
+  for (const asset of ['prompt.recover.md', 'supervisor-contract.mts', 'supervisor-policy.mts', 'model-policy.mts']) {
+    const path = join(f.override, asset);
+    writeFileSync(path, readFileSync(path, 'utf8') + '\n// changed selected policy\n');
+    assert.match(recoveryCopyProblem(f.p, f.root)!, /mismatch/);
+    f.publish(); assert.match(recoveryCopyProblem(f.p, f.root)!, /changed since recovery review/);
+    recordReview(f.p, f.root); assert.equal(recoveryCopyProblem(f.p, f.root), null);
+  }
   writeFileSync(f.config, factoryToml('owner/repo'));
   assert.equal(recoveryCopyProblem(f.p, f.root), null);
   f.selectProject();
@@ -64,7 +67,7 @@ test('complete explicit override owns every helper and dependencies; edits need 
   assert.match(recoveryCopyProblem(f.p, f.root)!, /changed since recovery review/, 'same code at another root cannot reuse review');
 });
 
-for (const corruption of ['missing-manifest', 'unknown-version', 'unknown-inventory', 'missing-inventory-file', 'extra-inventory-file', 'illegal-inventory-path', 'missing-helper', 'stale-hash', 'missing-lock', 'missing-dependencies', 'missing-transitive', 'changed-dependency', 'dangling-source-link', 'escaping-source-link', 'internal-source-link', 'escaping-dependency-link', 'dangling-dependency-link']) {
+for (const corruption of ['missing-manifest', 'unknown-version', 'unknown-inventory', 'missing-inventory-file', 'extra-inventory-file', 'illegal-inventory-path', 'missing-helper', 'missing-supervisor-policy', 'stale-hash', 'missing-lock', 'missing-dependencies', 'missing-transitive', 'changed-dependency', 'dangling-source-link', 'escaping-source-link', 'internal-source-link', 'escaping-dependency-link', 'dangling-dependency-link']) {
   test(`broken override fails without fallback: ${corruption}`, t => {
     const f = fixture(t); f.selectProject();
     const file = join(f.override, 'runtime-manifest.json'), manifest = JSON.parse(readFileSync(file, 'utf8'));
@@ -75,6 +78,7 @@ for (const corruption of ['missing-manifest', 'unknown-version', 'unknown-invent
     if (corruption === 'extra-inventory-file') { manifest.files.push({ path: 'unknown.mts', sha256: 'a'.repeat(64), mode: 420 }); writeFileSync(file, JSON.stringify(manifest)); }
     if (corruption === 'illegal-inventory-path') { manifest.files[0].path = '../outside.mts'; writeFileSync(file, JSON.stringify(manifest)); }
     if (corruption === 'missing-helper') rmSync(join(f.override, 'recovery-analysis-contract.mts'));
+    if (corruption === 'missing-supervisor-policy') rmSync(join(f.override, 'supervisor-policy.mts'));
     if (corruption === 'stale-hash') writeFileSync(join(f.override, 'dispatch.mts'), 'changed');
     if (corruption === 'missing-lock') rmSync(join(f.override, 'package-lock.json'));
     if (corruption === 'missing-dependencies') rmSync(join(f.override, 'node_modules'), { recursive: true });
