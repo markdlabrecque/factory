@@ -1,10 +1,10 @@
 ---
-name: sandcastle-setup
+name: factory-setup
 description: Set up Factory project environments and Sandcastle image layers for GitHub or GitLab, including Pi, Playwright, optional web, Drupal, WordPress and ddev compatibility. Use when preparing or adapting a project's Factory sandbox.
 ---
 
 <!-- Project environment setup uses v2 data and a selected shared runtime; custom executable workflows require a complete reviewed override. -->
-# Sandcastle setup
+# Factory setup
 
 ## Detect and confirm
 

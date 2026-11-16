@@ -6,7 +6,7 @@ Use `gh-axi` for ordinary GitHub API operations, including repositories, issues,
 
 ## Documentation
 
-Update the authoritative documentation for the behavior changed, in the same change. Do not edit `README.md`, `orchestrator/ADAPTING.md` or `skills/sandcastle-setup/SKILL.md` merely because another file changed. Update them when their own instructions or claims become inaccurate. Keep the top-of-file responsibility comments accurate in touched source files; describe current behavior rather than appending ticket history. Include required documentation paths in the ticket footprint. Markdown files receive the same conflict protection as code.
+Update the authoritative documentation for the behavior changed, in the same change. Do not edit `README.md`, `orchestrator/ADAPTING.md` or `skills/factory-setup/SKILL.md` merely because another file changed. Update them when their own instructions or claims become inaccurate. Keep the top-of-file responsibility comments accurate in touched source files; describe current behavior rather than appending ticket history. Include required documentation paths in the ticket footprint. Markdown files receive the same conflict protection as code.
 
 Use this table to find the authoritative document, not as a list of mandatory edits.
 
@@ -15,7 +15,7 @@ Use this table to find the authoritative document, not as a list of mandatory ed
 | Operator CLI, recovery and scheduler contracts | `docs/factory-cli.md` |
 | Configuration schema | `docs/project-config.md` |
 | Workflow adaptation and complete overrides | `orchestrator/ADAPTING.md` |
-| Environment and setup layers | `skills/sandcastle-setup/SKILL.md` |
+| Environment and setup layers | `skills/factory-setup/SKILL.md` |
 | Test boundaries and commands | `TESTING.md` |
 | Overview and quick start | `README.md` |
 
