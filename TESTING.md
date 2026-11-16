@@ -50,6 +50,24 @@ node --test cli/test/documentation.test.mts cli/test/documentation-cli.test.mts 
 
 Keep tracker, provider, authentication, Docker and service-manager boundaries fixture-owned and fail on unexpected calls. Do not invoke real npm, install packages, use credentials, contact a registry or service, or start a real agent. Local Git repositories and local Node children are permitted fixture boundaries. `cli/test/shared-runtime.test.mts` covers normal execution, recovery, two data-only projects, override refusal and A/B publication with those stubs.
 
+## Supervisor authority contracts
+
+```sh
+node --test orchestrator/supervisor-contract.test.mts orchestrator/models.test.mts cli/test/runtime-bundle.test.mts
+```
+
+These unit tests prove strict bounded records, exact input/proposal identity, material
+freshness, independent-review provenance, explicit denial-state refusal, no reviewer
+shopping, protected-policy escalation and actionable pending notification shapes.
+One minimal process-boundary case passes the existing Pi argument builder's fixed
+Large-role argv and frozen stdin to local Node recorder children. It runs no Pi,
+SDK, paid model, tracker, Docker or credential operation. Separate processes and
+`--no-session` argv are not proof of live model behavior or an available notification
+API. The [supervisor contract](docs/supervisor.md) records the missing unattended
+host notification/stop bridge and reviewer worker prerequisites; these remain
+blocking for downstream action activation. The complete runtime fixtures include
+the new import-safe contract module without enabling any supervisor execution.
+
 ## Runtime bundle preparation
 
 ```sh
