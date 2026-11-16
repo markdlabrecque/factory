@@ -20,8 +20,10 @@ test('supervisor Mid and independent review Large are fixed in each configured f
     assert.equal(modelForRole(family, 'analysis', tier).tier, 'mid');
   }
 });
-test('paid preflight holds observe/stop, disabled/unregistered, missing limits and unknown global admission', () => {
+test('paid preflight allows bounded observe diagnosis only, holds reviews/stop and unknown admission', () => {
   assert.equal(supervisorCallHold(policy, 'diagnosis', input()), undefined);
+  assert.equal(supervisorCallHold(policy, 'diagnosis', { ...input(), mode: 'observe' }), undefined);
+  assert.ok(supervisorCallHold(policy, 'diagnosis', { ...input(), mode: 'stopped' }));
   for (const mode of ['observe','stopped'] as const) assert.ok(supervisorCallHold(policy, 'review', { ...input(), mode }));
   assert.ok(supervisorCallHold({ enabled: false }, 'diagnosis', input()));
   assert.ok(supervisorCallHold({ enabled: true }, 'diagnosis', input()));

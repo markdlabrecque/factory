@@ -38,7 +38,8 @@ export interface Intent {
   inputHash: string; reviewId: string; runId: string; fence: string; expiresAt: string;
   state: 'proposed' | 'authorized' | 'applied' | 'refused' | 'cancelled';
 }
-/** Host-owned outbox request, not a claim that an agent called a tool. Persist before attempting notification. */
+/** Host-owned pending outbox, not delivered notification. proposalId binds an exact gate proposal or retained
+ * proposal-only diagnosis diagnostic; neither grants action authority. Persist before notification. */
 export interface HumanRequest {
   version: 1; id: string; project: ProjectIdentity; scope: Scope; incidentId: string; proposalId: string;
   reason: 'review-denied' | 'factory-wide' | 'missing-primitive' | 'authority-uncertain';
