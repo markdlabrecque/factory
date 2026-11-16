@@ -23,10 +23,10 @@ test('profiles normalize independently of executable legacy settings', () => {
     assert.equal(c.TRACKER.kind, profile === 'personal' ? 'github' : 'gitlab');
   });
 });
-test('absent and v1 configuration require manual migration', () => {
+test('absent and v1 configuration fail closed without conversion', () => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-config-'));
-  try { assert.throws(() => loadTomlConfig(dir), /missing version 2.*manually migrate/); } finally { rmSync(dir, { recursive: true }); }
-  fixture('version = 1', dir => assert.throws(() => loadTomlConfig(dir), /version.*manually migrate/));
+  try { assert.throws(() => loadTomlConfig(dir), /missing version 2/); } finally { rmSync(dir, { recursive: true }); }
+  fixture('version = 1', dir => assert.throws(() => loadTomlConfig(dir), /version.*no conversion/));
 });
 test('present unreadable/dangling files fail rather than opting out', () => {
   const dir = mkdtempSync(join(tmpdir(),'factory-unreadable-'));

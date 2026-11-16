@@ -24,11 +24,11 @@ function fixture(t: any) {
   const previous = process.env.SANDCASTLE_STATE_DIR;
   process.env.SANDCASTLE_STATE_DIR = p.state;
   t.after(() => { if (previous === undefined) delete process.env.SANDCASTLE_STATE_DIR; else process.env.SANDCASTLE_STATE_DIR = previous; });
-  fs.mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  fs.mkdirSync(join(root, '.factory'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  fs.writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/project'));
+  fs.writeFileSync(join(root, '.factory/factory.toml'), factoryToml('me/project'));
   // Executable overrides must never be imported by diagnostics.
-  fs.writeFileSync(join(root, '.sandcastle/config.mts'), 'throw Error("EXECUTABLE IMPORTED");');
+  fs.writeFileSync(join(root, '.factory/config.mts'), 'throw Error("EXECUTABLE IMPORTED");');
   addProject(p, root); fs.mkdirSync(p.state, { recursive: true });
   bindExecution(root, {}, { paths: p, overlays: false });
   const output: string[] = []; t.mock.method(console, 'log', (s: string) => output.push(s));
@@ -71,8 +71,8 @@ test('readiness guide commands, JSON subsets, selectors and exit semantics match
   subset(results[2], JSON.parse(block('readiness-ticket-json', 'json')));
   subset(results[3], JSON.parse(block('readiness-active-json', 'json')));
   assert.equal(fs.existsSync(join(f.p.state, 'readiness')), false, 'doctor must not publish');
-  assert.deepEqual(fs.readdirSync(join(f.root, '.sandcastle/evidence')), []);
-  for (const selector of [f.root, join(f.root, '.sandcastle')]) {
+  assert.deepEqual(fs.readdirSync(join(f.root, '.factory/evidence')), []);
+  for (const selector of [f.root, join(f.root, '.factory')]) {
     const result = cli(['doctor', '--project', selector, '--json']);
     assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).project.root, f.root);
   }
@@ -81,8 +81,8 @@ test('readiness guide commands, JSON subsets, selectors and exit semantics match
   for (const args of [['doctor', '--project', 'not registered', '--json'], ['doctor', 'unexpected', '--project', 'project with spaces']]) {
     const result = cli(args); assert.equal(result.status, 1); assert.ok(result.stderr); assert.equal(result.stdout, '');
   }
-  fs.rmdirSync(join(f.root, '.sandcastle/evidence'));
-  fs.symlinkSync(f.p.state, join(f.root, '.sandcastle/evidence'));
+  fs.rmdirSync(join(f.root, '.factory/evidence'));
+  fs.symlinkSync(f.p.state, join(f.root, '.factory/evidence'));
   const failed = cli(['doctor', '--project', 'project with spaces', '--probe-filesystem', '--json']);
   assert.equal(failed.status, 1); const failure = JSON.parse(failed.stdout).readiness.report;
   assert.equal(failure.status, 'blocked'); assert.ok(failure.checks.some((c: any) => c.id === 'evidence' && c.errno === 'EUNSAFEPATH'));
@@ -98,10 +98,10 @@ test('doctor CLI accepts explicit project/probe/json and rejects stray positiona
     { cwd: f.p.home, env: { ...process.env, FACTORY_HOME: f.p.home, PATH: '' }, encoding: 'utf8' });
   const passive = cli('--project', 'project with spaces', '--json');
   assert.equal(passive.status, 0, passive.stderr); assert.equal(JSON.parse(passive.stdout).writeCapability, 'untested');
-  assert.equal(fs.existsSync(join(f.root, '.sandcastle/logs')), false);
+  assert.equal(fs.existsSync(join(f.root, '.factory/logs')), false);
   const bad = cli('unexpected', '--project', 'project with spaces', '--probe-filesystem');
   assert.equal(bad.status, 1); assert.match(bad.stderr, /Unexpected arguments/);
-  assert.equal(fs.existsSync(join(f.root, '.sandcastle/logs')), false);
+  assert.equal(fs.existsSync(join(f.root, '.factory/logs')), false);
   const active = cli('--project', 'project with spaces', '--probe-filesystem', '--json');
   assert.equal(active.status, 0, active.stderr); assert.equal(JSON.parse(active.stdout).readiness.report.phase, 'active');
 });
@@ -180,7 +180,7 @@ test('passive status, ticket show and doctor do not mutate, read secrets or call
   assert.equal(await doctor(f.p, undefined, { project: 'project with spaces', json: true }), 0);
   const data = JSON.parse(f.out()); assert.equal(data.writeCapability, 'untested'); assert.equal(data.readiness.report.phase, 'passive');
   assert.deepEqual(fs.readFileSync(report), before);
-  assert.equal(fs.existsSync(join(f.root, '.sandcastle/logs')), false);
+  assert.equal(fs.existsSync(join(f.root, '.factory/logs')), false);
   t.mock.restoreAll(); syncBuiltinESMExports();
 });
 test('only matching recent active write cycles establish an observed write capability, never passive overwrites', async t => {
@@ -192,7 +192,7 @@ test('only matching recent active write cycles establish an observed write capab
   assert.equal(await doctor(f.p, undefined, { project: 'project with spaces', json: true }), 0);
   const data = JSON.parse(f.out()); assert.equal(data.writeCapability, 'observed recently, not authorization');
   assert.equal(data.readiness.report.phase, 'passive'); assert.deepEqual(fs.readFileSync(file), before);
-  fs.writeFileSync(join(f.root, '.sandcastle/factory.toml'), factoryToml('me/project') + '\n# changed identity\n');
+  fs.writeFileSync(join(f.root, '.factory/factory.toml'), factoryToml('me/project') + '\n# changed identity\n');
   assert.equal(await doctor(f.p, undefined, { project: 'project with spaces', json: true }), 0);
   assert.equal(JSON.parse(f.out()).writeCapability, 'untested'); assert.deepEqual(fs.readFileSync(file), before);
 });
@@ -214,7 +214,7 @@ test('default installation doctor keeps project observations passive with fake p
   try {
     assert.equal(await doctor(f.p, undefined, { cwd: f.root }), 1, 'missing installation manifest still fails as before');
     const text = f.out(); assert.match(text, /Filesystem observation: unknown \| passive/); assert.match(text, /Write capability: untested/);
-    assert.equal(fs.existsSync(join(f.root, '.sandcastle/logs')), false);
+    assert.equal(fs.existsSync(join(f.root, '.factory/logs')), false);
     assert.ok(calls.length); assert.ok(calls.every(c => !/docker (?:run|start)|\b(?:op|pi|claude|gh|glab) /.test(c)));
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
 });
@@ -222,9 +222,9 @@ test('explicit active doctor performs owned probes, does not publish, and failur
   const f = fixture(t);
   assert.equal(await doctor(f.p, undefined, { project: f.root, probeFilesystem: true, json: true }), 0);
   const data = JSON.parse(f.out()); assert.equal(data.writeCapability, 'ready');
-  assert.deepEqual(fs.readdirSync(join(f.root, '.sandcastle/logs')), []);
+  assert.deepEqual(fs.readdirSync(join(f.root, '.factory/logs')), []);
   assert.equal(fs.existsSync(join(f.p.state, 'readiness')), false);
-  fs.rmdirSync(join(f.root, '.sandcastle/logs')); fs.symlinkSync(f.p.state, join(f.root, '.sandcastle/logs'));
+  fs.rmdirSync(join(f.root, '.factory/logs')); fs.symlinkSync(f.p.state, join(f.root, '.factory/logs'));
   assert.equal(await doctor(f.p, undefined, { project: f.root, probeFilesystem: true, json: true }), 1);
   const failed = JSON.parse(f.out()).readiness.report.checks.find((c: any) => c.id === 'logs');
   assert.equal(failed.status, 'blocked'); assert.equal(failed.errno, 'EUNSAFEPATH'); assert.equal(failed.operation, 'lstat'); assert.match(failed.nextAction, /Inspect lstat/);

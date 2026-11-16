@@ -38,7 +38,7 @@ test("a pass moves a stopped card whose work merged outside Factory to done, kee
   const fake = join(home, "fake");
   mkdirSync(fake);
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
-    patch: { stage: "stopped", note: "verifier said FAIL", verdict: "FAIL", starting: undefined, branch: "7-fix-login", base: "main" } });
+    patch: { stage: "stopped", note: "verifier said FAIL", verdict: "FAIL", starting: undefined, branch: "7-fix-login", base: "main", evidenceDir: join(root, '.factory/evidence/7/prior-execution') } });
   const runtime = bindExecution(root);
   const pass = (extra: Record<string, string> = {}) => spawnSync(process.execPath, [join(runtime.directory, 'dispatch.mts'), "--base", "main", "--max", "3"], {
     cwd: root, encoding: "utf8",

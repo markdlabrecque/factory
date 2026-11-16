@@ -29,7 +29,7 @@ export function projectFixture(p: Paths, root: string) {
       if(!existsSync(target) || ['package.json','package-lock.json'].includes(a.destination)) {
         // Scaffold fixtures may stage their initial executable stubs beside project data.
         // Only inventory assets cross this boundary, never config, logs or arbitrary helpers.
-        const staged=join(root,'.sandcastle',a.destination);
+        const staged=join(root,'.factory',a.destination);
         const from=existsSync(staged) && !['package.json','package-lock.json'].includes(a.destination)
           ? staged : join(source,a.source);
         mkdirSync(dirname(target),{recursive:true});cpSync(from,target);
@@ -37,7 +37,7 @@ export function projectFixture(p: Paths, root: string) {
     }
     if(!existsSync(join(code,'node_modules'))) installPackages(code);
   }
-  const config=join(root,'.sandcastle','factory.toml');
+  const config=join(root,'.factory','factory.toml');
   let text=readFileSync(config,'utf8');
   if(!/^\[workflow\]/m.test(text)) text+='\n[workflow]\nmode = "project"\ndirectory = ".factory-workflow"\n';
   writeFileSync(config,text);

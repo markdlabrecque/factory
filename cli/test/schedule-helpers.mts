@@ -25,7 +25,7 @@ export type RepoOptions = { script?: string; current?: boolean; push?: boolean; 
 /** A registered project `<home>/work/<name>` on `main`, with a pushed `main` on a bare origin unless `push` is false. */
 export function repo(p: ReturnType<typeof paths>, name: string, o: RepoOptions = {}): string {
   const root = join(p.home, 'work', name);
-  mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  mkdirSync(join(root, '.factory'), { recursive: true });
   git(root, 'init', '-q', '-b', 'main');
   git(root, 'commit', '-q', '--allow-empty', '-m', 'init');
   if (o.push !== false) {
@@ -37,7 +37,7 @@ export function repo(p: ReturnType<typeof paths>, name: string, o: RepoOptions =
   }
   mkdirSync(join(root, '.factory-workflow'), { recursive: true });
   writeFileSync(join(root, '.factory-workflow/dispatch.sh'), o.script ?? '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`${name}/${name}`));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml(`${name}/${name}`));
   const current = o.current !== false;
   writeFileSync(join(root, '.factory-workflow/dispatch.mts'), current ? 'reserveRun(iid, pid);\n' : 'spawn();\n');
   writeFileSync(join(root, '.factory-workflow/board.mts'), current ? 'export function reserveRun() {}\n' : '');
@@ -57,7 +57,8 @@ function commandStub(t: TestContext, p: ReturnType<typeof paths>, name: 'systemc
   const stub = join(dirname(fileURLToPath(import.meta.url)), `stubs/${name}`);
   writeFileSync(join(bin, name), readFileSync(stub));
   chmodSync(join(bin, name), 0o755);
-  const env: Record<string, string> = { STUB_DIR: dir, ...extra, PATH: `${bin}:${process.env.PATH}` };
+  const env: Record<string, string> = { STUB_DIR: dir, ...extra, PATH: `${bin}:${process.env.PATH}`,
+    NODE_OPTIONS: `--import=${new URL('./fixtures/package-guard.mjs', import.meta.url).href}` };
   writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nconst {installPackages}=await import(${JSON.stringify(new URL('./runtime-fixture.mts', import.meta.url).href)}); if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['ci','--include=dev','--include=optional','--ignore-scripts']))process.exit(99); installPackages(process.cwd());\n`, {mode:0o755});
   const stateFile = join(dir, 'state.json');
   const log = () => existsSync(join(dir, 'calls.jsonl')) ? readFileSync(join(dir, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
@@ -123,7 +124,7 @@ ticket.unref();
 writeFileSync(dir + 'held.json', JSON.stringify({ dispatcher: process.pid, shell: shell.pid, analysis: analysis.pid, ticket: ticket.pid }));
 setInterval(() => {}, 1000);
 `;
-export const QUICK = `#!/bin/sh\necho "$@" > "$PWD/.sandcastle/quick.args"\npwd > "$PWD/.sandcastle/quick.cwd"\n: > "$PWD/.sandcastle/ran"\nexit "\${QUICK_EXIT:-0}"\n`;
-export const heldScript = (root: string) => { writeFileSync(join(root, '.sandcastle/held.mjs'), HELD); return `#!/bin/sh\nexec "${process.execPath}" "$PWD/.sandcastle/held.mjs" "$@"\n`; };
+export const QUICK = `#!/bin/sh\necho "$@" > "$PWD/.factory/quick.args"\npwd > "$PWD/.factory/quick.cwd"\n: > "$PWD/.factory/ran"\nexit "\${QUICK_EXIT:-0}"\n`;
+export const heldScript = (root: string) => { writeFileSync(join(root, '.factory/held.mjs'), HELD); return `#!/bin/sh\nexec "${process.execPath}" "$PWD/.factory/held.mjs" "$@"\n`; };
 
-export const held = (root: string): Record<'dispatcher' | 'shell' | 'analysis' | 'ticket', number> => JSON.parse(readFileSync(join(root, '.sandcastle/held.json'), 'utf8'));
+export const held = (root: string): Record<'dispatcher' | 'shell' | 'analysis' | 'ticket', number> => JSON.parse(readFileSync(join(root, '.factory/held.json'), 'utf8'));

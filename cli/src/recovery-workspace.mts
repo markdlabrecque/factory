@@ -8,9 +8,9 @@
 // - an origin copy of it (as last fetched) that the local branch already contains, so nobody else's pushed commits are
 //   overwritten or dropped;
 // - at most one worktree with the branch checked out, and only inside Sandcastle's worktree folder
-//   (`<root>/.sandcastle/worktrees/` by default), present on disk. A dirty worktree is accepted and its changes are
+//   (`<root>/.factory/worktrees/` by default), present on disk. A dirty worktree is accepted and its changes are
 //   listed so the repair keeps them; none means Sandcastle checks the branch out afresh;
-// - the record's evidence folder, when set, being the ticket's own `<root>/.sandcastle/evidence/<ticket>`.
+// - the record's evidence folder, when set, being the ticket's own `<root>/.factory/evidence/<ticket>`.
 // Anything else (no recorded branch, a diverged origin copy, the branch checked out in the project's main checkout or a
 // worktree outside that folder, a missing registered worktree) is ambiguous ownership: the attempt is refused with the
 // reason and nothing is touched. Read-only; the recovery launcher (#60) calls it before claimRecovery.
@@ -20,7 +20,7 @@
 // receipt and the branch or worktree creation) is reconciled: what Git now shows is returned under `reconcile` for the
 // launcher to fill in, and a branch that was never created is refused. Without a receipt (a run stopped before the
 // upgrade), only the exact recorded branch is accepted, with at most the one canonical worktree
-// (`.sandcastle/worktrees/<branch>`) whose Git common directory is the project's; `adopt` tells the launcher to write
+// (`.factory/worktrees/<branch>`) whose Git common directory is the project's; `adopt` tells the launcher to write
 // the receipt. A branch only on origin is refused with `remoteOnly`; fetchRecordedBranch then fetches exactly that branch
 // and creates the local ref without force (refusing several matching refs or a mismatch), and the check runs again.
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -28,6 +28,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, isAbsolute } from 'node:path';
 import type { RunState } from '../../board/board.mts';
 import { gitCommonDir } from '../../orchestrator/ownership.mts';
+import { projectLayoutPaths } from '../../orchestrator/project-layout.mts';
 import type { Receipt } from '../../orchestrator/ownership.mts';
 
 export type ResumeTarget = {
@@ -94,7 +95,7 @@ function validateTarget(root: string, run: Pick<RunState, 'iid' | 'branch' | 'ba
       !ok(root, ['rev-parse', '--verify', '--quiet', `${run.base}^{commit}`])) {
     return no('base-invalid', `recorded base ${run.base} is not an existing commit or branch`);
   }
-  const evidenceDir = resolve(root, '.sandcastle/evidence', run.iid);
+  const evidenceDir = resolve(projectLayoutPaths(root).evidence, run.iid);
   if (run.evidenceDir && real(run.evidenceDir) !== real(evidenceDir)) {
     return no('evidence-mismatch', `recorded evidence folder ${run.evidenceDir} is not the ticket's own (${evidenceDir})`);
   }
@@ -132,7 +133,7 @@ function validateTarget(root: string, run: Pick<RunState, 'iid' | 'branch' | 'ba
   if (receipt && !receipt.branchSha) reconcile.branchSha = tip;
   const extra = { ...(receipt ? {} : { adopt: true as const }), ...(Object.keys(reconcile).length ? { reconcile } : {}) };
 
-  const owned = real(o.worktreeDir ?? join(root, '.sandcastle/worktrees'));
+  const owned = real(o.worktreeDir ?? projectLayoutPaths(root).worktrees);
   const holding = worktrees(root).filter(w => w.branch === `refs/heads/${branch}`);
   if (holding.length > 1) return no('worktree-not-owned', `branch ${branch} is checked out in several worktrees: ${holding.map(w => w.path).join(', ')}`);
   const held = holding[0];

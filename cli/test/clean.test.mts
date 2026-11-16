@@ -26,25 +26,25 @@ function fixture(t: TestContext) {
   mkdirSync(origin);
   sh(origin, 'init', '-q', '--bare', '-b', 'main');
   const root = join(home, 'site');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true });
+  mkdirSync(join(root, '.factory'), { recursive: true });
   const git = (...args: string[]) => sh(root, ...args);
   git('init', '-q', '-b', 'main');
-  writeFileSync(join(root, '.gitignore'), '.sandcastle/\n');
+  writeFileSync(join(root, '.gitignore'), '.factory/\n');
   git('add', '.gitignore');
   git('commit', '-q', '-m', 'init');
   git('remote', 'add', 'origin', origin);
   git('push', '-q', 'origin', 'main');
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   mkdirSync(p.state, { recursive: true });
   const record = (iid: number, extra: Record<string, unknown>) => {
     const now = new Date().toISOString();
     writeFileSync(join(p.state, `me_site--${iid}.json`), JSON.stringify({ iid: String(iid), project: 'me/site', stage: 'done',
-      stageSince: now, startedAt: now, updatedAt: now, pid: process.pid, base: 'main', ...extra }));
+      stageSince: now, startedAt: now, updatedAt: now, pid: process.pid, base: 'main', evidenceDir: join(root, '.factory/evidence', String(iid), 'prior-execution'), ...extra }));
   };
-  /** A Factory branch `<iid>-work` with one commit, made in its worktree under .sandcastle/worktrees/ (or none). */
+  /** A Factory branch `<iid>-work` with one commit, made in its worktree under .factory/worktrees/ (or none). */
   const branch = (iid: number, o: { worktree?: boolean; push?: boolean } = {}) => {
-    const name = `${iid}-work`, wt = join(root, '.sandcastle/worktrees', name);
+    const name = `${iid}-work`, wt = join(root, '.factory/worktrees', name);
     git('worktree', 'add', '-q', '-b', name, wt, 'main');
     writeFileSync(join(wt, `f${iid}.txt`), `${iid}\n`);
     sh(wt, 'add', '.'); sh(wt, 'commit', '-q', '-m', `#${iid}`);
@@ -55,6 +55,19 @@ function fixture(t: TestContext) {
   const has = (b: string) => git('branch', '--list', b) !== '';
   return { home, p, root, git, sh, origin, record, branch, has };
 }
+
+test('cleanup never adopts old-layout or unidentified merged records', t => {
+  const f = fixture(t);
+  for (const iid of [7, 8]) {
+    const branch = f.branch(iid, {push:true,worktree:false});
+    f.record(iid, {branch:branch.name,mergedAt:'2026-11-12T00:00:00Z',evidenceDir:iid === 7 ? join(f.root,'.sandcastle/evidence/7') : undefined});
+  }
+  const lines: string[] = []; t.mock.method(console, 'log', line => lines.push(line));
+  assert.equal(clean(f.p, {cwd:f.root}), 0);
+  assert.ok(f.has('7-work') && f.has('8-work'));
+  assert.equal(lines.filter(line => /cross-layout evidence identity/.test(line)).length, 2);
+  assert.equal(existsSync(join(f.root,'.sandcastle')), false);
+});
 
 test('removes merged, clean Factory branches and their worktrees, and keeps anything that would lose work', t => {
   const f = fixture(t);

@@ -14,12 +14,12 @@ import { freezeTicketInput, TicketInputHold } from './ticket-input.mts';
 function fixture(t: any) {
   const home = mkdtempSync(join(tmpdir(), 'host-readiness-')); t.after(() => rmSync(home, { recursive: true, force: true }));
   const root = join(home, 'project'), runtime = join(home, 'runtime'), state = join(home, 'state');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true }); mkdirSync(runtime); mkdirSync(state);
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('owner/repo'));
+  mkdirSync(join(root, '.factory'), { recursive: true }); mkdirSync(runtime); mkdirSync(state);
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('owner/repo'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe', encoding: 'utf8' }).trim();
   git('init', '-b', 'main'); git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'base');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-  const input = () => ({ projectRoot: root, runtimeRoot: runtime, runtimeIdentity: 'fixture-runtime', runtimeDependencies: 'fixture-dependencies', config: loadTomlConfig(join(root, '.sandcastle')), stateRoot: state, base: 'main' });
+  const input = () => ({ projectRoot: root, runtimeRoot: runtime, runtimeIdentity: 'fixture-runtime', runtimeDependencies: 'fixture-dependencies', config: loadTomlConfig(join(root, '.factory')), stateRoot: state, base: 'main' });
   return { home, root, runtime, state, git, input };
 }
 test('fresh project observations permit dirty checkout and unrelated linked worktree; ticket conflicts stay local', async t => {
@@ -37,7 +37,7 @@ test('fresh project observations permit dirty checkout and unrelated linked work
 });
 test('late path replacement and branch creation are detected; next fresh pass recovers without repairing or deleting', async t => {
   const f = fixture(t); assert.equal((await projectLaunchReadiness(f.input())).status, 'ready');
-  const worktrees = join(f.root, '.sandcastle/worktrees'); rmSync(worktrees, { recursive: true }); symlinkSync(f.runtime, worktrees);
+  const worktrees = join(f.root, '.factory/worktrees'); rmSync(worktrees, { recursive: true }); symlinkSync(f.runtime, worktrees);
   assert.match(ticketWorkspaceProblem(f.root, '7-fix')!, /Unsafe worktree parent/);
   assert.equal((await projectLaunchReadiness(f.input())).status, 'blocked');
   assert.deepEqual(readdirSync(f.runtime), []);
@@ -47,9 +47,9 @@ test('late path replacement and branch creation are detected; next fresh pass re
 });
 test('missing configured instruction and report publication failure hold directly; no saved success is reused', async t => {
   const f = fixture(t); const first = await projectLaunchReadiness(f.input()); assert.equal(first.status, 'ready');
-  writeFileSync(join(f.root, '.sandcastle/factory.toml'), factoryToml('owner/repo') + '\n[instructions]\ncommon = ["missing.md"]\n');
+  writeFileSync(join(f.root, '.factory/factory.toml'), factoryToml('owner/repo') + '\n[instructions]\ncommon = ["missing.md"]\n');
   assert.equal((await projectLaunchReadiness(f.input())).status, 'blocked');
-  writeFileSync(join(f.root, '.sandcastle/factory.toml'), factoryToml('owner/repo'));
+  writeFileSync(join(f.root, '.factory/factory.toml'), factoryToml('owner/repo'));
   rmSync(join(f.state, 'readiness'), { recursive: true }); writeFileSync(join(f.state, 'readiness'), 'collision');
   assert.equal((await projectLaunchReadiness(f.input())).status, 'blocked');
   assert.equal(readFileSync(join(f.state, 'readiness'), 'utf8'), 'collision');
@@ -78,7 +78,7 @@ test('ticket source failures are freshly collected, attributed and do not replac
 
 test('stale missing worktree registration is not adopted or pruned', async t => {
   const f = fixture(t); await projectLaunchReadiness(f.input());
-  const branch = '7-fix', path = join(f.root, '.sandcastle/worktrees', branch);
+  const branch = '7-fix', path = join(f.root, '.factory/worktrees', branch);
   f.git('worktree', 'add', '-b', branch, path); rmSync(path, { recursive: true });
   const before = f.git('worktree', 'list', '--porcelain');
   assert.match(ticketWorkspaceProblem(f.root, branch)!, /registration conflicts/);

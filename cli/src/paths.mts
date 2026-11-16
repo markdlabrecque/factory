@@ -5,8 +5,9 @@
 // macOS, tick.log (the supervisor's output) and next-tick.json (when the supervisor's next tick is due, next-tick.mts).
 // `recovery` holds each project's self-recovery record: jam episodes, confirmation and repair attempts (recovery-state.mts).
 // `tickService`/`tickTimer` are the Linux scheduler units; `tickPlist` is the macOS scheduler's launch agent.
-// The project scaffold folder stays `.sandcastle` this slice (`.factory` is a later migration).
+// Project data uses the shared strict .factory layout; global Factory homes remain unchanged.
 import { homedir } from 'node:os';
+import { PROJECT_ASSET_BASENAME } from '../../orchestrator/project-layout.mts';
 import { join, resolve } from 'node:path';
 export function paths(home = process.env.FACTORY_HOME || homedir()) {
   home = resolve(home);
@@ -30,6 +31,6 @@ export function paths(home = process.env.FACTORY_HOME || homedir()) {
 }
 export type Paths = ReturnType<typeof paths>;
 export const boardURL = 'http://127.0.0.1:4444';
-export const scaffoldName = '.sandcastle';
+export const scaffoldName = PROJECT_ASSET_BASENAME;
 /** POSIX shell single-quoting: safe for spaces and apostrophes. */
 export const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;

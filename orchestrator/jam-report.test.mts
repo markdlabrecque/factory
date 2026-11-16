@@ -38,7 +38,7 @@ test("a scheduled pass reports a still-ready stopped ticket as jammed; a manual 
   const fake = join(home, "fake");
   mkdirSync(fake);
   claimRun({ dir: state, project: "owner/repo", iid: "7", pid: 2 ** 22 + 4321, cap: 99,
-    patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main" } });
+    patch: { stage: "stopped", note: "exited", starting: undefined, branch: "7-fix-login", base: "main", evidenceDir: join(root, '.factory/evidence/7') } });
 
   const runtime = bindExecution(root);
   const report = join(home, "jam.json");

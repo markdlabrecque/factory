@@ -63,7 +63,7 @@ function noLaunch(f: ReturnType<typeof readinessFixture>) {
 }
 
 for (const path of ['evidence', 'worktrees']) test(`clean Git ${path} filesystem hold across manual, dispatch and real tick; next pass fails separately on incomplete parent input`, async t => {
-  const f = readinessFixture(t), obstruction = join(f.root, '.sandcastle', path);
+  const f = readinessFixture(t), obstruction = join(f.root, '.factory', path);
   writeFileSync(obstruction, 'A file cannot be used as a writable artifact directory');
   assert.equal(f.git('status', '--porcelain'), '', 'clean Git does not imply usable filesystem');
   const generations = new Set<string>();
@@ -149,15 +149,15 @@ test('actual config and runtime publication changes stale old diagnostic data; p
 
 test('complete custom workflow gets fresh host gates but its internal input and sandbox stay opaque', async t => {
   const f = readinessFixture(t), code = join(f.root, '.factory-workflow'); mkdirSync(code);
-  writeFileSync(join(code, 'dispatch.sh'), '#!/bin/sh\n# --issue N\nprintf "opaque invocation" > "$PWD/.sandcastle/custom-called"\n', {mode:0o755});
+  writeFileSync(join(code, 'dispatch.sh'), '#!/bin/sh\n# --issue N\nprintf "opaque invocation" > "$PWD/.factory/custom-called"\n', {mode:0o755});
   projectFixture(f.p, f.root);
-  const obstruction = join(f.root, '.sandcastle/evidence'); writeFileSync(obstruction, 'preserve');
+  const obstruction = join(f.root, '.factory/evidence'); writeFileSync(obstruction, 'preserve');
   assert.equal(await run(f.p, '7', {cwd:f.root}), 1);
-  assert.equal(existsSync(join(f.root, '.sandcastle/custom-called')), false);
+  assert.equal(existsSync(join(f.root, '.factory/custom-called')), false);
   await agreement(f); noLaunch(f);
   rmSync(obstruction);
   assert.equal(await run(f.p, '7', {cwd:f.root}), 0);
-  assert.equal(readFileSync(join(f.root, '.sandcastle/custom-called'), 'utf8'), 'opaque invocation');
+  assert.equal(readFileSync(join(f.root, '.factory/custom-called'), 'utf8'), 'opaque invocation');
   const report = await agreement(f); assert.equal(report.status, 'ready');
   assert.ok(report.checks.every(c => c.scope === 'project'), 'host success invents no ticket-context or internal sandbox success');
   assert.equal(existsSync(join(f.fake, 'gh.jsonl')), false); noLaunch(f);

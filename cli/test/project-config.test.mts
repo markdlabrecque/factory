@@ -20,7 +20,7 @@ function fixture(t: any, profile: 'personal' | 'client' = 'personal') {
   const root = join(base, 'project checkout'), home = join(base, 'home'), bin = join(base, 'bin');
   for (const d of [root, home, bin]) mkdirSync(d);
   execFileSync('git', ['init','-q',root]);
-  const p = paths(home), sc = join(root, '.sandcastle');
+  const p = paths(home), sc = join(root, '.factory');
   writeScaffold(root, buildAssets({ profile, repo: 'new/project', image: 'sandcastle-test', host: 'git.example.com', projectId: 42 }, p.state));
   addProject(p, root);
   const toml = join(sc,'factory.toml');
@@ -137,7 +137,7 @@ test('init repair and update never migrate legacy or overwrite TOML; no runtime 
   writeScaffold(f.root,buildAssets({profile:'client',repo:'other/project',image:'other',host:'other.host',projectId:4},f.p.state));
   assert.deepEqual(readFileSync(f.toml),original);
   rmSync(f.toml);
-  assert.throws(() => writeScaffold(f.root,buildAssets({profile:'personal',repo:'other/project',image:'other'},f.p.state)), /manual.*migrat/i);
+  assert.throws(() => writeScaffold(f.root,buildAssets({profile:'personal',repo:'other/project',image:'other'},f.p.state)), /No conversion/i);
   assert.equal(existsSync(f.toml),false);
   assert.throws(() => classifyCopy(f.p,f.root), /manual|version 2|factory.toml/i);
   assert.throws(() => applyCopy(f.p,f.root), /manual|version 2|factory.toml/i); assert.equal(existsSync(f.toml),false);
@@ -187,8 +187,8 @@ test('metadata resolves the linked worktree version without executing legacy con
   execFileSync('git',['-C',f.root,'-c','user.name=Fixture','-c','user.email=fixture@example.test','commit','--allow-empty','-qm','Fixture']);
   const wt = join(f.base,'linked checkout');
   execFileSync('git',['-C',f.root,'worktree','add','-qb','fixture-linked',wt]);
-  cpSync(f.sc,join(wt,'.sandcastle'),{recursive:true});
-  const toml = join(wt,'.sandcastle/factory.toml');
+  cpSync(f.sc,join(wt,'.factory'),{recursive:true});
+  const toml = join(wt,'.factory/factory.toml');
   writeFileSync(toml,readFileSync(toml,'utf8').replace('new/project','worktree/project').replace('host = "github.com"','host = "github.example.com"'));
   const ctx = resolveProject(f.p,{cwd:wt});
   assert.equal(ctx.root,wt); assert.equal(ctx.tracker,'worktree/project');

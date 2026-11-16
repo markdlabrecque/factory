@@ -48,7 +48,7 @@ export const pi = (model, options) => {
 };
 export async function createSandbox(o) {
   if (scenario === 'shared-projects') writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
-  const worktree = join(root, '.sandcastle/worktrees', o.branch); mkdirSync(join(root, '.sandcastle/worktrees'), {recursive:true});
+  const worktree = join(root, '.factory/worktrees', o.branch); mkdirSync(join(root, '.factory/worktrees'), {recursive:true});
   git(root, ['worktree', 'add', '-b', o.branch, worktree, o.baseBranch]);
   writeFileSync(join(fake, 'live'), 'yes');
   return {worktreePath:worktree, sandboxId:'fixture-container',
@@ -72,7 +72,7 @@ export async function createSandbox(o) {
       const marked = template.replace(/!\x60([^\x60]*)\x60/g, (_m, command) => '!SDK_MARK\x60' + command + '\x60');
       const rendered = marked.replace(/\\{\\{(\\w+)\\}\\}/g, (match, key) => o.promptArgs[key] ?? match);
       writeFileSync(join(fake, o.name + '-prompt.txt'), rendered);
-      const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.sandcastle/evidence'));
+      const evidence = o.promptArgs.EVIDENCE_DIR.replace('/home/agent/evidence', join(root,'.factory/evidence'));
       if (o.name === 'implementer') {
         writeFileSync(join(fake,'implementer-started'),'yes');
         if (scenario === 'primary-cleanup-error') throw Error('fixture primary error');
@@ -94,8 +94,8 @@ export async function createSandbox(o) {
         }
         writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
         if (scenario === 'instruction-edit') { writeFileSync(join(root,'common.md'),'changed after invocation'); writeFileSync(join(fake,'frozen-after-edit.txt'),o.promptArgs.ADDITIVE_INSTRUCTIONS); }
-        if (scenario === 'config-family') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
-        if (scenario === 'config-setup') { const file=join(root,'.sandcastle/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('setup = []','setup = [{command="changed setup"}]')); }
+        if (scenario === 'config-family') { const file=join(root,'.factory/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
+        if (scenario === 'config-setup') { const file=join(root,'.factory/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('setup = []','setup = [{command="changed setup"}]')); }
         if (scenario === 'runtime-template') writeFileSync(join(process.env.FACTORY_RUNTIME_ROOT,'prompt.verify.md'),'changed verifier');
         if (scenario === 'tier-edit' || scenario === 'parent-plan') writeFileSync(join(fake,'changed'),'yes');
         if (scenario === 'missing-baseline') rmSync(join(root,'.git/objects',${JSON.stringify(baseline.slice(0, 2))},${JSON.stringify(baseline.slice(2))}));
@@ -133,13 +133,13 @@ export async function createSandbox(o) {
       await install(p, new Fake(p), { installPackages: dir => stageExecutionPackages(dir, sdk) });
       const { init } = await import(pathToFileURL(join(p.app, 'cli/src/commands/init.mts')).href);
       await init(p, root, { profile: 'personal', repo: 'owner/repo', image: 'img' });
-      assert.deepEqual(readdirSync(join(root, '.sandcastle')).sort(), ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml'].sort());
+      assert.deepEqual(readdirSync(join(root, '.factory')).sort(), ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml'].sort());
     } else {
       for (const f of buildAssets({ profile: 'personal', repo: 'owner/repo', image: 'img' }, state)) {
         const target = join(root, f.path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, f.content, { mode: f.mode });
       }
     }
-    const config = join(root, '.sandcastle/factory.toml');
+    const config = join(root, '.factory/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
     const completeAcceptance = scenario === 'readiness-acceptance';
     if (scenario === 'pass' || completeAcceptance || scenario === 'instruction-edit' || scenario === 'publication') {
@@ -171,13 +171,13 @@ console.log('sha256:'+'a'.repeat(64));
 `, { mode: 0o755 });
     writeFileSync(join(bin, 'pi'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_STATE/pi-calls"\n[ "$1" = auth ] || exit 90\nprintf "fixture-token\\n"\n', { mode: 0o755 });
     const runtime = bindExecution(root, process.env, { sdk, overlays: false, ...(copied ? { sourceRoot: p.app, paths: p } : {}) });
-    if (!copied) for (const name of ['main.mts', 'dispatch.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
+    if (!copied) for (const name of ['main.mts', 'dispatch.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.factory', name), 'PROJECT POISON MUST NOT EXECUTE');
     if (copied) {
       assert.equal(runtime.directory, join(p.runtimes, runtime.id));
       assert.equal(runtime.env.FACTORY_RUNTIME_ROOT, runtime.directory);
       assert.equal(runtime.env.FACTORY_RUNTIME_ID, runtime.id);
-      for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md', 'node_modules']) assert.equal(existsSync(join(root, '.sandcastle', name)), false, name);
-      for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
+      for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md', 'node_modules']) assert.equal(existsSync(join(root, '.factory', name)), false, name);
+      for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(root, '.factory', name), 'PROJECT POISON MUST NOT EXECUTE');
       writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
     }
     assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
@@ -217,18 +217,19 @@ console.log('sha256:'+'a'.repeat(64));
           const path = join(d.parentPath, d.name); return [path, readFileSync(path).toString('base64')];
         }));
       };
-      const beforeState = snapshot(state), beforeEvidence = snapshot(join(root, '.sandcastle/evidence')), beforeFake = snapshot(fake);
+      const beforeState = snapshot(state), beforeEvidence = snapshot(join(root, '.factory/evidence')), beforeFake = snapshot(fake);
       rmSync(join(override, 'verification.mts'));
       const cli = join(p.app, 'cli/bin/factory.mts');
       const refused = spawnSync(process.execPath, [cli, 'run', '7', '--project', root], { cwd: root, encoding: 'utf8', env: { ...env, HOME: home, FACTORY_HOME: home }, timeout: 15000 });
       assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
       assert.match(refused.stdout + refused.stderr, /Invalid project workflow/);
       assert.match(refused.stdout + refused.stderr, /no Factory fallback is permitted/);
-      assert.deepEqual(snapshot(state), beforeState); assert.deepEqual(snapshot(join(root, '.sandcastle/evidence')), beforeEvidence);
+      assert.deepEqual(snapshot(state), beforeState); assert.deepEqual(snapshot(join(root, '.factory/evidence')), beforeEvidence);
       assert.deepEqual(snapshot(fake), beforeFake, 'no tracker, sandbox or agent boundary ran');
       assert.equal(existsSync(join(fake, 'npm-called')), false);
       assert.equal(existsSync(join(root, 'node_modules')), false);
-      assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false);
+      assert.equal(existsSync(join(root, '.factory/node_modules')), false);
+      assert.equal(existsSync(join(root, '.sandcastle')), false, 'supported execution must never create old-layout assets');
       return;
     }
     if (scenario === 'shared-projects') {
@@ -240,14 +241,14 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(second, 'app.txt'), 'before second'); git(second, 'add', '.'); git(second, 'commit', '-qm', 'init'); git(second, 'push', '-q', 'origin', 'main');
       const { init } = await import(pathToFileURL(join(p.app, 'cli/src/commands/init.mts')).href);
       await init(p, second, { profile: 'personal', repo: 'other/project', image: 'second-image' });
-      assert.deepEqual(readdirSync(join(second, '.sandcastle')).sort(), ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml'].sort());
-      const secondConfig = join(second, '.sandcastle/factory.toml');
+      assert.deepEqual(readdirSync(join(second, '.factory')).sort(), ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml'].sort());
+      const secondConfig = join(second, '.factory/factory.toml');
       writeFileSync(secondConfig, readFileSync(secondConfig, 'utf8').replace('family = "openai"', 'family = "anthropic"'));
       for (const [project, label] of [[root, 'first'], [second, 'second']]) {
-        const file = join(project, '.sandcastle/factory.toml');
+        const file = join(project, '.factory/factory.toml');
         writeFileSync(file, readFileSync(file, 'utf8').replace('setup = []', `setup = [{command="echo ${label}-setup"}]`) + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nverification = ["verify.md"]\n');
         for (const [name, text] of [['common.md', 'common'], ['impl.md', 'implementer'], ['verify.md', 'verifier']]) writeFileSync(join(project, name), `${label}-${text}`);
-        for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(project, '.sandcastle', name), 'PROJECT POISON MUST NOT EXECUTE');
+        for (const name of ['main.mts', 'dispatch.mts', 'project-config.mts', 'prompt.md', 'prompt.verify.md']) writeFileSync(join(project, '.factory', name), 'PROJECT POISON MUST NOT EXECUTE');
       }
       for (const name of ['docker', 'pi']) cpSync(join(bin, name), join(secondBin, name));
       writeFileSync(join(secondBin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(secondFake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
@@ -280,10 +281,10 @@ console.log('sha256:'+'a'.repeat(64));
         assert.ok(calls.includes(repo));
         assert.ok(!calls.includes(label === 'first' ? 'other/project' : 'owner/repo'));
         assert.equal(proof.report.verdict, 'PASS');
-        assert.ok(run.evidenceDir.startsWith(join(project, '.sandcastle/evidence') + '/'));
+        assert.ok(run.evidenceDir.startsWith(join(project, '.factory/evidence') + '/'));
         assert.equal(readFileSync(join(run.evidenceDir, 'check.txt'), 'utf8'), `${label}-artifact`);
         assert.ok(proof.artifacts.some((a: { path: string }) => a.path === 'check.txt'));
-        assert.equal(existsSync(join(project, 'node_modules')), false); assert.equal(existsSync(join(project, '.sandcastle/node_modules')), false);
+        assert.equal(existsSync(join(project, 'node_modules')), false); assert.equal(existsSync(join(project, '.factory/node_modules')), false);
         assert.equal(existsSync(join(fakeDir, 'npm-called')), false);
       }
       return;
@@ -321,7 +322,7 @@ console.log('sha256:'+'a'.repeat(64));
       const selected = resolveWorkflow(root, p.runtimeDescriptor);
       assert.equal(selected.id, b.id); assert.equal(selected.root, b.directory);
       git(root, 'push', '-q', 'origin', '--delete', '7-fix-login');
-      git(root, 'worktree', 'remove', '--force', join(root, '.sandcastle/worktrees/7-fix-login'));
+      git(root, 'worktree', 'remove', '--force', join(root, '.factory/worktrees/7-fix-login'));
       git(root, 'branch', '-D', '7-fix-login');
       rmSync(state, { recursive: true, force: true }); mkdirSync(state, { recursive: true });
       rmSync(join(fake, 'changed'), { force: true });
@@ -338,7 +339,8 @@ console.log('sha256:'+'a'.repeat(64));
       assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.large, thinking: 'high' });
       assert.equal(existsSync(join(fake, 'npm-called')), false);
       assert.equal(existsSync(join(root, 'node_modules')), false);
-      assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false);
+      assert.equal(existsSync(join(root, '.factory/node_modules')), false);
+      assert.equal(existsSync(join(root, '.sandcastle')), false, 'supported execution must never create old-layout assets');
       return;
     }
     if (scenario === 'instruction-missing') {
@@ -346,7 +348,7 @@ console.log('sha256:'+'a'.repeat(64));
     }
     if (scenario === 'no-commit-unavailable') {
       mkdirSync(state, {recursive:true});
-      const oldEvidence = join(root,'.sandcastle/evidence/7/old-execution'); mkdirSync(oldEvidence, {recursive:true});
+      const oldEvidence = join(root,'.factory/evidence/7/old-execution'); mkdirSync(oldEvidence, {recursive:true});
       writeFileSync(join(oldEvidence,'no-commit.json'), JSON.stringify({agentReply:'old explanation must not be reused'}));
       writeFileSync(join(state,'owner_repo--7.json'), JSON.stringify({iid:'7',project:'owner/repo',stage:'stopped',executionId:'old-execution',evidenceDir:oldEvidence,note:'old explanation must not be reused'}));
     }
@@ -358,7 +360,7 @@ console.log('sha256:'+'a'.repeat(64));
     if (copied) {
       assert.equal(existsSync(join(fake, 'npm-called')), false, 'execution must not invoke npm');
       assert.equal(existsSync(join(root, 'node_modules')), false, 'execution must not create project dependencies');
-      assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false, 'execution must not fall back to project dependencies');
+      assert.equal(existsSync(join(root, '.factory/node_modules')), false, 'execution must not fall back to project dependencies');
     }
     if (scenario === 'primary-cleanup-error') {
       assert.notEqual(result.status, 0);
@@ -416,7 +418,7 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(run.implementationModel, expectedModel);
       if (copied) {
         assert.equal(expectedModel, 'openai/gpt-6.1-terra');
-        assert.ok(run.evidenceDir.startsWith(join(root, '.sandcastle/evidence') + '/'));
+        assert.ok(run.evidenceDir.startsWith(join(root, '.factory/evidence') + '/'));
         assert.ok(existsSync(join(fake, 'implementer-started')) && existsSync(join(fake, 'verifier-started')));
       }
       assert.equal(run.modelChoice.family, family);

@@ -16,6 +16,7 @@ export { keyFor } from "./admission.mts";
 import { readAssessments, requestRefresh } from "./assessment.mts";
 import type { Assessment } from "./assessment.mts";
 import { projectTicket, readJournal } from "./journal.mts";
+const { inspectProjectLayout, projectLayoutPolicy } = await import(existsSync(new URL('./project-layout.mts', import.meta.url)) ? './project-layout.mts' : '../orchestrator/project-layout.mts');
 
 // Run-state store + the Factory tracker board/evidence page (light/dark/system appearance).
 // #126: implementationModel is an attempt snapshot; assessment.modelResolution is the current description choice.
@@ -26,7 +27,7 @@ import { projectTicket, readJournal } from "./journal.mts";
 // Stage visits persist for real timing, blockers and bounce stats; legacy history stays explicitly incomplete.
 // Completed tickets appear in the template's latest-ten Shipped section; stopped runs remain unfinished.
 // Writers (main.mts) call setStage(); each call writes <stateDir>/<key>.json and regenerates
-// .sandcastle/board.html, a self-contained snapshot that opens from disk and does not poll. The always-on
+// .factory/board.html, a self-contained snapshot that opens from disk and does not poll. The always-on
 // service (board-server.mts) serves the same page over HTTP, plus buildBoardData() as JSON at /api/runs,
 // which the page polls to animate live changes.
 // The dispatcher calls reserveRun() as it spawns each run, so the run counts against the shared cap (in this and
@@ -51,7 +52,7 @@ import { projectTicket, readJournal } from "./journal.mts";
 // A queued card whose last good assessment facts say selected === false is left out of the snapshot (#125); other stages,
 // missing or unknown selection, and raw readRuns are unaffected, and nothing is written.
 // readRuns(dir, false) reads raw records without crash reconciliation, for strictly read-only refresh paths.
-// stateDir: $SANDCASTLE_STATE_DIR, else .sandcastle/state in the current repo. Set the variable to
+// stateDir: $SANDCASTLE_STATE_DIR, else .factory/state in the current repo. Set the variable to
 // one shared folder (the service's) so a single board shows runs from every project and worktree.
 
 export type Stage = "queued" | "waiting" | "setup" | "implementing" | "verifying" | "posting" | "pushing" | "ci" | "done" | "stopped";
@@ -111,8 +112,8 @@ export interface BoardRun extends RunState {
 }
 
 const expand = (p: string) => (p.startsWith("~/") ? resolve(homedir(), p.slice(2)) : resolve(p));
-export const stateDir = () => expand(process.env.SANDCASTLE_STATE_DIR || ".sandcastle/state");
-const boardFile = () => resolve(".sandcastle/board.html");
+export const stateDir = () => expand(process.env.SANDCASTLE_STATE_DIR || ".factory/state");
+const boardFile = () => resolve(".factory/board.html");
 const templateFile = resolve(dirname(fileURLToPath(import.meta.url)), "board.template.html");
 const now = () => new Date().toISOString();
 
@@ -466,7 +467,7 @@ export function readRuns(dir = stateDir(), reconcile = true): BoardRun[] {
 }
 
 /** What an in-progress run is doing now: the last line of its newest agent log (`<branch>-*.log` in the project's
- *  `.sandcastle/logs`, found next to the evidence folder). Read-only, and only for runs that are neither parked nor finished. */
+ *  `.factory/logs`, found next to the evidence folder). Read-only, and only for runs that are neither parked nor finished. */
 export function latestActivity(run: RunState): { activity: string; activityAt: string } | undefined {
   if (TERMINAL.includes(run.stage) || PARKED.includes(run.stage) || !run.branch || !run.evidenceDir) return undefined;
   const dir = resolve(run.evidenceDir, "..", "..", "logs");
@@ -547,6 +548,8 @@ export function buildEvidencePage(run: BoardRun, files: { name: string; kind: st
 }
 
 export function renderBoard(): void {
+  // Shared state/owned cleanup may still settle while this checkout is unsupported. Do not create project artifacts.
+  if (!projectLayoutPolicy(inspectProjectLayout(process.cwd()), 'existing').allowed) return;
   mkdirSync(dirname(boardFile()), { recursive: true });
   write(boardFile(), buildPage("file"));
 }

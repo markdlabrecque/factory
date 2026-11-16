@@ -26,7 +26,7 @@ import { readImageConfig } from './image-config.mts';
 // under <state>/recovery/attempts/, never mounted into a container); then spawn
 // saved Node with selected absolute tsx/main paths and --issue/--base/--recover/--attempt-record from the project root,
 // detached into its own process group (so cancelling a dispatcher pass or `schedule off` never reaches it, like
-// dispatched ticket runs), output appended to .sandcastle/logs/recover-<t>.log, SANDCASTLE_STATE_DIR set to the
+// dispatched ticket runs), output appended to .factory/logs/recover-<t>.log, SANDCASTLE_STATE_DIR set to the
 // run-state folder. The claim is handed to the child's pid at once; main.mts adopts it and checks the record, run record
 // and claim name the same attempt before any side effect.
 // settleRecovery first applies any admitted attempt whose charge never reached the recovery record (a launcher crash),
@@ -53,7 +53,7 @@ import type { AdmissionClaim } from '../../board/admission.mts';
 import { observeEvent } from '../../board/execution-events.mts';
 import { PARKED, readRuns, TERMINAL, writeRecord } from '../../board/board.mts';
 import type { RunState } from '../../board/board.mts';
-import { fillReceipt, projectId, readReceipt, receiptFile, recordIntent } from '../../orchestrator/ownership.mts';
+import { canonicalWorktree, fillReceipt, projectId, readReceipt, receiptFile, recordIntent } from '../../orchestrator/ownership.mts';
 import type { Receipt, TrackerIdentity } from '../../orchestrator/ownership.mts';
 import { attemptEvidence, attemptGitDir, containerFor, ownedContainerGone, readAttemptRecord, realDocker, writeAttemptRecord } from '../../orchestrator/recovery.mts';
 import type { AttemptRecord, RecoveryOutcome } from '../../orchestrator/recovery.mts';
@@ -100,7 +100,7 @@ const inFlight = (r: RunState) => !TERMINAL.includes(r.stage) && !PARKED.include
 import { loadTomlConfig, tomlIdentity } from '../../orchestrator/project-config.mts';
 /** Validate the complete v2 configuration before using its tracker identity. */
 export function trackerIdentity(root: string): TrackerIdentity {
-  return tomlIdentity(join(root, '.sandcastle'));
+  return tomlIdentity(join(root, '.factory'));
 }
 const recordFile = (dir: string, tracker: string, ticket: number) => join(dir, `${keyFor(String(ticket), tracker)}.json`);
 /** Merge `patch` into the ticket's run record (temp file + rename). */
@@ -114,12 +114,26 @@ function patchRecord(dir: string, tracker: string, ticket: number, patch: Partia
 
 /** Where the launcher keeps host-owned attempt records. */
 export const attemptsDir = (p: Paths) => join(p.recovery, 'attempts');
-/** Sandcastle's worktree for `branch`: <root>/.sandcastle/worktrees/<branch with / as ->. */
-export const worktreeFor = (root: string, branch: string) => resolve(root, '.sandcastle/worktrees', branch.replaceAll('/', '-'));
+/** Sandcastle's worktree for `branch`: <root>/.factory/worktrees/<branch with / as ->. */
+export const worktreeFor = canonicalWorktree;
 
-/** Finish the project's running attempt if its process has ended; see the file comment. */
+/** Recover only a saved exact attempt identity for maintenance, never for launch authorization. */
+export function ownedRecoveryTracker(p: Paths, root: string): string | undefined {
+  const state = readRecovery(p, root);
+  const a = runningAttempt(state) ?? state.attempts.at(-1);
+  if (!a?.id || a.container !== containerFor(a.id) || a.record !== join(attemptsDir(p), `${a.id}.json`)) return;
+  const saved = readAttemptRecord(a.record);
+  if (!saved.ok || saved.record.id !== a.id || saved.record.seq !== a.seq || saved.record.iid !== String(a.ticket) || saved.record.container !== a.container) return;
+  // Old paths are accepted only as immutable cleanup identity, never converted or used for a launch.
+  const r = saved.record;
+  if (!['.factory', '.sandcastle'].some(dir => r.worktree === resolve(root, dir, 'worktrees', r.branch.replaceAll('/', '-')))) return;
+  return r.project;
+}
+
+/** Finish an already-owned attempt even when project layout policy holds new launches. */
 export function settleRecovery(p: Paths, o: Common): Settled {
-  loadTomlConfig(join(o.root, '.sandcastle')); // validate before admission writes or Docker, even with an explicit identity
+  try { loadTomlConfig(join(o.root, '.factory')); }
+  catch (error) { if (ownedRecoveryTracker(p, o.root) !== o.tracker) throw error; }
   const dir = o.dir ?? runStateDir(p);
   const at = o.at ?? new Date().toISOString();
   const docker = o.docker ?? realDocker;
@@ -184,7 +198,7 @@ export type CandidateInspection = {ok:true} | Extract<Launch,{admitted:false}>;
 export function inspectRecoveryCandidate(p:Paths,o:Common & {ticket:number;cap?:number;worktreeDir?:string}):CandidateInspection {
   const stop=(code:string,reason:string):CandidateInspection=>({ok:false,kind:'project-stopped',admitted:false,code,reason});
   try {
-    const dir=o.dir??runStateDir(p),config=loadTomlConfig(join(o.root,'.sandcastle'));
+    const dir=o.dir??runStateDir(p),config=loadTomlConfig(join(o.root,'.factory'));
     const cap=o.cap??config?.dispatch.maxConcurrent??DEFAULT_CAP;
     if(!Number.isSafeInteger(cap)||cap<=0)return stop('capacity-invalid','Recovery cap must be a positive safe integer');
     const state=readRecovery(p,o.root),admission=readAdmission(dir);
@@ -310,7 +324,7 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
     return stop('ticket-input', error.message, 'ticket');
   }
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped during ticket input readiness.');
-  const log = join(o.root, '.sandcastle/logs', `recover-${o.ticket}.log`);
+  const log = join(o.root, '.factory/logs', `recover-${o.ticket}.log`);
   const container = containerFor(id);
   const record = join(attemptsDir(p), `${id}.json`);
   const validated = target;

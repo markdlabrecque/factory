@@ -5,6 +5,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadTomlConfig, resolveCheckoutPath, type EffectiveConfig } from './project-config.mts';
 import { loadInstructions } from './instructions.mts';
+import { requireProjectLayout } from './project-layout.mts';
+import { assertProjectRecordLayout } from './ownership.mts';
 
 const guidance = 'Use Factory commands with an explicit selected runtime; low-level entrypoints do not discover project context.';
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -37,6 +39,7 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
   const env = input.env ?? process.env;
   try {
     const projectRoot = canonical(env.FACTORY_PROJECT_ROOT, 'FACTORY_PROJECT_ROOT');
+    requireProjectLayout(projectRoot);
     const runtimeRoot = canonical(env.FACTORY_RUNTIME_ROOT, 'FACTORY_RUNTIME_ROOT');
     if (realpathSync(input.cwd ?? process.cwd()) !== projectRoot) throw Error(`cwd must be project root. ${guidance}`);
     if (realpathSync(input.moduleRoot ?? dirname(fileURLToPath(import.meta.url))) !== runtimeRoot) throw Error(`Module is not from selected runtime. ${guidance}`);
@@ -50,10 +53,10 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     }
     let assetRoot: string;
     try {
-      assetRoot = canonical(within(projectRoot, '.sandcastle'), 'Project asset root');
-      resolveCheckoutPath(projectRoot, '.sandcastle/factory.toml', 'file');
+      assetRoot = canonical(within(projectRoot, '.factory'), 'Project asset root');
+      resolveCheckoutPath(projectRoot, '.factory/factory.toml', 'file');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw Error(`${projectRoot}/.sandcastle/factory.toml: missing version 2 configuration; manually migrate this project`);
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw Error(`${projectRoot}/.factory/factory.toml: missing version 2 configuration; initialize a supported new project`);
       throw error;
     }
     const config = freezeSnapshot(loadTomlConfig(assetRoot));
@@ -64,6 +67,9 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     if (!env.SANDCASTLE_STATE_DIR && (!env.HOME || !isAbsolute(env.HOME))) throw Error('An absolute shared state directory or HOME is required');
     if (env.SANDCASTLE_STATE_DIR && !isAbsolute(env.SANDCASTLE_STATE_DIR)) throw Error('SANDCASTLE_STATE_DIR must be absolute');
     const sharedState = resolve(env.SANDCASTLE_STATE_DIR ?? join(env.HOME!, '.local/state/factory'));
+    const tracker = config.TRACKER;
+    const checkSavedLayout = () => assertProjectRecordLayout(sharedState, projectRoot, { kind: tracker.kind, host: tracker.gitlabHost ?? tracker.host!, project: tracker.project });
+    checkSavedLayout();
     const codePath = (path: string) => within(runtimeRoot, path);
     const projectPath = (path: string) => within(projectRoot, path);
     const templates = Object.fromEntries(['prompt.md', 'prompt.verify.md', 'prompt.analyze.md', 'prompt.recover.md'].map(name => [name, readFileSync(codePath(name), 'utf8')]));
@@ -74,8 +80,10 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
       templates: Object.freeze(templates), additive, identity, policyIdentity: hash(identity),
       assertCurrent: () => {
         canonical(projectRoot, 'FACTORY_PROJECT_ROOT');
+        requireProjectLayout(projectRoot);
+        checkSavedLayout();
         canonical(assetRoot, 'Project asset root');
-        resolveCheckoutPath(projectRoot, '.sandcastle/factory.toml', 'file');
+        resolveCheckoutPath(projectRoot, '.factory/factory.toml', 'file');
         const now = validateRuntimeBundle(runtimeRoot);
         const currentAdditive = readAdditive();
         if (now.id !== manifest.id || now.dependencies !== manifest.dependencies || hash(normalizedSettings(loadTomlConfig(assetRoot))) !== hash(safetySettings) || hash(Object.fromEntries(roles.map(role => [role, currentAdditive[role].hashes]))) !== hash(additiveHashes()))

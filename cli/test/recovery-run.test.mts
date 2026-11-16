@@ -36,7 +36,7 @@ import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import {preparedFixture, preparedContextSource} from './prepared-fixture.mts';
 import { ContextReadError } from '../../orchestrator/ticket-context.mts';
 import { readStoredReadiness } from '../../board/readiness.mts';
-import { launchRecovery, settleRecovery } from '../src/recovery-run.mts';
+import { launchRecovery, ownedRecoveryTracker, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
 import { beginAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
 
@@ -56,19 +56,19 @@ function fixture(t: TestContext, o: { copy?: boolean; worktree?: boolean } = {})
   git(root, 'commit', '-q', '--allow-empty', '-m', 'init');
   git(root, 'branch', '7-fix-login');
   // The ticket's Factory worktree, with a commit and uncommitted work the repair must keep.
-  const worktree = join(root, '.sandcastle/worktrees/7-fix-login');
+  const worktree = join(root, '.factory/worktrees/7-fix-login');
   if (o.worktree === false) {
     git(root, 'commit', '-q', '--allow-empty', '-m', 'on main');
-    mkdirSync(join(root, '.sandcastle/worktrees'), { recursive: true });
+    mkdirSync(join(root, '.factory/worktrees'), { recursive: true });
   } else {
     git(root, 'worktree', 'add', '-q', worktree, '7-fix-login');
     git(worktree, 'commit', '-q', '--allow-empty', '-m', 'half done');
     writeFileSync(join(worktree, 'wip.txt'), 'uncommitted\n');
   }
-  const evidence = join(root, '.sandcastle/evidence/7');
+  const evidence = join(root, '.factory/evidence/7');
   mkdirSync(evidence, { recursive: true });
   // The tracker identity the project's ownership receipts are keyed by.
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('proj'));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('proj'));
   writeFileSync(join(evidence, 'before-1.png'), 'old evidence');
   if (o.copy !== false) {
     mkdirSync(join(root, '.factory-workflow'), { recursive: true });
@@ -136,7 +136,7 @@ for (const change of ['failure', 'changed']) test(`recovery ${change} after imag
 });
 
 test('host holds spend no recovery attempt, catch a late race and do not block exact-owned cleanup', async t => {
-  const f = fixture(t), logs = join(f.root, '.sandcastle/logs');
+  const f = fixture(t), logs = join(f.root, '.factory/logs');
   symlinkSync(f.evidence, logs);
   const before = readRecovery(f.p, f.root); const admission = readAdmission(f.dir);
   const held = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) });
@@ -156,6 +156,25 @@ test('host holds spend no recovery attempt, catch a late race and do not block e
   assert.equal(settleRecovery(f.p, { ...f.common, at: at(13) }).state, 'settled');
   assert.deepEqual(f.removed, [mine]); assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
   assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
+});
+
+test('mixed layout holds new launches but retains exact saved-container settlement', async t => {
+  const f = fixture(t);
+  assert.equal((await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(10) })).ok, true);
+  const attempt = readRecovery(f.p, f.root).attempts[0], mine = attempt.container!;
+  f.containers.add(mine);
+  mkdirSync(join(f.root, '.sandcastle'));
+  writeFileSync(join(f.root, '.sandcastle/saved.txt'), 'historical work');
+  const before = readFileSync(join(f.worktree, 'wip.txt'));
+  assert.equal(ownedRecoveryTracker(f.p, f.root), f.common.tracker);
+  const held = await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(11) });
+  assert.equal(held.ok, false); if (!held.ok) assert.match(held.reason, /mixed-layout/);
+  await f.kill(f.launched[0].child);
+  assert.equal(settleRecovery(f.p, { ...f.common, at: at(12) }).state, 'settled');
+  assert.deepEqual(f.removed, [mine]);
+  assert.deepEqual(readFileSync(join(f.worktree, 'wip.txt')), before);
+  assert.equal(readFileSync(join(f.root, '.sandcastle/saved.txt'), 'utf8'), 'historical work');
+  assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
 });
 
 test('launcher admission, direct patches and settlement emit once with stable separate identities', async t => {
@@ -224,7 +243,7 @@ test('a repair runs detached on the recorded branch with its identity fixed firs
   assert.equal(rec.pid, l.child.pid);
   assert.deepEqual(rec.recovery && [rec.recovery.attempt, rec.recovery.id], [1, IDS[0]]);
   assert.equal(rec.branch, '7-fix-login');
-  assert.match(readFileSync(join(f.root, '.sandcastle/logs/recover-7.log'), 'utf8'), /recovery attempt 1 on #7 \(7-fix-login\)/);
+  assert.match(readFileSync(join(f.root, '.factory/logs/recover-7.log'), 'utf8'), /recovery attempt 1 on #7 \(7-fix-login\)/);
 
   assert.equal(settleRecovery(f.p, { ...f.common, at: at(11) }).state, 'running');
   assert.match((await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(11) }) as { reason: string }).reason, /attempt 1 on #7 is still running/);
@@ -344,7 +363,7 @@ test('a pre-upgrade run is adopted into an ownership receipt, and a missing work
   const tip = f.git(f.root, 'rev-parse', '7-fix-login');
   assert.equal(receiptOf(f), null, 'no receipt before the upgrade');
   // A worktree outside the canonical path is refused for a pre-upgrade run, touching nothing.
-  const odd = join(f.root, '.sandcastle/worktrees/elsewhere');
+  const odd = join(f.root, '.factory/worktrees/elsewhere');
   f.git(f.root, 'worktree', 'add', '-q', odd, '7-fix-login');
   assert.match((await launchRecovery(f.p, { ...f.common, ticket: 7, at: at(9) }) as { reason: string }).reason, /not its canonical Factory worktree/);
   assert.equal(readRecovery(f.p, f.root).attempts.length, 0);
@@ -437,7 +456,7 @@ test('paused/off/cancelled recovery probes nothing; a pause during readiness sti
 
 test('missing TOML is held without executing legacy configuration or charging', async t => {
   const f = fixture(t); let probes = 0;
-  rmSync(join(f.root, '.sandcastle/factory.toml'));
+  rmSync(join(f.root, '.factory/factory.toml'));
   writeFileSync(join(f.root, '.factory-workflow/main.mts'), 'const CONFIG = { image: getSecretImage() }; parseArgs({ options: { recover: { type: "string" }, "attempt-record": { type: "string" } } });');
   refreshManifest(f.root);
   assert.throws(() => recordReview(f.p, f.root), /factory.toml/);
@@ -493,7 +512,7 @@ for (const problem of ['malformed-run', 'unreadable-run', 'malformed-receipt', '
       const path = receiptFile(f.dir, projectId(f.root, { kind: 'github', host: 'github.com', project: 'proj' }), '7');
       mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, '{');
     }
-    if (problem === 'identity') writeFileSync(join(f.root, '.sandcastle/factory.toml'), 'version = 2\n');
+    if (problem === 'identity') writeFileSync(join(f.root, '.factory/factory.toml'), 'version = 2\n');
     if (problem === 'workflow') writeFileSync(join(f.root, '.factory-workflow/recovery.mts'), 'changed');
     if (problem === 'git-error') writeFileSync(join(f.root, '.git/config'), 'not a valid Git config\n');
     if (problem === 'capacity') claimRun({ dir: f.dir, project: 'elsewhere', iid: '8', pid: process.pid, cap: 99 });

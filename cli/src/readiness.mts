@@ -29,7 +29,7 @@ function ancestor(path: string): string {
 /** Build only from validated data and the complete workflow resolver. No shell, auth or tracker reads. */
 export function diagnosticContext(p: Paths, root: string) {
   const workflow = resolveWorkflow(root, p.runtimeDescriptor);
-  const configPath = join(root, '.sandcastle/factory.toml');
+  const configPath = join(root, '.factory/factory.toml');
   const configBytes = fs.readFileSync(configPath);
   const assets: Record<string, string> = {};
   for (const role of ['implementation', 'verification', 'analysis', 'recovery'] as const)
@@ -39,7 +39,7 @@ export function diagnosticContext(p: Paths, root: string) {
 }
 export function diagnosticInput(p: Paths, root: string): ReadinessInput {
   const { workflow, assets, identity } = diagnosticContext(p, root);
-  const configPath = join(root, '.sandcastle/factory.toml');
+  const configPath = join(root, '.factory/factory.toml');
   const paths: ReadinessPath[] = [];
   const read = (id: string, path: string, trustedRoot: string, role: ReadinessPath['role'], access: ReadinessPath['access'] = 'read-directory') =>
     paths.push({ id, scope: 'project', role, path, trustedRoot, access });
@@ -63,8 +63,8 @@ export function diagnosticInput(p: Paths, root: string): ReadinessInput {
     read('git-common-dir', common, common, 'git-common-dir');
   }
   for (const [id, path, role] of [
-    ['state', runStateDir(p), 'state'], ['logs', join(root, '.sandcastle/logs'), 'artifact'],
-    ['evidence', join(root, '.sandcastle/evidence'), 'artifact'], ['worktrees', join(root, '.sandcastle/worktrees'), 'worktree-parent'],
+    ['state', runStateDir(p), 'state'], ['logs', join(root, '.factory/logs'), 'artifact'],
+    ['evidence', join(root, '.factory/evidence'), 'artifact'], ['worktrees', join(root, '.factory/worktrees'), 'worktree-parent'],
   ] as const) paths.push({ id, scope: 'project', path, role, trustedRoot: role === 'artifact' ? root : ancestor(path), access: 'write-directory', create: true });
   return { identity, paths, owner: { invocationId: `doctor-${randomUUID()}`, ownerId: `cli-${process.pid}`, generation: randomUUID() } };
 }

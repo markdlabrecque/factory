@@ -6,7 +6,8 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareRuntimeBundle } from '../cli/src/runtime-bundle.mts';
+import { installRuntimePackages, prepareRuntimeBundle, validateRuntimeBundle } from '../cli/src/runtime-bundle.mts';
+import { prepareSandcastlePackage } from '../cli/src/sandcastle-patch.mts';
 
 const [cacheSource, npmCli] = process.argv.slice(2);
 if (!cacheSource || !npmCli) throw new Error('Usage: node scripts/test-runtime-packages.mts <npm-cache-directory> <npm-cli.js>');
@@ -28,9 +29,21 @@ try {
     npm_config_cache: cache, npm_config_userconfig: config, npm_config_globalconfig: global,
     npm_config_offline: 'true', npm_config_audit: 'false', npm_config_fund: 'false' };
   const bundle = prepareRuntimeBundle({ sourceRoot, runtimeStore: join(root, 'runtimes'), install: directory => {
-    const result = spawnSync(process.execPath, [resolve(npmCli), 'ci', '--include=dev', '--include=optional', '--ignore-scripts', '--offline'], { cwd: directory, env, encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr || String(result.error));
+    // Exercise the activated production installer and patch ordering, changing only npm's offline boundary.
+    installRuntimePackages(directory, (_command, args, options) => {
+      const result = spawnSync(process.execPath, [resolve(npmCli), ...args, '--offline'], { cwd: options.cwd, env, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr || String(result.error));
+      return result;
+    });
+    assert.deepEqual(prepareSandcastlePackage(directory), { state: 'patched', changed: [] });
   } });
+  validateRuntimeBundle(bundle.directory); // Dependency identity includes the patched private bytes.
+  const smoke = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    const { smokeSandcastlePatch } = await import(${JSON.stringify(new URL('./smoke-sandcastle-patch.mts', import.meta.url).href)});
+    await smokeSandcastlePatch(${JSON.stringify(bundle.directory)}, ${JSON.stringify(root)}, ${JSON.stringify(env)});
+  `], { cwd: home, env, encoding: 'utf8', timeout: 60_000 });
+  assert.equal(smoke.status, 0, smoke.stderr || smoke.stdout || String(smoke.error));
+  process.stdout.write(smoke.stdout);
   const entry = join(bundle.directory, 'locked-smoke.mts');
   writeFileSync(entry, `import assert from 'node:assert/strict';
 import * as sandcastle from '@ai-hero/sandcastle';

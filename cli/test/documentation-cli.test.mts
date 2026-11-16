@@ -76,7 +76,7 @@ test('documented launch and refresh forms select the project runtime safely', {t
 
 test('documented selection, update, workflow status and review CLI forms stay safe', {timeout: 30000}, t => {
   const {home: dir, p} = home(t); const root = repo(p, 'site', {push: false});
-  const config = join(root, '.sandcastle/factory.toml');
+  const config = join(root, '.factory/factory.toml');
   const projectConfig = readFileSync(config, 'utf8');
   writeFileSync(config, projectConfig.replace(/\n\[workflow\][\s\S]*$/, '\n') + '\n[work]\nunits = "issues"\n');
   const runtime = bindExecution(root, {}, {paths: p, overlays: false});

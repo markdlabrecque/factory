@@ -35,12 +35,12 @@ for (const mode of ['factory', 'project'] as const) {
     const home = mkdtempSync(join(tmpdir(), 'factory-routing-')), p = paths(home), root = join(home, 'site');
     t.after(() => rmSync(home, { recursive: true, force: true }));
     t.mock.method(console, 'log', () => {});
-    mkdirSync(join(root, '.sandcastle'), { recursive: true });
+    mkdirSync(join(root, '.factory'), { recursive: true });
     const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test', ...args], { cwd: root, encoding: 'utf8' }).trim();
     git('init', '-q', '-b', 'main'); git('commit', '-q', '--allow-empty', '-m', 'fixture');
     const origin = join(home, 'origin.git'); execFileSync('git', ['init', '-q', '--bare', origin]);
     git('remote', 'add', 'origin', origin); git('push', '-q', 'origin', 'main'); git('branch', '7-saved');
-    const config = join(root, '.sandcastle/factory.toml');
+    const config = join(root, '.factory/factory.toml');
     writeFileSync(config, factoryToml('owner/repo') + (mode === 'project' ? '\n[workflow]\nmode = "project"\ndirectory = "workflow"\n' : ''));
     installedFixture(p);
     const source = join(home, 'workflow-source'), records = join(root, 'selected.jsonl');
@@ -54,7 +54,7 @@ for (const mode of ['factory', 'project'] as const) {
     withRuntimeLock(p, () => { recordRuntimeOwnership(p, bundle.id); writeRuntimeDescriptor(p, bundle.id); });
     if (mode === 'project') cpSync(bundle.directory, join(root, 'workflow'), { recursive: true });
     // Project-local decoys are never executable overrides, even when a complete explicit override is selected elsewhere.
-    for (const name of ['dispatch.sh', 'dispatch.mts', 'main.mts', 'config-read.mts', 'capabilities.mts']) writeFileSync(join(root, '.sandcastle', name), 'throw Error("DECOY EXECUTED")');
+    for (const name of ['dispatch.sh', 'dispatch.mts', 'main.mts', 'config-read.mts', 'capabilities.mts']) writeFileSync(join(root, '.factory', name), 'throw Error("DECOY EXECUTED")');
     addProject(p, root);
     const selected = projectWorkflow(p, root), ctx = resolveProject(p, { project: root });
     assert.equal(copyProblem(root, p), null); assert.equal(ctx.root, root);
@@ -79,7 +79,7 @@ for (const mode of ['factory', 'project'] as const) {
     const read = () => readFileSync(records, 'utf8').trim().split('\n').map(l => JSON.parse(l));
     const beforePause = read().length; setProjectSchedule(p, root, false);
     await tick(p, { backend, log: () => {}, maintenance: () => {} }); assert.equal(read().length, beforePause);
-    claimRun({ dir: p.state, project: 'owner/repo', iid: '7', pid: 99999999, cap: 99, patch: { stage: 'stopped', starting: undefined, branch: '7-saved', base: 'main' } });
+    claimRun({ dir: p.state, project: 'owner/repo', iid: '7', pid: 99999999, cap: 99, patch: { stage: 'stopped', starting: undefined, branch: '7-saved', base: 'main', evidenceDir: join(root, '.factory/evidence/7') } });
     const key = 'owner_repo--7'; requestRefresh(p.state, key, '7', 'owner/repo');
     const runFile = join(p.state, key + '.json'), runBytes = readFileSync(runFile);
     const runBoard = (extra = {}) => spawnSync(process.execPath, ['--input-type=module', '-e', `const {executeRefresh}=await import(${JSON.stringify(worker)});await executeRefresh(${JSON.stringify(key)},5000);`], { cwd: root, env: { ...env, ...extra }, encoding: 'utf8' });
@@ -91,8 +91,8 @@ for (const mode of ['factory', 'project'] as const) {
     requestRefresh(p.state, key, '7', 'owner/repo');
     assert.equal(runBoard({ FACTORY_RUNTIME_DESCRIPTOR: '' }).status, 0);
     assert.match(readAssessment(p.state, key)!.error!, /Missing trusted Factory runtime descriptor/);
-    const duplicate = join(home, 'ambiguous'); mkdirSync(join(duplicate, '.sandcastle'), { recursive: true });
-    writeFileSync(join(duplicate, '.sandcastle/factory.toml'), factoryToml('owner/repo'));
+    const duplicate = join(home, 'ambiguous'); mkdirSync(join(duplicate, '.factory'), { recursive: true });
+    writeFileSync(join(duplicate, '.factory/factory.toml'), factoryToml('owner/repo'));
     addProject(p, duplicate); requestRefresh(p.state, key, '7', 'owner/repo');
     assert.equal(runBoard().status, 0);
     assert.match(readAssessment(p.state, key)!.error!, /Several project roots match/);

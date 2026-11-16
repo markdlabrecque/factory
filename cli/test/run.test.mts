@@ -1,7 +1,7 @@
 // `factory run` tests: it runs the chosen project's dispatch.sh with --issue <n> from the checkout root, against
 // Factory's run-state folder, returns its exit code, and refuses an older dispatch.sh without --issue. Then the
 // real orchestrator/dispatch.sh --issue, with stub tools on the PATH (no tracker, Docker or agent): it runs
-// main.mts for that ticket in the foreground, logs to .sandcastle/logs/run-<n>.log, and rejects pass-only flags.
+// main.mts for that ticket in the foreground, logs to .factory/logs/run-<n>.log, and rejects pass-only flags.
 // The curl stub drains the piped dummy auth header before returning, avoiding SIGPIPE under dispatch.sh's pipefail.
 import { projectFixture } from './workflow-fixture.mts';
 import { factoryToml } from './config-fixture.mts';
@@ -33,9 +33,9 @@ function fixture(t: TestContext) {
   const p = paths(home);
   const project = (dir: string, script: string) => {
     const root = join(home, dir);
-    mkdirSync(join(root, '.sandcastle'), { recursive: true });
+    mkdirSync(join(root, '.factory'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: root });
-    writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml(`me/${dir}`));
+    writeFileSync(join(root, '.factory/factory.toml'), factoryToml(`me/${dir}`));
     mkdirSync(join(root, '.factory-workflow'), { recursive: true });
     writeFileSync(join(root, '.factory-workflow/dispatch.sh'), script, { mode: 0o755 });
     projectFixture(p, root);
@@ -54,7 +54,7 @@ test('manual run, dispatch and scheduled tick share the host gate before opaque 
   execFileSync('git', ['remote', 'add', 'origin', root], { cwd: root });
   execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: root });
   const outside = join(home, 'outside'); mkdirSync(outside);
-  symlinkSync(outside, join(root, '.sandcastle/logs'));
+  symlinkSync(outside, join(root, '.factory/logs'));
   assert.equal(await run(p, '7', { cwd: root }), 1);
   const manual = readStoredReadiness(p.state, realpathSync(root)); assert.ok(manual.report);
   assert.equal(await dispatch(p, { cwd: root }), 1);
@@ -67,12 +67,12 @@ test('manual run, dispatch and scheduled tick share the host gate before opaque 
   assert.equal(scheduled.result, 'failed'); assert.equal(maintained, 1, 'local maintenance is not behind new-launch readiness');
   const saved = readStoredReadiness(p.state, realpathSync(root)); assert.ok(saved.report);
   assert.deepEqual(saved.report.identity, manual.report.identity); assert.notEqual(saved.report.owner.generation, manual.report.owner.generation);
-  assert.ok(saved.report.checks.some(c => c.scope === 'project' && c.path === join(root, '.sandcastle/logs') && c.status !== 'ready'));
+  assert.ok(saved.report.checks.some(c => c.scope === 'project' && c.path === join(root, '.factory/logs') && c.status !== 'ready'));
   assert.equal(existsSync(join(root, 'called')), false);
   assert.equal(existsSync(join(p.state, 'admission')), false);
   assert.deepEqual(readdirSync(outside), []);
   assert.equal(readdirSync(join(p.state, 'readiness')).filter(n => n.endsWith('.json')).length, 1);
-  rmSync(join(root, '.sandcastle/logs'));
+  rmSync(join(root, '.factory/logs'));
   assert.equal(await run(p, '7', { cwd: root }), 0);
 });
 
@@ -131,15 +131,15 @@ function sandcastleProject(t: TestContext) {
   const origin = join(home, 'origin.git');
   execFileSync('git', ['init', '-q', '--bare', origin]);
   const root = join(home, 'site');
-  mkdirSync(join(root, '.sandcastle'), { recursive: true });
-  copyFileSync(join(import.meta.dirname, '../../orchestrator/dispatch.sh'), join(root, '.sandcastle/dispatch.sh'));
-  copyFileSync(join(import.meta.dirname, '../../orchestrator/capabilities.mts'), join(root, '.sandcastle/capabilities.mts'));
-  copyFileSync(join(import.meta.dirname, '../../board/admission.mts'), join(root, '.sandcastle/admission.mts'));
-  copyFileSync(join(import.meta.dirname, '../../board/execution-events.mts'), join(root, '.sandcastle/execution-events.mts'));
-  writeFileSync(join(root, '.sandcastle/dispatch.mts'), '');
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site', { kind: 'gitlab', host: 'gitlab.example' }));
-  writeFileSync(join(root, '.sandcastle/main.mts'), 'const CONFIG = {\n  image: "site-image",\n};\n');
-  writeFileSync(join(root, '.sandcastle/.env'), 'CLAUDE_CODE_OAUTH_TOKEN=x\n');
+  mkdirSync(join(root, '.factory'), { recursive: true });
+  copyFileSync(join(import.meta.dirname, '../../orchestrator/dispatch.sh'), join(root, '.factory/dispatch.sh'));
+  copyFileSync(join(import.meta.dirname, '../../orchestrator/capabilities.mts'), join(root, '.factory/capabilities.mts'));
+  copyFileSync(join(import.meta.dirname, '../../board/admission.mts'), join(root, '.factory/admission.mts'));
+  copyFileSync(join(import.meta.dirname, '../../board/execution-events.mts'), join(root, '.factory/execution-events.mts'));
+  writeFileSync(join(root, '.factory/dispatch.mts'), '');
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('me/site', { kind: 'gitlab', host: 'gitlab.example' }));
+  writeFileSync(join(root, '.factory/main.mts'), 'const CONFIG = {\n  image: "site-image",\n};\n');
+  writeFileSync(join(root, '.factory/.env'), 'CLAUDE_CODE_OAUTH_TOKEN=x\n');
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
   git('init', '-q', '-b', 'dev');
   git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init');
@@ -162,7 +162,7 @@ test('dispatch.sh --issue runs main.mts for that ticket after the checks, loggin
   assert.equal(readFileSync(join(root, 'bundled-called'), 'utf8').trim(), `${join(runtime.directory, 'main.mts')} --base dev --issue 15 --no-push`);
   assert.equal(existsSync(join(root, 'npx-called')), false);
   assert.match(r.stdout, /run output/);
-  assert.match(readFileSync(join(root, '.sandcastle/logs/run-15.log'), 'utf8'), /run output/);
+  assert.match(readFileSync(join(root, '.factory/logs/run-15.log'), 'utf8'), /run output/);
 });
 
 test('dispatch.sh rejects a bad --issue, and pass-only flags with --issue, before the checks', t => {

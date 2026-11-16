@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { projectLayoutPaths } from './project-layout.mts';
 
 // Receipt read errors never masquerade as an absent receipt; only ENOENT permits legacy adoption.
 // #150: preserve the host-recorded implementation baseline with ownership identity.
@@ -10,14 +11,14 @@ import { dirname, join, resolve } from "node:path";
 // `<stateDir>/ownership/<projectId>/<iid>.json` (folders 0700, file 0600, temp file + fsync + rename), where
 //   projectId = sha256(realpath(projectRoot) + "\0" + trackerKind + "\0" + trackerHost + "\0" + trackerProject)
 // so two checkouts, or two trackers, never share receipts. A receipt holds the project root, its Git common directory,
-// the ticket, branch, base, the canonical worktree path (`<root>/.sandcastle/worktrees/<branch with / as ->`), the run
+// the ticket, branch, base, the canonical worktree path (`<root>/.factory/worktrees/<branch with / as ->`), the run
 // that wrote it (a claim token or recovery attempt UUID) and `creationIntent`: which of the branch and worktree that run
 // was about to create. The created identities are filled in as each step completes (`branchSha`, `worktreeAt`), so a
 // receipt with an intent and no identity marks a crash between the two; the next reader reconciles it against Git
 // (cli/src/recovery-workspace.mts) rather than guessing. main.mts writes one before a normal run creates its branch and
 // worktree; the recovery launcher (cli/src/recovery-run.mts) writes one before it adds a missing worktree or creates a
 // local branch from origin, and adopts a pre-upgrade run's exact branch. Receipts are never deleted by `factory retry`.
-// Import-safe (Node only); factory init copies it next to main.mts (cli/src/scaffold.mts).
+// Import-safe Node helpers ship beside main.mts in the complete immutable runtime, never in project scaffolds.
 
 export type TrackerIdentity = { kind: string; host: string; project: string };
 export interface Receipt {
@@ -42,8 +43,42 @@ const real = (p: string) => { try { return realpathSync(p); } catch { return res
 export const projectId = (root: string, t: TrackerIdentity) =>
   createHash("sha256").update(`${real(root)}\0${t.kind}\0${t.host}\0${t.project}`).digest("hex");
 export const receiptFile = (stateDir: string, id: string, iid: string) => join(stateDir, "ownership", id, `${iid}.json`);
-/** Sandcastle's worktree for `branch`: <root>/.sandcastle/worktrees/<branch with / as ->. */
-export const canonicalWorktree = (root: string, branch: string) => join(real(root), ".sandcastle/worktrees", branch.replaceAll("/", "-"));
+/** Sandcastle's worktree for `branch`: <root>/.factory/worktrees/<branch with / as ->. */
+export const canonicalWorktree = (root: string, branch: string) => join(projectLayoutPaths(real(root)).worktrees, branch.replaceAll("/", "-"));
+/** Reject explicit cross-layout saved authority before starting new work. Never rewrites historical records. */
+export function assertProjectRecordLayout(state: string, root: string, tracker: TrackerIdentity): void {
+  const layout = projectLayoutPaths(real(root));
+  let names: string[];
+  try { names = readdirSync(state); } catch (error) {
+    // No record can be adopted through a non-directory state root. The mandatory host filesystem gate
+    // owns its ENOTDIR diagnostic and refusal, including failure to publish a report. Other uncertainty holds here.
+    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return;
+    throw error;
+  }
+  for (const name of names.filter(n => n.endsWith('.json'))) {
+    let record: any;
+    try { record = JSON.parse(readFileSync(join(state, name), 'utf8')); } catch { continue; } // Normal record readers retain schema/error authority.
+    if (record.project !== tracker.project || typeof record.iid !== 'string') continue;
+    if (record.evidenceDir !== undefined && typeof record.evidenceDir !== 'string')
+      throw new Error('Saved run has unknown evidence identity; preserve it without adoption');
+    if (typeof record.evidenceDir === 'string' && (resolve(record.evidenceDir) !== record.evidenceDir || record.evidenceDir !== layout.evidence && !record.evidenceDir.startsWith(`${layout.evidence}/`)))
+      throw new Error('Saved run has uncertain or cross-layout evidence identity; preserve it without adoption');
+    if (record.branch && !record.evidenceDir && !record.starting && !existsSync(canonicalWorktree(root, record.branch))) {
+      const saved = readReceipt(receiptFile(state, projectId(root, tracker), record.iid));
+      if (!saved || saved.worktreePath !== canonicalWorktree(root, record.branch))
+        throw new Error('Saved run has no supported layout provenance; preserve it without adoption');
+    }
+  }
+  const receipts = join(state, 'ownership', projectId(root, tracker));
+  let files: string[];
+  try { files = readdirSync(receipts); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  for (const name of files.filter(n => n.endsWith('.json'))) {
+    const receipt = readReceipt(join(receipts, name));
+    if (receipt && (receipt.projectId !== projectId(root, tracker) || receipt.ticket !== name.slice(0, -5) || receipt.projectRoot !== real(root) || receipt.worktreePath !== canonicalWorktree(root, receipt.branch)))
+      throw new Error('Saved ownership has uncertain or cross-layout identity; preserve it without adoption');
+  }
+}
+
 /** The checkout's Git common directory, resolved. */
 export const gitCommonDir = (cwd: string) =>
   real(resolve(cwd, execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()));
@@ -96,9 +131,15 @@ export function recordIntent(stateDir: string, o: { root: string; tracker: Track
   runId: string; branchToCreate: boolean; worktreeToCreate: boolean; at?: string; branchSha?: string; worktreeAt?: string; implementationBaseSha?: string }): string {
   const id = projectId(o.root, o.tracker);
   const file = receiptFile(stateDir, id, o.ticket);
+  const prior = readReceipt(file);
+  if (prior && (prior.projectId !== id || prior.projectRoot !== real(o.root) || prior.worktreePath !== canonicalWorktree(o.root, prior.branch)))
+    throw new Error('Ownership receipt has uncertain or cross-layout identity; refusing adoption or rewrite');
+  if (prior?.implementationBaseSha && o.implementationBaseSha && prior.implementationBaseSha !== o.implementationBaseSha)
+    throw new Error('Historical implementation baseline changed; refusing ownership rewrite');
+  const baseline = o.implementationBaseSha ?? prior?.implementationBaseSha;
   const at = o.at ?? new Date().toISOString();
   writeReceipt(file, {
-    ...(o.implementationBaseSha ? { implementationBaseSha: o.implementationBaseSha } : {}),
+    ...(baseline ? { implementationBaseSha: baseline } : {}),
     version: 1, projectId: id, projectRoot: real(o.root), gitCommonDir: gitCommonDir(o.root), ticket: o.ticket, branch: o.branch,
     ...(o.base ? { base: o.base } : {}), worktreePath: canonicalWorktree(o.root, o.branch), runId: o.runId,
     creationIntent: { branch: o.branchToCreate, worktree: o.worktreeToCreate, at }, ...(o.branchSha ? { branchSha: o.branchSha } : {}),

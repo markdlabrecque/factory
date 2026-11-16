@@ -1,13 +1,13 @@
 <!-- Adapting project data, additive instructions and complete workflow overrides for the shared Factory runtime. -->
 # Adapting Factory to a project
 
-Factory selects a complete runtime for each invocation. In the default `factory` mode, executable code, prompts and private dependencies come from the installed shared bundle. Project files provide data and environment assets. Copied `.sandcastle/main.mts`, prompts or individual helpers do not override the shared runtime. A dispatch and its detached children retain their selected runtime even if another bundle is published.
+Factory selects a complete runtime for each invocation. In the default `factory` mode, executable code, prompts and private dependencies come from the installed shared bundle. Project files provide data and environment assets. Copied `.factory/main.mts`, prompts or individual helpers do not override the shared runtime. A dispatch and its detached children retain their selected runtime even if another bundle is published.
 
 ## Choose the smallest customization
 
 | Need | Where it belongs |
 | --- | --- |
-| Tracker, labels, ticket selection, concurrency, merge, image or startup commands | `.sandcastle/factory.toml`, schema v2 |
+| Tracker, labels, ticket selection, concurrency, merge, image or startup commands | `.factory/factory.toml`, schema v2 |
 | Project test commands, fixtures or stack-specific advice for agents | Repository Markdown listed in `[instructions]` |
 | Change workflow stages, model policy, prompts or executable behavior | Complete project workflow override, maintained and reviewed by its owner |
 
@@ -15,7 +15,7 @@ The [project configuration reference](../docs/project-config.md) owns the schema
 
 ## Project data and instructions
 
-Both `factory init` profiles create only `factory.toml`, `.env`, `.env.example`, `.gitignore` and `factory-dispatch.sh` under `.sandcastle/`. They do not copy runtime modules or prompts. Personal uses GitHub and automatic merge by default; client uses GitLab and manual merge by default. Both select the OpenAI Pi family. Review generated settings and provision the image and selected Pi family separately; init does not authenticate, build an image or install a provider.
+Both `factory init` profiles create only `factory.toml`, `.env`, `.env.example`, `.gitignore` and `factory-dispatch.sh` under `.factory/`. They do not copy runtime modules or prompts. Personal uses GitHub and automatic merge by default; client uses GitLab and manual merge by default. Both select the OpenAI Pi family. Review generated settings and provision the image and selected Pi family separately; init does not authenticate, build an image or install a provider.
 
 Set `sandbox.image` to the project image and use ordered `[[sandbox.setup]]` entries for startup. Keep script bodies in project-owned helper files and make them available to the sandbox. Remove the profile's `setup = []` before adding setup tables. Commands are trusted code run inside the sandbox; TOML is not a security boundary. For example, this is a fragment, not a complete configuration:
 
@@ -64,7 +64,7 @@ node --input-type=module -e '
   import { realpathSync, writeFileSync } from "node:fs";
   import { join } from "node:path";
   import { regenerateRuntimeManifest } from "/path/to/factory/orchestrator/workflow.mts";
-  const directory = realpathSync(".sandcastle/workflow");
+  const directory = realpathSync(".factory/workflow");
   const manifest = regenerateRuntimeManifest(directory);
   writeFileSync(join(directory, "runtime-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 '
@@ -75,7 +75,7 @@ node --input-type=module -e '
 ```toml
 [workflow]
 mode = "project"
-directory = ".sandcastle/workflow"
+directory = ".factory/workflow"
 ```
 
 5. Inspect the complete executable bundle and its dependencies, then have the operator review recovery with `factory recovery review --project <name-or-path>` and, only after review, `factory recovery review --confirm --project <name-or-path>`. Factory mode needs no per-project executable review. In project mode a changed mode, directory, inventory, code or dependencies invalidates review. An invalid manifest cannot be repaired by review. See [recovery review](../docs/factory-cli.md) for the full operator contract.

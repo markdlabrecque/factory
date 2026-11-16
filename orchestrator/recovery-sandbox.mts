@@ -13,7 +13,7 @@ import type { RecoveryDeps, RecoverySandbox, SandboxSpec } from "./recovery.mts"
 //   /home/agent/workspace; over its `.git` file a read-only gitfile pointing at /home/agent/.factory-git, the
 //   attempt-private Git metadata (only the ticket's branch and history); this attempt's evidence folder writable at the
 //   prompt's EVIDENCE_DIR with its snapshots (recovery-context.json, previous-run.json, previous-logs/, history/, input/)
-//   mounted read-only over themselves; .sandcastle/sandbox read-only at /opt/sandcastle. No Docker socket, host common
+//   mounted read-only over themselves; .factory/sandbox read-only at /opt/sandcastle. No Docker socket, host common
 //   Git directory, other evidence or credentials file is mounted; agent environment values go through the docker
 //   client's environment (`-e NAME`), never its arguments. Setup hooks run with `docker exec` after the container is up.
 //   Agents run with `docker exec` of the agent provider's own print command; aborting kills that exec and waits for it
@@ -61,9 +61,9 @@ interface AgentLike { env?: Record<string, string>; buildPrintCommand(o: { promp
 export interface OwnedSandboxConfig {
   image: string;
   setup: SetupStep[];
-  /** Host .sandcastle/sandbox, mounted read-only at /opt/sandcastle. */
+  /** Host .factory/sandbox, mounted read-only at /opt/sandcastle. */
   helpers: string;
-  /** Values for the container's environment (e.g. from .sandcastle/.env); passed by name only. */
+  /** Values for the container's environment (e.g. from .factory/.env); passed by name only. */
   env: Record<string, string>;
   uid: number;
   gid: number;

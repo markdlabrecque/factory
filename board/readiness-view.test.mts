@@ -145,7 +145,7 @@ test('production GET routing is passive, path-independent and compatible; file s
   for (const iid of ['1', '2', '3']) fs.writeFileSync(join(f.state, `project--${iid}.json`), JSON.stringify({ iid, project: 'project', stage: iid === '3' ? 'stopped' : 'queued', pid: 99999999,
     title: 'Old history', note: 'historical execution note', startedAt: new Date(f.now - 100000).toISOString(), stageSince: new Date(f.now - 100000).toISOString() }));
   // A dead unfinished run used to be rewritten by a GET. Its log path must never be read either.
-  fs.writeFileSync(join(f.state, 'project--4.json'), JSON.stringify({ iid: '4', project: 'project', stage: 'implementing', pid: 99999999, branch: 'unsafe', evidenceDir: join(f.project, '.sandcastle/evidence/4'), startedAt: new Date(f.now).toISOString() }));
+  fs.writeFileSync(join(f.state, 'project--4.json'), JSON.stringify({ iid: '4', project: 'project', stage: 'implementing', pid: 99999999, branch: 'unsafe', evidenceDir: join(f.project, '.factory/evidence/4'), startedAt: new Date(f.now).toISOString() }));
   const before = fs.readdirSync(f.state).filter(n => n.endsWith('.json')).map(n => [n, fs.readFileSync(join(f.state, n), 'utf8')]);
   const originals: [any, string, any][] = [];
   function trap(object: any, key: string) { originals.push([object, key, object[key]]); object[key] = () => assert.fail('Unexpected GET boundary: ' + key); }

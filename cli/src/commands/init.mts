@@ -6,6 +6,7 @@ import { scaffoldName } from '../paths.mts';
 import { addProject, canonicalRoot, readRegistry } from '../projects.mts';
 import { loadTomlConfig } from '../../../orchestrator/project-config.mts';
 import { buildAssets, writeScaffold } from '../scaffold.mts';
+import { requireProjectLayout } from '../../../orchestrator/project-layout.mts';
 import type { PlannedFile, Profile, Settings } from '../scaffold.mts';
 
 export type InitOptions = { profile?: string; repo?: string; image?: string; host?: string; 'project-id'?: string };
@@ -36,13 +37,15 @@ export function validateInit(o: InitOptions): Settings {
 export async function init(p: Paths, path: string | undefined, options: InitOptions, hooks: { assets?: PlannedFile[]; beforeWrite?: (path: string, index: number) => void } = {}) {
   const settings = validateInit(options);
   const root = canonicalRoot(path ?? process.cwd());
+  requireProjectLayout(root, 'init');
   readRegistry(p); // a malformed registry stops us before anything is written
   const files = hooks.assets ?? buildAssets(settings, p.state);
   const legacy = !existsSync(join(root, scaffoldName, 'factory.toml')) && ['config.mts','main.mts','dispatch.mts','dispatch.sh'].some(f => existsSync(join(root, scaffoldName, f)));
-  if (legacy) throw new Error('Unsupported existing workflow without version 2 factory.toml; manually migrate this project.');
+  if (legacy) throw new Error('Unsupported existing workflow without version 2 factory.toml; No conversion or adoption is performed.');
   const config = join(root, scaffoldName, 'factory.toml');
   if (existsSync(config) && lstatSync(config).isFile() && !lstatSync(config).isSymbolicLink()) loadTomlConfig(join(root, scaffoldName));
   const { created, skipped } = writeScaffold(root, files, { beforeWrite: hooks.beforeWrite });
+  requireProjectLayout(root);
   const added = addProject(p, root);
 
   console.log(`Initialized ${join(root, scaffoldName)} (profile ${settings.profile})`);

@@ -4,6 +4,8 @@ Factory requires global Playwright and headless Chromium for every ticket, inclu
 
 ## Checks before work
 
+Project configuration and environment data come from `.factory/factory.toml` and `.factory/.env`. Shared layout inspection rejects `.sandcastle`-only, mixed and unsafe layouts before image/tracker/container work. Readiness probes do not convert projects or rewrite prior evidence. Project helper mounts use `.factory/sandbox` at the unchanged container path `/opt/sandcastle`. Already-owned exact-container cleanup and settlement remain available during a layout hold.
+
 The selected runtime's `dispatch.sh` validates v2 TOML and performs host/image/UID checks, then runs that runtime's `capabilities.mts` before dispatch/main startup. Runtime dependencies are already prepared in the complete selected bundle; dispatch does not install project packages. Its existing interactive missing-image build behavior is unchanged. A background readiness failure stops the pass with provisioning guidance and starts no implementation agent.
 
 The recovery launcher checks the selected complete workflow, required project-override review, ownership and budget eligibility, then awaits the same image check before atomic claim-and-charge. It reads `sandbox.image` through the v2 TOML parser. Missing, v1, invalid or unreadable TOML is a configuration hold; there is no executable `CONFIG.image` fallback. Discovery never imports customized `main.mts`. Factory-mode recovery needs no per-project executable review; complete project overrides do.

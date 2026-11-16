@@ -4,6 +4,7 @@ import type { Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scaffoldName } from './paths.mts';
+import { requireProjectLayout } from '../../orchestrator/project-layout.mts';
 
 export const appRoot = fileURLToPath(new URL('../../', import.meta.url));
 export type Profile = 'personal' | 'client';
@@ -80,15 +81,17 @@ function inspect(root: string, rel: string): 'file' | 'missing' {
 }
 
 export function writeScaffold(root: string, files: PlannedFile[], hooks: { beforeWrite?: (path: string, index: number) => void } = {}) {
+  requireProjectLayout(root, 'init');
   // Decide before repairing ANY missing file: an existing workflow without TOML stays legacy.
   const legacy = inspect(root, `${scaffoldName}/factory.toml`) === 'missing' &&
     ['config.mts','main.mts','dispatch.mts','dispatch.sh'].some(f => inspect(root, `${scaffoldName}/${f}`) === 'file');
-  if (legacy) throw new Error('Unsupported existing workflow without version 2 factory.toml; manually migrate this project.');
+  if (legacy) throw new Error('Unsupported existing workflow without version 2 factory.toml; No conversion or adoption is performed.');
   const todo = files.filter(f => inspect(root, f.path) === 'missing'); // all preflight checks finish before the first write
   const skipped = files.filter(f => !todo.includes(f)).map(f => f.path);
   const created: string[] = [];
   for (const f of todo) {
     hooks.beforeWrite?.(f.path, created.length);
+    requireProjectLayout(root, 'init');
     inspect(root, f.path);
     const target = join(root, f.path);
     mkdirSync(dirname(target), { recursive: true });

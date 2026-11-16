@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { Fake, FakeSchedule } from '../src/platform/fake.mts';
 import { schedulerUnits } from '../src/platform/scheduler-systemd.mts';
@@ -482,7 +483,7 @@ test('each completed pass hands its own jam report to jam confirmation; a failed
   setProjectSchedule(p, a, true);
   const { readRecovery } = await import('../src/recovery-state.mts');
   mkdirSync(p.state, { recursive: true });
-  writeFileSync(`${p.state}/a_a--7.json`, JSON.stringify({ iid: '7', project: 'a/a', stage: 'stopped', startedAt: new Date().toISOString(), branch: '7-x' }));
+  writeFileSync(`${p.state}/a_a--7.json`, JSON.stringify({ iid: '7', project: 'a/a', stage: 'stopped', startedAt: new Date().toISOString(), branch: '7-x', evidenceDir: join(a, '.factory/evidence/7/prior-execution') }));
   const reports: string[] = [];
   const pass = (code: number, after?: () => Promise<void>) => async (_ctx: unknown, _args: string[], o: { env: NodeJS.ProcessEnv }) => {
     const file = o.env.FACTORY_JAM_REPORT!;
@@ -512,10 +513,10 @@ test('each completed pass is followed by factory clean for its project; a failed
   setProjectSchedule(p, a, true);
   mkdirSync(p.state, { recursive: true });
   const merged = (iid: number) => {
-    const name = `${iid}-x`, wt = `${a}/.sandcastle/worktrees/${name}`;
+    const name = `${iid}-x`, wt = `${a}/.factory/worktrees/${name}`;
     git(a, 'worktree', 'add', '-q', '-b', name, wt, 'main');
     writeFileSync(`${p.state}/a_a--${iid}.json`, JSON.stringify({ iid: String(iid), project: 'a/a', stage: 'done', mergedAt: '2026-11-12T00:00:00Z',
-      startedAt: new Date().toISOString(), pid: process.pid, base: 'main', branch: name }));
+      startedAt: new Date().toISOString(), pid: process.pid, base: 'main', branch: name, evidenceDir: join(a, '.factory/evidence', String(iid), 'prior-execution') }));
     return { name, wt };
   };
   const has = (branch: string) => execFileSync('git', ['branch', '--list', branch], { cwd: a, encoding: 'utf8' }).trim() !== '';

@@ -5,7 +5,7 @@
 // attempts fence pending, success and failure publication across processes. A short per-card lock covers only
 // generation allocation and compare/write, never tracker/analysis work. Dead owners are reclaimed under a separate
 // guard; an abandoned/unreadable guard fails closed. Only process-identity helpers come from admission, not its locks.
-// No orchestrator imports: this also runs beside copied files in .sandcastle/ and in the installed board.
+// No orchestrator imports: this also runs beside copied files in .factory/ and in the installed board.
 import { mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";

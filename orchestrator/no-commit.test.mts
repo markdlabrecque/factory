@@ -37,7 +37,7 @@ test('claims remain attributed, dependency reports separate, fixed bounded priva
   assert.ok(!diagnosticText(d, false).includes('execution/no-commit.json'));
   assert.equal(sanitizeReply('a'.repeat(9000)).length, 4096);
   assert.equal(diagnostic('execution', 'unknown', false, undefined, '/private/arbitrary.log').logReference, 'unavailable');
-  assert.equal(diagnostic('execution', 'unknown', false, undefined, '.sandcastle/logs/implementer.log').logReference, '.sandcastle/logs/implementer.log');
+  assert.equal(diagnostic('execution', 'unknown', false, undefined, '.factory/logs/implementer.log').logReference, '.factory/logs/implementer.log');
   saveDiagnostic(root, d); assert.deepEqual(JSON.parse(readFileSync(join(root,'no-commit.json'),'utf8')), d);
   assert.throws(() => saveDiagnostic(root, d), /EEXIST/);
 });

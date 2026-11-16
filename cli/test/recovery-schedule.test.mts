@@ -124,9 +124,9 @@ async function waitFor<T>(what: string, fn: () => T | undefined | false, ms = 15
 }
 const up = (pid: number) => sameProcess({ pid, startTicks: null });
 
-// The dispatcher: reports a jam on #7 for its pass, then holds the pass open while .sandcastle/hold exists.
+// The dispatcher: reports a jam on #7 for its pass, then holds the pass open while .factory/hold exists.
 const DISPATCH = `#!/bin/sh
-d="$PWD/.sandcastle"
+d="$PWD/.factory"
 printf '{"version":1,"pass":"%s","project":"site/site","at":"%s","tickets":[7],"observed":[]}' "$FACTORY_PASS_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$FACTORY_JAM_REPORT"
 if [ -e "$d/hold" ]; then echo $$ > "$d/pass.pid"; sleep 300; fi
 exit 0
@@ -147,7 +147,7 @@ const REPAIR = `#!${process.execPath}
 const fs = require('node:fs'), path = require('node:path');
 const a = process.argv.slice(2), rec = a[a.indexOf('--attempt-record') + 1];
 fs.writeFileSync(path.join(process.env.DOCKER_STUB_DIR, 'containers', 'factory-recovery-' + path.basename(rec, '.json')), '');
-fs.appendFileSync('.sandcastle/repairs.jsonl', JSON.stringify({ pid: process.pid, args: a }) + '\\n');
+fs.appendFileSync('.factory/repairs.jsonl', JSON.stringify({ pid: process.pid, args: a }) + '\\n');
 setInterval(() => {}, 1000);
 `;
 
@@ -195,7 +195,7 @@ test('scheduled recovery stays safe across tick restarts, schedule off, a crashe
   await w.cli('install', '--link');
   await w.cli('schedule', 'on');
   const root = repo(p, 'site', { script: DISPATCH });
-  const sc = join(root, '.sandcastle');
+  const sc = join(root, '.factory');
   writeFileSync(join(sc, 'factory.toml'), factoryToml('site/site'));
   // The complete recovery workflow (board.mts keeps what the scheduler's copy check needs), reviewed by a person.
   const code = join(root, '.factory-workflow');
@@ -350,7 +350,7 @@ test('paused maintenance settles competing delivery; later eligible passes recov
   await w.cli('install', '--link');
   await w.cli('schedule', 'on');
   const root = repo(p, 'site', { script: DISPATCH.replace('"tickets":[7]', '"tickets":[7,9]') });
-  const sc = join(root, '.sandcastle');
+  const sc = join(root, '.factory');
   writeFileSync(join(sc, 'factory.toml'), factoryToml('site/site'));
   const code = join(root, '.factory-workflow');
   writeFileSync(join(code, 'main.mts'), 'const CONFIG = { image: "fixture" };\n"attempt-record": { type: "string" }\n');
@@ -363,7 +363,7 @@ test('paused maintenance settles competing delivery; later eligible passes recov
     git(root, 'branch', `${iid}-saved`);
     tips[iid] = execFileSync('git', ['rev-parse', `${iid}-saved`], { cwd: root, encoding: 'utf8' }).trim();
     claimRun({ dir: p.state, project: 'site/site', iid, pid: 99999999, cap: 99,
-      patch: { stage: 'stopped', starting: undefined, branch: `${iid}-saved`, base: 'main', verdict: 'FAIL' } });
+      patch: { stage: 'stopped', starting: undefined, branch: `${iid}-saved`, base: 'main', verdict: 'FAIL', evidenceDir: join(root, '.factory/evidence', String(iid)) } });
   }
   await w.cli('schedule', 'on', '--project', 'site');
   await w.cli('recovery', 'review', '--project', 'site', '--confirm');

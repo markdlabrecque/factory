@@ -37,6 +37,8 @@ import type { Host } from "./handoff.mts";
 import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
 import { createOwnedSandbox, gitWorkspace, readDotEnv, realProc } from "./recovery-sandbox.mts";
 import * as tracker from "./tracker.mts";
+import { projectLayoutPaths } from './project-layout.mts';
+const layout = projectLayoutPaths(context.projectRoot);
 
 // End-to-end loop for one ticket, launched from the project root through the selected bundle's absolute tsx:
 //   <runtime>/main.mts --base <integration-branch> [--issue N] [--no-push]
@@ -54,7 +56,7 @@ import * as tracker from "./tracker.mts";
 // started only by Factory's recovery launcher (cli/src/recovery-run.mts) after it claimed the ticket and wrote the
 // host-owned attempt record. Before any Git or container side effect it checks the record, the claimed run record and
 // the arguments name the same project, ticket, branch, base and attempt (seq and UUID), and that the worktree is inside
-// .sandcastle/worktrees/. It then runs recovery.mts runRecoveryAttempt with the real boundaries: recovery-sandbox.mts's
+// .factory/worktrees/. It then runs recovery.mts runRecoveryAttempt with the real boundaries: recovery-sandbox.mts's
 // owned container (exact pre-recorded name, private Git metadata, this attempt's evidence only writable; not
 // Sandcastle's createSandbox), the repair agent on AGENT.model whatever the ticket's model declaration, a 900000 ms deadline
 // from container readiness, the shared verifier and delivery (handoff.mts), and a recheck of the ticket's requirements,
@@ -80,7 +82,7 @@ const CONFIG = effectiveConfig.config;
 const PROJECT = TRACKER.project;
 // What the container's Pi run needs depends on its model's provider (models.mts). pi-claude-subscription (the
 // personal config) needs nothing from here: the image's Claude Code CLI logs in with CLAUDE_CODE_OAUTH_TOKEN,
-// which Sandcastle reads from the project's .sandcastle/.env. The OpenAI family gets a
+// which Sandcastle reads from the project's .factory/.env. The OpenAI family gets a
 // per-run token from the host's pi login, handed over as OPENAI_API_KEY for that one run.
 function openaiCredential(): string {
   for (const cmd of [["print-bearer-token", "--min-expiry", "50m"], ["print-api-key"]]) {
@@ -211,7 +213,7 @@ const ticketHash = () => {
 const startVersion = { hash: frozenInput.hash };
 const inputEvidence = (...parts: string[]) => resolve(stateDir(), 'ticket-inputs', keyFor(iid!, PROJECT), ...parts);
 context.assertCurrent();
-assertProofStoreOutsideMounts(stateDir(), [resolve('.sandcastle/evidence'), resolve('.sandcastle/sandbox'), resolve('.sandcastle/worktrees'), resolve('.sandcastle/recovery')]);
+assertProofStoreOutsideMounts(stateDir(), [resolve(layout.evidence), resolve(layout.helpers), resolve(layout.worktrees), resolve(layout.recovery)]);
 const provenance = async (sandbox: { exec(cmd: string): Promise<{ stdout: string }> }, container: string): Promise<Provenance> => {
   // The SDK/host supplies this identity; never trust an agent-controlled hostname or report.
   const name = container;
@@ -235,7 +237,7 @@ if (recovering) {
   const claimed = readRuns().find((r) => r.project === PROJECT && r.iid === iid);
   const claimOf = () => readAdmission(stateDir()).claims[keyFor(iid!, PROJECT)];
   const admitted = claimOf();
-  const owned = (() => { try { const r = relative(realpathSync(".sandcastle/worktrees"), realpathSync(rec.worktree)); return !!r && !r.startsWith("..") && !r.includes("/"); } catch { return false; } })();
+  const owned = (() => { try { const r = relative(realpathSync(layout.worktrees), realpathSync(rec.worktree)); return !!r && !r.startsWith("..") && !r.includes("/"); } catch { return false; } })();
   if (rec.iid !== iid || rec.seq !== seq || rec.project !== PROJECT || rec.base !== base || rec.phase !== "claimed"
     || rec.executionId !== claimed?.executionId || rec.implementationBaseSha !== claimed?.implementationBaseSha
     || claimed?.recovery?.attempt !== seq || claimed.recovery.id !== rec.id || claimed.branch !== rec.branch || !owned
@@ -258,7 +260,7 @@ if (recovering) {
   console.log(`#${iid} ${issue.title}\n  recovery attempt ${seq} (${rec.id}) on ${rec.branch} at ${rec.startSha.slice(0, 8)}, repair model ${AGENT.model}`);
   const cancel = new AbortController();
   for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => cancel.abort(new Error(`${sig}: recovery attempt cancelled`)));
-  mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true });
+  mkdirSync(resolve(layout.helpers), { recursive: true });
   const evidenceBox = `/home/agent/evidence/${iid}`;
   const recheck = () => {
     const hold = contextHold(context); if (hold) return hold;
@@ -304,13 +306,13 @@ if (recovering) {
       ADDITIVE_INSTRUCTIONS: context.additive.recovery.text,
     },
     verificationInstructions: context.additive.verification.text,
-    previousRun: claimed, logs: [resolve(".sandcastle/logs", `recover-${iid}.log`)],
+    previousRun: claimed, logs: [resolve(layout.logs, `recover-${iid}.log`)],
     delivery: { ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto },
     cancel: cancel.signal, deadlineMs: REPAIR_DEADLINE_MS,
   }, {
     clock: realClock,
     createSandbox: (spec) => createOwnedSandbox(spec, {
-      image: IMAGE, setup: CONFIG.sandboxSetup, helpers: resolve(".sandcastle/sandbox"), env: readDotEnv(resolve(".sandcastle/.env")),
+      image: IMAGE, setup: CONFIG.sandboxSetup, helpers: resolve(layout.helpers), env: readDotEnv(layout.env),
       uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000, proc: realProc, root: process.cwd(),
     }),
     containerGone: (name) => ownedContainerGone(name, realDocker),
@@ -374,7 +376,7 @@ setStage(iid, {
   implementationModel: implementerModel, modelChoice: picked.choice,
   implementationBaseSha: baseSha, verification: undefined,
   executionId,
-  evidenceDir: resolve('.sandcastle/evidence', iid, executionId), ticketHash: startVersion.hash,
+  evidenceDir: resolve(layout.evidence, iid, executionId), ticketHash: startVersion.hash,
   ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash }, verdict: undefined, mr: undefined,
   parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
   starting: undefined, // this run now owns the record the dispatcher reserved at launch
@@ -384,10 +386,10 @@ setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
 console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${baseSha.slice(0, 8)}), implementer ${implementerModel}`);
 
 // ---- sandbox: one container + one site install shared by both runs -------------
-const evidenceHost = resolve('.sandcastle/evidence', iid, executionId);
+const evidenceHost = resolve(layout.evidence, iid, executionId);
 const evidenceBox = `/home/agent/evidence/${iid}/${executionId}`;
 mkdirSync(evidenceHost, { recursive: true });
-mkdirSync(resolve(".sandcastle/sandbox"), { recursive: true }); // mounted read-only at /opt/sandcastle; empty unless the project adds helpers
+mkdirSync(resolve(layout.helpers), { recursive: true }); // mounted read-only at /opt/sandcastle; empty unless the project adds helpers
 // A relaunched ticket (it was waiting on a blocker) must not pick up the last run's reports.
 for (const f of ["blocked.json", "verdict.md"]) rmSync(resolve(evidenceHost, f), { force: true });
 
@@ -430,7 +432,7 @@ const sandbox = await createSandbox({
     imageName: IMAGE,
     mounts: [
       { hostPath: evidenceHost, sandboxPath: evidenceBox },
-      { hostPath: resolve(".sandcastle/sandbox"), sandboxPath: "/opt/sandcastle", readonly: true },
+      { hostPath: resolve(layout.helpers), sandboxPath: "/opt/sandcastle", readonly: true },
     ],
   }),
   hooks: {
@@ -479,7 +481,7 @@ const cancelSandbox = () => sandboxCancel.abort();
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelSandbox);
 let noCommitMessage: string | undefined;
 let noCommitSuperseded = false;
-const diagnosticSessions = resolve('.sandcastle/diagnostic-sessions', executionId);
+const diagnosticSessions = resolve(layout.diagnosticSessions, executionId);
 try {
   const actualBase = sh('git', ['rev-parse', `refs/heads/${branch}`]);
   if (actualBase !== baseSha) throw Error('Branch creation baseline changed; refusing unverifiable implementation');

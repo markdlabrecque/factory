@@ -54,7 +54,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   git(root, "push", "-q", "origin", "main");
   git(root, "branch", "7-fix-login");
   git(root, "branch", "8-other");
-  const worktree = join(root, ".sandcastle/worktrees/7-fix-login");
+  const worktree = join(root, ".factory/worktrees/7-fix-login");
   mkdirSync(dirname(worktree), { recursive: true });
   git(root, "worktree", "add", "-q", worktree, "7-fix-login");
   writeFileSync(join(worktree, "app.txt"), "v2\n");
@@ -71,17 +71,17 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     await install(p, new Fake(p), { installPackages: dir => stageExecutionPackages(dir, sdk) });
     const { init } = await import(pathToFileURL(join(p.app, 'cli/src/commands/init.mts')).href);
     await init(p, root, { profile: 'personal', repo: 'owner/repo', image: 'img' });
-    assert.deepEqual(readdirSync(join(root, '.sandcastle')).sort(), ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml', 'worktrees'].sort());
+    assert.deepEqual(readdirSync(join(root, '.factory')).sort(), ['.env', '.env.example', '.gitignore', 'factory-dispatch.sh', 'factory.toml', 'worktrees'].sort());
   } else {
     for (const f of buildAssets({ profile: "personal", repo: "owner/repo", image: "img" }, state)) {
       mkdirSync(dirname(join(root, f.path)), { recursive: true });
       writeFileSync(join(root, f.path), f.content, { mode: f.mode });
     }
   }
-  const configPath = join(root, '.sandcastle/factory.toml');
+  const configPath = join(root, '.factory/factory.toml');
   writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('family = "openai"', copied ? 'family = "openai"' : 'family = "anthropic"') + '\n[instructions]\ncommon = ["common.md"]\nimplementation = ["impl.md"]\nanalysis = ["analysis.md"]\nverification = ["verify.md"]\nrecovery = ["repair.md"]\n');
   for (const [file, text] of Object.entries({ 'common.md': 'COMMON {{TICKET}} !`literal`', 'impl.md': 'IMPLEMENTATION ONLY', 'analysis.md': 'ANALYSIS ONLY', 'verify.md': 'VERIFICATION ONLY', 'repair.md': 'RECOVERY ONLY' })) writeFileSync(join(root, file), text);
-  const evidence = join(root, ".sandcastle/evidence/7");
+  const evidence = join(root, ".factory/evidence/7");
   mkdirSync(evidence, { recursive: true });
   writeFileSync(join(evidence, "verdict.md"), "VERDICT: FAIL\nold\n");
   const bin = join(home, "bin");
@@ -123,12 +123,12 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.equal(runtime.directory, join(p.runtimes, runtime.id));
     assert.equal(runtime.env.FACTORY_RUNTIME_ROOT, runtime.directory);
     assert.equal(runtime.env.FACTORY_RUNTIME_ID, runtime.id);
-    for (const name of ['main.mts', 'recovery.mts', 'prompt.recover.md', 'prompt.verify.md', 'node_modules']) assert.equal(existsSync(join(root, '.sandcastle', name)), false, name);
+    for (const name of ['main.mts', 'recovery.mts', 'prompt.recover.md', 'prompt.verify.md', 'node_modules']) assert.equal(existsSync(join(root, '.factory', name)), false, name);
     writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fake, 'npm-called'))}, 'unexpected'); process.exit(91);\n`, {mode:0o755});
   } else {
     // Legacy review gate remains independent of the selected runtime.
     for (const file of WORKFLOW) {
-      const path = join(root, '.sandcastle', file);
+      const path = join(root, '.factory', file);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, file === 'main.mts' ? '"attempt-record": { type: "string" }' : 'fixture review');
     }
@@ -191,7 +191,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   assert.equal(readinessChecked, true);
   assert.equal(launch.ok, true, (launch as { reason?: string }).reason);
   const [code] = await once(child, "exit");
-  const log = readFileSync(join(root, ".sandcastle/logs/recover-7.log"), "utf8");
+  const log = readFileSync(join(root, ".factory/logs/recover-7.log"), "utf8");
   if (scenario !== 'pass') {
     assert.notEqual(code, 0, log);
     assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
@@ -299,8 +299,9 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   if (copied) {
     assert.equal(existsSync(join(fake, 'npm-called')), false);
     assert.equal(existsSync(join(root, 'node_modules')), false);
-    assert.equal(existsSync(join(root, '.sandcastle/node_modules')), false);
-    assert.ok(record.evidence.startsWith(join(root, '.sandcastle/evidence/') ));
+    assert.equal(existsSync(join(root, '.factory/node_modules')), false);
+      assert.equal(existsSync(join(root, '.sandcastle')), false, 'supported execution must never create old-layout assets');
+    assert.ok(record.evidence.startsWith(join(root, '.factory/evidence/') ));
     return;
   }
 

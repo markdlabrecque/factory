@@ -17,8 +17,8 @@ test('factory and project modes never repair code or data', t => {
   for (const mode of ['factory', 'project']) {
     const root = join(base, mode); mkdirSync(root); execFileSync('git', ['init', '-q', root]);
     writeScaffold(root, buildAssets({ profile: 'personal', repo: 'me/site', image: 'img' }, p.state));
-    const dir = join(root, '.sandcastle');
-    if (mode === 'project') writeFileSync(join(dir, 'factory.toml'), readFileSync(join(dir, 'factory.toml'), 'utf8') + '\n[workflow]\nmode = "project"\ndirectory = ".sandcastle/workflow"\n');
+    const dir = join(root, '.factory');
+    if (mode === 'project') writeFileSync(join(dir, 'factory.toml'), readFileSync(join(dir, 'factory.toml'), 'utf8') + '\n[workflow]\nmode = "project"\ndirectory = ".factory/workflow"\n');
     mkdirSync(join(dir, 'workflow')); writeFileSync(join(dir, 'workflow/main.mts'), 'custom');
     mkdirSync(join(dir, 'instructions')); writeFileSync(join(dir, 'instructions/common.md'), 'literal {{placeholder}}');
     mkdirSync(join(dir, 'helpers')); writeFileSync(join(dir, 'helpers/helper.sh'), '#!/bin/sh\nexit 0\n');

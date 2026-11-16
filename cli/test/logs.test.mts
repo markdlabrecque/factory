@@ -18,12 +18,12 @@ function fixture(t: TestContext) {
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const p = paths(home);
   const root = join(home, 'site');
-  mkdirSync(join(root, '.sandcastle/logs'), { recursive: true });
+  mkdirSync(join(root, '.factory/logs'), { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: root });
-  writeFileSync(join(root, '.sandcastle/factory.toml'), factoryToml('me/site'));
+  writeFileSync(join(root, '.factory/factory.toml'), factoryToml('me/site'));
   addProject(p, realpathSync(root));
   const log = (n: number, text: string, age = 0) => {
-    const f = join(root, '.sandcastle/logs', `run-${n}.log`);
+    const f = join(root, '.factory/logs', `run-${n}.log`);
     writeFileSync(f, text);
     const t = new Date(Date.now() - age * 1000);
     utimesSync(f, t, t);

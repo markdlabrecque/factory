@@ -56,8 +56,8 @@ export interface NoCommitDiagnostic {
   evidence: 'no-commit.json';
 }
 export function diagnostic(executionId: string, worktree: NoCommitDiagnostic['worktree'], dependencyReport: boolean, agentReply?: string, logFilePath?: string): NoCommitDiagnostic {
-  const log = logFilePath && relative(resolve('.sandcastle/logs'), resolve(logFilePath));
-  const logReference = log && /^[A-Za-z0-9_.-]{1,160}\.log$/.test(log) && !log.startsWith('..') ? `.sandcastle/logs/${log}` : 'unavailable';
+  const log = logFilePath && relative(resolve('.factory/logs'), resolve(logFilePath));
+  const logReference = log && /^[A-Za-z0-9_.-]{1,160}\.log$/.test(log) && !log.startsWith('..') ? `.factory/logs/${log}` : 'unavailable';
   return { version: 1, executionId, phase: 'implementing', commits: 0, worktree, push: 'not-attempted',
     dependencyReport: dependencyReport ? 'present' : 'missing', agentReply, logReference,
     nextActor: dependencyReport ? 'factory' : 'operator', nextAction: dependencyReport
