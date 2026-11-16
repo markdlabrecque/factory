@@ -78,6 +78,28 @@ _Avoid_: Approval, launch authorization
 A project condition in which still-selected work is stuck behind stopped work, with no active run or remaining analysis or capacity wait to explain the lack of progress.
 _Avoid_: Any queued ticket, temporary wait
 
+### Project supervision
+
+**Project supervisor**:
+The durable responsibility for observing a project's progress and problems and proposing bounded responses under host authority.
+_Avoid_: Permanent agent, scheduler, autonomous operator
+
+**Supervisor incident**:
+A tracked episode of a project or ticket problem, distinct from the attempts to diagnose or resolve it.
+_Avoid_: Run, retry, failure log
+
+**Supervisor proposal**:
+An exact suggested response to an incident, with its rationale, alternatives, risks and intended scope.
+_Avoid_: Authorization, action, instruction
+
+**Gate review**:
+An independent judgment on one exact proposed change to a project's gate expectations under its guidelines and Factory's constraints.
+_Avoid_: Verification verdict, waiver, self-approval
+
+**Human request**:
+An actionable escalation requiring an operator decision, distinct from notification delivery and from authorization to resume work.
+_Avoid_: Log line, needs-human label, approval
+
 ### Agents and verification
 
 **Agent**:

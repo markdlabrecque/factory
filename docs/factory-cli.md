@@ -5,6 +5,10 @@ Live read-only scheduler authorization and delivery claims continue existing exa
 <!-- Operator guidance covers CLI commands, runtime ownership, scheduling, recovery and diagnostics. -->
 # Factory CLI
 
+The [project supervisor authority contract](supervisor.md) documents the gate inventory,
+import-safe records and unresolved fresh-review/notification prerequisites. It does not
+introduce supervisor commands or enable action mode.
+
 Dispatch and recovery enforce [image and sandbox readiness](image-readiness.md) before agent work. Recovery awaits readiness before atomic claim-and-charge, reports environment holds without spending attempts, and rechecks scheduling eligibility after the probe. New supported projects use `.factory` throughout. Strict metadata inspection refuses any `.sandcastle` entry, mixed layouts, directory/config aliases and unknown inspection results before new project writes, tracker work, reports or launch/admission effects. Init may complete a safe existing `.factory` data/image-assets directory without config, preserving existing regular files and registering only after all writes succeed. Executable legacy remnants without TOML are still refused. Existing operations require validated TOML. The shared runtime contract is a breaking change. Project owners are responsible for reviewing their own configuration and custom code; Factory does not automatically migrate them.
 
 The [structured ticket-context contract](ticket-readiness.md#structured-ticket-context) defines complete child and immediate-parent input, bounded collection holds, provenance, hashing and untrusted rendering. Standard launch/analysis gates refuse incomplete structured input before work starts and publish typed ticket-only holds alongside project checks. Standard workflows freeze one complete snapshot per invocation for prompts and evidence, then compare fresh included-source hashes at the existing analysis/proof/delivery boundaries.

@@ -79,6 +79,18 @@ A readiness observation describes resource access for a particular scope and ide
 
 See [ticket readiness](ticket-readiness.md) for schema, freshness, publication and consumer boundaries, and [image readiness](image-readiness.md) for image-specific contracts.
 
+### Supervisor, incident, proposal and review have separate authority
+
+A project's supervisor is a durable logical responsibility, not a permanent agent or a second dispatcher. Its snapshot observes current authoritative facts. An incident records a bounded problem episode; it may outlive multiple proposals without granting additional attempts or ownership.
+
+A proposal names an exact response and its material inputs. Every proposed change to project gate expectations requires a new independent gate review. The reviewer judges the proposal against original child/parent/human context, project guidelines and separately stated nonwaivable Factory constraints. Its approval is neither a verification PASS nor permission to apply or deliver a change. Host admission, freshness, exact effect ownership/expiry and normal proof/delivery gates remain separate.
+
+A denial requires a human request and prevents reviewer shopping. A required Factory-wide change is not a project-local gate correction and must stop new project supervisor action for a human decision. Notification receipt is not resolution or resumption authority. Unknown scope, missing original context and missing notification primitives hold action rather than expanding authority.
+
+For example, replacing an unavailable project verification command with equivalent offline evidence can be proposed for one ticket/run. It still needs fresh review and verification; it cannot waive immutable proof or required CI. An approved instruction correction for that ticket cannot be reused on another ticket. A complete project workflow cannot turn a host-policy bypass into a local exception.
+
+The [supervisor contract](supervisor.md) owns the inventory, bounded records and investigation prerequisites. This increment ships contracts only: the fresh reviewer worker and actionable unattended notification bridge are not yet wired. Merging an investigation finding does not satisfy those downstream action prerequisites.
+
 ## Lifecycle and invariants
 
 ### Selection is not admission
@@ -150,6 +162,7 @@ Source paths below are in the repository. Installed runtime bundles assemble the
 | Verification and host proof | `orchestrator/handoff.mts`, `orchestrator/verification.mts` | [Execution context](execution-context.md), [operator verification contracts](factory-cli.md) |
 | Delivery identity and continuation | `orchestrator/tracker.mts`, `board/delivery.mts`, `orchestrator/delivery-followup.mts` | [Operator CLI](factory-cli.md) |
 | Jam detection and recovery | `orchestrator/graph.mts`, `cli/src/jam-detect.mts`, `cli/src/recovery-run.mts`, `orchestrator/recovery.mts` | [Operator recovery contracts](factory-cli.md) |
+| Supervisor authority, incidents, proposals and gate review | `orchestrator/supervisor-contract.mts` | [Supervisor authority contract](supervisor.md) |
 | Pinned runtime and project assets | `orchestrator/context.mts`, `cli/src/runtime-bundle.mts`, `cli/src/runtime-ownership.mts` | [Execution context](execution-context.md) |
 
 No new architectural decision is introduced here. These relationships document existing contracts; changes to their trade-offs should be decided separately rather than recorded as retrospective decisions.

@@ -3,7 +3,7 @@ name: Tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     # No `paths` filter: Factory only merges a PR after CI passes, so docs-only PRs need a run too.
 
 jobs:
