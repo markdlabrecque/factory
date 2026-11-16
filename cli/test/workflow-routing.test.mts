@@ -44,7 +44,7 @@ for (const mode of ['factory', 'project'] as const) {
     writeFileSync(config, factoryToml('owner/repo') + (mode === 'project' ? '\n[workflow]\nmode = "project"\ndirectory = "workflow"\n' : ''));
     installedFixture(p);
     const source = join(home, 'workflow-source'), records = join(root, 'selected.jsonl');
-    const recorder = `import {appendFileSync,readFileSync} from 'node:fs'; import {dirname} from 'node:path'; import {fileURLToPath} from 'node:url'; const root=process.env.FACTORY_PROJECT_ROOT; appendFileSync(root+'/selected.jsonl',JSON.stringify({entry:import.meta.url,cwd:process.cwd(),args:process.argv.slice(2),node:process.execPath,path:process.env.PATH,state:process.env.SANDCASTLE_STATE_DIR,project:root,runtime:process.env.FACTORY_RUNTIME_ROOT,id:process.env.FACTORY_RUNTIME_ID,mode:process.env.FACTORY_WORKFLOW_MODE,scheduled:process.env.FACTORY_SCHEDULED,readonly:process.env.FACTORY_REFRESH_ONLY})+'\\n');`;
+    const recorder = `import {appendFileSync,readFileSync} from 'node:fs'; import {dirname} from 'node:path'; import {fileURLToPath} from 'node:url'; const root=process.env.FACTORY_PROJECT_ROOT; appendFileSync(root+'/selected.jsonl',JSON.stringify({entry:import.meta.url,cwd:process.cwd(),args:process.argv.slice(2),node:process.execPath,path:process.env.PATH,state:process.env.SANDCASTLE_STATE_DIR,project:root,runtime:process.env.FACTORY_RUNTIME_ROOT,id:process.env.FACTORY_RUNTIME_ID,dependencies:process.env.FACTORY_RUNTIME_DEPENDENCIES,mode:process.env.FACTORY_WORKFLOW_MODE,scheduled:process.env.FACTORY_SCHEDULED,readonly:process.env.FACTORY_REFRESH_ONLY})+'\\n');`;
     writeFileSync(join(source, 'orchestrator/dispatch.sh'), '#!/bin/sh\nexec node "$FACTORY_RUNTIME_ROOT/dispatch.mts" "$@"\n', { mode: 0o755 });
     writeFileSync(join(source, 'orchestrator/dispatch.mts'), recorder + `if(process.env.FACTORY_REFRESH_KEY){ const a=await import(${JSON.stringify(assessment)});a.clearRequest(process.env.SANDCASTLE_STATE_DIR,process.env.FACTORY_REFRESH_KEY,a.pendingRequests(process.env.SANDCASTLE_STATE_DIR).get(process.env.FACTORY_REFRESH_KEY));}`);
     writeFileSync(join(source, 'orchestrator/config-read.mts'), recorder + `process.stdout.write('0.01');`);
@@ -59,6 +59,9 @@ for (const mode of ['factory', 'project'] as const) {
     const selected = projectWorkflow(p, root), ctx = resolveProject(p, { project: root });
     assert.equal(copyProblem(root, p), null); assert.equal(ctx.root, root);
     assert.equal(selected.mode, mode);
+    assert.equal(ctx.scaffold, join(root, '.factory'));
+    assert.equal(selected.config.TRACKER.project, 'owner/repo');
+    assert.equal(selected.config.config.image, 'fixture');
     if (mode === 'project') recordReview(p, root);
     assert.equal(recoveryCopyProblem(p, root), null);
     const env = { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: p.state, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, FACTORY_RUNTIME_DESCRIPTOR: p.runtimeDescriptor };
@@ -126,12 +129,15 @@ for (const mode of ['factory', 'project'] as const) {
     const calls = read(); assert.equal(calls.length, 7);
     for (const c of calls) {
       assert.equal(c.cwd, root); assert.equal(c.project, root); assert.equal(c.runtime, selected.root); assert.equal(c.id, selected.id); assert.equal(c.mode, mode);
+      assert.equal(c.dependencies, selected.manifest.dependencies);
       assert.ok(c.entry.startsWith('file://' + selected.root + '/'));
       assert.equal(c.node, process.execPath); assert.equal(c.path, env.PATH); assert.equal(c.state, p.state);
     }
     assert.deepEqual(calls[0].args, ['--dry-run']); assert.deepEqual(calls[1].args, ['--issue', '7']);
     assert.deepEqual(calls[2].args, ['--refresh-only', '--base', 'main']);
+    assert.equal(calls[2].scheduled, undefined, 'unopted refresh has no launch authorization');
     assert.equal(calls[3].scheduled, '1'); assert.deepEqual(calls[4].args, ['--refresh-only', '--ticket', '7', '--base', 'main']);
+    assert.equal(calls[4].scheduled, undefined, 'Board refresh has no scheduled launch authorization');
     const before = readRuns(p.state, false); assert.equal(before.length, 1);
     child!.kill('SIGKILL'); await once(child!, 'exit');
     // A stale selected override cannot be launched, scheduled, refreshed or reviewed by using Factory as a fallback.

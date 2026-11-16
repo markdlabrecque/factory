@@ -73,6 +73,24 @@ test('patch helper and specification participate in source identity with synthet
   }
 });
 
+test('synthetic SDK package bytes affect dependency identity independently of source identity', t => {
+  const f = fixture(); t.after(f.cleanup);
+  const a = prepare(f);
+  const b = prepareRuntimeBundle({ sourceRoot: f.source, runtimeStore: join(f.root, 'other-store'), install: directory => {
+    install(directory);
+    // This is a byte-hash probe, not evidence that a fixture package implements the upstream patch.
+    const sdk = join(directory, 'node_modules/@ai-hero/sandcastle/dist/main.js');
+    writeFileSync(sdk, readFileSync(sdk, 'utf8') + '\n// synthetic patched package bytes\n');
+  } });
+  assert.equal(a.id, b.id, 'unchanged source must retain the source identity');
+  assert.notEqual(a.manifest.dependencies, b.manifest.dependencies);
+  validateRuntimeBundle(a.directory); validateRuntimeBundle(b.directory);
+  const sdk = join(b.directory, 'node_modules/@ai-hero/sandcastle/dist/main.js');
+  writeFileSync(sdk, readFileSync(sdk, 'utf8') + '\n// post-publication drift\n');
+  assert.throws(() => validateRuntimeBundle(b.directory), /dependencies changed/);
+  validateRuntimeBundle(a.directory);
+});
+
 test('missing source, symlinks and invalid or colliding destinations fail closed', t => {
   const f = fixture(); t.after(f.cleanup);
   assert.throws(() => validateRuntimeInventory([{ source: '../escape', destination: 'x' }]));

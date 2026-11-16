@@ -11,8 +11,9 @@ import { exportEvents } from '../../board/execution-events.mts';
 // holds the claim; a finished attempt is recorded from its attempt record; a crashed one is settled as interrupted only
 // after its exact container is confirmed gone, never touching another container (even one mounting the same worktree);
 // a cleanup-pending attempt keeps its intended outcome; a death during delivery is never replayed; a ticket stops after
-// two attempts; the recovery claim in the admission record outlives the worker until settled (#75); a pre-upgrade run is
-// adopted into an ownership receipt; a remote-only branch is fetched exactly, and ambiguous or mismatched refs refused. Disposable Git repo, run-state folder and recovery record; a sleeping process stands in for the repair
+// two attempts; the recovery claim in the admission record outlives the worker until settled. In-layout runs without receipts
+// can be adopted, but old-layout records/receipts stay untouched and spend no attempt. A remote-only branch is fetched
+// exactly, and ambiguous or mismatched refs refused. Disposable Git repo, run-state folder and recovery record; a sleeping process stands in for the repair
 // process and a fake docker (exact-name inspect and rm -f only; anything else throws). No tracker, agent or real Docker.
 import { factoryToml } from './config-fixture.mts';
 import { test } from 'node:test';
@@ -156,6 +157,30 @@ test('host holds spend no recovery attempt, catch a late race and do not block e
   assert.equal(settleRecovery(f.p, { ...f.common, at: at(13) }).state, 'settled');
   assert.deepEqual(f.removed, [mine]); assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
   assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
+});
+
+for (const saved of ['run', 'receipt'] as const) test(`supported .factory cannot adopt an old-layout ${saved} or charge a recovery attempt`, async t => {
+  const f = fixture(t);
+  if (saved === 'run') {
+    const file = join(f.dir, 'proj--7.json');
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), evidenceDir: join(f.root, '.sandcastle/evidence/7') }));
+  } else {
+    const tracker = { kind: 'github', host: 'github.com', project: 'proj' };
+    const file = recordIntent(f.dir, { root: f.root, tracker, ticket: '7', branch: '7-fix-login', base: 'main', runId: 'historical', branchToCreate: false, worktreeToCreate: false });
+    writeFileSync(file, JSON.stringify({ ...readReceipt(file), worktreePath: join(f.root, '.sandcastle/worktrees/7-fix-login') }));
+  }
+  const files = (path: string): unknown => readdirSync(path, { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => {
+    const file = join(e.parentPath, e.name); return [file, statSync(file).mode, readFileSync(file).toString('hex')];
+  }).sort();
+  const before = { records: files(f.dir), git: files(join(f.root, '.git')), work: files(f.worktree), recovery: readRecovery(f.p, f.root) };
+  const held = await launchRecovery(f.p, { ...f.common, ticket: 7, capabilities: async () => assert.fail('historical authority must hold before image probes'), spawn: () => assert.fail('cannot launch historical work') });
+  assert.equal(held.ok, false); if (!held.ok) {
+    assert.ok(held.reason.includes(join(f.root, '.sandcastle')));
+    assert.match(held.reason, saved === 'run' ? /not the ticket's own/ : /not the worktree its ownership receipt names/);
+  }
+  assert.deepEqual({ records: files(f.dir), git: files(join(f.root, '.git')), work: files(f.worktree), recovery: readRecovery(f.p, f.root) }, before);
+  assert.deepEqual(f.removed, []); assert.equal(f.launched.length, 0);
+  assert.equal(existsSync(join(f.root, '.sandcastle')), false, 'refusal must not create or convert old assets');
 });
 
 test('mixed layout holds new launches but retains exact saved-container settlement', async t => {
