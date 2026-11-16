@@ -43,6 +43,9 @@ test('complete inventory, deterministic identity, private install and validation
   const facts = await import(pathToFileURL(join(a.directory, 'supervisor-facts.mts')).href);
   assert.equal(facts.safeExcerpt('token=private'), '[REDACTED]');
   assert.equal(facts.observed('fixture', 'saved', '2026-11-16T00:00:00.000Z', []).status, 'known');
+  const state = await import(pathToFileURL(join(a.directory, 'supervisor-state.mts')).href);
+  assert.equal(state.emptySupervisor({ root: '/fixture/project', tracker: { kind: 'github', host: 'github.com', project: 'owner/repo' } }).revision, 0);
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-state.mts')), readFileSync(join(f.source, 'cli/src/supervisor-state.mts')), 'state ships unchanged');
   assert.deepEqual(layout.projectLayoutPolicy({ kind: 'fresh' }, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
   for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
