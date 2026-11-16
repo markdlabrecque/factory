@@ -1,5 +1,5 @@
 // Offline entrypoint acceptance: rejected layouts preserve project/Git/shared authority byte-for-byte.
-// Only Board assessment/request observations may change. All external execution stubs reject; homes are temporary.
+// Only Board assessment/request observations may change. External stubs reject; homes and cwd are fixture-owned.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -36,8 +36,10 @@ for (const kind of ['old-only', 'mixed', 'symlink', 'type-conflict', 'unreadable
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'factory-layout-accept-'))), p = paths(home);
     const root = join(home, 'project'), outside = join(home, 'outside'), bin = join(home, 'bin');
     mkdirSync(root); mkdirSync(outside); mkdirSync(bin);
-    const saved = { ...process.env };
+    const saved = { ...process.env }, savedCwd = process.cwd();
+    process.chdir(root);
     t.after(() => {
+      process.chdir(savedCwd);
       if (kind === 'unreadable') chmodSync(join(root, '.factory/factory.toml'), 0o640);
       for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
       Object.assign(process.env, saved); rmSync(home, { recursive: true, force: true });

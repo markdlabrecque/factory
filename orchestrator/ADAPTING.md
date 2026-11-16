@@ -11,9 +11,11 @@ Factory selects a complete runtime for each invocation. In the default `factory`
 | Project test commands, fixtures or stack-specific advice for agents | Repository Markdown listed in `[instructions]` |
 | Change workflow stages, model policy, prompts or executable behavior | Complete project workflow override, maintained and reviewed by its owner |
 
-The [project configuration reference](../docs/project-config.md) owns the schema and defaults. The [CLI reference](../docs/factory-cli.md) owns operator commands, scheduling and recovery. Environment setup is covered by the [Sandcastle setup skill](../skills/sandcastle-setup/SKILL.md). Do not patch the published shared default for a single project or add Factory runtime dependencies to the project.
+The [project configuration reference](../docs/project-config.md) owns the schema and defaults. The [CLI reference](../docs/factory-cli.md) owns operator commands, scheduling and recovery. Environment setup is covered by the [Sandcastle setup skill](../skills/sandcastle-setup/SKILL.md). Do not patch the published shared default for a single project or add Factory runtime dependencies to the project. The [Sandcastle patch maintenance guide](../docs/sandcastle-patch.md) owns the shared SDK patch, coordinated dependency updates and eventual removal, including private SDK preparation for complete overrides.
 
 ## Project data and instructions
+
+The repository's [`.factory/Dockerfile`](../.factory/Dockerfile), [environment example](../.factory/.env.example) and [ignore rules](../.factory/.gitignore) are maintained source assets. They are not a copied executable workflow or a ready-to-run standard Pi image. Use the setup skill's selected layers; init does not copy the Dockerfile.
 
 Both `factory init` profiles create only `factory.toml`, `.env`, `.env.example`, `.gitignore` and `factory-dispatch.sh` under `.factory/`. They do not copy runtime modules or prompts. Personal uses GitHub and automatic merge by default; client uses GitLab and manual merge by default. Both select the OpenAI Pi family. Review generated settings and provision the image and selected Pi family separately; init does not authenticate, build an image or install a provider.
 

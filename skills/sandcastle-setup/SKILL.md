@@ -28,6 +28,8 @@ Read [project configuration](../../docs/project-config.md) for the schema and [a
 
 ## Prepare the project
 
+Only new `.factory` projects are supported. Any `.sandcastle` entry, mixed layout or unsafe alias holds setup without conversion. Preserve existing environment files, worktrees, evidence, logs and saved state; do not rename or remove them to pass the gate. Use a separate new checkout/project rather than treating this skill as an upgrade procedure.
+
 1. For a new project, use `factory init [path] --profile personal|client --repo <namespace/project> --image <image>`. Client also requires `--host <gitlab-host> --project-id <number>`. Confirm the inputs before running it. Init creates v2 TOML, an empty private `.env`, `.env.example`, `.gitignore` and a dispatch wrapper. It registers the project after successful writes, preserves existing files and does not build an image, install project runtime dependencies, authenticate or copy workflow code and prompts. Both profiles use OpenAI Pi. Personal enables automatic merge; client leaves merge to a person. Review the generated selection and merge values.
 2. Configure `sandbox.image`, selection and merge settings in TOML. Keep startup scripts separate. For web setup, remove the existing `setup = []` before adding a setup table. This is a fragment, not a complete configuration:
 
@@ -50,7 +52,9 @@ If asked about interactive attach/steer, consult the [herdr-core experiment](../
 
 ## Image layers
 
-Use the confirmed snippets in `layers/`, pinning versions and adapting the project's Dockerfile and build context:
+Use the confirmed snippets in `layers/`, pinning versions and adapting the project's Dockerfile and build context. The repository's [`.factory/Dockerfile`](../../.factory/Dockerfile), [environment example](../../.factory/.env.example) and [ignore rules](../../.factory/.gitignore) are source examples. The Dockerfile supplies browser tooling, not a complete standard Pi image; add the selected Pi layer. Keep project-owned Dockerfile/Containerfile inputs and any copied build helpers under `.factory/`. The patched SDK's default build context is that directory, while an explicit file option retains upstream current-directory context. Init neither copies these image sources nor builds them.
+
+Select layers:
 
 | Layer | Source | When |
 | --- | --- | --- |
@@ -61,9 +65,9 @@ Use the confirmed snippets in `layers/`, pinning versions and adapting the proje
 | CMS | `layers/cms-drupal/` or `layers/cms-wordpress/` | As detected and confirmed. |
 | ddev compatibility | `layers/compat-ddev/` | When project scripts call ddev inside the sandbox. |
 
-The Pi snippet's comment calls its subscription section personal-only; choose that section by `agent.family`, not by profile. Keep credentials out of the image. For Playwright, use the project's locked `playwright-core` version when applicable; otherwise use the supplied layer's version. Install browser dependencies as root and leave the browser readable and executable by the sandbox user. Copy the chosen web and compatibility helpers into the build context as required by their snippets.
+Choose the Pi snippet's subscription section by `agent.family`, not by profile. Keep credentials out of the image. For Playwright, use the project's locked `playwright-core` version when applicable; otherwise use the supplied layer's version. Install browser dependencies as root and leave the browser readable and executable by the sandbox user. Copy the chosen web and compatibility helpers into the build context as required by their snippets.
 
-Review [image readiness](../../docs/image-readiness.md) before rebuilding an existing image. Image capability checks, sandbox setup and the independent verifier browser check are separate. Ask before a build or live smoke test; do not present source inspection as a successful image test. The dispatcher uses the selected bundle's private Sandcastle executable, not project `npx` or a project npm install.
+Review [image readiness](../../docs/image-readiness.md) before rebuilding an existing image. Image capability checks, sandbox setup and the independent verifier browser check are separate. Ask before a build or live smoke test; do not present source inspection as a successful image test. The dispatcher uses the selected bundle's private Sandcastle executable, not project `npx` or a project npm install. For SDK dependency changes, private override preparation or removal of the directory patch, follow the single [Sandcastle patch maintenance guide](../../docs/sandcastle-patch.md). Never patch an installed bundle or shared/global package in place.
 
 ## Inspect and hand off
 

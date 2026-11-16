@@ -45,7 +45,7 @@ resolves an executable through project `npm`, `npx` or `node_modules`.
 Git and `.env` use the checkout. Sandbox image/setup settings come from its TOML.
 Logs, evidence, recovery artifacts, diagnostic sessions, SDK patches and implementation worktrees use the shared `.factory` layout. New private runtime preparation applies the pinned [Sandcastle patch](sandcastle-patch.md) after npm with scripts disabled and before dependency hashing. Failed preparation leaves prior bundles and descriptor bytes intact. Analysis worktrees and shared records retain their shared
 state layout. `.factory/sandbox` is an explicitly mounted project helper
-directory; an empty project receives no installed sample image or Drupal setup.
+directory; an empty project receives no installed sample image or Drupal setup. Repository source examples live under `.factory/`, but executable runtime assembly reads the canonical `orchestrator/`, `board/` and CLI template inventories. The retired project workflow copies are not runtime inputs.
 `codePath` and `projectPath` reject lexical traversal between these roots. Existing old-layout run/ownership paths are never rewritten into `.factory` authority. Exact saved-container settlement may proceed while a layout hold blocks new launches; that maintenance does not authorize repair or adopt a branch. Already-running processes keep their immutable selected runtime, even after a new descriptor is published.
 
 ## Frozen inputs and proof
@@ -173,6 +173,8 @@ aliases are deduplicated. Their role-specific hashes participate in policy ident
 current-input checks reload them and revoke authority on changes. Frozen text is
 inserted literally in an additive section, never as a replacement Factory template.
 Missing or invalid configured files fail closed.
+
+[Supported-layout acceptance](../TESTING.md#supported-layout-acceptance) records the offline entrypoint, preservation and dependency-identity evidence. The [patch maintenance guide](sandcastle-patch.md#updating-the-sdk) owns SDK updates and removal; fixture SDKs do not replace its actual-package verification.
 
 These changes are source contracts, not deployment or migration instructions.
 They neither install a runtime into a real project nor resume schedules.

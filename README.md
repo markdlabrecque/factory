@@ -13,6 +13,7 @@ The first five roadmap slices are implemented: installation, project registratio
 | Installation, doctor, Board service and safe uninstall | [Factory CLI](docs/factory-cli.md) |
 | V2 configuration, profiles and family/tier policy | [Project configuration](docs/project-config.md) |
 | Shared runtime identity, pinning, leases and complete overrides | [Execution context](docs/execution-context.md), [workflow adaptation](orchestrator/ADAPTING.md) |
+| Pinned SDK patch, dependency updates and patch removal | [Sandcastle patch maintenance](docs/sandcastle-patch.md) |
 | Selection, dependency/conflict analysis, dispatch, run and retry | [Selection explanation](docs/factory-cli.md#selection-explanation), [execution commands](docs/factory-cli.md#slice-three-spec) |
 | Linux/macOS scheduling, project opt-in, health and timing | [Scheduler contracts](docs/factory-cli.md#slice-four-scheduler-storage) |
 | Bounded recovery, saved-work ownership, reports and explicit reset | [Recovery guide](docs/design/self-recovery.md) |
@@ -25,7 +26,7 @@ The first five roadmap slices are implemented: installation, project registratio
 | Project-asset reports, read-only workflow diagnostics and local event export | [Update](docs/factory-cli.md#project-asset-diagnostics), [workflow status](docs/factory-cli.md#read-only-workflow-identity-report), [telemetry](docs/telemetry.md) |
 | Domain relationships and terminology | [Domain model](docs/domain-model.md), [glossary](docs/GLOSSARY.md) |
 
-New projects use `.factory` for configuration, environment assets, worktrees and evidence. `.sandcastle`-only and mixed-layout projects are unsupported and are not converted. Repository image/source-asset relocation and release verification remain separate gates. Legacy installer removal remains unfinished. The [herdr-core attach/steer experiment](docs/research/interactive-agents-herdr-core.md) was approved for adoption, but production integration is not implemented. Standard Factory runs remain noninteractive Pi. A dedicated recovery Board UI is also deferred.
+New projects use `.factory` for configuration, environment assets, worktrees and evidence. `.sandcastle`-only and mixed-layout projects are unsupported and are not converted. Tracked image/environment examples now live in `.factory/`; obsolete copied workflow modules have been retired. [Offline layout acceptance](TESTING.md#supported-layout-acceptance) is complete, including preservation of unsupported projects. This is source/test evidence, not a live rollout or proof that the example image has been built. Legacy installer removal remains unfinished. The [herdr-core attach/steer experiment](docs/research/interactive-agents-herdr-core.md) was approved for adoption, but production integration is not implemented. Standard Factory runs remain noninteractive Pi. A dedicated recovery Board UI is also deferred.
 
 ## What belongs where
 

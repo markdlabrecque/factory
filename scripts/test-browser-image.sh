@@ -5,7 +5,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 image="factory-browser-smoke-$(date +%s)-$$"
 container="${image}-container"
 trap 'docker rm -f "$container" >/dev/null 2>&1 || :; docker image rm -f "$image" >/dev/null 2>&1 || :' EXIT
-docker build --build-arg AGENT_UID="$(id -u)" --build-arg AGENT_GID="$(id -g)" -t "$image" "$root/.sandcastle"
+docker build --build-arg AGENT_UID="$(id -u)" --build-arg AGENT_GID="$(id -g)" -t "$image" "$root/.factory"
 docker run --name "$container" --entrypoint /bin/sh "$image" -c '
 set -eu
 [ "$(id -u)" != 0 ]

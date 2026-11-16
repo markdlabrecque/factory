@@ -1,4 +1,4 @@
-<!-- Regular tests use fixture-owned runtimes and external boundaries. CI partitions the complete inventory across bounded parallel shards and separately checks browser lifecycle isolation. Real browser-image and service-manager smoke checks are opt-in. -->
+<!-- Commit checks use fixture-owned runtimes and external boundaries across four bounded CI shards plus a separate browser-lifecycle gate. Exact-package offline verification and real browser-image/service-manager smoke checks are distinct opt-in boundaries. -->
 # Testing
 
 ## Run the tests
@@ -58,13 +58,38 @@ node --test cli/test/runtime-bundle.test.mts cli/test/runtime-ownership.test.mts
 
 These tests copy the assembly inventory into temporary fixtures and inject a package installer. They check source and lock identity, applicable optional dependencies, the exact npm command boundary, failed preparation, competing publication, path collisions and symlink refusal. Copied and linked install fixtures cover descriptor publication, old-bundle retention, process leases and uninstall refusal. Subprocess fixtures exit during temporary preparation and after publication to prove ownership recovery. Late service failure must leave the old descriptor unchanged. Concurrent asynchronous installs and uninstall are fenced across service awaits. Child processes interrupt ledger and lease writes before each rename to verify metadata recovery without weakening unknown-entry deletion checks. These regular tests do not run npm or contact a registry.
 
-An opt-in smoke test exercises the real locked tsx, esbuild platform binary and Sandcastle imports with scripts disabled. Supply a cache containing the public tarballs from the root lock and an npm CLI path. It copies only those tarballs into an isolated cache, clears inherited npm configuration and runs npm with `--offline`. It never fills missing cache entries from the network or changes the supplied cache. Run on a supported Node 22.18+ binary and Node 24 when checking dependency compatibility:
+The pinned SDK patch has cheap guard and transactional-publication checks:
+
+```sh
+node --test cli/test/sandcastle-patch.test.mts cli/test/runtime-bundle.test.mts
+```
+
+These use owned synthetic package bytes to check version/integrity, complete inventory, exact preimages/postimages, repeat application, mixed-state refusal, changed patch-input source identity, dependency-only identity/drift and failed-publication preservation. They do not prove the upstream SDK's directory behavior. The [Sandcastle patch guide](docs/sandcastle-patch.md) owns the version/file coverage, coordinated SDK/lock/specification update procedure, drift guards, publication/rollback boundaries and eventual removal.
+
+An opt-in offline smoke test exercises the real locked tsx, esbuild platform binary and Sandcastle `0.14.0` package with scripts disabled. It calls the production installer, applies the patch before dependency hashing and validates the resulting bundle. The disposable probe in `scripts/smoke-sandcastle-patch.mts` checks upstream worktree creation/reuse/recognition/pruning/removal, environment loading, default and explicit logging, saved-patch cleanup/recovery guidance, and default/explicit Docker/Podman build argv. Container executables are argv recorders, not daemon calls. It neither builds an image nor runs an agent. Supply a cache containing the public tarballs from the root lock and an npm CLI path. It copies only those tarballs into an isolated cache, clears inherited npm configuration and runs npm with `--offline`. It never fills missing cache entries from the network or changes the supplied cache. Run on a supported Node 22.18+ binary and Node 24 when checking dependency compatibility:
 
 ```sh
 node scripts/test-runtime-packages.mts /path/to/npm-cache /path/to/npm/bin/npm-cli.js
 ```
 
-The implementation was smoke-tested with Node 22.23.2 and 24.20.0. This is not an execution test of the exact 22.18.0 patch release.
+The implementation was smoke-tested with Node 22.23.2 and 24.20.0. The actual-package patch smoke passed on Node 22.23.2 during #208 and through the activated production installer on Node 24.20.0 during #210. That evidence is reused for this documentation/source-asset change; no package install is rerun solely to edit docs. This is not an execution test of the exact 22.18.0 patch release. A future SDK/lock/specification update requires fresh actual-package evidence; missing offline cache content blocks that gate rather than authorizing network access.
+
+## Supported-layout acceptance
+
+Supported new projects use `.factory` for config, environment assets, implementation worktrees, logs, evidence, diagnostic sessions and SDK patches. Old-only and mixed layouts are unsupported, not upgrade inputs. No test may convert deployed projects, rewrite old authority or operate on ignored operator artifacts.
+
+Run the cheap layout boundary checks and the existing entrypoint/package fixtures:
+
+```sh
+node --test orchestrator/project-layout.test.mts cli/test/init.test.mts cli/test/sandcastle-patch.test.mts
+timeout --signal=KILL 180s node --test --test-concurrency=4 --test-reporter=tap --test-timeout=120000 cli/test/layout-acceptance.test.mts cli/test/recovery-run.test.mts cli/test/runtime-bundle.test.mts cli/test/shared-runtime.test.mts cli/test/workflow-routing.test.mts
+```
+
+`cli/test/layout-acceptance.test.mts` covers old-only, mixed, symlink, type-conflict and unreadable layouts across init, CLI launch, scheduled/read-only refresh, Board refresh, registry add and cleanup. Each invalidates a previously ready observation. It asserts unchanged project bytes/modes, Git refs/index/status and saved shared authority, no external command calls and no admission. Board may write only its assessment/request observation. Recovery fixtures reject old-layout evidence and ownership receipts even for a supported project, without spending an attempt, touching dirty work or probing an image. Already-owned exact-container settlement remains separate from authorization to launch new work.
+
+Copied-install normal/verifier/recovery fixtures assert `.factory` asset/worktree paths and exact evidence/helper mounts. Routing fixtures pin runtime and dependency identity through CLI, tick, unopted refresh, Board, preparation and recovery, including complete overrides. The SDK, tracker, agent, container and service-manager boundaries remain synthetic. Real temporary filesystem/Git operations prove preservation and selection, not live deployment.
+
+The accepted baseline in [PR #214](https://github.com/markdlabrecque/factory/pull/214), merged 2026-11-16, passed 941 regular tests across all four bounded shards and the separate 12-test browser-lifecycle gate. Eight added cases cover unsupported-layout preservation, old authority and dependency identity. The focused five-file command above passed 66 tests. The separate browser execution repeats a file already in the shard inventory; it is not 12 additional unique tests. Reproduce all four shards and the separate browser command for each candidate change. Source readiness does not claim a live install, conversion, built image or rollout.
 
 ## Data-only projects and workflow diagnostics
 
@@ -88,7 +113,7 @@ recovery case exercises preparation and readiness before charging, preserves pri
 work and evidence, and settles the delivered attempt. These use an explicit ticket
 tier. The normal cases poison project workflow files; the copied recovery checks
 their absence. They trap npm calls
-and checks that execution creates no project dependencies. It uses temporary bare
+and check that execution creates no project dependencies. It uses temporary bare
 Git and fake SDK, tracker, container and authentication boundaries; it does not
 run a real agent or prove semantic verification. A complete project override also
 runs the implementation and verifier with custom code and a marked template. Removing
@@ -328,7 +353,7 @@ timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 o
 
 ## Optional browser image smoke test
 
-Run `./scripts/test-browser-image.sh` from this checkout with Docker/build access, network access for public build dependencies, and a non-root caller UID/GID. It builds a uniquely tagged disposable image from `.sandcastle/Dockerfile`, overrides the entrypoint and checks the non-root browser with synthetic content, screenshot and video from an empty directory. The runtime check downloads nothing. The image and container are removed on exit; configured images and services are untouched. The regular Node suite never runs this test.
+Run `./scripts/test-browser-image.sh` from this checkout with Docker/build access, network access for public build dependencies, and a non-root caller UID/GID. It builds a uniquely tagged disposable image from `.factory/Dockerfile`, overrides the entrypoint and checks the non-root browser with synthetic content, screenshot and video from an empty directory. The runtime check downloads nothing. The image and container are removed on exit; configured images and services are untouched. The regular Node suite never runs this test.
 
 ## Optional deployment smoke tests
 

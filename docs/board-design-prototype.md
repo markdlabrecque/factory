@@ -3,7 +3,7 @@
 
 Status: implemented in the production Board template. The retained prototype is simulated design history, not the live operations console. The production section below records current presentation and links to the operational contracts.
 
-Production project refresh, readiness, logs and new evidence use the strict `.factory` layout. Unsupported or unknown projects are not fresh authorization and passive Board reads create no report or run. Historical evidence keeps its recorded path. A file snapshot is not rendered into an unsupported checkout merely because shared-state cleanup or settlement updates a run. See [execution context](execution-context.md) and [CLI layout policy](factory-cli.md).
+Production project refresh, readiness, logs and new evidence use the strict `.factory` layout. Unsupported or unknown projects are not fresh authorization and passive Board reads create no report or run. Historical evidence keeps its recorded path. A file snapshot is not rendered into an unsupported checkout merely because shared-state cleanup or settlement updates a run. See [execution context](execution-context.md), [CLI layout policy](factory-cli.md) and [offline layout acceptance](../TESTING.md#supported-layout-acceptance). That acceptance checks Board refresh refusal and preservation, not a live Board installation.
 
 - Source: [`board/board-prototype.html`](../board/board-prototype.html), one self-contained HTML file with inline CSS and JavaScript.
 - Model regression tests: [`board/board-prototype.test.mjs`](../board/board-prototype.test.mjs), using Node's built-in test runner.

@@ -11,7 +11,7 @@ family = "openai" # openai|anthropic
 
 # [workflow]
 # mode = "project"
-# directory = ".sandcastle/workflow"
+# directory = ".factory/workflow"
 # [instructions]
 # common = ["docs/agent-instructions.md"]
 # implementation = []

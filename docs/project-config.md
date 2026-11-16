@@ -3,6 +3,8 @@
 
 Supported new projects keep all project data under `.factory`. Shared layout inspection refuses any `.sandcastle` entry, mixed layouts, directory/config symlinks and unknown access before configuration becomes authority. There is no old-layout conversion or fallback. Init may add missing data to an existing safe source-assets-only `.factory` directory; existing commands require a regular, readable `factory.toml` and the usual schema/runtime checks. Historical records and ownership paths are not translated. Global Factory homes, package names and `SANDCASTLE_STATE_DIR` are unchanged.
 
+Repository-owned image and environment examples are [`.factory/Dockerfile`](../.factory/Dockerfile), [`.factory/.env.example`](../.factory/.env.example) and [`.factory/.gitignore`](../.factory/.gitignore). These are source inputs, not an initialized project or a complete provisioned Pi image. Init generates profile-specific data and does not copy the Dockerfile or obsolete workflow code. Review the [setup layers](../skills/sandcastle-setup/SKILL.md#image-layers) before building. The SDK's matching directory behavior is maintained through the [pinned Sandcastle patch](sandcastle-patch.md), not a project configuration option.
+
 New Factory projects use versioned TOML, not edits to Factory implementation files.
 `factory init --profile personal|client` creates a commented profile with values from
 `--repo`, `--image` and (client) `--host` / `--project-id`. Reference profiles are
