@@ -47,7 +47,7 @@ export const pi = (model, options) => {
   return Object.defineProperty({model, thinking: options.thinking}, 'sessionRoot', {value:options.sessionStorage?.hostSessionsDir});
 };
 export async function createSandbox(o) {
-  if (scenario === 'shared-projects') writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
+  writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
   const worktree = join(root, '.factory/worktrees', o.branch); mkdirSync(join(root, '.factory/worktrees'), {recursive:true});
   git(root, ['worktree', 'add', '-b', o.branch, worktree, o.baseBranch]);
   writeFileSync(join(fake, 'live'), 'yes');
@@ -59,10 +59,10 @@ export async function createSandbox(o) {
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
     run: async o => {
-      if (scenario === 'publication' || scenario === 'shared-projects' || scenario === 'project-override') {
+      if (scenario === 'pass' || scenario === 'readiness-acceptance' || scenario === 'publication' || scenario === 'shared-projects' || scenario === 'project-override') {
         const { executionContext } = await import(process.env.FACTORY_RUNTIME_ROOT + '/context.mts');
         const c = await executionContext();
-        writeFileSync(join(fake, o.name + '-identity.json'), JSON.stringify({root:c.runtimeRoot, identity:c.identity, templates:c.templates, additive:c.additive}));
+        writeFileSync(join(fake, o.name + '-identity.json'), JSON.stringify({root:c.runtimeRoot, assets:c.assetRoot, identity:c.identity, templates:c.templates, additive:c.additive}));
       }
       writeFileSync(join(fake, o.name + '-agent.json'), JSON.stringify(o.agent));
       writeFileSync(join(fake, o.name + '-instructions.txt'), o.promptArgs.ADDITIVE_INSTRUCTIONS);
@@ -418,6 +418,20 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(run.implementationModel, expectedModel);
       if (copied) {
         assert.equal(expectedModel, 'openai/gpt-6.1-terra');
+        for (const role of ['implementer', 'verifier']) {
+          const selected = JSON.parse(readFileSync(join(fake, `${role}-identity.json`), 'utf8'));
+          assert.equal(selected.root, runtime.directory);
+          assert.equal(selected.assets, join(root, '.factory'), 'execution context loads supported project data separately from runtime code');
+          assert.deepEqual(selected.identity.runtime, { id: runtime.id, dependencies: runtime.manifest.dependencies });
+        }
+        const options = JSON.parse(readFileSync(join(fake, 'sandbox-options.json'), 'utf8'));
+        assert.equal(options.branch, '7-fix-login'); assert.equal(options.baseBranch, 'origin/main');
+        assert.deepEqual(options.sandbox.mounts, [
+          { hostPath: run.evidenceDir, sandboxPath: `/home/agent/evidence/7/${run.executionId}` },
+          { hostPath: join(root, '.factory/sandbox'), sandboxPath: '/opt/sandcastle', readonly: true },
+        ], 'production passes exact in-layout evidence/helper mounts to the synthetic SDK');
+        assert.ok(existsSync(join(root, '.factory/worktrees/7-fix-login')), 'synthetic SDK uses the supported worktree path');
+        assert.equal(existsSync(join(root, '.sandcastle')), false);
         assert.ok(run.evidenceDir.startsWith(join(root, '.factory/evidence') + '/'));
         assert.ok(existsSync(join(fake, 'implementer-started')) && existsSync(join(fake, 'verifier-started')));
       }
