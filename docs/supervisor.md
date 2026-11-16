@@ -1,8 +1,20 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implemented foundation supplies **import-safe records, validation, a bounded authority investigation and host-owned durable state**, not a running supervisor. There is no new worker, configuration switch, CLI, notification service, gate applicator or pilot rollout here. Existing Factory gates remain unchanged. The contract and state modules ship in the complete runtime inventory. The contract performs no I/O; state persistence is explicit and importing the state module starts no work.
+This is the authoritative reference for the project supervisor feature. The implemented foundation supplies **import-safe records, validation, optional inert policy, a bounded authority investigation and host-owned durable state**, not a running supervisor. There is no new worker, action-mode switch, CLI, notification service, gate applicator or pilot rollout here. Existing Factory gates remain unchanged. The contract, policy and state modules ship in the complete runtime inventory. The contract and policy perform no I/O; state persistence is explicit and importing the state module starts no work.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. A future action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
+
+## Configuration, model and paid-call foundation
+
+[Project configuration](project-config.md#optional-supervisor-policy) defines optional `[supervisor]` policy. Omission/disabled policy is inert. Explicit finite cumulative project and diagnosis/review token, cost and call ceilings are required for opt-in; timeout can only lower the ten-minute bound. Two diagnoses per unchanged incident and one active decision per project remain fixed. This introduces no scheduler or actual model catalogue, and changes none of the existing implementation/analysis/verifier/recovery role mappings.
+
+`model-policy.mts` fixes `supervisor` to Mid and `gateReview` to Large in the configured family, with Pi/high thinking and no exact-model/provider overrides, fallback or automatic escalation. Independent review is separately budgeted, not a diagnosis escalation. Model policy identity is version 2; old analysis/proof must be refreshed normally.
+
+`supervisor-policy.mts:supervisorCallHold` is a pure necessary paid-call preflight. It refuses disabled/unregistered, observe/stopped, unknown global admission, missing/invalid finite caps, unknown pricing/accounting, invalid worst-case reservations, exhausted project/role totals and active-decision/incident bounds. Inputs are host facts, not agent claims. Usage totals include settled usage **and all outstanding reservations**, with no implicit period or automatic reset. A successful preflight is not admission, proof or action authority. The downstream journal/admission owner must atomically check/reserve project and global budgets/capacity under a fence before spawn, enforce provider token/output and time ceilings, settle known usage, and hold new calls on any accounting failure. The preflight does not write state; the durable journal below provides the host-owned atomic storage boundary. Wiring configured role/project preflight and enforceable provider ceilings into a worker remains downstream work.
+
+`context.mts` freezes supervisor/review additive instructions and their hashes alongside normalized policy and complete selected-runtime identity. Common then role inputs remain contained, additive guidelines; they cannot replace Factory constraints or original source bytes. See [frozen inputs](execution-context.md#supervisor-and-independent-review-inputs). No future worker/prompt asset is referenced until it exists; new actual assets enter the single complete inventory in the change that introduces them. Overrides must be complete and reviewed, never mixed with installed helpers.
+
+**Activation remains blocked:** configured limits or an `act` observation cannot clear the unattended approved-channel/acknowledgement/authenticated-resumption blocker below, install a reviewer worker, atomically apply a correction, produce fresh verification, or clear a durable denial. No mode/restart/reviewer shopping removes denial; approval is never verifier PASS. The executable action set remains empty.
 
 ## Authority and gate inventory
 
@@ -212,7 +224,7 @@ there is no running supervisor or pilot opt-in in this change.
 ## Reproduce offline evidence
 
 ```sh
-node --test orchestrator/supervisor-contract.test.mts orchestrator/models.test.mts
+node --test orchestrator/supervisor-contract.test.mts orchestrator/supervisor-policy.test.mts orchestrator/project-config.test.mts orchestrator/context.test.mts orchestrator/instructions.test.mts orchestrator/models.test.mts orchestrator/workflow.test.mts
 node --test cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
 ```
 

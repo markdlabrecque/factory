@@ -5,7 +5,7 @@ import { relative } from 'node:path';
 import { resolveCheckoutPath, type EffectiveConfig } from './project-config.mts';
 import type { FrozenAdditive } from './context.mts';
 
-type Role = 'implementation' | 'verification' | 'analysis' | 'recovery';
+type Role = Exclude<keyof EffectiveConfig['instructions'], 'common'>;
 
 /** Common files precede role files; aliases of the same real file are read once. */
 export function loadInstructions(root: string, lists: EffectiveConfig['instructions'], role: Role): FrozenAdditive {

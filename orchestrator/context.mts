@@ -1,4 +1,4 @@
-// Explicit project/runtime boundary. Validate selected bytes before loading settings or taking process leases.
+// Explicit project/runtime boundary. Freeze selected settings and additive role inputs; never grant supervisor action authority.
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -60,7 +60,7 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
       throw error;
     }
     const config = freezeSnapshot(loadTomlConfig(assetRoot));
-    const roles = ['implementation', 'verification', 'analysis', 'recovery'] as const;
+    const roles = ['implementation', 'verification', 'analysis', 'recovery', 'supervisor', 'gateReview'] as const;
     const readAdditive = () => Object.freeze(Object.fromEntries(roles.map(role => [role, loadInstructions(projectRoot, config.instructions, role)])) as Record<typeof roles[number], FrozenAdditive>);
     const additive = readAdditive();
     const additiveHashes = () => Object.fromEntries(roles.map(role => [role, additive[role].hashes]));

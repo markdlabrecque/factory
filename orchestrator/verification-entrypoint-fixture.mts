@@ -438,7 +438,7 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(run.modelChoice.family, family);
       assert.equal(run.modelChoice.tier, expectedTier);
       assert.equal(run.modelChoice.source, tier ? 'ticket-tier' : 'factory-default');
-      assert.equal(run.modelChoice.policyIdentity, 'factory-model-policy-v1');
+      assert.equal(run.modelChoice.policyIdentity, 'factory-model-policy-v2');
       assert.equal(run.modelChoice.resolvedModel, run.implementationModel);
       assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: expectedModel, thinking: 'high' });
       assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: MODEL_POLICY[family].large, thinking: 'high' });

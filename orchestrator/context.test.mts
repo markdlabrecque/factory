@@ -31,7 +31,7 @@ test('canonical project-root cwd and complete selected runtime identity are mand
   assert.equal(good.config.TRACKER.project, 'one/project');
   assert.equal(good.tsx, join(f.runtime.directory, 'node_modules/tsx/dist/cli.mjs'));
   assert.equal(good.sandcastle, join(f.runtime.directory, 'node_modules/@ai-hero/sandcastle/dist/main.js'));
-  for (const role of ['implementation', 'verification', 'analysis', 'recovery'] as const) assert.deepEqual(good.additive[role], EMPTY_ADDITIVE);
+  for (const role of ['implementation', 'verification', 'analysis', 'recovery', 'supervisor', 'gateReview'] as const) assert.deepEqual(good.additive[role], EMPTY_ADDITIVE);
   assert.throws(() => { good.config.config.image = 'mutated'; });
   assert.throws(() => { good.identity.runtime.id = 'mutated'; });
   assert.ok(Object.isFrozen(good.manifest.files));
@@ -53,6 +53,33 @@ test('canonical project-root cwd and complete selected runtime identity are mand
   await assert.rejects(loadExecutionContext({ ...f.input, env: { ...f.runtime.env, FACTORY_RUNTIME_ROOT: join(f.home, 'missing') } }), /execution context/);
   rmSync(join(f.runtime.directory, 'runtime-manifest.json'));
   await assert.rejects(f.load(), /Use Factory commands/);
+});
+
+test('supervisor/review additive bytes and policy are frozen freshness inputs, never Factory replacements', async t => {
+  const f = fixture(t), file = join(f.root, '.factory/factory.toml');
+  writeFileSync(join(f.root, 'supervisor.md'), 'project diagnosis guidance');
+  writeFileSync(join(f.root, 'review.md'), 'project review guidance');
+  writeFileSync(file, readFileSync(file, 'utf8') + '\n[instructions]\nsupervisor = ["supervisor.md"]\ngateReview = ["review.md"]\n');
+  const first = await f.load();
+  assert.equal(first.additive.supervisor.text, 'project diagnosis guidance');
+  assert.equal(first.additive.gateReview.text, 'project review guidance');
+  const template = first.templates['prompt.verify.md'];
+  for (const path of ['supervisor.md','review.md']) {
+    const before = await f.load();
+    writeFileSync(join(f.root, path), `changed ${path}`);
+    assert.match(contextHold(before)!, /prompt inputs changed/);
+    const after = await f.load();
+    assert.notEqual(after.policyIdentity, before.policyIdentity);
+    assert.equal(first.templates['prompt.verify.md'], template);
+    assert.ok(Object.isFrozen(after.additive.gateReview.hashes));
+  }
+  assert.equal(first.additive.supervisor.text, 'project diagnosis guidance');
+  const before = await f.load();
+  writeFileSync(file, readFileSync(file, 'utf8') + '\n[supervisor]\nenabled = false\n');
+  // Explicit default attribution alone is not policy authority.
+  assert.equal((await f.load()).policyIdentity, before.policyIdentity);
+  writeFileSync(join(f.root, 'review.md'), 'last edit');
+  assert.match(contextHold(before)!, /fresh analysis/);
 });
 
 test('missing/legacy settings never import code or installed sample configuration', async t => {
