@@ -1,7 +1,9 @@
 # Constrained advisory Pi request contract
 
-Scope: source/offline T00 investigation for [258](https://github.com/markdlabrecque/factory/issues/258).
-This selects a supported integration surface, **not a shipped `DiagnosisBoundary`,
+Scope: source/offline T00 selection and T02 direct-request implementation for
+[258](https://github.com/markdlabrecque/factory/issues/258) and
+[260](https://github.com/markdlabrecque/factory/issues/260).
+This selects and implements a supported request surface, **not a complete `DiagnosisBoundary`,
 public diagnose command, paid permission or operational acceptance**. Existing paid
 launch holds remain. The fixed role is `openai/gpt-6.1-terra`, high thinking.
 
@@ -18,22 +20,28 @@ neither changes the worker nor treats its current argv as enforcing this contrac
 Pinned source: `@earendil-works/pi-ai@1.5.2`, resolved OpenAI SDK `7.19.0`,
 `@earendil-works/pi-telemetry@1.5.2`, `partial-json@0.1.7`. Unmodified published
 archives and SHA-256 identities live in
-[`cli/test/fixtures/supervisor-pi/manifest.json`](../../cli/test/fixtures/supervisor-pi/manifest.json).
+[`cli/src/supervisor-provider/manifest.json`](../../cli/src/supervisor-provider/manifest.json).
 The Pi serializer/catalogue hashes match the earlier
 [research](../research/supervisor-openai-boundary.md). Archive metadata was obtained
 anonymously from npm and each download verified against npm's SHA-512 integrity.
-No package manager, lifecycle script, credential discovery or installation ran.
+No credential discovery, lifecycle script or installation ran. T02 generated the
+actual provenance lock using anonymous package-lock-only metadata resolution with
+fresh temporary HOME/cache and empty npm config; this did not install packages.
 
 The fixture extracts these exact artifacts into a disposable private module tree.
 This is the **reachable dependency closure of the selected public subpath**, not a
 complete Pi installation: Pi-AI's manifests declare other providers' dependencies
 which this path does not import. Original package manifests, source, licenses and
 README files are retained in the archives; nothing is rewritten or imitated.
-Production T02/T04 must ship this selected closure with explicit asset identity, or
-pin the full dependency graph in real package manifests/lockfiles. It must not use
-this test path or depend on a host Pi/global `node_modules`. Any enlarged import
-surface needs a new complete inventory. No production module/dependency is added
-by T00, and the fixture archives are deliberately not runtime assets yet.
+T02 ships this closure, its manifest and actual provenance package/lock files as
+complete-runtime assets. The lock records all upstream provider dependencies; the
+offline loader deliberately exposes only the selected subpath's four-package
+closure, not an all-provider npm installation. It hashes archive bytes, copies the
+verified bytes into private scratch before extraction, and verifies original
+package versions plus serializer/catalogue hashes before imports. There is no
+source/test/host/global dependency fallback or immutable-runtime mutation. Any
+enlarged import surface needs a new complete inventory. T00 itself added no
+production module; T02 adds the final request adapter and these selected assets.
 
 ### Actual ordering and fail-closed primitive
 
@@ -44,8 +52,9 @@ catch and emits a Pi **error result** before transport. It is not necessary for
 OpenAI client. Validate the final serialized URL/method/body there as well as the
 payload hook, consume exactly one permission **before forwarding**, and never
 restore it on failure. No mutable/untrusted callback may run between authorization
-and send. T01 supplies journal authorization, not this fixture's synthetic
-eligibility bit. The final production gate must consume that same-lock primitive.
+and send. The actual T02 final transport gate now consumes T01's same-lock journal primitive
+in the copied-runtime fixture too. No eligibility bit or injected authorization
+callback can substitute for it. A trusted HTTP seam is only below authorization.
 
 An extension `before_provider_request` throw is unsuitable: the extension runner
 catches errors and proceeds with the payload. Do not replace the direct gate with
@@ -130,11 +139,14 @@ cancellation. Reservation is monotonic and **never measured actual usage**.
 The direct API calls only one generation; there is no coding-agent retry,
 compaction, overflow recovery, cache warmer, tool loop or queued continuation.
 Both SDK and provider retries are zero. A one-shot final transport fence remains
-necessary against erroneous extra calls, retries or future changes; T02 must
-extend this same suite for induced retry/overflow/warming attempts, not duplicate
-it. The offline spike forces a second real SDK call through a shared spent fence:
-one admitted transmission, second rejected before forwarding. It does not prove
-host crash/replay safety or the journal authorization still to be built in T01.
+necessary against erroneous extra calls, retries or future changes. The same
+suite now induces real SDK 429/503/context-overflow error paths, proving one
+transmission and no provider/SDK recovery request. A second adapter entry with the
+same grant cannot receive journal permission. Extra tool/cache-warm/continuation
+payloads are refused; no agent layer that could generate them is instantiated.
+Stop-first commits forbid send; stop during an authorized in-flight request retains
+its spent receipt. This is actual journal/gate behavior, not a boolean authority
+fixture; later controller-death/cleanup/host composition remains separate.
 
 Retain response/request IDs from response headers and terminal raw parsed
 `response.completed` / `response.incomplete` / `response.failed` events, including
@@ -155,18 +167,27 @@ node cli/test/supervisor-provider-fixture.mts --offline-spike
 ```
 
 One integration test exercises actual unmodified published Pi/OpenAI serialization
-in a child with an empty environment (only fixture PATH/HOME/LANG), synthetic
+in a child with an isolated environment (fixture PATH/HOME/LANG, except explicit
+zero-send debug/TLS-override refusal cases), synthetic
 non-secret auth, an injected fetch which never delegates, and disabled native
 socket/HTTP/TLS paths and global fetch. Archive hash checks precede imports. No
 live provider, token-count, tracker, service, registry, Docker or credentials are
-reachable from the fixture. Response/SSE content, permission eligibility and
+reachable from the fixture. Response/SSE content, current host controls, exclusion binding and remote
 request identity are **synthetic**. Output contains the actual captured serialized
-payload and raw synthetic usage, never real originals or hidden reasoning.
+payload and raw synthetic usage, never real originals or hidden reasoning. Actual
+copied-runtime artifact loading, separately registered child PID/start and final
+journal authorization bind the exact wire-body SHA-256. Frozen-input mismatch,
+inherited provider debug/TLS configuration and corrupted selected archives hold with
+zero sends. A deterministic fixture-side filesystem barrier changes actual copied
+prompt/dependency bytes after initial validation; final-gate identity validation
+refuses before journal authorization. Actual selected prompt bytes also match their
+manifest hash before decoding. All reservations remain charged, with no settlement
+claim. Duplicate/oversize terminal evidence has an explicit ambiguity flag.
 
-Observed: invalid permission -> zero transport calls; valid permission -> one
-captured request with server output cap and disabled truncation; forced extra
-request -> no second transmission; terminal raw fields survive before normalized
-usage. Actual provider acceptance, billing, tokenization, useful diagnosis,
-controller-independent lifecycle, durable authorization/settlement, copied-install
-host wiring and paid evaluation are **not run/not proven** here. T01–T13 must
-supply their own evidence; no public paid command is enabled by this contract.
+Observed: stopped/invalid input -> zero transport calls; valid journal grant ->
+one constrained request; repeated adapter entry -> no second transmission; terminal
+raw fields survive before normalized usage. Actual provider acceptance, billing,
+tokenization, useful diagnosis, controller-independent watchdog/owned cleanup,
+durable usage settlement, public installed host wiring and paid evaluation are
+**not run/not proven** here. Later tasks must supply their own evidence; no public
+paid command is enabled by this contract.

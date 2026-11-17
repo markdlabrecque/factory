@@ -50,6 +50,13 @@ test('complete inventory, deterministic identity, private install and validation
   assert.deepEqual(advisory.advisoryReservation(), { tokens: 1_054_096, cost: 5_808_792 });
   const hostPolicy = await import(pathToFileURL(join(a.directory, 'supervisor-host-policy.mts')).href);
   assert.equal(typeof hostPolicy.readHostAdvisoryPolicy, 'function');
+  const request = await import(pathToFileURL(join(a.directory, 'supervisor-openai-request.mts')).href);
+  assert.equal(typeof request.requestAdvisory, 'function');
+  const provider = JSON.parse(readFileSync(join(a.directory, 'supervisor-provider/package-lock.json'), 'utf8'));
+  assert.equal(provider.packages['node_modules/@earendil-works/pi-ai'].version, '1.5.2');
+  assert.equal(provider.packages['node_modules/openai'].version, '7.19.0');
+  for (const path of ['supervisor-openai-request.mts', 'supervisor-provider/manifest.json', 'supervisor-provider/package.json', 'supervisor-provider/package-lock.json', 'supervisor-provider/pi-ai-1.5.2.tgz', 'supervisor-provider/openai-7.19.0.tgz'])
+    assert.ok(a.manifest.files.some(f => f.path === path), 'provider code, artifacts and dependency provenance are inventoried');
   assert.equal(typeof state.authorizeAdvisorySend, 'function');
   for (const name of ['supervisor-advisory-contract.mts', 'supervisor-host-policy.mts'])
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'cli/src', name)), 'advisory assets ship unchanged');

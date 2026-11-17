@@ -83,6 +83,38 @@ This context supplies only runtime/config/instruction identity. It does not coll
 
 `supervisor-policy.mts` and `supervisor-contract.mts` ship through the single complete runtime inventory, including copied fixture installs and explicit project overrides. Assembly, manifest regeneration, selection and override recovery review already consume that inventory; a missing/changed supervisor module cannot borrow installed code. Future modules/entrypoints/prompts must be added when their actual files land, then receive new complete manifest identity and renewed override review. No absent future asset names or mixed-runtime fallback are supported.
 
+### Direct advisory provider artifact boundary
+
+The source-only direct request adapter requires a **validated complete selected
+runtime**, not source-tree or host-global Pi. It compares the selected runtime ID
+and dependency identity with the immutable grant, verifies that it is itself loaded
+from that exact flat runtime, revalidates at the final transport gate before
+authorization, and validates again after the response. The actual selected prompt
+bytes must match their manifest hash. Its fixed
+`supervisor-provider/` assets contain hash-pinned published Pi-AI/OpenAI public
+subpath archives and original manifest/license data, plus real provenance package
+and lock files. These files participate in the ordinary runtime inventory/source
+identity. The provenance lock records the upstream full dependency graph; runtime
+loading is deliberately only the complete selected OpenAI Responses subpath closure,
+not an all-provider install. No package manager or source/test fallback is used.
+Verified archive bytes are copied to private temporary scratch before extraction;
+immutable runtime contents are never modified. An enlarged import surface or
+changed artifact needs a new complete inventory/profile rather than a missing
+module workaround.
+
+The exact grant owner must be a separately registered worker PID/start. Frozen
+snapshot project/ticket/run, basis, runtime and dependencies must match the grant.
+The system prompt is selected-runtime-owned, and all original snapshot context is
+serialized into the user message. Explicit isolated worker configuration and
+Standard API auth are required; environment credential/log/proxy overrides cannot
+select the provider context. Final payload/profile/worker authorization uses the
+supervisor journal under its stop lock, then HTTP occurs outside every lock.
+Raw terminal evidence is not yet durable settlement or a proof artifact.
+[Request contract](design/supervisor-provider-contract.md) and
+[supervisor limits](supervisor.md#bounded-direct-pi-request-source-adapter) distinguish
+this actual source/copy/transport proof from later watchdog, owned cleanup,
+installed factory and public-command acceptance. No activation is implied.
+
 ### Exact scoped gate-input corrections
 
 The source-only [`applyReviewedGate`](supervisor.md#exact-scoped-verification-guidance-application)

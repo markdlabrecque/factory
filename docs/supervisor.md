@@ -59,11 +59,64 @@ source APIs do not mean those installed journeys pass acceptance. The advisory M
 requires its own actual public copied-install diagnosis evidence and the complete
 mandatory tests/review; source merge is not installation or live pilot approval.
 
+## Bounded direct Pi request source adapter
+
+`supervisor-openai-request.mts` now implements the final request gate using the
+actual pinned Pi-AI/OpenAI SDK. It requires the complete validated selected runtime
+and its dependency identity, exact registered separate worker PID/start and grant,
+and the complete frozen snapshot whose project/ticket/run/runtime/dependencies and
+diagnosis basis match the grant. The system prompt comes from that runtime; the
+user context preserves the original snapshot plus journal memory. Inputs are
+detached before asynchronous work. There are no resource/tool/model/session options.
+Only an explicit Standard API key is accepted, never credential discovery or a
+subscription token. The worker environment permits only `PATH`, `HOME`, `LANG`,
+`LC_ALL`, `LC_CTYPE`, `TZ` and Node's two IPC channel keys. Every other variable,
+including TLS-verification, provider/logging/proxy/Node overrides, holds without
+reading or hashing its value. The owned worker must not inherit user settings.
+
+The complete selected public `openai-responses` import closure is shipped as
+hash-pinned, unmodified published archives under `supervisor-provider/`, with
+original manifests/licenses and an actual provenance `package.json`/`package-lock.json`.
+The lock records the full upstream dependency graph; the loader needs only the
+four archived packages reachable from this public subpath, **not** a full Pi or
+all-provider install. It extracts verified bytes into a private disposable module
+tree outside the immutable runtime. No npm, lifecycle script, host/global Pi,
+project `node_modules` or test-directory fallback runs. Both sides of the request
+validate the selected complete runtime, and the final transport gate validates it
+again before journal authorization. Actual selected system-prompt bytes are checked
+against the manifest before decoding. Archive/package/serializer/catalogue drift
+holds before SDK use; mid-load complete-runtime/dependency drift holds before send. An expanded import surface requires a new complete inventory.
+
+The supported awaited payload hook validates the exact JSON wire object. The
+final fetch gate revalidates URL/method/full body and calls the actual
+`authorizeAdvisorySend` journal API, binding the exact serialized-body SHA-256,
+profile, invocation and worker. Network runs **after** lock release. Both SDK and
+provider retries are zero; the local once fence and durable spent receipt also
+refuse any erroneous extra attempt/re-entry. No agent retry, compaction, cache
+warmer or continuation layer exists. Redirects are errors, never forwarded to a
+second endpoint. Accepted requests retain their context-derived input bound,
+`truncation: disabled`, 4,096 output/reasoning cap, Standard service and explicit
+unmarked cache policy independently of local survival. See the
+[provider contract](design/supervisor-provider-contract.md).
+
+The same offline suite now uses the **actual adapter in a copied complete runtime**
+and a separately registered IPC child with real journal permission. Synthetic
+HTTP/SSE proves stop-first zero sends, authorization-first in-flight stop retained,
+one request on retryable 429/503 or context overflow with no recovery/retry,
+no grant replay, input/environment/artifact drift refusal and deterministic mid-load
+prompt/dependency mutation refusal before authorization. Actual provider
+acceptance, billing and useful advice remain untested. Raw parsed terminal evidence
+is captured before normalized counters but is not durable usage settlement;
+ambiguous/oversized terminal evidence carries an explicit problem flag.
+No watchdog, cleanup receipt, complete `DiagnosisBoundary`, trusted host factory,
+public command or paid activation is supplied by this source adapter alone;
+T03/T04 and subsequent composition remain required. Paid launch remains held.
+
 ## Advisory grants, finite host policy and one-use send permission
 
 The source-only advisory foundation adds `supervisor-advisory-contract.mts` and
-`supervisor-host-policy.mts` to every complete runtime. It does not enable a paid
-command, instantiate a provider boundary or provision policy. The fixed
+`supervisor-host-policy.mts` to every complete runtime. These grant/policy helpers alone do not enable a paid
+command, instantiate the request adapter or provision policy. The fixed
 [provider profile](design/supervisor-provider-contract.md) is identified by
 `b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587`.
 It reserves exactly 1,054,096 tokens and 5,808,792 integer micro-USD per diagnosis;
@@ -102,8 +155,8 @@ permission. Unknown/foreign/stale/duplicate registration is refused.
 lock/CAS as stop**, records the exact payload/profile/worker receipt, then returns
 new permission **only once**. A replay can read the retained receipt but cannot
 obtain permission or resend. Different event IDs cannot bypass spent permission.
-The request itself must occur outside locks; T02 must consume this API at the final
-transport gate, not infer permission from a persisted event or missing record.
+The request itself must occur outside locks; The direct request adapter consumes this API at the final
+transport gate, never inferring permission from a persisted event or missing record.
 
 Ordering is definitive: stop commits first -> authorization refuses; authorization
 commits first -> owned in-flight request stays consumed after stop. Stop does not

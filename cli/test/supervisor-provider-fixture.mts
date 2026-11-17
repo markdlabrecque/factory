@@ -1,23 +1,27 @@
-// Offline spike against unmodified published Pi/OpenAI artifacts. Never a production authorization adapter.
-import { mkdtempSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
+// One offline provider boundary: actual copied-runtime adapter, unmodified pinned SDK, real journal/worker handshake, synthetic HTTP/SSE only.
+import fs, { mkdtempSync, rmSync, mkdirSync, cpSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
+import { createHash } from 'node:crypto';
 import net from 'node:net';
 import tls from 'node:tls';
 import http from 'node:http';
 import https from 'node:https';
 import assert from 'node:assert/strict';
+import { prepareRuntimeBundle } from '../src/runtime-bundle.mts';
+import { installPackages } from './runtime-fixture.mts';
+import { supervisorFixture } from './supervisor-fixture.mts';
+import { commitSupervisor, readSupervisor, incidentIdentity } from '../src/supervisor-state.mts';
+import { diagnosisGrant, ADVISORY_PROFILE_ID, advisoryReservation } from '../src/supervisor-advisory-contract.mts';
+import { hostAdvisoryPolicyIdentity } from '../src/supervisor-host-policy.mts';
+import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
+import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
+import { ownerOf } from '../../board/admission.mts';
 
-/** Explicit synthetic premise; T01 must replace eligibility with its committed journal primitive. */
-export const SPIKE_PROFILE = Object.freeze({ model: 'gpt-6.1-terra', input: 1_050_000, output: 4096,
-  reservedTokens: 1_054_096, reservedMicroUSD: 5_808_792 });
-const fixture = fileURLToPath(new URL('./fixtures/supervisor-pi/', import.meta.url));
-
-/** This child has no usable network path: injected fetch never delegates, and native socket/HTTP paths throw. */
 function denyNetwork() {
   const deny = () => { throw Error('Offline provider fixture: external network denied'); };
   globalThis.fetch = deny;
@@ -26,94 +30,140 @@ function denyNetwork() {
   http.request = deny as any; http.get = deny as any; https.request = deny as any; https.get = deny as any;
   syncBuiltinESMExports();
 }
-function unpack() {
-  const root = mkdtempSync(join(tmpdir(), 'factory-pi-spike-'));
-  try {
-    const manifest = JSON.parse(readFileSync(join(fixture, 'manifest.json'), 'utf8'));
-    for (const p of manifest.packages) {
-      const archive = join(fixture, p.archive);
-      assert.equal(createHash('sha256').update(readFileSync(archive)).digest('hex'), p.sha256);
-      const dest = join(root, 'node_modules', p.name); mkdirSync(dest, { recursive: true });
-      execFileSync('tar', ['-xzf', archive, '--strip-components=1', '-C', dest], { timeout: 5000 });
-      const actual = JSON.parse(readFileSync(join(dest, 'package.json'), 'utf8'));
-      assert.equal(actual.name, p.name); assert.equal(actual.version, p.version);
-    }
-    return root;
-  } catch (error) { rmSync(root, { recursive: true, force: true }); throw error; }
-}
 const sse = (value: any) => `event: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`;
+const host = { version: 1 as const, enabled: true as const, profile: ADVISORY_PROFILE_ID, capacity: 1 as const,
+  cumulative: { tokens: 10_000_000, cost: 100_000_000, calls: 10 } };
+const role = { maxTokens: 5_000_000, maxCostUsd: 50, maxCalls: 5, timeoutSeconds: 60 };
+const policy = { enabled: true, limits: { maxTokens: 10_000_000, maxCostUsd: 100, maxCalls: 10, diagnosis: role, review: role } };
+const controls = { registered: true, global: 'on' as const, projectControl: 'enabled' as const };
+
+if (process.argv[2] === '--request-worker') {
+  denyNetwork();
+  process.once('message', async (o: any) => {
+    try {
+      if (o.abort) { process.disconnect(); return; }
+      let driftApplied = false;
+      if (o.scenario.startsWith('mid-load-')) {
+        // Below the adapter, the second prompt-file read is the selected-input read after initial bundle validation.
+        // Mutate actual copied files at this deterministic filesystem barrier; no production callback/flag or timing loop.
+        const original = fs.readFileSync; let reads = 0;
+        fs.readFileSync = ((path: any, ...args: any[]) => {
+          const value = (original as any)(path, ...args);
+          if (String(path) === join(o.runtimeRoot, 'prompt.supervisor.md') && ++reads === 2) {
+            fs.readFileSync = original; syncBuiltinESMExports();
+            const target = o.scenario === 'mid-load-prompt' ? path : join(o.runtimeRoot, 'node_modules/tsx/dist/cli.mjs');
+            writeFileSync(target, Buffer.concat([original(target), Buffer.from('\nchanged at fixture barrier\n')])); driftApplied = true;
+          }
+          return value;
+        }) as any;
+        syncBuiltinESMExports();
+      }
+      const { requestAdvisory, validateAdvisoryPayload } = await import(pathToFileURL(join(o.runtimeRoot, 'supervisor-openai-request.mts')).href);
+      let transmissions = 0, serialized = '', payload: any;
+      const terminal = { type: 'response.completed', response: { id: 'resp_offline', model: 'gpt-6.1-terra', status: 'completed',
+        service_tier: 'default', output: [], usage: { input_tokens: 25, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0,
+          cache_write_tokens_details: { ttl_30m_tokens: 0, ttl_12h_tokens: 0 } }, output_tokens: 10,
+          output_tokens_details: { reasoning_tokens: 8 }, total_tokens: 35 } } };
+      const transport: typeof fetch = async (url, init) => {
+        assert.equal(String(url), 'https://api.openai.com/v1/responses'); assert.equal(init!.method, 'POST'); assert.equal(init!.redirect, 'error');
+        assert.equal(new Headers(init!.headers).get('authorization'), 'Bearer sk-synthetic-offline-not-a-secret');
+        serialized = init!.body as string; payload = JSON.parse(serialized);
+        const system = payload.input[0].content, user = payload.input[1].content[0].text;
+        validateAdvisoryPayload(payload, system, user);
+        assert.throws(() => validateAdvisoryPayload({ ...payload, background: true }, system, user));
+        assert.throws(() => validateAdvisoryPayload({ ...payload, truncation: 'auto' }, system, user));
+        assert.equal(payload.max_output_tokens, 4096); assert.deepEqual(payload.reasoning, { effort: 'medium', summary: 'auto' });
+        assert.deepEqual(payload.input.at(-1), { type: 'configuration_update', reasoning: { effort: 'high' } });
+        transmissions++;
+        if (o.scenario === 'inflight-stop') { process.send!({ inflight: true }); await once(process, 'message'); }
+        const status = o.scenario === 'retry-429' ? 429 : o.scenario === 'retry-503' ? 503 : o.scenario === 'overflow' ? 400 : 200;
+        if (status !== 200) return new Response(JSON.stringify({ error: { message: status === 400 ? 'context_length_exceeded' : 'synthetic retryable failure',
+          type: 'invalid_request_error', code: status === 400 ? 'context_length_exceeded' : 'synthetic' } }),
+          { status, headers: { 'content-type': 'application/json', 'retry-after': '0' } });
+        return new Response(sse(terminal) + (o.scenario === 'duplicate-terminal' ? sse(terminal) : ''), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
+      };
+      if (o.scenario === 'changed-input') o.snapshot.material.settings = 'c'.repeat(64);
+      const options = { ...o, apiKey: 'sk-synthetic-offline-not-a-secret', fetch: transport };
+      let result: any, refused: string | undefined;
+      try { result = await requestAdvisory(options); } catch (e) { refused = String(e); }
+      let extraRequestDenied = false;
+      if (!['stop-first','changed-input','environment','tls-environment','artifact-drift','mid-load-prompt','mid-load-dependencies'].includes(o.scenario)) {
+        try { await requestAdvisory(options); } catch (e) { extraRequestDenied = /consumed/.test(String(e)); }
+      }
+      process.send!({ transmissions, serialized, payload, ...result, refused, extraRequestDenied, driftApplied }, () => process.disconnect());
+    } catch (e) { process.send!({ error: String(e) }, () => process.disconnect()); }
+  });
+  process.send!({ ready: true });
+}
 
 export async function runProviderSpike() {
   denyNetwork();
-  const root = unpack();
+  const root = mkdtempSync(join(tmpdir(), 'factory-provider-boundary-'));
   try {
-    const pi = join(root, 'node_modules/@earendil-works/pi-ai');
-    const { stream } = await import(pathToFileURL(join(pi, 'dist/api/openai-responses.js')).href);
-    const { OPENAI_MODELS } = await import(pathToFileURL(join(pi, 'dist/providers/openai.models.js')).href);
-    const model = Object.values(OPENAI_MODELS).find((m: any) => m.id === SPIKE_PROFILE.model) as any;
-    assert.ok(model); assert.equal(model.provider, 'openai'); assert.equal(model.api, 'openai-responses');
-    assert.equal(model.baseUrl, 'https://api.openai.com/v1'); assert.equal(model.contextWindow, 272000);
-    const context = { messages: [{ role: 'system', content: 'Original Factory constraints.', timestamp: 0 },
-      { role: 'user', content: 'Complete synthetic saved-run originals.', timestamp: 0 }] };
-    const rawTerminal = { type: 'response.completed', response: { id: 'resp_offline', model: model.id,
-      status: 'completed', service_tier: 'default', output: [], usage: { input_tokens: 25,
-        input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0,
-          cache_write_tokens_details: { ttl_30m_tokens: 0, ttl_12h_tokens: 0 } }, output_tokens: 10,
-        output_tokens_details: { reasoning_tokens: 8 }, total_tokens: 35 } } };
-    let attempted = 0, transmitted = 0, payload: any, terminal: any, requestId: any;
-    let spent = false;
-    // This is a transport permission for the spike only, not a journal grant or host-authority proof.
-    const transport = async (url: any, init: any) => {
-      attempted++;
-      if (spent) throw Error('One request permission already consumed');
-      spent = true; // consume before even inspecting a potentially invalid/ambiguous send
-      assert.equal(String(url), 'https://api.openai.com/v1/responses'); assert.equal(init.method, 'POST');
-      const final = JSON.parse(init.body); assert.deepEqual(final, payload);
-      assert.equal(final.max_output_tokens, SPIKE_PROFILE.output); assert.equal(final.truncation, 'disabled');
-      transmitted++;
-      return new Response(sse(rawTerminal), { status: 200, headers: { 'content-type': 'text/event-stream',
-        'x-request-id': 'req_offline' } });
-    };
-    const options = (eligible: boolean, fetch = transport) => ({ apiKey: 'sk-synthetic-offline-not-a-secret',
-      env: {}, maxTokens: SPIKE_PROFILE.output, reasoningEffort: 'high', cacheRetention: 'none',
-      maxRetries: 0, serviceTier: 'default', fetch,
-      onPayload(value: any, resolved: any) {
-        if (!eligible) throw Error('No eligible spike permission');
-        assert.equal(resolved.id, model.id); assert.equal(value.model, model.id);
-        assert.equal(value.store, false); assert.equal(value.stream, true);
-        assert.equal(value.max_output_tokens, SPIKE_PROFILE.output);
-        assert.equal(value.service_tier, 'default');
-        assert.deepEqual(value.include, ['reasoning.encrypted_content']);
-        assert.deepEqual(value.reasoning, { effort: 'medium', summary: 'auto' });
-        assert.deepEqual(value.input.at(-1), { type: 'configuration_update', reasoning: { effort: 'high' } });
-        assert.deepEqual(value.prompt_cache_options, { mode: 'explicit' });
-        assert.equal(value.tools, undefined); assert.equal(value.previous_response_id, undefined);
-        assert.equal(value.background, undefined);
-        // Supported onPayload transformation. No truncation and no extra request, tool or modality fields.
-        value.truncation = 'disabled';
-        payload = JSON.parse(JSON.stringify(value));
-        const allowed = ['model','input','stream','store','max_output_tokens','service_tier','reasoning',
-          'include','prompt_cache_options','truncation'];
-        assert.ok(Object.keys(payload).every(k => allowed.includes(k)));
-        assert.deepEqual(payload.input.slice(0, -1).map((m: any) => m.role), ['developer', 'user']);
-        assert.deepEqual(payload.input.slice(0, -1).map((m: any) => typeof m.content === 'string' ? m.content : m.content.map((c: any) => c.text).join('')),
-          context.messages.map(m => m.content));
-      },
-      onResponse(info: any) { requestId = info.headers['x-request-id']; },
-      onProviderStreamEvent(event: any) { if (event.type === 'response.completed') terminal = structuredClone(event); },
-    });
-    const rejected = await stream(model, context, options(false)).result();
-    assert.equal(rejected.stopReason, 'error'); assert.equal(attempted, 0); assert.equal(transmitted, 0);
-    const completed = await stream(model, context, options(true)).result();
-    assert.equal(completed.stopReason, 'stop', completed.errorMessage); assert.equal(transmitted, 1);
-    assert.deepEqual(terminal, rawTerminal); assert.equal(requestId, 'req_offline');
-    assert.equal(completed.usage.totalTokens, 35); assert.equal(completed.usage.output, 10);
-    const extra = await stream(model, context, options(true)).result();
-    assert.equal(extra.stopReason, 'error'); assert.match(extra.errorMessage, /permission already consumed/);
-    assert.equal(attempted, 2); assert.equal(transmitted, 1);
-    return { artifact: 'pi-ai@1.5.2 / openai@7.19.0', invalidTransmissions: 0, transmissions: transmitted,
-      extraRequestDenied: true, rawUsage: terminal.response.usage, requestId,
-      payload, profile: SPIKE_PROFILE, evidence: 'real pinned serializer + synthetic HTTP/SSE; no remote acceptance or billing' };
+    const bundle = prepareRuntimeBundle({ sourceRoot: fileURLToPath(new URL('../../', import.meta.url)), runtimeStore: join(root, 'runtimes'), install: installPackages });
+    const scenarios: any[] = [];
+    for (const scenario of ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','changed-input','environment','tls-environment','artifact-drift','mid-load-prompt','mid-load-dependencies']) {
+      let runtimeRoot = bundle.directory;
+      if (scenario === 'artifact-drift' || scenario.startsWith('mid-load-')) {
+        runtimeRoot = join(root, `runtime-${scenario}`); cpSync(bundle.directory, runtimeRoot, { recursive: true });
+        if (scenario === 'artifact-drift') writeFileSync(join(runtimeRoot, 'supervisor-provider/pi-ai-1.5.2.tgz'), 'corrupt');
+      }
+      const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--request-worker'],
+        { stdio: ['ignore','ignore','ignore','ipc'], env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C',
+          ...(scenario === 'environment' ? { OPENAI_LOG: 'debug' } : {}),
+          ...(scenario === 'tls-environment' ? { NODE_TLS_REJECT_UNAUTHORIZED: '0' } : {}) } });
+      const closed = once(child, 'close');
+      try {
+        assert.deepEqual((await once(child, 'message'))[0], { ready: true });
+        const { snapshot, facts } = supervisorFixture(join(root, scenario)); mkdirSync(snapshot.project.root);
+        snapshot.material.runtime = bundle.id; snapshot.material.dependencies = bundle.manifest.dependencies;
+        const stateDir = join(root, `state-${scenario}`), project = snapshot.project, at = new Date().toISOString();
+        const incidentId = incidentIdentity(project, facts), owner = ownerOf(process.pid), worker = ownerOf(child.pid!);
+        const reservation = { id: 'invocation', incidentId, kind: 'diagnosis' as const, owner, fence: 'fresh-fence', at,
+          deadline: new Date(Date.parse(at) + 60_000).toISOString(), reserved: advisoryReservation(), actual: null, state: 'active' as const, reviewId: null };
+        const registration = { holdId: 'synthetic-exclusion-binding-not-an-admission-claim', host, project: policy, at };
+        const grant = diagnosisGrant({ version: 1, project, ticket: 236, runId: facts.runId, attemptId: null, incidentId, basis: diagnosisBasis(snapshot),
+          invocationId: reservation.id, fence: reservation.fence, holdId: registration.holdId, runtime: bundle.id, dependencies: bundle.manifest.dependencies,
+          profile: ADVISORY_PROFILE_ID, policy: hostAdvisoryPolicyIdentity(host), owner: worker, deadline: reservation.deadline, reserved: reservation.reserved });
+        let state = commitSupervisor(stateDir, project, 0, { id: 'observe', at, kind: 'observe', facts, snapshotHash: supervisorHash(snapshot), reason: 'offline original input' });
+        state = commitSupervisor(stateDir, project, state.revision, { id: 'reserve', at, kind: 'reserve-advisory', reservation, policy: registration, controls,
+          limits: { project: { tokens: 10_000_000, cost: 100_000_000 }, shared: { tokens: 10_000_000, cost: 100_000_000 }, capacity: 1, reviewCalls: 5, reviewTimeoutMs: 60_000 } });
+        state = commitSupervisor(stateDir, project, state.revision, { id: 'register', at: new Date().toISOString(), kind: 'register-advisory-worker',
+          reservationId: reservation.id, fence: reservation.fence, owner, grant });
+        const stop = () => { const current = readSupervisor(stateDir, project); return commitSupervisor(stateDir, project, current.revision,
+          { id: 'stop', at: new Date().toISOString(), kind: 'control', mode: 'stopped', actor: 'fixture-operator', pilot: false }); };
+        if (scenario === 'stop-first') stop();
+        const reply = once(child, 'message');
+        child.send({ scenario, runtimeRoot, stateDir, grant, policy: registration, controls, snapshot });
+        let outcome: any = (await reply)[0];
+        if (scenario === 'inflight-stop') {
+          assert.deepEqual(outcome, { inflight: true }); stop(); const next = once(child, 'message'); child.send({ continue: true }); outcome = (await next)[0];
+        }
+        assert.equal(outcome.error, undefined, JSON.stringify(outcome));
+        const journal = readSupervisor(stateDir, project), sends = Object.values(journal.advisory!.sends);
+        if (['stop-first','changed-input','environment','tls-environment','artifact-drift','mid-load-prompt','mid-load-dependencies'].includes(scenario)) { assert.equal(outcome.transmissions, 0); assert.equal(sends.length, 0); }
+        else { assert.equal(outcome.transmissions, 1, JSON.stringify(outcome)); assert.equal(sends.length, 1); assert.equal(outcome.extraRequestDenied, true); }
+        if (scenario.startsWith('mid-load-')) assert.equal(outcome.driftApplied, true, 'deterministic drift barrier reached');
+        if (['complete','inflight-stop'].includes(scenario)) {
+          assert.equal(outcome.result.stopReason, 'stop', outcome.result.errorMessage);
+          assert.equal(outcome.terminal.response.usage.total_tokens, 35);
+          assert.equal(sends[0].payload, createHash('sha256').update(outcome.serialized).digest('hex'));
+          for (const source of snapshot.sources) assert.ok(outcome.payload.input[1].content[0].text.includes(source.text));
+        } else assert.ok(outcome.refused || outcome.result.stopReason === 'error');
+        if (scenario === 'inflight-stop') assert.equal(journal.control!.mode, 'stopped');
+        if (scenario === 'duplicate-terminal') assert.match(outcome.terminalProblem, /ambiguous/);
+        assert.deepEqual(journal.charged.diagnosis, advisoryReservation(), 'no refund/settlement is claimed');
+        scenarios.push({ scenario, ...outcome, authorizations: sends.length });
+        await closed;
+      } finally { if (child.connected) child.send({ abort: true }, () => {}); await closed; }
+    }
+    const complete = scenarios[0];
+    return { artifact: 'PiAI1.5.2 / OpenAI7.19.0 copied-runtime public subpath closure', invalidTransmissions: 0,
+      transmissions: complete.transmissions, extraRequestDenied: complete.extraRequestDenied, payload: complete.payload,
+      rawUsage: complete.terminal.response.usage, requestId: complete.response.requestId,
+      scenarios: scenarios.map(({ serialized, payload, terminal, result, ...trace }) => trace),
+      runtime: bundle.id, dependencies: bundle.manifest.dependencies,
+      evidence: 'actual production gate/pinned serializer/copied artifacts/journal/registered child; synthetic HTTP/SSE, host controls and exclusion ID; no live provider/admission/settlement' };
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 if (process.argv[2] === '--offline-spike') console.log(JSON.stringify(await runProviderSpike()));
