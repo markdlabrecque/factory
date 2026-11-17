@@ -6,6 +6,36 @@ bundle contains the workflow, Board helpers, TOML parser, Factory templates and
 private locked dependencies. A project does not supply individual executable or
 template overrides to this workflow.
 
+## Host preparation and current originals
+
+The source-only `prepareSupervisorHost` API in `cli/src/supervisor-host.mts` creates
+a validated read-only runtime context and rebuilds current originals before exact
+cache comparison. A new paid call then acquires custody-backed exclusion and
+runtime pins before reservation; cached reuse acquires neither. Its asynchronous
+`current()` rereads the existing scheduler backend and
+registry opt-in, validates private host policy and exact hold ownership, and
+rebuilds the complete saved-run originals outside locks. Each private collection
+gets its own host-only destination; generated freezes and observations do not
+become authoritative prior decisions or recursively change the basis. The actual
+normal producer's `no-commit.json` is a supported complete failure original.
+
+Preparation does not start a child, reserve paid work or grant a request. A failure
+after acquisition retains exclusion/pins, including when controls become off.
+The prepared object's explicit `invoke` delegates to the existing diagnosis worker
+using the pinned owned boundary. Pins transfer to the actual ready child before
+grant registration/handoff. Final-send IPC rebuilds current controls, policy,
+complete basis, exact hold and runtime, then the child uses the same journal-lock
+authorization as stop. A second asynchronous rebuild precedes local terminal closure.
+Known raw usage and fresh owned whole-group cleanup permit branded atomic terminal
+publication: typed non-executing advice bound to actual output/frozen input/grant,
+or a durable actionable HumanRequest. Current journal stop/human/denial/material
+fences refuse usable late output. Exact cache reuse precedes paid hold/pin acquisition,
+so exhausted new-call budgets do not strand cached advice. Original terminal receipts
+permit exact runtime/admission release and idempotent restart reconciliation; unknown
+or successor ownership remains held without resend/refund. Prepared-host observations
+cannot be replaced by static controls; legacy component fixtures are not authority.
+This is not activation, mount isolation or a confirmed remote cancellation claim.
+
 ## Protected advisory runtime selection
 
 `cli/src/supervisor-runtime.mts` supplies a source-only trusted composition API,
@@ -65,6 +95,28 @@ without a generation increment. Neither a selected context nor a fixture
 runtime proves actual installed mount or cleanup authority. Refer to the
 [complete input contract](supervisor.md#complete-saved-run-input-collection) for
 source roles, authoritative decisions, cache stability and refusal conditions.
+
+## Normal payload custody and terminal handoff
+
+The standard launcher inventories `payload-custody.mts` with the exact selected
+source/dependency identity. Actual normal main saves a fresh private journal nonce
+on its current run before payload creation, durably writes pending custody before
+calling Sandcastle, registers its actual returned exact container and records absence
+only through the real close helper's independent Docker observation. This journal
+is separate from branch/worktree ownership receipts and mutable readiness reports.
+
+A lexical normal scope owns implementation, verification and host delivery. Its
+terminal seal is appended only after that scope has actually unwound and every
+registered payload is absent with no pending creation; only then may its cleanup
+entry and runtime lease release on exit. Ambiguous construction/registration, failed
+close and controller loss retain ownership. Early no-payload failure does not mint
+closure. A successor scope receives a fresh nonce; normal/recovery admission clears
+old pointers, and delivery continuation's changed claim cannot inherit authority.
+The admission exception validates only an explicitly selected current saved run
+against its complete immutable source-bound chain; all legacy/foreign raw records
+remain held. See [the exclusion protocol](supervisor.md#shared-admission-exclusion).
+No full advisory host, credentials, installed activation or runtime policy change is
+introduced by this source protocol.
 
 ## Launcher contract
 
@@ -246,8 +298,9 @@ This is source exclusion, not public advisory finalization. A separate source-on
 `settleAdvisory` journal primitive validates actual registered grant/authorization,
 immutable known T03 usage and exact T04 whole-group cleanup outside locks, then uses
 a private one-use frozen event and journal CAS to retain a finished reservation,
-full reserved charge and local-human-required terminal receipt. No legacy pending
-notification or usable advice is produced. Exact release reads validated durable
+full reserved charge and a terminal receipt. Owned-host publication also validates
+actual bounded output/frozen input and atomically retains typed advice or a pending
+local HumanRequest; no notification is sent. Exact release reads validated durable
 closure before taking the admission lock and rechecks the full current hold identity;
 replay cannot resend or clear a successor. Strict old journal readers refuse the new
 settlements field; three-field old advisory records remain explicitly readable.

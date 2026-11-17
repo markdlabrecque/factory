@@ -2,26 +2,34 @@
 // No Docker daemon, credentials, browser installation, tracker or service manager is used.
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import cp, { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { once } from 'node:events';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bindExecution, stageExecutionPackages } from '../cli/test/execution-fixture.mts';
 import { buildAssets } from '../cli/src/scaffold.mts';
 import { paths } from '../cli/src/paths.mts';
-import { Fake } from '../cli/src/platform/fake.mts';
+import { Fake, FakeSchedule } from '../cli/src/platform/fake.mts';
+import { inspectSupervisorHost } from '../cli/src/supervisor-host.mts';
+import { readSupervisor } from '../cli/src/supervisor-state.mts';
+import { ADVISORY_PROFILE_ID } from '../cli/src/supervisor-advisory-contract.mts';
+import { structuredContextSource } from './ticket-context-source.mts';
 import { install } from '../cli/src/commands/install.mts';
 import { pathToFileURL } from 'node:url';
 import { fixtureReport } from './fixtures/verification.mts';
 import { proofRoot } from './verification.mts';
 import { createHash } from 'node:crypto';
 import { MODEL_POLICY } from './model-policy.mts';
+import { supervisorHash } from './supervisor-contract.mts';
 import { prepareRuntimeBundle, regenerateRuntimeManifest } from '../cli/src/runtime-bundle.mts';
 import { addProject } from '../cli/src/projects.mts';
 import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../cli/src/runtime-ownership.mts';
 import { resolveWorkflow } from './workflow.mts';
 import { claimSupervisorHold, checkSupervisorHold } from '../cli/src/supervisor-admission.mts';
+import { readPayloadCustody, payloadRunClosed } from './payload-custody.mts';
+import { readAdmission } from '../board/admission.mts';
 
 
 export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false) {
@@ -40,6 +48,13 @@ export async function normalEntrypointFixture(t: TestContext, scenario: string, 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import net from 'node:net'; import tls from 'node:tls'; import http from 'node:http'; import https from 'node:https';
+import { syncBuiltinESMExports } from 'node:module';
+const denyNetwork = () => { throw Error('Offline normal fixture: outbound network denied'); };
+globalThis.fetch = denyNetwork;
+net.connect = denyNetwork; net.createConnection = denyNetwork; net.Socket.prototype.connect = denyNetwork;
+tls.connect = denyNetwork; http.request = denyNetwork; http.get = denyNetwork; https.request = denyNetwork; https.get = denyNetwork;
+syncBuiltinESMExports();
 const root = process.cwd(), scenario = process.env.SCENARIO, fake = process.env.FAKE_STATE;
 const git = (cwd, args) => execFileSync('git', args, {cwd, encoding:'utf8'}).trim();
 const readFileSyncBarrier = () => { try { return readFileSync(join(fake, 'release'), 'utf8') === 'yes'; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
@@ -48,11 +63,19 @@ export const pi = (model, options) => {
   return Object.defineProperty({model, thinking: options.thinking}, 'sessionRoot', {value:options.sessionStorage?.hostSessionsDir});
 };
 export async function createSandbox(o) {
+  if (scenario.startsWith('no-commit-custody')) {
+    const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
+    const run = JSON.parse(readFileSync(join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json')));
+    const c = readPayloadCustody(process.env.SANDCASTLE_STATE_DIR,run.payloadCustody);
+    if (c.sealed || c.payloads.size !== 1 || [...c.payloads.values()][0].container) throw Error('SDK create lacked durable pending custody');
+    writeFileSync(join(fake,'custody-before-create'),'pending');
+  }
   writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
   const worktree = join(root, '.factory/worktrees', o.branch); mkdirSync(join(root, '.factory/worktrees'), {recursive:true});
   git(root, ['worktree', 'add', '-b', o.branch, worktree, o.baseBranch]);
   writeFileSync(join(fake, 'live'), 'yes');
-  return {worktreePath:worktree, sandboxId:'fixture-container',
+  if (scenario === 'custody-create-error') throw Error('ambiguous SDK create after platform acceptance');
+  return {worktreePath:worktree, sandboxId:scenario === 'custody-registration-error' ? undefined : 'fixture-container',
     exec: async cmd => {
       if (cmd.startsWith('command -v playwright')) return scenario === 'setup-bad' ? {stdout:'browser preflight failed: Chromium launch',exitCode:1} : {stdout:'browser preflight OK',exitCode:0};
       if (cmd === 'hostname') return {stdout:'fixture-container',exitCode:0};
@@ -81,6 +104,12 @@ export async function createSandbox(o) {
           while (!readFileSyncBarrier()) await new Promise(resolve => setTimeout(resolve, 10));
         }
         if (scenario.startsWith('no-commit')) {
+          if (scenario.startsWith('no-commit-custody')) {
+            const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
+            const run = JSON.parse(readFileSync(join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json')));
+            const c = readPayloadCustody(process.env.SANDCASTLE_STATE_DIR,run.payloadCustody);
+            if (c.sealed || [...c.payloads.values()][0].container !== 'fixture-container') throw Error('Actual returned sandbox was not registered');
+          }
           if (scenario === 'no-commit-dirty') writeFileSync(join(worktree,'app.txt'),'uncommitted');
           const session = join(o.agent.sessionRoot, 'fixture.jsonl'); mkdirSync(o.agent.sessionRoot, {recursive:true});
           if (scenario !== 'no-commit-unavailable') writeFileSync(session, JSON.stringify({type:'message',message:{role:'assistant',stopReason:'stop',content:[{type:'text',text:'I cannot implement this safely because the agreed audit, Q&A and plan in comments are unavailable. Inspect /private/context. token=fixture-secret'}]}}));
@@ -142,6 +171,23 @@ export async function createSandbox(o) {
     }
     const config = join(root, '.factory/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
+    if (scenario.startsWith('no-commit-custody')) writeFileSync(config,readFileSync(config,'utf8') + `
+[supervisor]
+enabled = true
+max_tokens = 10000000
+max_cost_usd = 100
+max_calls = 10
+[supervisor.diagnosis]
+max_tokens = 5000000
+max_cost_usd = 50
+max_calls = 5
+timeout_seconds = 15
+[supervisor.review]
+max_tokens = 5000000
+max_cost_usd = 50
+max_calls = 5
+timeout_seconds = 600
+`);
     const completeAcceptance = scenario === 'readiness-acceptance';
     if (scenario === 'pass' || completeAcceptance || scenario === 'instruction-edit' || scenario === 'publication') {
       writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal) !`shell`');
@@ -369,7 +415,7 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(state,'owner_repo--7.json'), JSON.stringify({iid:'7',project:'owner/repo',stage:'stopped',executionId:'old-execution',evidenceDir:oldEvidence,note:'old explanation must not be reused'}));
     }
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
+      cwd: root, encoding: 'utf8', env: { ...runtime.env, GIT_ALLOW_PROTOCOL: 'file', PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
@@ -377,6 +423,20 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(existsSync(join(fake, 'npm-called')), false, 'execution must not invoke npm');
       assert.equal(existsSync(join(root, 'node_modules')), false, 'execution must not create project dependencies');
       assert.equal(existsSync(join(root, '.factory/node_modules')), false, 'execution must not fall back to project dependencies');
+    }
+    if (['custody-create-error','custody-registration-error'].includes(scenario)) {
+      assert.notEqual(result.status,0,result.stdout + result.stderr);
+      const run = JSON.parse(readFileSync(join(state,'owner_repo--7.json'),'utf8'));
+      const c = readPayloadCustody(state,run.payloadCustody);
+      assert.equal(c.sealed,false); assert.equal(c.payloads.size,1);
+      assert.equal([...c.payloads.values()][0].container,undefined,'ambiguous construction/registration never invents an identity');
+      assert.equal(existsSync(join(fake,'live')),true);
+      assert.equal(Object.keys(readAdmission(state).entries).length,1,'dead controller retains managed custody');
+      assert.equal(existsSync(join(fake,'implementer-started')),false);
+      assert.throws(() => claimSupervisorHold(state,{project:{root,tracker:{kind:'github',host:'github.com',project:'owner/repo'}},
+        invocationId:'interrupted-producer',runtimeRoot:runtime.directory,savedRun:{key:'owner_repo--7',executionId:run.executionId},
+        rollout:{olderRuntimesQuiesced:true,unmanagedWorkQuiesced:true}}),/not quiescent/);
+      return;
     }
     if (scenario === 'primary-cleanup-error') {
       assert.notEqual(result.status, 0);
@@ -395,7 +455,144 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(existsSync(join(fake, 'live')), ['no-commit-cleanup-error','no-commit-unconfirmed-cleanup'].includes(scenario));
       assert.equal(existsSync(join(fake, 'verifier-started')), false);
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '');
-      const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+      const runFile = join(state, 'owner_repo--7.json');
+      const rawRun = readFileSync(runFile,'utf8'), run = JSON.parse(rawRun);
+      const custody = readPayloadCustody(state, run.payloadCustody);
+      assert.equal(custody.sealed, !['no-commit-cleanup-error','no-commit-unconfirmed-cleanup'].includes(scenario));
+      if (!custody.sealed) assert.equal(Object.keys(readAdmission(state).entries).length,1,'uncertain close retains entry despite process exit');
+      if (scenario.startsWith('no-commit-custody')) {
+        assert.equal(readFileSync(join(fake,'custody-before-create'),'utf8'),'pending');
+        assert.deepEqual([...custody.payloads.values()], [{container:'fixture-container',absent:true}]);
+        assert.deepEqual(readAdmission(state).entries, {}, 'only sealed actual normal scope releases its managed entry');
+        const project = {root,tracker:{kind:'github' as const,host:'github.com',project:'owner/repo'}};
+        const options = {project,invocationId:'actual-normal-producer',runtimeRoot:runtime.directory,
+          savedRun:{key:'owner_repo--7',executionId:run.executionId},rollout:{olderRuntimesQuiesced:true as const,unmanagedWorkQuiesced:true as const}};
+        const bytes = '{"stage":"stopped"}';
+        writeFileSync(join(state,'legacy.json'),bytes);
+        assert.throws(() => claimSupervisorHold(state,options), /unknown run ownership/);
+        assert.equal(readFileSync(join(state,'legacy.json'),'utf8'),bytes);
+        rmSync(join(state,'legacy.json')); // fixture-only foreign record; target run is never moved or filtered.
+        const expected = {project,key:'owner_repo--7',executionId:run.executionId,runtime:{id:runtime.id,dependencies:runtime.manifest.dependencies}};
+        assert.equal(payloadRunClosed(state,run,expected),true);
+        for (const patch of [{executionId:'successor'},{claim:'stale-fence'},{recovery:{id:'repair'}},{delivery:{state:'ci-waiting'}},{payloadCustody:{version:1,nonce:'missing'}}])
+          assert.equal(payloadRunClosed(state,{...run,...patch},expected),false);
+        assert.equal(payloadRunClosed(state,run,{...expected,project:{...project,root:home}}),false);
+        assert.throws(() => claimSupervisorHold(state,{...options,savedRun:{...options.savedRun,executionId:'stale-execution'}}),/unknown run ownership/);
+        // Real normal producer -> exact exclusion -> selected artifact/runtime pins -> complete original collector.
+        // The only synthetic surfaces are the existing SDK/platform/tracker boundaries; no provider call is made.
+        mkdirSync(p.config,{recursive:true,mode:0o700}); chmodSync(p.config,0o700); chmodSync(state,0o700);
+        writeFileSync(p.projects,JSON.stringify({version:1,projects:[{name:'fixture',root,schedule:{enabled:true,branch:'main',since:new Date().toISOString()}}]}));
+        writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:1}}),{mode:0o600});
+        const backend = new FakeSchedule(p); backend.enabled=true; backend.timer='active';
+        const humanPath=join(fake,'current-human.txt');
+        writeFileSync(humanPath,'Complete current human instructions');
+        const source = structuredContextSource(project.tracker,({args}) => {
+          if (args[1]==='graphql') return JSON.stringify({data:{repository:{issue:{parent:null}}}});
+          if (args[1].includes('/comments?')) return '[]';
+          return JSON.stringify({number:7,title:'Fix login',body:readFileSync(humanPath,'utf8')});
+        });
+        const hp={...p,state,runtimeDescriptor:runtime.env.FACTORY_RUNTIME_DESCRIPTOR!,runtimes:dirname(runtime.directory),data:dirname(dirname(runtime.directory))};
+        const { prepareSupervisorHost } = await import(pathToFileURL(join(runtime.directory,'supervisor-host.mts')).href);
+        const prepared=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:options.invocationId,backend,tracker:source,rollout:options.rollout});
+        assert.equal(prepared.hold,undefined,'read-only preparation does not strand ownership before exact cache reuse');
+        assert.equal(prepared.runtime.lease(),undefined);
+        assert.equal(prepared.initial.preflightHold,null);
+        const rebuilt=await prepared.current();
+        assert.equal(rebuilt.input.basis,prepared.initial.input.basis,'rebuilding originals does not recursively include its own freezes or observations');
+        writeFileSync(humanPath,readFileSync(humanPath,'utf8')+'\nNew material human instruction');
+        const changed=await prepared.current();
+        assert.notEqual(changed.input.basis,rebuilt.input.basis,'new current human original changes the material basis');
+        assert.equal(prepared.hold,undefined,'read-only preparation has not acquired exclusion');
+        const diagnosticFile=join(run.evidenceDir,'no-commit.json'), diagnosticBytes=readFileSync(diagnosticFile,'utf8');
+        writeFileSync(diagnosticFile,JSON.stringify({...JSON.parse(diagnosticBytes),executionId:'foreign-execution'}));
+        await assert.rejects(prepared.current(),/no-commit original belongs to an unknown\/stale execution/);
+        writeFileSync(diagnosticFile,diagnosticBytes);
+        backend.enabled=false;
+        await assert.rejects(prepared.current(),/global=off/,'fresh existing controls narrow even an already prepared host');
+        assert.equal(prepared.hold,undefined,'control failure does not acquire ownership');
+        assert.equal(readFileSync(runFile,'utf8'),rawRun,'host preparation preserves the exact raw saved record');
+        // Extend this SAME genuine normal producer through the owned worker and pinned SDK. Reuse T04's
+        // network-denied SSE preload; no fabricated grant/terminal receipt and no model-semantics claim.
+        backend.enabled=true;
+        const preloadConfig=join(fake,'advisory-preload.json'), barrier=join(fake,'advisory-network.json');
+        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier,missingUsage:scenario === 'no-commit-custody-unknown-usage',
+          diagnosisInput:join(state,'supervisor',supervisorHash(project.root),supervisorHash(options.invocationId),'input.json')}));
+        const preload=new URL('../cli/test/supervisor-process-preload.mts',import.meta.url); preload.searchParams.set('config',preloadConfig);
+        const originalSpawn=cp.spawn;
+        cp.spawn=((command: any,args: any[],opts: any)=> {
+          if (String(args[0]).endsWith('supervisor-guard.mjs')) {
+            args=['--import',preload.href,...args]; opts={...opts,stdio:[...opts.stdio,'ignore']};
+          }
+          return originalSpawn(command,args,opts);
+        }) as any;
+        syncBuiltinESMExports();
+        let diagnosis;
+        try { diagnosis=await prepared.invoke('sk-synthetic-offline-not-a-secret'); }
+        finally { cp.spawn=originalSpawn; syncBuiltinESMExports(); }
+        if (scenario === 'no-commit-custody-unknown-usage') {
+          assert.equal(diagnosis.state,'human-required',JSON.stringify(diagnosis));
+          const reopened = readSupervisor(state,project), key = supervisorHash(options.invocationId);
+          assert.equal(reopened.reservations[key].state,'ambiguous');
+          assert.equal(reopened.reservations[key].actual,null);
+          assert.equal(reopened.advisory?.settlements?.[key],undefined,'uncertainty is not successful settlement');
+          assert.equal(Object.keys(reopened.advisory!.sends).length,1);
+          assert.match(reopened.humans[reopened.reservations[key].incidentId].nextAction,/Do not retry, reset charges/);
+          assert.equal(reopened.humans[reopened.reservations[key].incidentId].delivery.attempts,0);
+          assert.equal(checkSupervisorHold(state,prepared.hold!),true,'unknown usage retains exclusion');
+          const pin = prepared.runtime.lease()!;
+          assert(existsSync(join(hp.runtimes,'.leases',`${pin.token}.json`)),'unknown usage retains runtime pins');
+          prepared.runtime.assertCurrent();
+          assert.deepEqual(reopened.charged.diagnosis,reopened.reservations[key].reserved,'the full reservation remains charged');
+          const again = await prepared.invoke('sk-synthetic-offline-not-a-secret');
+          assert.equal(again.state,'held','durable human stop refuses replacement send');
+          assert.deepEqual(readSupervisor(state,project).charged,reopened.charged);
+          assert.equal(Object.keys(readSupervisor(state,project).advisory!.sends).length,1);
+          return;
+        }
+        assert.equal(diagnosis.state,'proposed',JSON.stringify(diagnosis));
+        assert(existsSync(barrier),'the actual SDK reached only the network-denied synthetic SSE transport');
+        const terminal=readSupervisor(state,project), key=supervisorHash(options.invocationId);
+        assert.equal(terminal.advisory?.settlements?.[key]?.disposition,'retained-advice');
+        assert.equal(terminal.reservations[key].state,'finished');
+        assert(terminal.reservations[key].actual!.tokens>0);
+        assert.equal(Object.keys(terminal.advisory!.sends).length,1);
+        assert.equal(inspectSupervisorHost(terminal,prepared.hold).state,'settled');
+        assert(!checkSupervisorHold(state,prepared.hold!),'known terminal evidence permits exact exclusion release');
+        const { reconcileSupervisorHost } = await import(pathToFileURL(join(runtime.directory,'supervisor-host.mts')).href);
+        assert.equal((await reconcileSupervisorHost(hp,prepared.hold!,prepared.runtime.lease()!)).released,true,'original receipts make restart closure idempotent');
+        const sameHost=await prepared.invoke('sk-synthetic-offline-not-a-secret');
+        assert.equal(sameHost.state,'reused',JSON.stringify(sameHost));
+        const again=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'cached-advice',backend,tracker:source,rollout:options.rollout});
+        assert(again.initial.preflightHold,'host maxCalls=1 is already spent');
+        const reused=await again.invoke('sk-synthetic-offline-not-a-secret');
+        assert.equal(reused.state,'reused',JSON.stringify(reused));
+        assert.equal(again.hold,undefined,'cache reuse creates no unreleasable exclusion');
+        assert.equal(again.runtime.lease(),undefined,'cache reuse creates no paid pin');
+        assert.deepEqual(readSupervisor(state,project).charged,terminal.charged);
+        assert.equal(Object.keys(readSupervisor(state,project).advisory!.sends).length,1,'unchanged basis performs zero extra sends');
+        // Same owned boundary, one final-publication source mutation. No parallel provider matrix.
+        const hostFile=join(p.config,'supervisor.json'), larger=JSON.parse(readFileSync(hostFile,'utf8'));
+        larger.cumulative.calls=2;writeFileSync(hostFile,JSON.stringify(larger),{mode:0o600});
+        writeFileSync(humanPath,readFileSync(humanPath,'utf8')+'\nAuthoritative successor instruction before new bounded call');
+        const late=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'final-stale',backend,tracker:source,rollout:options.rollout});
+        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier:join(fake,'late-network.json'),changeOriginal:humanPath,
+          diagnosisInput:join(state,'supervisor',supervisorHash(project.root),supervisorHash('final-stale'),'input.json')}));
+        cp.spawn=((command:any,args:any[],opts:any)=> {
+          if(String(args[0]).endsWith('supervisor-guard.mjs')) {args=['--import',preload.href,...args];opts={...opts,stdio:[...opts.stdio,'ignore']};}
+          return originalSpawn(command,args,opts);
+        }) as any;syncBuiltinESMExports();
+        let stale;
+        try {stale=await late.invoke('sk-synthetic-offline-not-a-secret');}
+        finally {cp.spawn=originalSpawn;syncBuiltinESMExports();}
+        assert.equal(stale.state,'human-required',JSON.stringify(stale));
+        const final=readSupervisor(state,project), lateKey=supervisorHash('final-stale');
+        assert.equal(final.advisory!.settlements![lateKey].disposition,'local-human-required');
+        assert(Object.values(final.humans).some(h=>h.proposalId===stale.diagnosticId),'stale owned output has a durable actionable human request');
+        assert.equal(Object.values(final.diagnostics!).find(d=>d.reservationId==='final-stale')!.decision,null);
+        assert.equal(final.charged.diagnosis.tokens,terminal.charged.diagnosis.tokens*2,'stale usage retains both full reservations');
+        assert(!checkSupervisorHold(state,late.hold!),'known stale terminal receipts release only exact exclusion');
+        assert.equal(readFileSync(runFile,'utf8'),rawRun,'owned diagnosis never rewrites actual saved run custody');
+      }
       if (scenario === 'no-commit-stale') {
         assert.equal(run.executionId, 'new-execution'); assert.equal(run.note, 'new execution owns this record');
         assert.equal(run.evidenceDir, 'new-evidence'); assert.equal(run.stage, 'implementing');

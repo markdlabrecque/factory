@@ -42,7 +42,7 @@ test('exact isolated process evidence refuses leader-only, shared-group, missing
 test('one owned copied process integration: normal receipt, explicit terminate, child deadline, actual controller death and inherited descendant cleanup', async t=>{
   const root=mkdtempSync(join(tmpdir(),'factory-process-')); t.after(()=>rmSync(root,{recursive:true,force:true}));
   const bundle=prepareRuntimeBundle({sourceRoot:fileURLToPath(new URL('../../',import.meta.url)),runtimeStore:join(root,'runtime'),install:installPackages});
-  for(const scenario of ['complete','terminate','deadline','controller-loss','pre-handoff-loss','guard-loss']) {
+  for(const scenario of ['complete','terminate','deadline','controller-loss','pre-handoff-loss','guard-loss','fresh-stop','fresh-source','fresh-controller-loss']) {
     const dir=join(root,scenario); mkdirSync(dir);
     const child=spawn(process.execPath,[fileURLToPath(new URL('./supervisor-process-fixture.mts',import.meta.url)),'--controller',dir,bundle.directory,scenario],
       {stdio:['ignore','pipe','pipe','ipc'],env:{PATH:'/usr/bin:/bin',HOME:'/nonexistent',LANG:'C'}});
@@ -53,6 +53,25 @@ test('one owned copied process integration: normal receipt, explicit terminate, 
       assert.equal((await closed)[0],1);
       t.diagnostic('Darwin lifecycle capability explicitly held before handoff; no positive Darwin proof');
       return;
+    }
+    if (scenario.startsWith('fresh-')) {
+      assert.equal(first.kind,'observing',JSON.stringify(first)+stderr);
+      const before=readSupervisor(first.stateDir,first.grant.project);
+      assert.equal(Object.keys(before.advisory!.workers).length,1,'actual ready worker registered before fresh IPC');
+      assert.equal(Object.keys(before.advisory!.sends).length,0,'observation request is not permission');
+      if (scenario === 'fresh-stop') commitSupervisor(first.stateDir,first.grant.project,before.revision,
+        {kind:'control',id:'barrier-stop',at:new Date().toISOString(),mode:'stopped',actor:'offline-operator',pilot:false});
+      child.send({continue:true});
+      if (scenario !== 'fresh-controller-loss') {
+        const refused=(await once(child,'message'))[0] as any;
+        assert.equal(refused.kind,'refused',JSON.stringify(refused)); assert.equal(refused.sends,0); assert.equal(refused.held,true);
+      }
+      assert.equal((await closed)[0],0,stderr);
+      const after=readSupervisor(first.stateDir,first.grant.project);
+      assert.equal(Object.keys(after.advisory!.sends).length,0,'stop/source change/controller loss at IPC cannot send');
+      assert.equal(Object.values(after.reservations)[0].state,'active','missing send never manufactures no-send settlement');
+      assert.deepEqual(after.charged.diagnosis,advisoryReservation());
+      continue;
     }
     assert.equal(first.kind,'inflight',JSON.stringify(first)+stderr);
     assert.deepEqual(readOwnedProcess(first.stateDir,first.grant),first.evidence);

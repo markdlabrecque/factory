@@ -1,10 +1,13 @@
 // Execute one fixed Pi workflow with durable managed admission before readiness/tracker/model work.
-// A pinned leased runtime binds explicit project assets and state; uncertain cleanup retains admission ownership.
+// A pinned leased runtime binds explicit project assets and state; immutable payload custody retains uncertain admission ownership.
+// Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
 // Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute bounded Pi session replies without delivery authority, then exit after owned teardown.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
-import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup, closeSandbox } from './sandbox-readiness.mts';
+import { beginPayloadCustody } from './payload-custody.mts';
+import { ownerOf } from './admission.mts';
+import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup } from './sandbox-readiness.mts';
 import type { ReadinessReport } from './readiness-schema.mts';
 // #153: proofs also bind continuation, checkpoint and admission code; upgrades require fresh verification.
 // #150: freeze structured verifier evidence after teardown; recheck requirements/claim at every delivery boundary.
@@ -351,6 +354,11 @@ if (recovering) {
 }
 
 // Recovery has exited using its fixed role default. Normal work has no model/provider fallback.
+// This lexical scope owns every normal launch handoff, including post-teardown delivery.
+let custody: ReturnType<typeof beginPayloadCustody> | undefined;
+let normalExit = 0;
+async function normalRun(): Promise<void> {
+function fail(msg: string): never { lastMessage = msg; throw Error(msg); }
 if ('error' in picked) fail(`#${iid} ${picked.error} Not started.`);
 const implementerModel = picked.model;
 const branch = `${iid}-${slug}`;
@@ -391,6 +399,15 @@ setStage(iid, {
   parentIid: parentIid === undefined ? undefined : String(parentIid), mergedAt: undefined,
   starting: undefined, // this run now owns the record the dispatcher reserved at launch
 });
+entryCleanupConfirmed = false;
+runtimeLease.pendingCleanup();
+custody = beginPayloadCustody(stateDir(), {
+  project: { root: context.projectRoot, tracker: { kind: TRACKER.kind, host: (TRACKER.gitlabHost ?? TRACKER.host!).toLowerCase(), project: PROJECT } },
+  key: keyFor(iid!, PROJECT), ticket: iid!, executionId, claim: claimToken!,
+  runtime: { id: context.manifest.id, dependencies: context.manifest.dependencies },
+  entry: managedEntry, lease: runtimeLease.token, owner: ownerOf(process.pid), baseline: baseSha, ticketHash: startVersion.hash,
+});
+setStage(iid, { payloadCustody: custody.pointer });
 // Heartbeat so the board can tell a long agent run from a dead process.
 setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
 console.log(`#${iid} ${issue.title}\n  branch ${branch} from origin/${base} (${baseSha.slice(0, 8)}), implementer ${implementerModel}`);
@@ -436,6 +453,8 @@ const receipt = recordIntent(stateDir(), {
 context.assertCurrent();
 entryCleanupConfirmed = false;
 runtimeLease.pendingCleanup();
+// Persist before invoking the SDK: a rejected/ambiguous create is still pending custody.
+const payloadCreation = custody.pendingCreation();
 const sandbox = await createSandbox({
   branch,
   baseBranch: `origin/${base}`,
@@ -452,6 +471,8 @@ const sandbox = await createSandbox({
     },
   },
 });
+
+custody.register(payloadCreation, sandbox);
 
 const promptArgs = {
   ISSUE_IID: iid,
@@ -555,8 +576,8 @@ try {
 } catch (error) {
   sandboxFailure = error instanceof Error ? error.message : String(error);
 } finally {
-  const cleanup = await closeSandbox(sandbox);
-  if (cleanup.confirmed) { entryCleanupConfirmed = true; runtimeLease.confirmedCleanup(); }
+  const cleanup = await custody.close(payloadCreation, sandbox);
+  // Container absence does not close the still-running normal delivery/launch scope.
   if (cleanup.reason) sandboxFailure = [sandboxFailure, noCommitMessage ? sanitizeReply(cleanup.reason) : cleanup.reason].filter(Boolean).join('; ');
   if (sandboxReport) {
     try { recordSandboxCleanup(stateDir(), sandboxReport, cleanup.confirmed); }
@@ -606,7 +627,7 @@ if (blockers) {
   finished = true;
   setStage(iid, { stage: "waiting", note: `${noCommitMessage ?? ''} implementer: needs ${what}${[...dependencyCache.values()].some((r) => r.state === "unknown") ? "; dependency information unavailable, will retry" : ""}` });
   console.log(`#${iid} waits on ${what}. The dispatcher relaunches it once that is merged.`);
-  process.exit(0);
+  return;
 }
 
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
@@ -624,7 +645,24 @@ if (!outcome.ok) fail(outcome.reason);
 finished = true;
 if (!outcome.pushed) {
   console.log(`--no-push: stopping. Branch ${branch} is ready locally.`);
-  process.exit(0);
+  return;
 }
 const next = parentIid === undefined ? `moves #${iid} to ${LABELS.done}` : `closes Task #${iid}`;
 console.log(outcome.merged ? `Merged after CI passed. The next dispatcher pass ${next}.` : `Not merged. Once you merge it, the dispatcher ${next}.`);
+}
+try { await normalRun(); }
+catch (error) { normalExit = 1; lastMessage = (error as Error).message; console.error(lastMessage); }
+finally {
+  if (custody) {
+    try {
+      custody.finish(); // normalRun has actually returned/thrown: no payload or launch continuation remains in this scope.
+      entryCleanupConfirmed = true;
+      runtimeLease.confirmedCleanup();
+    } catch (error) {
+      normalExit = 1; console.error(`Normal payload custody held: ${(error as Error).message}`);
+      // Never repair, release a lease or infer cleanup from controller death.
+    }
+  }
+}
+// Preserve complete-workflow module continuation; active handles still retain entry/lease ownership until actual exit.
+process.exitCode = normalExit;

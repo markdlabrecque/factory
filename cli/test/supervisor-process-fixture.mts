@@ -18,7 +18,7 @@ import { factoryToml } from './config-fixture.mts';
 import { paths } from '../src/paths.mts';
 import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor, preflightRuntimeRemoval, releaseRuntimeLease } from '../src/runtime-ownership.mts';
 
-if (process.argv[2] === '--controller') {
+async function controller() {
   denyNetwork();
   const [root,runtimeRoot,scenario] = process.argv.slice(3), configFile = join(root,'preload.json'), barrier = join(root,'network.json');
   writeFileSync(configFile,JSON.stringify({ scenario, barrier }));
@@ -42,7 +42,7 @@ if (process.argv[2] === '--controller') {
     const f = usageFixture(ownerOf(process.pid) as any,snapshot.project.root), at = f.at;
     f.registration.holdId = hold.id;
     const incidentId = incidentIdentity(snapshot.project,facts), owner = ownerOf(process.pid);
-    const deadline = new Date(Date.now() + (scenario === 'deadline' ? 3000 : 60000)).toISOString();
+    const deadline = new Date(Date.now() + (scenario === 'deadline' ? 3000 : 15000)).toISOString();
     const reservation = { id:'invocation',incidentId,kind:'diagnosis',owner,fence:hold.fence,at,deadline,reserved:f.g.reserved,actual:null,state:'active',reviewId:null };
     let state = commitSupervisor(stateDir,snapshot.project,0,{id:'observe',at,kind:'observe',facts,snapshotHash:supervisorHash(snapshot),reason:'offline'});
     state = commitSupervisor(stateDir,snapshot.project,state.revision,{id:'reserve',at,kind:'reserve-advisory',reservation:reservation as any,policy:f.registration,controls:f.controls,
@@ -73,12 +73,28 @@ if (process.argv[2] === '--controller') {
       await once(process,'message'); process.exit(0);
     }
     state = commitSupervisor(stateDir,snapshot.project,state.revision,{id:'register',at:new Date().toISOString(),kind:'register-advisory-worker',reservationId:'invocation',fence:hold.fence,owner,grant});
+    if (scenario.startsWith('fresh-')) {
+      const closed = once(handle.process.child,'close');
+      handle.handoff({grant,snapshot,policy:f.registration,controls:f.controls,apiKey:'sk-synthetic-offline-not-a-secret'},async () => {
+        process.send!({kind:'observing',grant,stateDir,evidence:handle.process.evidence});
+        await once(process,'message'); // Deterministic boundary barrier, not time/sleep polling.
+        if (scenario === 'fresh-controller-loss') process.exit(0);
+        if (scenario === 'fresh-source') snapshot.material.runId='material-successor';
+        return {snapshot,policy:f.registration,controls:f.controls};
+      });
+      await closed;
+      await handle.terminate();
+      const journal=readSupervisor(stateDir,snapshot.project);
+      process.send!({kind:'refused',sends:Object.keys(journal.advisory!.sends).length,held:checkSupervisorHold(stateDir,hold)},()=>process.disconnect());
+      return;
+    }
     const watcher = watch(root);
     const sent = new Promise<void>(accept => watcher.on('change',(_event,name) => { if (name === 'network.json') { watcher.close(); accept(); } }));
     let output = '';
     handle.process.child.stdout!.on('data',(b: Buffer)=>{ output += b.toString(); });
     const closed = once(handle.process.child,'close');
-    handle.handoff({grant,snapshot,policy:f.registration,controls:f.controls,apiKey:'sk-synthetic-offline-not-a-secret'});
+    handle.handoff({grant,snapshot,policy:f.registration,controls:f.controls,apiKey:'sk-synthetic-offline-not-a-secret'},
+      pinned ? async () => ({snapshot,policy:f.registration,controls:f.controls}) : undefined); // Component data only, not genuine host authority.
     await sent;
     const report = { grant, stateDir, evidence:handle.process.evidence, ...JSON.parse(readFileSync(barrier,'utf8')) };
     process.send!({kind:'inflight',...report});
@@ -112,3 +128,4 @@ if (process.argv[2] === '--controller') {
     process.send!({kind:'result',cleanup,again,usage,output,released,reopened,staleHeld,pinned:pinned?.lease(),charge:journal.charged.diagnosis,sends:Object.keys(journal.advisory!.sends).length},()=>process.disconnect());
   } catch (e) { process.send!({kind:'error',error:String(e)},()=>process.exit(1)); }
 }
+if (process.argv[2] === '--controller') await controller();

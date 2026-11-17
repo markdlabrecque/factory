@@ -68,6 +68,39 @@ source-only reviewer/outbox implementation and remaining paid-runtime/applicatio
 prerequisites; contract fixtures alone do not activate downstream action. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
+## Advisory host owned-worker boundary (partial)
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-host.test.mts cli/test/supervisor-input.test.mts cli/test/supervisor-worker.test.mts cli/test/supervisor-process.test.mts cli/test/supervisor-runtime.test.mts cli/test/runtime-bundle.test.mts cli/test/projects.test.mts cli/test/tick.test.mts orchestrator/verification-entrypoint-sandbox.test.mts
+```
+
+Cheap units prove fresh existing scheduler/registry controls (including absent
+opt-in, aliases, duplicate registration and failed backend query), early missing
+policy refusal, and observational restart cutpoints through one-use authorization.
+They do not manufacture terminal certificates. The reused actual flat normal
+producer fixture now imports the copied host module, claims exact custody-backed
+exclusion, verifies/pins the actual four-archive SDK closure, freezes complete
+saved-run originals including source-produced `no-commit.json`, rebuilds the same
+basis and refuses a later genuine fake-platform off observation without erasing
+the hold. SDK sandbox/Docker, tracker responses and scheduler observations are
+synthetic; source/flat imports, normal lifecycle, immutable custody, Git, admission,
+runtime artifacts/pins and collector I/O are real. Fake installed packages alone
+are not provider capability evidence.
+
+The SAME producer fixture now invokes the copied host's existing worker, actual
+owned process and pinned SDK using T04's network-denied synthetic SSE preload,
+then checks genuine raw accounting/cleanup, retained non-executing advice and durable local HUMAN settlement. A missing-terminal-usage variant proves a durable actionable human request survives reopen while the reservation remains ambiguous, fully charged and excluded with its runtime pins retained.
+The existing T04 process fixture adds deterministic last-send observation barriers:
+stop-before-auth, changed source and actual controller disconnect all leave no
+send and retain full charge/ownership. Existing journal units own both stop/auth
+orderings; no duplicate provider matrix was added. Worker units cover asynchronous
+observations while retaining synchronous component fixtures.
+
+Terminal advice composition, exact receipt-based release/reconciliation and spent-budget cache reuse are exercised through the copied host. Handled unknown accounting/cleanup records an unsettled human outcome, never a successful settlement or release. Complete mandatory and hosted acceptance remain separate gates.
+No paid/live probe or model semantics is claimed.
+The unchanged 15-second direct-child, 120-second test, four 180-second shard and
+concurrency-four limits still apply; complete mandatory/release gates are separate.
+
 ## Complete saved-run input boundary
 
 ```sh
@@ -86,6 +119,28 @@ Tracker transport, runtime package installation and saved-run inputs are synthet
 these tests establish no paid provider, installed mount, quiescence or cleanup
 authority. The fixture Git helper has per-call bounds; whole-test 120-second bounds
 and the unchanged four 180-second shards remain required.
+
+## Normal payload custody source prerequisite
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 orchestrator/payload-custody.test.mts orchestrator/no-commit.test.mts orchestrator/verification-entrypoint-sandbox.test.mts cli/test/supervisor-admission.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Cheap event-table units cover before creation, pending/ambiguous construction,
+registration, exact close, still-open handoff, terminal seal, multiple payloads and
+forbidden reuse of a sealed nonce. A private-filesystem case proves exclusive event
+publication and fresh attempt pointers; these synthetic events are not platform
+proof. The existing actual flat-main fixture additionally asserts durable pending
+custody *inside the SDK constructor*, actual returned-container registration before
+agent work, independent exact absence via controlled Docker-inspect responses, and
+terminal saved-record admission without altering the target raw record. Ambiguous
+create, missing returned identity and failed/unconfirmed close retain entries after
+actual controller exit. Foreign legacy records, stale claims/executions/nonces,
+recovery and delivery ownership refuse. The real producer, filesystem and admission
+code execute; SDK, tracker/auth and Docker transport are synthetic, not live platform
+or provider evidence. These tests prove no full advisory-host composition or rollout.
+The complete inventory and shared flat-copy fixtures carry the new module; no
+package, archive, dependency, concurrency or shard-deadline change is required.
 
 ## Shared admission exclusion
 
@@ -113,6 +168,18 @@ against an actually claimed successor. Fabricated commit events and corrupted re
 bindings fail closed. Other lifecycle cases retain unknown usage/exclusion. Cheap raw
 filesystem permutations cover live parked/terminal records, dangling claims, starting
 handoffs and unresolved recovery payloads regardless of stage or controller death.
+The SAME `verification-entrypoint-sandbox.test.mts` actual normal-custody/copied
+runtime fixture additionally reaches owned host/worker/SDK, validates a synthetic
+typed wait against its real frozen input and retains it, then proves unchanged reuse
+with maxCalls=1 spent makes zero extra sends/charges/holds/pins. Original receipt
+reconciliation is idempotent. A second bounded call mutates the original human input
+after authorization and proves final publication retains a durable human request,
+not stale usable advice; both full reservations remain charged. Cheap host units own
+final stop/denial/supersession/deadline/malformed publication permutations. Existing
+T01/T04 units and IPC fixtures own both stop/authorization orderings and controller
+loss, rather than another transport matrix. Synthetic JSON establishes typed
+validation only, not model quality. Parent release gates still require all four
+bounded shards, separate browser lifecycle and independent review.
 No-send finalization and installed public host authority are not proved. Runtime
 pinning is separately covered by `cli/test/supervisor-runtime.test.mts`: cheap
 selection/source/dependency/override/dead-owner permutations and one reuse of the

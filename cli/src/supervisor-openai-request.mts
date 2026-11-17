@@ -67,7 +67,10 @@ export function validateAdvisoryInput(value: Snapshot, grant: DiagnosisGrant): S
   return snapshot;
 }
 
+export type AdvisoryObservation = { snapshot: Snapshot; policy: AdvisoryRegistration; controls: AdvisoryControls };
 export type AdvisoryRequest = { runtimeRoot: string; stateDir: string; grant: DiagnosisGrant; policy: AdvisoryRegistration; controls: AdvisoryControls;
+  /** Owned host path requires fresh data over the original controller IPC, not permission. Legacy direct component fixtures omit this. */
+  observe?: () => Promise<AdvisoryObservation>;
   snapshot: Snapshot; apiKey: string; signal?: AbortSignal;
   /** SDK-supported HTTP seam only: never an authorization callback. Production defaults to native fetch. */
   fetch?: typeof globalThis.fetch };
@@ -110,9 +113,16 @@ export async function requestAdvisory(o: AdvisoryRequest) {
       validateAdvisoryPayload(JSON.parse(init.body), system, user);
       const final = validateRuntimeBundle(o.runtimeRoot);
       if (final.id !== grant.runtime || final.dependencies !== grant.dependencies) throw Error('Advisory held: runtime changed before authorization');
+      const observation = o.observe ? await o.observe() : { snapshot, policy: o.policy, controls: o.controls };
+      validateAdvisoryInput(observation.snapshot, grant);
+      if (supervisorHash(observation.policy) !== supervisorHash(o.policy) || o.signal?.aborted || Date.now() >= Date.parse(grant.deadline))
+        throw Error('Advisory held: current host policy/deadline changed');
+      const observedRuntime = validateRuntimeBundle(o.runtimeRoot);
+      if (observedRuntime.id !== grant.runtime || observedRuntime.dependencies !== grant.dependencies)
+        throw Error('Advisory held: runtime changed during current observation');
       const current = readSupervisor(o.stateDir, grant.project);
       authorization = authorizeAdvisorySend(o.stateDir, grant.project, current.revision, { at: new Date().toISOString(),
-        grantId: grant.id, reservationId: grant.invocationId, fence: grant.fence, worker, payload: sha(init.body), policy: o.policy, controls: o.controls });
+        grantId: grant.id, reservationId: grant.invocationId, fence: grant.fence, worker, payload: sha(init.body), policy: observation.policy, controls: observation.controls });
       // No network under the journal lock. Authorization-first remains owned in-flight if stop now commits.
       return network(url, { ...init, redirect: 'error' });
     };

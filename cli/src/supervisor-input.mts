@@ -208,10 +208,17 @@ export function collectSupervisorInput(o: SupervisorInputOptions): { snapshot: S
     || !run.evidenceDir || resolve(run.evidenceDir) !== run.evidenceDir || !inside(join(root,'.factory','evidence'),run.evidenceDir)) return hold('saved evidence location missing/unsupported');
   // A finished recovery's current originals are authoritative; older implementation evidence is never substituted.
   let failures = 0; const absent: string[] = [];
-  for (const name of ['verification.json','verdict.md','blocked.json']) {
+  for (const name of ['verification.json','verdict.md','blocked.json','no-commit.json']) {
     const file = join(evidence,name);
-    try { const text = read(file); sources.push(original('failure',file,text)); failures++; }
-    catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; absent.push(file); }
+    try {
+      const text = read(file);
+      if (name === 'no-commit.json') {
+        const diagnostic = JSON.parse(text);
+        if (diagnostic.version !== 1 || diagnostic.executionId !== run.executionId || diagnostic.phase !== 'implementing'
+          || diagnostic.commits !== 0 || diagnostic.evidence !== name) return hold('no-commit original belongs to an unknown/stale execution');
+      }
+      sources.push(original('failure',file,text)); failures++;
+    } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; absent.push(file); }
   }
   if (!failures) return hold('no complete saved failure/gate outcome original; stopped summary is not evidence');
   const reportSource = sources.find(s => s.locator === join(evidence,'verification.json'));

@@ -21,7 +21,7 @@ process.stderr.on('error', stop);
 const worker = spawn(process.execPath, [runner], { cwd: process.cwd(), env: {
   PATH: '/usr/bin:/bin', HOME: process.cwd(), LANG: 'C',
 }, stdio: ['ignore','pipe','pipe','ipc'] });
-let output = 0, errors = 0, handed = false, ready = false, closed = false, pending = 0;
+let output = 0, errors = 0, handed = false, ready = false, closed = false, pending = 0, observing = false, observed = false;
 const drained = () => { if (closed && pending === 0) stop(); };
 const forward = (stream, bytes) => { pending++; stream.write(bytes, () => { pending--; drained(); }); };
 worker.stdout.on('data', b => { output += b.length; if (output > limit) stop(); else forward(process.stdout,b); });
@@ -33,12 +33,18 @@ worker.on('close', () => { closed = true; drained(); });
 worker.on('message', m => {
   if (!ready && m?.kind === 'ready' && Object.keys(m).length === 1) {
     ready = true; process.send?.({ kind: 'ready', worker: worker.pid });
+  } else if (handed && !observing && !observed && m?.kind === 'observe' && Object.keys(m).length === 1) {
+    observing = true; process.send?.({ kind: 'observe' });
   } else if (m?.kind === 'complete' && Object.keys(m).length === 1) {
     process.send?.({ kind: 'complete' });
   } else stop();
 });
 process.on('message', m => {
   if (m?.kind === 'terminate' && Object.keys(m).length === 1) return stop();
+  if (m?.kind === 'observation') {
+    if (!observing || observed || Object.keys(m).length !== 2 || Buffer.byteLength(JSON.stringify(m)) > 4_000_000) return stop();
+    observed = true; worker.send(m, e => { if (e) stop(); }); return;
+  }
   if (!ready || handed || m?.kind !== 'handoff' || Buffer.byteLength(JSON.stringify(m)) > 4_000_000) return stop();
   handed = true;
   worker.send(m, e => { if (e) stop(); });

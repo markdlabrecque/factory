@@ -40,6 +40,11 @@ if (process.argv[1]?.endsWith('supervisor-runner.mts')) {
       await new Promise(() => {});
     }
     publish(null);
-    return new Response(providerTextStream(offlineText), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
+    const frozen = config.diagnosisInput ? JSON.parse(readFileSync(config.diagnosisInput,'utf8')) : null;
+    if (config.changeOriginal) writeFileSync(config.changeOriginal,readFileSync(config.changeOriginal,'utf8')+'\nMaterial change after authorization');
+    const text = frozen ? JSON.stringify({version:1,incidentId:frozen.incidentId,basisHash:frozen.basis,
+      classification:'expectation',rationale:'Synthetic typed wait; no model quality assertion',alternatives:['Inspect the retained originals'],
+      action:{kind:'wait',expectation:'Await a human material instruction'}}) : offlineText;
+    return new Response(providerTextStream(text, {missingUsage:config.missingUsage === true}), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
   };
 }

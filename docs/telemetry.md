@@ -18,6 +18,21 @@ Without `--project`, export includes every locally recorded project, even projec
 
 Export snapshots directory entries without writer locks, creates no directories, reconciles no records and emits no telemetry about itself. Files published after a directory's snapshot may appear only on a later export. Missing telemetry yields an empty report and exit 0. Unknown versions, corrupt events, foreign stream identities, sequence anomalies and unrecoverable reads yield diagnostics and exit 1, alongside any valid selected events. Diagnostics contain categories and safe stream hashes, not raw file contents or exceptions. Invalid events are excluded, never repaired or overwritten. A project-only filter may report unreadable data in another stream because corrupt data cannot establish its project identity.
 
+## Advisory host preparation coverage
+
+The source-only `prepareSupervisorHost` and `inspectSupervisorHost` APIs do not
+publish supervisor send/completion events. Preparation creates private original
+snapshots; exact exclusion and protected pins are deferred until after cache reuse
+and before a new paid reservation. Its read-only cutpoint projection is local actionable
+inspection, not terminal usage, no-send evidence or permission to release. The
+worker invocation uses the existing committed journal observations for reservation,
+registration, send and branded T05 terminal settlement, not fabricated completion
+events. Settlement telemetry selects known actual usage from the finished reservation,
+with observed retained-advice or pending human disposition; raw output and secrets
+are not telemetry. Retained typed advice grants no execution authority. Final-send IPC observations are data, not a second
+permission store or telemetry-derived authorization. Absence of telemetry can never reconstruct a grant, prove cleanup, refund a reservation
+or confirm that an authorized request was remotely cancelled.
+
 ## Coverage and attribution
 
 Coverage is always `observed-only`, including a new installation with no diagnostics. A process can crash after an authoritative write but before publishing its event. Recorder errors warn on stderr and leave the command's authoritative result unchanged. Missing events never prove that an action did not happen.

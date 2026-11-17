@@ -69,14 +69,16 @@ import { readRegistry } from '../projects.mts';
 import type { Project } from '../projects.mts';
 import { resolveProject } from '../runs.mts';
 import { copyProblem, currentBranch, readScheduleConfig, scheduleBlocker } from '../schedule.mts';
-import type { ScheduleConfig, Scheduling } from '../schedule.mts';
+import type { ScheduleConfig } from '../schedule.mts';
 import { appendHistory, markInterrupted, readTickState, writeTickState } from '../schedule-state.mts';
 import type { HistoryEntry, PassHistory, ProjectState, TickHistory, TickState } from '../schedule-state.mts';
 import { acquireTickLock, passAlive } from '../tick-lock.mts';
 import type { HeldLock } from '../tick-lock.mts';
 import { terminateGroup } from '../tick-cancel.mts';
 import type { CancelOptions } from '../tick-cancel.mts';
-import type { ScheduleBackend, ScheduleStatus } from '../platform/scheduler.mts';
+import type { ScheduleBackend } from '../platform/scheduler.mts';
+import { schedulingState } from '../scheduling-observation.mts';
+export { schedulingState, schedulingFrom } from '../scheduling-observation.mts';
 import { runDispatchSh } from './dispatch.mts';
 import { afterPass } from '../jam-detect.mts';
 import { maintainRecovery } from '../recovery-followup.mts';
@@ -115,21 +117,6 @@ export type TickResult = {
 export const SCHEDULED_ARGS: string[] = [];
 /** The exit code for a tick result. */
 export const tickExitCode = (r: TickResult) => r.result === 'interrupted' ? 143 : r.result === 'failed' || r.result === 'unknown' ? 1 : 0;
-
-/** Asks the service manager whether scheduled work may run. Needs the timer enabled and active; a failed query is unknown. */
-export async function schedulingState(backend: ScheduleBackend): Promise<Scheduling> {
-  let s;
-  try { s = await backend.status(); }
-  catch (e) { return { state: 'unknown', reason: `service manager query failed: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}` }; }
-  return schedulingFrom(s);
-}
-/** What one service-manager observation means for scheduled work (see schedulingState). */
-export function schedulingFrom(s: ScheduleStatus): Scheduling {
-  if (s.timer === 'missing') return { state: 'off', reason: 'timer not installed' };
-  if (!s.enabled) return { state: 'off', reason: s.timer === 'active' ? 'timer is running but disabled' : 'timer disabled' };
-  if (s.timer !== 'active') return { state: 'off', reason: 'timer enabled but not running' };
-  return { state: 'on' };
-}
 
 /** The environment a scheduled pass gets: the caller's, with the saved PATH, shared state and the scheduled marker. */
 export function scheduledEnv(p: Paths, config: ScheduleConfig, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {

@@ -19,7 +19,7 @@ export type OpenAIDiagnosisBoundary = {
   start(o: { project: DiagnosisGrant['project']; invocationId: string; fence: string; deadline: string; maxOutputBytes: number }): Promise<{
     process: OwnedProcess;
     /** Caller first registers a grant for process.evidence.worker in the actual journal. No callback can assert permission. */
-    handoff(o: { grant: DiagnosisGrant; snapshot: AdvisoryRequest['snapshot']; policy: AdvisoryRegistration; controls: AdvisoryControls; apiKey: string }): void;
+    handoff(o: { grant: DiagnosisGrant; snapshot: AdvisoryRequest['snapshot']; policy: AdvisoryRegistration; controls: AdvisoryControls; apiKey: string }, observe?: () => Promise<import('./supervisor-openai-request.mts').AdvisoryObservation>): void;
     terminate(): Promise<boolean>; usage(): ReturnType<typeof providerResources>;
   }>;
 };
@@ -39,7 +39,7 @@ export function createOpenAIDiagnosisBoundary(o: { runtimeRoot: string; stateDir
       try { owned = await startOwnedProcess({ ...input, runtimeRoot, stateDir, cwd, runtime: manifest.id, dependencies: manifest.dependencies }); }
       catch (e) { rmSync(cwd,{ recursive: true, force: true }); throw e; }
       let grant: DiagnosisGrant | undefined, handed = false, termination: Promise<boolean> | undefined;
-      return { process: owned, handoff(request) {
+      return { process: owned, handoff(request, observe) {
         advisoryDemand(!handed, 'handoff consumed'); handed = true;
         const copy = structuredClone(request), g = validateDiagnosisGrant(copy.grant);
         advisoryDemand(supervisorHash(readOwnedProcess(stateDir,g)) === supervisorHash(owned.evidence)
@@ -51,7 +51,7 @@ export function createOpenAIDiagnosisBoundary(o: { runtimeRoot: string; stateDir
           && g.owner.pid === owned.evidence.worker.pid && g.owner.start === owned.evidence.worker.start
           && g.deadline === input.deadline && ADVISORY_PROFILE.thinking === 'high', 'registered exact grant required before handoff');
         grant = g;
-        owned.handoff({ ...copy, runtimeRoot, stateDir });
+        owned.handoff({ ...copy, runtimeRoot, stateDir }, observe);
       }, terminate() {
         return termination ??= (async () => {
           const absent = await owned.terminate();

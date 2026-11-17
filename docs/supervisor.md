@@ -46,6 +46,91 @@ describes the supported-copy boundary. T09 still owes actual public-host rollout
 quiescence, mounts/resource isolation and control prerequisites. This module grants
 none of those authorities and creates no usable advice or notification.
 
+## Non-CLI owned advisory host
+
+`cli/src/supervisor-host.mts` now exports `prepareSupervisorHost`. This is a
+source API for explicit owned advisory invocation, **not a public CLI or activation**. It
+reads the existing service-manager `schedulingState` observation and strict project
+registry on every `current()` call. An unregistered/aliased checkout, missing
+project scheduling opt-in, pause, global off/unknown or unreadable host policy
+holds preparation. `scheduling-observation.mts` and `project-registry.mts` are shared
+with the existing scheduler/registry callers, not second permission stores.
+
+Preparation requires one explicitly named ticket/current saved execution and the
+actual source-owned normal custody chain. Read-only preparation uses the trusted
+runtime factory and complete original collector without acquiring a paid hold/pin.
+A new paid call claims exact shared admission exclusion and pins before reservation. Every current read rebuilds external originals and
+the authoritative prior-decision set before any later cache comparison, rereads
+private versioned host policy, validates any acquired exact own hold, and reports cumulative
+host/project/role budget preflight without changing history. Budget preflight is
+not authorization: the existing worker still commits `reserve-advisory` under
+the journal lock. Collected `no-commit.json` is the actual normal producer's named
+failure original; a stopped stage alone is still insufficient.
+
+Failures after acquiring exclusion deliberately retain it and any runtime pins.
+`inspectSupervisorHost` is a read-only cutpoint projection of validated journal
+state and an exact hold: exclusion-only, reserved, registered, authorized, settled,
+or inconsistent. Each has a local next action; none grants resend, infers no-send
+from absence, refunds charges, repairs ownership or releases a successor. A
+settled projection does not replace original receipt validation/fresh ESRCH in the
+actual release APIs. No telemetry is fabricated by preparation/inspection.
+
+The prepared object's explicit source-only `invoke(apiKey, signal?)` delegates to
+`diagnoseProject`, not a parallel supervisor. It accepts an explicit handoff secret
+but never retrieves credentials. The existing worker preserves reuse before budgets,
+retained human/denial checks and cumulative reservation. Its owned branch freezes
+input, reserves through `reserve-advisory`, starts the pinned child, constructs the
+immutable grant from actual ready PID/start and registers it before handoff.
+
+At the last HTTP gate, the runner requests one bounded observation through the
+original runner ↔ guard ↔ controller IPC. The controller rebuilds actual registration,
+backend/registry controls, private policy, complete material, exact hold and runtime;
+the child validates that data before the unchanged journal-lock one-use authorization.
+An observation is not permission. A lost/unresponsive controller cannot produce a
+fresh send; immutable deadlines and disconnect whole-group cleanup remain armed.
+Prepared-host calls have no static observation bypass. Static direct-boundary data
+is retained only for legacy component fixtures, not public host authority. Preflight
+for an already active exact own reservation excludes it only from NEW-call arithmetic
+before adding it back; durable cumulative charge never changes or refunds.
+
+After process closure, raw output is retained privately and current originals are
+rebuilt outside locks. The genuine T05 producer validates typed non-executing advice
+against the owned output, frozen snapshot/input reference and exact grant, basis,
+policy and source observations. Known T03 usage and fresh T04 whole-group ESRCH are
+required. One branded journal event atomically records accounting plus retained
+advice, or an actionable pending local HumanRequest for unusable/stale output. Its
+final transition enforces current journal stop/human/denial/supersession/deadline
+fences; no fake proposed decision is recorded for refused output. Full reserved
+charge remains spent. Advice never creates execution or independent-review authority.
+
+Handled unknown cleanup/accounting or interrupted owned work records a durable,
+invocation/fence-bound diagnostic and actionable local HumanRequest through the
+existing conservative diagnosis transition: null actual usage, unconfirmed cleanup,
+and an ambiguous reservation. This is not a terminal settlement. The full charge,
+exclusion and runtime pins remain; reopen cannot launch a replacement send or
+promote absent receipts into cleanup authority. A controller that disappears before
+publication still leaves inspectable held ownership rather than fabricated completion.
+
+Preparation/reuse is read-only: exact exclusion and runtime pins are acquired only
+after the existing worker's exact cache comparison and new-call preflight. Thus an
+unchanged retained wait remains reusable with host maxCalls=1 already spent, without
+a new send, hold or lease. Acquisition failure/uncertain start retains any acquired
+ownership; absence of a reservation is never a no-send certificate.
+
+Known terminal receipts compose exact runtime then admission release outside separate
+locks. `reconcileSupervisorHost(paths, originalHold, originalLease)` revalidates the
+original grant/authorization/usage/process/cleanup and fresh ESRCH; repeated closure
+is idempotent, foreign successors and unknown evidence remain held. It never acquires,
+repairs grants, reserves, resends or refunds. Interrupted preterminal cutpoints remain
+explicitly actionable through `inspectSupervisorHost`.
+
+The SAME actual normal producer/copy fixture proves typed synthetic wait retention,
+spent-budget unchanged reuse, idempotent receipt closure and a source mutation after
+authorization producing a durable human request instead of usable stale advice.
+Synthetic JSON proves typed validation, not model quality or installed rollout.
+**Remaining release gates:** parent-owned full shards, browser lifecycle, independent
+review and source acceptance/runbook/hosted delivery gates; no activation is implied.
+
 ## Complete saved-run input collection
 
 `cli/src/supervisor-input.mts` exports `collectSupervisorInput` (also named
@@ -211,9 +296,42 @@ The initial claim requires conservative **shared run-state quiescence**, because
 legacy claims and raw run records cannot establish exact canonical-root ownership:
 no live/unknown normal/delivery claims, recovery claims or pending charges, managed
 entries or any raw run record without definitive ownership and whole-payload cleanup.
-No shipped legacy raw-record producer supplies this proof, so even queued, waiting,
-done or stopped records hold, including dead controllers, dangling claims, starting
-handoffs and unresolved recovery payloads. A stage label is not cleanup. This may hold unrelated
+Legacy raw-record producers supply no such proof, so queued, waiting, done or
+stopped legacy records hold, including dead controllers, dangling claims, starting
+handoffs and unresolved recovery payloads. A stage label is not cleanup.
+
+The standard normal `main.mts` now produces a private append-only
+`<state>/payload-custody/<nonce>/000000.json` event chain. Its saved run carries only
+`payloadCustody: {version: 1, nonce}`. The immutable opening binds canonical
+root/structured tracker, run key/ticket/execution/claim, selected source and dependency
+identities, managed entry, runtime lease, exact controller PID/start, historical
+baseline and ticket-input hash. Before calling the actual Sandcastle constructor it
+persists a pending creation. Only the actual returned sandbox ID can register that
+creation. The custody close helper itself calls `closeSandbox`, including independent
+exact Docker-container absence observation; a caller boolean, readiness cleanup
+projection or branch/worktree receipt cannot append absence authority.
+
+Each payload (including additional stages) must be registered and observed absent.
+Only after the actual entire normal scope returns/throws, including post-container
+verification publication and delivery handoffs, does main append its terminal seal
+and permit normal entry/lease cleanup. No payload is a refusal, not a never-launched
+certificate. Construction/registration ambiguity, failed close, interrupted sealing
+or controller loss retains pending custody, entries and cleanup leases. There is no
+PID-kill, refund, replay, metadata repair or journal deletion path here.
+
+`claimSupervisorHold` accepts an optional **explicit** `savedRun: {key, executionId}`.
+For that raw file only it validates the complete event chain, exact current saved
+claim/baseline/input/project/runtime binding and terminal seal under the admission
+lock, after checking the selected launcher/custody/close source bytes. Missing target,
+foreign scope, stale nonce/fence, unknown/legacy or any additional raw record still
+holds. Live claims, managed entries, recovery ownership and pending charges remain
+independent guards. A new normal/recovery admission clears the old pointer before
+payload work; every new normal scope creates a fresh nonce. Delivery continuation
+changes claim/ownership and cannot reuse the old normal closure; recovery/delivery
+records are not admitted by this exception. Raw records and evidence are preserved.
+No waiting, tracker, model or network operation occurs under admission/journal locks.
+This is the normal-run source prerequisite only, not a composed advisory host or
+installed quiescence/rollout approval. This may hold unrelated
 projects sharing the store rather than infer their ownership. Existing conflicting
 supervisor holds refuse even when their owners died. Managed entry claims canonicalize
 root aliases too. They wrap CLI manual/dispatch (including complete overrides), shell
@@ -270,8 +388,10 @@ the journal lock. A module-private one-use, recursively frozen event binds direc
 project and revision; `commitSupervisor` rejects caller-fabricated settlement events.
 The journal CAS revalidates the exact current grant/send and atomically finishes the
 reservation with known actual resources, retaining **all reserved charge**, and sets
-an enduring `local-human-required` disposition. This publishes no usable advice,
-legacy pending HumanRequest, tracker/outbox request or execution authority.
+an enduring `retained-advice` or `local-human-required` disposition. Owned-host
+publication additionally retains a validated Diagnostic and, when necessary, an
+atomic pending HumanRequest. Legacy receipt-only calls remain human-only. Neither
+path executes advice or sends tracker/outbox notifications.
 
 The strict optional `advisory.settlements` map binds grant, hold, invocation, fence,
 authorization, validated usage and process/cleanup hashes to the finished reservation.

@@ -30,7 +30,7 @@ export type SupervisorTickHook = {
  * finite capacity. It must not reserve/charge a second recovery budget or infer permission from a Board projection.
  * No default binding/paid adapter is shipped. This is a source API, not config, an environment selector or a pilot. */
 export type SupervisorHost = {
-  diagnosis: Omit<WorkerOptions, 'signal' | 'invocationId' | 'fence'>;
+  diagnosis: Omit<WorkerOptions, 'signal' | 'invocationId' | 'fence' | 'current'> & { current(): DiagnosisAuthorization };
   admissionHold(): string | undefined;
   review?(decision: DiagnosisDecision): Omit<ReviewOptions, 'signal'>;
   application?(decision: DiagnosisDecision): GateOptions;
