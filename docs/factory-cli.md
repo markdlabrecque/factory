@@ -6,14 +6,16 @@ Live read-only scheduler authorization and delivery claims continue existing exa
 # Factory CLI
 
 The [project supervisor authority contract](supervisor.md) documents the gate inventory,
-import-safe records and unresolved fresh-review/notification prerequisites. It does not
-introduce supervisor commands or enable action mode. The source-only [advisory repair broker](supervisor.md#thin-host-action-broker)
-can inject a candidate into the existing successful-pass/two-pass recovery scan; no production caller activates it.
-Disabled/observe/stopped supervisors leave existing automatic recovery unchanged. Advice never bypasses fresh preparation,
-current scheduler/project authorization, saved-run ownership, project exclusion or the existing atomic attempt charge.
-Waiting CI stays on existing delivery follow-through, without new repair/model budget. Failed CI can yield a human-approved
-follow-up draft or an otherwise eligible exact stopped-run repair, never authority from merely having an open PR.
-Missing escalation/activation capability remains held; no local record counts as delivered notification or human approval.
+import-safe records, explicit fresh-review/managed-comment outbox boundaries and
+remaining paid-runtime/application prerequisites. The exact local resolution command
+below does not enable action mode, launch a review or approve a gate.
+The source-only [advisory repair broker](supervisor.md#thin-host-action-broker) can inject a candidate into the existing
+successful-pass/two-pass recovery scan; no production caller activates it. Disabled/observe/stopped supervisors leave
+existing automatic recovery unchanged. Advice never bypasses fresh preparation, current scheduler/project authorization,
+saved-run ownership, project exclusion or the existing atomic attempt charge. Waiting CI stays on existing delivery
+follow-through, without new repair/model budget. Failed CI can yield a human-approved follow-up draft or an otherwise
+eligible exact stopped-run repair, never authority from merely having an open PR. Missing trusted escalation/activation
+capability remains held; no local record counts as delivered notification or human approval.
 
 Dispatch and recovery enforce [image and sandbox readiness](image-readiness.md) before agent work. Recovery awaits readiness before atomic claim-and-charge, reports environment holds without spending attempts, and rechecks scheduling eligibility after the probe. New supported projects use `.factory` throughout. Strict metadata inspection refuses any `.sandcastle` entry, mixed layouts, directory/config aliases and unknown inspection results before new project writes, tracker work, reports or launch/admission effects. Init may complete a safe existing `.factory` data/image-assets directory without config, preserving existing regular files and registering only after all writes succeed. Executable legacy remnants without TOML are still refused. Existing operations require validated TOML. The shared runtime contract is a breaking change. Project owners are responsible for reviewing their own configuration and custom code; Factory does not automatically migrate them.
 
@@ -27,6 +29,44 @@ The [host launch gate](ticket-readiness.md#host-launch-ordering) applies fresh f
 The same host-owned project gate precedes explicit complete overrides, including Board reassessment and never-opted scheduled refresh, without importing their code into diagnostics or claiming coverage of opaque internal behavior. Board polling remains passive. A fresh pass may resume normal selection after success, but never implicitly retries a stopped run. Ticket-specific checks repeat before protected creation/admission, and final filesystem/Git operations remain authoritative. Saved readiness never authorizes launch.
 
 Recovery host checks run within the existing preparation/pre-charge flow and repeat after image readiness. Complete input must still match the existing preparation before charge, including parent planning comments. A failed source or changed hash publishes a ticket-input hold without replacing the preparation. Host-known failure charges no attempt. Capacity, activity-generation, ownership and admission-time local checks still apply; no budget is refunded or reset. After a container starts, existing charged-attempt and exact-container cleanup rules remain. Settlement and scheduled local maintenance run independently of the new-launch gate, including during project holds or pauses under the existing global-off/unknown/cancellation policy. Unconfirmed cleanup continues to hold ownership, and report state-write failures are reported directly.
+
+## Supervisor human-request resolution
+
+```sh
+factory supervisor resolve --project <name-or-path> --incident <exact-incident-id> --request <exact-request-id> --proposal <exact-held-proposal-hash> --reason "Owner decision after inspecting originals" --abandon --confirm
+factory supervisor resolve --project <name-or-path> --incident <exact-incident-id> --request <exact-request-id> --proposal <exact-held-proposal-hash> --reason "Permit only this material successor and new review" --revised <exact-new-proposal-hash> --confirm
+```
+
+This is a **local host-user control**, not tracker approval or an action-mode switch.
+Choose exactly one of `--abandon` or `--revised`; the latter cannot reuse the held
+proposal. Without confirmation, exact IDs, a reason and validated project identity,
+the command refuses without changing the journal. Registered project resolution is
+the same as other run controls; without `--project`, use the current registered
+checkout. It reads validated TOML, never executes project configuration or fetches
+credentials. OS UID/username supplies the audit actor; there is no actor flag or
+trust in a tracker comment/model response. Exit 0 means the resolution audit was
+committed, **not** gate approval, review/repair launch, proof or merge authority.
+Unknown/unsettled worker accounting or a foreign/already-resolved request exits 1.
+
+Inspect original retained review input/process/result and human request in the
+host-owned `<state>/supervisor/state.json` and its referenced sidecars before
+resolving. Do not edit that journal manually. Denials, pending/delivered requests,
+original gates/work and cumulative charges remain retained. Abandonment permits no
+replacement. A revised exact hash requires a new material incident and fresh
+independent review; A→B→C resolution chains retain all history without resetting
+budgets. This command does not automatically resume a worker or clear the original
+denial. Supervisor status/mode/stop controls and scheduler wiring remain separate work.
+
+The [source-only escalation contract](supervisor.md#durable-managed-comment-outbox)
+delivers one managed comment to the exact ticket or an explicitly configured
+same-project operator issue for project-wide requests. There is no fallback ticket.
+Only an actual tracker API comment receipt marks notification delivered; it never
+means human approval. Observe or absent host notification authorization forbids
+tracker writes. Failed/uncertain/crashed delivery remains pending and stopped;
+reconciliation may find the exact marker but never blindly repeats POST. There is
+no installed notification service, live configuration or automatic delivery command
+introduced here. Provider-enforceable paid ceilings/accounting, gate application,
+fresh proof and live activation remain prerequisites; offline tests are not a pilot.
 
 ## Board readiness
 

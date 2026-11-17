@@ -121,7 +121,7 @@ test('denial persists across rephrasing, new facts and restart; one pending huma
   s = validateSupervisor(JSON.parse(JSON.stringify(s)), project);
   assert.equal(s.incidents[iid].superseded, true); assert.equal(s.incidents[iid].denied, true);
   assert.throws(() => apply(s, reserve({ ...reservation('new-facts'), incidentId: incidentIdentity(project, changed) })), /human-held/);
-  assert.throws(() => apply(s, { id: 'notify-claim', at, kind: 'human', request: { ...human(), delivery: { state: 'notified', attempts: 1, channel: 'invented', receipt: 'fake', notifiedAt: at } } }), /no notification/);
+  assert.throws(() => apply(s, { id: 'notify-claim', at, kind: 'human', request: { ...human(), delivery: { state: 'notified', attempts: 1, channel: 'invented', receipt: 'fake', notifiedAt: at } } }), /requests begin pending/);
   assert.throws(() => apply(denied(), reserve(reservation('review-again', 'review'))), /human-held/);
 });
 
