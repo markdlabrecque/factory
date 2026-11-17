@@ -8,7 +8,8 @@ import { pathToFileURL } from 'node:url';
 import { supervisorFixture } from './supervisor-fixture.mts';
 import { usageFixture } from './supervisor-usage-fixture.mts';
 import { diagnosisGrant } from '../src/supervisor-advisory-contract.mts';
-import { commitSupervisor, readSupervisor, incidentIdentity } from '../src/supervisor-state.mts';
+import { commitSupervisor, readSupervisor, incidentIdentity, settleAdvisory } from '../src/supervisor-state.mts';
+import { claimSupervisorHold, releaseSupervisorHold, checkSupervisorHold } from '../src/supervisor-admission.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
 import { ownerOf } from '../../board/admission.mts';
@@ -33,23 +34,26 @@ if (process.argv[2] === '--controller') {
     const stateDir = join(root,'state'); mkdirSync(stateDir,{mode:0o700});
     const { snapshot,facts } = supervisorFixture(join(root,'project')); mkdirSync(snapshot.project.root);
     snapshot.material.runtime = manifest.id; snapshot.material.dependencies = manifest.dependencies;
+    const hold = claimSupervisorHold(stateDir,{project:snapshot.project, invocationId:'invocation',runtimeRoot,
+      rollout:{olderRuntimesQuiesced:true,unmanagedWorkQuiesced:true}});
     const f = usageFixture(ownerOf(process.pid) as any,snapshot.project.root), at = f.at;
+    f.registration.holdId = hold.id;
     const incidentId = incidentIdentity(snapshot.project,facts), owner = ownerOf(process.pid);
     const deadline = new Date(Date.now() + (scenario === 'deadline' ? 3000 : 60000)).toISOString();
-    const reservation = { id:'invocation',incidentId,kind:'diagnosis',owner,fence:'fence',at,deadline,reserved:f.g.reserved,actual:null,state:'active',reviewId:null };
+    const reservation = { id:'invocation',incidentId,kind:'diagnosis',owner,fence:hold.fence,at,deadline,reserved:f.g.reserved,actual:null,state:'active',reviewId:null };
     let state = commitSupervisor(stateDir,snapshot.project,0,{id:'observe',at,kind:'observe',facts,snapshotHash:supervisorHash(snapshot),reason:'offline'});
     state = commitSupervisor(stateDir,snapshot.project,state.revision,{id:'reserve',at,kind:'reserve-advisory',reservation:reservation as any,policy:f.registration,controls:f.controls,
       limits:{project:{tokens:10_000_000,cost:100_000_000},shared:{tokens:10_000_000,cost:100_000_000},capacity:1,reviewCalls:5,reviewTimeoutMs:600000}});
     const boundary = createOpenAIDiagnosisBoundary({runtimeRoot,stateDir});
-    const handle = await boundary.start({project:snapshot.project,invocationId:'invocation',fence:'fence',deadline,maxOutputBytes:65536});
+    const handle = await boundary.start({project:snapshot.project,invocationId:'invocation',fence:hold.fence,deadline,maxOutputBytes:65536});
     const { id: _id, ...body } = f.g;
     const grant = diagnosisGrant({...body,project:snapshot.project,ticket:snapshot.scope.ticket,runId:facts.runId,incidentId,
-      basis:diagnosisBasis(snapshot),runtime:manifest.id,dependencies:manifest.dependencies,owner:{pid:handle.process.evidence.worker.pid,start:handle.process.evidence.worker.start},deadline} as any);
+      basis:diagnosisBasis(snapshot),holdId:hold.id,fence:hold.fence,runtime:manifest.id,dependencies:manifest.dependencies,owner:{pid:handle.process.evidence.worker.pid,start:handle.process.evidence.worker.start},deadline} as any);
     if (scenario === 'pre-handoff-loss') {
       process.send!({kind:'inflight',grant,stateDir,evidence:handle.process.evidence,descendant:null});
       await once(process,'message'); process.exit(0);
     }
-    state = commitSupervisor(stateDir,snapshot.project,state.revision,{id:'register',at:new Date().toISOString(),kind:'register-advisory-worker',reservationId:'invocation',fence:'fence',owner,grant});
+    state = commitSupervisor(stateDir,snapshot.project,state.revision,{id:'register',at:new Date().toISOString(),kind:'register-advisory-worker',reservationId:'invocation',fence:hold.fence,owner,grant});
     const watcher = watch(root);
     const sent = new Promise<void>(accept => watcher.on('change',(_event,name) => { if (name === 'network.json') { watcher.close(); accept(); } }));
     let output = '';
@@ -70,7 +74,21 @@ if (process.argv[2] === '--controller') {
       await closed;
     } else await closed;
     const cleanup = await handle.terminate(), again = await handle.terminate(), usage = handle.usage();
-    const journal = readSupervisor(stateDir,snapshot.project);
-    process.send!({kind:'result',cleanup,again,usage,output,charge:journal.charged.diagnosis,sends:Object.keys(journal.advisory!.sends).length},()=>process.disconnect());
+    let journal = readSupervisor(stateDir,snapshot.project);
+    let released = false, reopened = false, staleHeld = false;
+    if (scenario === 'complete') {
+      journal = await settleAdvisory(stateDir,snapshot.project,journal.revision,'invocation');
+      const revision = journal.revision;
+      reopened = (await settleAdvisory(stateDir,snapshot.project,revision,'invocation')).revision === revision;
+      released = releaseSupervisorHold(stateDir,hold).released;
+      const successor = claimSupervisorHold(stateDir,{project:snapshot.project,invocationId:'successor',runtimeRoot,
+        rollout:{olderRuntimesQuiesced:true,unmanagedWorkQuiesced:true}});
+      staleHeld = !releaseSupervisorHold(stateDir,hold).released && checkSupervisorHold(stateDir,successor);
+    } else {
+      try { await settleAdvisory(stateDir,snapshot.project,journal.revision,'invocation'); throw Error('Unknown usage finalized'); }
+      catch (e) { if (!String(e).includes('known immutable provider usage required')) throw e; }
+      if (releaseSupervisorHold(stateDir,hold).released || !checkSupervisorHold(stateDir,hold)) throw Error('Unknown usage released');
+    }
+    process.send!({kind:'result',cleanup,again,usage,output,released,reopened,staleHeld,charge:journal.charged.diagnosis,sends:Object.keys(journal.advisory!.sends).length},()=>process.disconnect());
   } catch (e) { process.send!({kind:'error',error:String(e)},()=>process.exit(1)); }
 }

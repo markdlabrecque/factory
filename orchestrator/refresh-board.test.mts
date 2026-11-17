@@ -16,7 +16,8 @@ import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
 import { fixtureTicketHash } from './fixtures/ticket-input.mts';
 
-import { FIXTURES, git, ticket, fixture } from "./refresh-fixture.mts";
+import { emptyAdmission, readAdmission } from '../board/admission.mts';
+import { assertUnchargedAdmission, FIXTURES, git, ticket, fixture } from "./refresh-fixture.mts";
 
 for (const kind of ["github", "gitlab"]) {
   test(`${kind}: a waiting automatic merge still reserves its open branch footprint`, (t) => {
@@ -53,7 +54,7 @@ for (const kind of ["github", "gitlab"]) {
     assert.match(f.assessment(9).facts!.selectionReason!, /Excluded/);
     assert.equal(existsSync(join(f.fake, "launches")), false);
     assert.deepEqual(JSON.parse(f.bytes(report)).tickets, [], "retained deselected cards do not cause jams");
-    assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+    assertUnchargedAdmission(f.dir);
   });
 
   test(`${kind}: requirements, human comments and parent edits reassess stopped, active and completed cards without changing execution`, (t) => {
@@ -61,7 +62,9 @@ for (const kind of ["github", "gitlab"]) {
     f.data.tickets.push(ticket(30, { description: "parent context", contextOnly: true }));
     f.data.parents[7] = 30;
     const admission = join(f.dir, "admission/state.json");
-    writeFileSync(admission, '{"preserve":"admission"}');
+    // Valid saved accounting is preserved; corrupt stores now correctly refuse all effecting managed entries.
+    const preserved = { ...emptyAdmission(), generations: { saved: 5 }, recovery: { saved: { admitted: 2, pending: [] } } };
+    writeFileSync(admission, JSON.stringify(preserved));
     for (const stage of ["stopped", "implementing", "done"]) {
       const record = f.record(7, stage); f.manifest(7);
       const mf = join(f.dir, "graph", `${f.key(7)}.json`), manifest = f.bytes(mf);
@@ -76,7 +79,7 @@ for (const kind of ["github", "gitlab"]) {
         assert.deepEqual(a.dependencies?.map((b) => [b.iid, b.state]), [[21, "unsatisfied"]]);
         assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
         assert.equal(f.bytes(mf), manifest, "assessment never replaces the admission manifest");
-        assert.equal(f.bytes(admission), '{"preserve":"admission"}');
+        assert.deepEqual(readAdmission(f.dir), preserved, 'only transient managed entry ownership changes; accounting stays exact');
       }
     }
     assert.equal(existsSync(join(f.fake, "launches")), false);
@@ -107,7 +110,7 @@ for (const kind of ["github", "gitlab"]) {
       assert.ok(current, JSON.stringify(f.assessment()));
       assert.equal(f.assessment().facts?.title, "Ticket 7");
       assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
-      assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+      assertUnchargedAdmission(f.dir);
       assert.equal(existsSync(join(f.fake, "launches")), false);
     } finally { server.kill(); await once(server, "exit"); }
   });

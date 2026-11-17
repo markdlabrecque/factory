@@ -24,7 +24,7 @@ The [structured ticket-context contract](ticket-readiness.md#structured-ticket-c
 The [ticket-readiness contract](ticket-readiness.md) also defines the shared filesystem probe/report API and its passive-reader boundary. The CLI consumes these reports passively and offers explicit doctor probes. The standard normal and recovery workflows probe the prepared workspace, Git metadata and evidence mount as the actual agent UID/GID after setup/browser preflight and before invoking an implementer or repair agent. Required failures or unknown results invoke zero agents and preserve both readiness and cleanup causes. A post-container recovery failure still spends the existing admitted attempt. Exact-container teardown must be confirmed; normal uncertainty retains the runtime cleanup lease/ownership receipt, and recovery uncertainty retains its cleanup-pending claim until settlement. Complete custom workflows remain internally opaque unless their implementation calls the shared sandbox helper. No new CLI command or override handshake is introduced by this gate. Saved readiness is never launch authority.
 
 Normal implementer stops with zero commits now retain [an attributed no-commit explanation](ticket-readiness.md#no-commit-explanations) in the execution note and bounded execution evidence. Factory's zero-commit, worktree and push facts remain separate from the agent's claim. If capture is unavailable, cause stays unknown. Inspect ticket context and evidence before choosing a relaunch; there is no new automatic retry or success authority. Existing blocked-report dependency handling and opt-in recovery policy are unchanged. The owned sandbox closes before a no-commit exit; teardown failures retain the explanation and do not confirm cleanup.
-The [host launch gate](ticket-readiness.md#host-launch-ordering) applies fresh filesystem/input checks to manual run, dispatch, scheduled starts and recovery preparation/admission. A shared project failure stops before ticket analysis, new queue/run/admission records or containers. It leaves tracker selection and existing parked/stopped history intact, with one shared report rather than per-ticket failures, tracker comments or needs-human labels. A ticket input or branch/worktree conflict holds only that ticket. Neither an ordinary dirty checkout nor an unrelated valid worktree is a blanket failure. Factory preserves conflicts for inspection; it does not repair, delete or adopt them.
+The [host launch gate](ticket-readiness.md#host-launch-ordering) applies fresh filesystem/input checks to manual run, dispatch, scheduled starts and recovery preparation/admission. A shared project failure stops before ticket analysis, new queue/run/charged-admission records or containers. A short-lived durable managed entry already owns preflight and is released on known exit; uncertain handoff/cleanup retains it. It leaves tracker selection and existing parked/stopped history intact, with one shared report rather than per-ticket failures, tracker comments or needs-human labels. A ticket input or branch/worktree conflict holds only that ticket. Neither an ordinary dirty checkout nor an unrelated valid worktree is a blanket failure. Factory preserves conflicts for inspection; it does not repair, delete or adopt them.
 
 The same host-owned project gate precedes explicit complete overrides, including Board reassessment and never-opted scheduled refresh, without importing their code into diagnostics or claiming coverage of opaque internal behavior. Board polling remains passive. A fresh pass may resume normal selection after success, but never implicitly retries a stopped run. Ticket-specific checks repeat before protected creation/admission, and final filesystem/Git operations remain authoritative. Saved readiness never authorizes launch.
 
@@ -42,6 +42,41 @@ retry a generation from absence or assume it was unsent. Private provider-receip
 reopen also requires successful synchronization before returning known resources;
 uncertainty is null/unknown, never a zero bill or cleanup permission. No command
 repairs unsupported storage or changes filesystem configuration automatically.
+
+## Shared admission compatibility and supervisor exclusion
+
+Admission state is version 2. Validated v1 claims, generations, recovery pending
+charges and consumed candidates migrate without reinterpretation on the next commit;
+read-only access does not migrate on disk. Actual older v1 readers reject v2. Missing
+mandatory exclusions, corrupt stores and unknown versions hold without overwrite.
+Downgrade and optional exclusion-field rollback are unsupported.
+
+Managed run/dispatch, standard direct entrypoints, recovery launch and delivery
+admission honor durable supervisor exclusion before effecting work. Tokenless manual
+starts acquire normal ownership, rather than bypassing admission. Durable preflight
+entries are not implementation runs and do not advance generations/repair charges.
+Orphan entries and supervisor holds are retained, including dead owners. A canonical
+root match **or** colliding tracker/run-state namespace conflicts; exact ownership
+checks bind root **and** structured tracker, invocation/fence and PID/start.
+
+These are source primitives, not a public diagnosis command. `settleAdvisory` can
+close an actual registered/authorized invocation only with revalidated immutable known
+provider usage and confirmed whole-group cleanup. Journal CAS atomically finishes the
+reservation and retains full reserved charge plus a local human-required disposition,
+without usable advice or a pending notification. Exact release reads that validated
+closure before taking the separate admission lock, then rechecks the current hold's
+project/invocation/fence/controller owner before deletion. No nested locks are used.
+No-send closure is unsupported: absent authorization, exited controller, reference
+strings or callbacks do not prove no-send/cleanup. Unknown evidence stays held.
+See [the exclusion protocol](supervisor.md#shared-admission-exclusion) for strict
+journal compatibility, source-only boundaries and the journal's sole send authority.
+
+Before any future activation, quiesce older runtimes and unmanaged work and select a
+complete compatible runtime everywhere. The guarantee does not cover mixed old or
+arbitrary nonparticipating code. The initial claim also requires conservative
+shared-store quiescence; all legacy raw records without definitive ownership/payload
+cleanup hold regardless of queued/waiting/done/stopped labels or controller death. No real installation,
+rollout, paid probe or pilot acceptance is implied by offline copied-runtime tests.
 
 ## Supervisor inspection and project controls
 

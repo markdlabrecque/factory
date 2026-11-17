@@ -1,4 +1,4 @@
-// Pure lifecycle evidence permutations plus one disposable real process boundary; HTTP/auth/host exclusion are synthetic, never installed authority.
+// Pure evidence permutations and one disposable real process/journal/admission boundary; synthetic HTTP/auth, never installed host authority.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -13,7 +13,9 @@ import { prepareRuntimeBundle } from '../src/runtime-bundle.mts';
 import { installPackages } from './runtime-fixture.mts';
 import { advisoryReservation } from '../src/supervisor-advisory-contract.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
-import { readSupervisor } from '../src/supervisor-state.mts';
+import { readSupervisor, commitSupervisor, validateSupervisor } from '../src/supervisor-state.mts';
+import { releaseSupervisorHold } from '../src/supervisor-admission.mts';
+import { readAdmission } from '../../board/admission.mts';
 import { offlineText } from './supervisor-provider-fixture.mts';
 
 const evidence = { version:1,invocationId:'call',fence:'fence',project:{root:'/fixture/project',tracker:{kind:'github',host:'github.com',project:'owner/repo'}},runtime:'a'.repeat(64),dependencies:'b'.repeat(64),
@@ -61,7 +63,10 @@ test('one owned copied process integration: normal receipt, explicit terminate, 
       assert.equal(result.kind,'result',JSON.stringify(result)+stderr);
       assert.equal(result.sends,1); assert.deepEqual(result.charge,advisoryReservation(),'no release/refund/legacy finish');
       assert.equal(result.again,result.cleanup,'terminate is idempotent');
-      if(scenario==='complete') { assert.equal(result.output,offlineText,'actual SDK/runner output drains before guard cleanup'); assert.deepEqual(result.usage,{tokens:35,cost:220}); assert.equal(result.cleanup,true); }
+      if(scenario==='complete') {
+        assert.equal(result.output,offlineText,'actual SDK/runner output drains before guard cleanup'); assert.deepEqual(result.usage,{tokens:35,cost:220}); assert.equal(result.cleanup,true);
+        assert.equal(result.released,true); assert.equal(result.reopened,true); assert.equal(result.staleHeld,true);
+      }
       else assert.equal(result.usage,null,'missing terminal remains full-charge unknown');
     }
     const [code]=await closed; assert.equal(code,0,stderr);
@@ -91,6 +96,25 @@ test('one owned copied process integration: normal receipt, explicit terminate, 
     // The task may still be finishing kernel exit work (R) or awaiting reaping (Z). Only ESRCH is cleanup proof.
     const retained=readSupervisor(first.stateDir,first.grant.project);
     assert.deepEqual(retained.charged.diagnosis,advisoryReservation());
-    assert.equal(Object.values(retained.reservations).some(r=>r.state==='finished'),false,'unknown cleanup never settles or releases');
+    assert.equal(Object.values(retained.reservations).some(r=>r.state==='finished'),scenario==='complete','only known usage plus whole-group cleanup settles');
+    if(scenario==='complete') {
+      const key=supervisorHash(first.grant.invocationId), receipt=retained.advisory!.settlements![key];
+      assert.equal(receipt.disposition,'local-human-required'); assert.equal(receipt.grantId,first.grant.id);
+      assert.equal(receipt.holdId,first.grant.holdId); assert.equal(receipt.fence,first.grant.fence);
+      assert.deepEqual(retained.reservations[key].actual,{tokens:35,cost:220});
+      assert.equal(retained.incidents[first.grant.incidentId].incident.state,'human-required');
+      assert.deepEqual(retained.humans,{},'local closure creates no pending tracker notification');
+      assert.deepEqual(retained.proposals,{},'no usable advice or execution authority');
+      assert.throws(()=>commitSupervisor(first.stateDir,first.grant.project,retained.revision,{
+        kind:'settle-advisory',id:'fabricated',at:receipt.at,reservationId:first.grant.invocationId,settlement:receipt
+      }),/unverified advisory settlement/);
+      for(const field of ['holdId','grantId','fence','authorization','process','cleanup','disposition'] as const) {
+        const corrupt=structuredClone(retained); (corrupt.advisory!.settlements![key] as any)[field]='foreign';
+        assert.throws(()=>validateSupervisor(corrupt,first.grant.project));
+      }
+      const successor=Object.values(readAdmission(first.stateDir).supervisorHolds)[0];
+      assert.equal(successor.invocationId,'successor');
+      assert.equal(releaseSupervisorHold(first.stateDir,successor).released,false,'old settlement is not successor authority');
+    }
   }
 });

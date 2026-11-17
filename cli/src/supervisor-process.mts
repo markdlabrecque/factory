@@ -107,6 +107,16 @@ export function confirmOwnedCleanup(stateDir: string, g: DiagnosisGrant): boolea
     return receipt.version === 1 && receipt.process === supervisorHash(v) && receipt.group === v.guard.group && receipt.state === 'absent' && advisoryTime(receipt.at);
   } catch { return false; }
 }
+/** Strict durable cleanup reference, after a fresh whole-group absence check. No caller attestation. */
+export function readOwnedCleanup(stateDir: string, g: DiagnosisGrant): CleanupEvidence {
+  advisoryDemand(confirmOwnedCleanup(stateDir,g), 'whole-group cleanup missing or unknown');
+  const v = readRecord(store(stateDir,g.project,g.invocationId,false),'cleanup.json') as CleanupEvidence;
+  const p = readOwnedProcess(stateDir,g);
+  advisoryRecord(v,['version','process','group','state','at']);
+  advisoryDemand(v.version === 1 && v.process === supervisorHash(p) && v.group === p.guard.group
+    && v.state === 'absent' && advisoryTime(v.at), 'invalid cleanup receipt');
+  return v;
+}
 export type OwnedProcess = { child: ChildProcess; evidence: ProcessEvidence; handoff(request: unknown): void; terminate(): Promise<boolean> };
 /** Launch only the inventoried runner and guard. No caller-selected executable, argv, environment or provider seam. */
 export async function startOwnedProcess(o: { runtimeRoot: string; stateDir: string; project: DiagnosisGrant['project']; invocationId: string;

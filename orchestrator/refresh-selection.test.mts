@@ -16,7 +16,7 @@ import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
 import { fixtureTicketHash } from './fixtures/ticket-input.mts';
 
-import { FIXTURES, git, ticket, fixture } from "./refresh-fixture.mts";
+import { assertUnchargedAdmission, FIXTURES, git, ticket, fixture } from "./refresh-fixture.mts";
 
 for (const kind of ["github", "gitlab"]) {
   test(`${kind}: dependency assessment is fail-closed for unresolved, human-only and lookup errors; closed/merged need explicit retry`, (t) => {
@@ -57,7 +57,7 @@ test("refresh-only without --ticket reassesses every card of the project and not
   assert.equal(readAssessment(f.dir, "other_repo--7"), undefined, "another project's card is not touched");
   assert.equal(f.bytes(other), otherRecord);
   assert.equal(existsSync(join(f.fake, "launches")), false);
-  assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+  assertUnchargedAdmission(f.dir);
   assert.doesNotMatch(f.bytes(join(f.fake, "tracker.jsonl")), /"create"|"POST"|"edit"|"comment"|"close"/);
 });
 
@@ -144,6 +144,6 @@ test("analysis timeout is recorded without changing execution or losing the last
   assert.deepEqual(f.assessment().analysis, prior);
   assert.equal(f.assessment().facts?.hash, fixtureTicketHash(f.data, 7));
   assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
-  assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+  assertUnchargedAdmission(f.dir);
 });
 

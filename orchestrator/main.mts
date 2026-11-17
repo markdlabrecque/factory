@@ -1,4 +1,5 @@
-// Execute one fixed Pi workflow from a pinned leased runtime against explicit project assets and state.
+// Execute one fixed Pi workflow with durable managed admission before readiness/tracker/model work.
+// A pinned leased runtime binds explicit project assets and state; uncertain cleanup retains admission ownership.
 // Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute bounded Pi session replies without delivery authority, then exit after owned teardown.
@@ -21,7 +22,7 @@ import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
-import { readAdmission } from "./admission.mts";
+import { claimManagedEntry, readAdmission, releaseManagedEntry } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { freezeTicketInput, saveTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { context, effectiveConfig, AGENT, allLabels, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
@@ -39,6 +40,10 @@ import { createOwnedSandbox, gitWorkspace, readDotEnv, realProc } from "./recove
 import * as tracker from "./tracker.mts";
 import { projectLayoutPaths } from './project-layout.mts';
 const layout = projectLayoutPaths(context.projectRoot);
+const managedEntry = claimManagedEntry(stateDir(), { root: context.projectRoot, tracker: {
+  kind: TRACKER.kind, host: TRACKER.gitlabHost ?? TRACKER.host!, project: TRACKER.project } });
+let entryCleanupConfirmed = true;
+process.on('exit', () => { if (entryCleanupConfirmed) releaseManagedEntry(stateDir(), managedEntry); });
 
 // End-to-end loop for one ticket, launched from the project root through the selected bundle's absolute tsx:
 //   <runtime>/main.mts --base <integration-branch> [--issue N] [--no-push]
@@ -295,6 +300,7 @@ if (recovering) {
   if (inputHold) fail(inputHold);
   saveTicketInput(inputEvidence(claimed.executionId!, rec.id), frozenInput);
   setStage(iid, { ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash, attemptId: rec.id } });
+  entryCleanupConfirmed = false;
   runtimeLease.pendingCleanup();
   let recoveryReport: ReadinessReport | undefined;
   const result = await runRecoveryAttempt({
@@ -334,7 +340,7 @@ if (recovering) {
     agent,
     log: (line) => console.log(line),
   });
-  if (!result.cleanupPending) runtimeLease.confirmedCleanup();
+  if (!result.cleanupPending) { entryCleanupConfirmed = true; runtimeLease.confirmedCleanup(); }
   finished = true;
   // The recovery claim stays in the admission record either way; settleRecovery releases it once the container is confirmed gone.
   if (result.outcome !== "delivered" || result.cleanupPending) {
@@ -362,10 +368,10 @@ if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads"
   fail(`Branch ${branch} already exists locally or on origin; preserve saved work and inspect this ticket's workspace.`);
 }
 setProject(PROJECT);
-// The dispatcher's launch claim (if this run was dispatched): take it over, and fence every later board write with it.
+// Adopt dispatch ownership or atomically acquire a normal claim for a tokenless manual run.
 let claimToken: string | undefined;
 try {
-  claimToken = adoptClaim(iid);
+  claimToken = adoptClaim(iid, stateDir(), effectiveConfig.dispatch.maxConcurrent);
 } catch (e) {
   fail(`#${iid} not started: ${(e as Error).message}`);
 }
@@ -428,6 +434,7 @@ const receipt = recordIntent(stateDir(), {
   ticket: iid, branch, base, implementationBaseSha: baseSha, runId: claimToken ?? randomUUID(), branchToCreate: true, worktreeToCreate: true,
 });
 context.assertCurrent();
+entryCleanupConfirmed = false;
 runtimeLease.pendingCleanup();
 const sandbox = await createSandbox({
   branch,
@@ -549,7 +556,7 @@ try {
   sandboxFailure = error instanceof Error ? error.message : String(error);
 } finally {
   const cleanup = await closeSandbox(sandbox);
-  if (cleanup.confirmed) runtimeLease.confirmedCleanup();
+  if (cleanup.confirmed) { entryCleanupConfirmed = true; runtimeLease.confirmedCleanup(); }
   if (cleanup.reason) sandboxFailure = [sandboxFailure, noCommitMessage ? sanitizeReply(cleanup.reason) : cleanup.reason].filter(Boolean).join('; ');
   if (sandboxReport) {
     try { recordSandboxCleanup(stateDir(), sandboxReport, cleanup.confirmed); }

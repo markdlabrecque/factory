@@ -46,6 +46,10 @@ test('complete inventory, deterministic identity, private install and validation
   const state = await import(pathToFileURL(join(a.directory, 'supervisor-state.mts')).href);
   assert.equal(state.emptySupervisor({ root: '/fixture/project', tracker: { kind: 'github', host: 'github.com', project: 'owner/repo' } }).revision, 0);
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-state.mts')), readFileSync(join(f.source, 'cli/src/supervisor-state.mts')), 'state ships unchanged');
+  const admission = await import(pathToFileURL(join(a.directory, 'supervisor-admission.mts')).href);
+  assert.equal(typeof admission.claimSupervisorHold, 'function');
+  assert.equal(typeof admission.releaseSupervisorHold, 'function');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-admission.mts')), readFileSync(join(f.source, 'cli/src/supervisor-admission.mts')), 'admission ships unchanged without source fallback');
   const advisory = await import(pathToFileURL(join(a.directory, 'supervisor-advisory-contract.mts')).href);
   assert.deepEqual(advisory.advisoryReservation(), { tokens: 1_054_096, cost: 5_808_792 });
   const hostPolicy = await import(pathToFileURL(join(a.directory, 'supervisor-host-policy.mts')).href);

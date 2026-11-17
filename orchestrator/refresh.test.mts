@@ -16,7 +16,7 @@ import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
 import { fixtureTicketHash } from './fixtures/ticket-input.mts';
 
-import { FIXTURES, git, ticket, fixture } from "./refresh-fixture.mts";
+import { assertUnchargedAdmission, FIXTURES, git, ticket, fixture } from "./refresh-fixture.mts";
 
 test("manual worker has a bounded process group and coalesces overlapping requests per card", async (t) => {
   const f = fixture(t), record = f.record(7, "stopped");
@@ -40,7 +40,7 @@ test("manual worker has a bounded process group and coalesces overlapping reques
   assert.equal(pids.length, 1);
   assert.throws(() => process.kill(Number(pids[0]), 0));
   assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
-  assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+  assertUnchargedAdmission(f.dir);
 });
 
 test('a running dispatcher keeps bundle A for detached children after descriptor B publication', async t => {
@@ -108,7 +108,7 @@ exec "${f.node}" "${join(FIXTURES, "refresh-analysis.mjs")}" "$@"
     assert.equal(code, 0, output);
     assert.deepEqual(f.assessment(), authoritative, "older completion cannot overwrite or erase the newer result");
     assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
-    assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+    assertUnchargedAdmission(f.dir);
     assert.equal(existsSync(join(f.fake, "launches")), false);
   });
 }
@@ -147,7 +147,7 @@ exec "${f.node}" "${join(FIXTURES, "refresh-tracker.mjs")}" "$@"
   assert.match(output, /old catalogue failure/);
   assert.deepEqual(f.assessment(), authoritative);
   assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
-  assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+  assertUnchargedAdmission(f.dir);
 });
 
 test("a superseded manual worker timeout cannot overwrite a newer scheduled result", async (t) => {
@@ -183,7 +183,7 @@ exec "${f.node}" "${join(FIXTURES, "refresh-analysis.mjs")}" "$@"
     await job;
     assert.deepEqual(f.assessment(), authoritative, "the worker's timeout error is fenced too");
     assert.equal(f.bytes(join(f.dir, `${f.key(7)}.json`)), record);
-    assert.equal(existsSync(join(f.dir, "admission/state.json")), false);
+    assertUnchargedAdmission(f.dir);
   } finally { await job; }
 });
 
@@ -231,7 +231,7 @@ test('project hold precedes tracker reads, analysis, queue and admission for man
     assert.equal(existsSync(join(f.fake, 'analysis.jsonl')), false);
     assert.equal(existsSync(join(f.fake, 'launches')), false);
     assert.equal(existsSync(join(f.dir, f.key(7) + '.json')), false);
-    assert.equal(existsSync(join(f.dir, 'admission/state.json')), false);
+    assertUnchargedAdmission(f.dir);
     assert.equal(f.bytes(join(f.dir, f.key(8) + '.json')), stopped);
   }
   rmSync(logs); f.manifest(7); f.pass(['--dry-run']);
@@ -243,7 +243,7 @@ test('a branch created during the final fresh context read is held before admiss
   const f = fixture(t); f.data.tickets[0].description = 'No dependencies'; f.manifest(7); f.data.workspaceRace = true;
   const raced = f.pass(); assert.match(raced.stdout, /#7 held before admission: Branch already exists/);
   assert.equal(existsSync(join(f.dir, f.key(7) + '.json')), false);
-  assert.equal(existsSync(join(f.dir, 'admission/state.json')), false);
+  assertUnchargedAdmission(f.dir);
   assert.equal(git(f.root, 'branch', '--list', '7-ticket-7'), '7-ticket-7');
   // Stand in for an operator resolving this synthetic conflict, not an automatic Factory repair.
   git(f.root, 'branch', '-D', '7-ticket-7'); f.data.workspaceRace = false;
