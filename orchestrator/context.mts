@@ -1,12 +1,13 @@
-// Explicit project/runtime boundary. Freeze selected settings and additive role inputs; never grant supervisor action authority.
+// Explicit project/runtime boundary. Freeze selected settings and scoped additive inputs; changed corrections/candidates require fresh analysis and proof.
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadTomlConfig, resolveCheckoutPath, type EffectiveConfig } from './project-config.mts';
 import { loadInstructions } from './instructions.mts';
 import { requireProjectLayout } from './project-layout.mts';
 import { assertProjectRecordLayout } from './ownership.mts';
+import type { GateConsumption } from '../cli/src/supervisor-gate-apply.mts';
 
 const guidance = 'Use Factory commands with an explicit selected runtime; low-level entrypoints do not discover project context.';
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -35,7 +36,7 @@ export function freezeAdditive(text = '', hashes: Readonly<Record<string, string
 }
 export const EMPTY_ADDITIVE: FrozenAdditive = freezeAdditive();
 export type ExecutionContext = Awaited<ReturnType<typeof loadExecutionContext>>;
-export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd?: string; moduleRoot?: string } = {}) {
+export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd?: string; moduleRoot?: string; gate?: GateConsumption } = {}) {
   const env = input.env ?? process.env;
   try {
     const projectRoot = canonical(env.FACTORY_PROJECT_ROOT, 'FACTORY_PROJECT_ROOT');
@@ -61,7 +62,12 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     }
     const config = freezeSnapshot(loadTomlConfig(assetRoot));
     const roles = ['implementation', 'verification', 'analysis', 'recovery', 'supervisor', 'gateReview'] as const;
-    const readAdditive = () => Object.freeze(Object.fromEntries(roles.map(role => [role, loadInstructions(projectRoot, config.instructions, role)])) as Record<typeof roles[number], FrozenAdditive>);
+    // Explicit host API only: no environment/config/model selector can install a correction or choose a source root.
+    const gateTools = await import(existsSync(new URL('./supervisor-gate-apply.mts', import.meta.url)) ? './supervisor-gate-apply.mts' : '../cli/src/supervisor-gate-apply.mts');
+    const gateSource = gateTools.gateInstructionSource;
+    if (input.gate && (input.gate.options.current().input.snapshot.project.root !== projectRoot || input.gate.options.stateDir !== (env.SANDCASTLE_STATE_DIR ?? resolve(env.HOME!,'.local/state/factory')))) throw Error('Gate consumer project/state mismatch');
+    const correction = input.gate ? gateSource!(input.gate) : undefined;
+    const readAdditive = () => Object.freeze(Object.fromEntries(roles.map(role => [role, loadInstructions(projectRoot, config.instructions, role, input.gate ? gateSource!(input.gate) : undefined)])) as Record<typeof roles[number], FrozenAdditive>);
     const additive = readAdditive();
     const additiveHashes = () => Object.fromEntries(roles.map(role => [role, additive[role].hashes]));
     if (!env.SANDCASTLE_STATE_DIR && (!env.HOME || !isAbsolute(env.HOME))) throw Error('An absolute shared state directory or HOME is required');
@@ -75,9 +81,15 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     const templates = Object.fromEntries(['prompt.md', 'prompt.verify.md', 'prompt.analyze.md', 'prompt.recover.md'].map(name => [name, readFileSync(codePath(name), 'utf8')]));
     const templateHashes = Object.fromEntries(Object.entries(templates).map(([name, text]) => [name, hash(text)]));
     const safetySettings = JSON.parse(JSON.stringify(normalizedSettings(config)));
-    const identity = freezeSnapshot({ runtime: { id: manifest.id, dependencies: manifest.dependencies }, settings: safetySettings, templates: templateHashes, additive: additiveHashes() });
+    const identity = freezeSnapshot({ runtime: { id: manifest.id, dependencies: manifest.dependencies }, settings: safetySettings, templates: templateHashes, additive: additiveHashes(), ...(correction ? { gate: correction.identity } : {}) });
     return Object.freeze({ projectRoot, runtimeRoot, assetRoot, sharedState, config, manifest, codePath, projectPath,
       templates: Object.freeze(templates), additive, identity, policyIdentity: hash(identity),
+      assertScope: (ticket: number, runId?: string) => {
+        if (correction && (correction.identity.ticket !== ticket || correction.identity.runId !== runId)) throw Error('Gate correction cannot cross ticket/run scope');
+        const hold = gateTools.gateScopeHold(sharedState, {root:projectRoot,tracker:{kind:tracker.kind,host:tracker.gitlabHost ?? tracker.host!,project:tracker.project}}, ticket, runId, correction?.identity.applicationId);
+        if (hold) throw Error(hold);
+        if (input.gate) gateSource(input.gate);
+      },
       assertCurrent: () => {
         canonical(projectRoot, 'FACTORY_PROJECT_ROOT');
         requireProjectLayout(projectRoot);
@@ -86,6 +98,7 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
         resolveCheckoutPath(projectRoot, '.factory/factory.toml', 'file');
         const now = validateRuntimeBundle(runtimeRoot);
         const currentAdditive = readAdditive();
+        if (input.gate && hash(gateSource!(input.gate).identity) !== hash(correction!.identity)) throw Error('Gate candidate/scope changed; fresh analysis/verification required');
         if (now.id !== manifest.id || now.dependencies !== manifest.dependencies || hash(normalizedSettings(loadTomlConfig(assetRoot))) !== hash(safetySettings) || hash(Object.fromEntries(roles.map(role => [role, currentAdditive[role].hashes]))) !== hash(additiveHashes()))
           throw Error('Runtime, settings or prompt inputs changed; fresh analysis/verification required');
       },

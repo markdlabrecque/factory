@@ -1,4 +1,4 @@
-// Runtime-owned independent verification retains browser, immutable-proof and exact-SHA delivery gates.
+// Runtime-owned independent verification retains browser, immutable-proof and exact-SHA delivery gates; scoped guidance requires fresh candidate analysis.
 import { browserPreflight } from './capabilities.mts';
 export { browserPreflight, BROWSER_PROBE } from './capabilities.mts';
 // #153: persist exact opened PR identity before CI; later delivery results retain the original host proof.
@@ -6,9 +6,12 @@ import type { DeliveryCheckpoint } from './delivery.mts';
 // #149: recovery holds on shared unknown dependency results and sanitized reasons.
 import type { DependencyResult } from "./dependencies.mts";
 // #150: only host-frozen structured proof can authorize publication, exact-SHA push and merge.
-import { rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+const {gateProofHold}=await import(existsSync(new URL('./supervisor-gate-apply.mts',import.meta.url))?'./supervisor-gate-apply.mts':'../cli/src/supervisor-gate-apply.mts');
 import { readProof, validateEvidence } from './verification.mts';
 import type { Identity } from './verification.mts';
+import { sha256 } from './verification.mts';
+import { ticketContextHash, renderTicketContext } from './ticket-context.mts';
 import { resolve } from "node:path";
 import { fileURLToPath } from 'node:url';
 import type { RunState } from "./board.mts";
@@ -30,8 +33,8 @@ import type { Delivered, Delivery } from "./tracker.mts";
 // recheck, before verification and again before delivery, of the dependency holds the dispatcher's ticket analysis
 // records (manifests: analysed requirements and implementer-reported blockers): any prerequisite not yet closed or
 // merged, whether in flight or waiting in an open PR, holds the ticket; a missing or out-of-date analysis, or a lookup
-// that fails, is unknown and holds it too. Host calls are passed in (Host), so this file imports no tracker, config or
-// board module (only graph.mts's marker and edges) and is tested with fakes (handoff.test.mts).
+// that fails, is unknown and holds it too. Live tracker/Git calls are passed in (Host); the import-safe supervisor
+// journal additionally binds scoped frozen proof to its exact amendment. Imports start no worker or external I/O.
 // Posting is one adapter operation: GitHub attaches native media, GitLab uploads then comments.
 // A posting error retains local evidence and stops before the PASS/no-push and delivery gates. Both verifier paths
 // first launch the globally installed browser as the sandbox user and retain a bounded provisioning log.
@@ -73,13 +76,28 @@ export function beginVerification(host: Pick<Host, "setStage">, iid: string, evi
 
 /** Run the independent verifier on `tip` in the run's sandbox. Returns why the result can't be used, or undefined. */
 export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "setStage">,
-  o: { iid: string; evidenceHost: string; agent: unknown; promptArgs: Record<string, string>; tip: string; promptFile?: string }): Promise<string | undefined> {
+  o: { iid: string; evidenceHost: string; agent: unknown; promptArgs: Record<string, string>; tip: string; promptFile?: string;
+    execution?: { context: import('./context.mts').ExecutionContext; runId: string; manifest: Manifest; requirementsHash: string; input?: import('./ticket-input.mts').FrozenTicketInput } }): Promise<string | undefined> {
+  const current = () => {
+    const e=o.execution;if(!e)return;
+    e.context.assertScope(Number(o.iid),e.runId);e.context.assertCurrent();
+    const gate=e.context.identity.gate;
+    if (gate && (e.manifest.policyIdentity!==e.context.policyIdentity || e.manifest.hash!==e.requirementsHash || e.manifest.baseSha!==o.tip
+      || e.manifest.iid!==Number(o.iid) || e.manifest.project!==e.context.config.TRACKER.project)) throw Error('Scoped gate correction requires fresh exact-candidate execution analysis');
+    if(gate && (e.requirementsHash!==gate.ticketInput || !e.input || ticketContextHash(e.input.context)!==gate.ticketInput || e.input.hash!==gate.ticketInput
+      || sha256(e.input.text)!==e.input.textHash || renderTicketContext(e.input.context)!==e.input.text || o.promptArgs.TICKET!==e.input.text
+      || o.promptArgs.ADDITIVE_INSTRUCTIONS!==e.context.additive.verification.text || sandbox.worktreePath!==gate.workspace || o.tip!==gate.candidate
+      || o.promptFile!==undefined && o.promptFile!==e.context.codePath('prompt.verify.md'))) throw Error('Scoped verifier requires exact reviewed input, owned candidate and corrected instructions');
+  };
+  try {current();} catch(e) {return (e as Error).message;}
+  if(o.execution?.context.identity.gate && ['verdict.md','verification.json'].some(name=>existsSync(resolve(o.evidenceHost,name))))
+    return 'Scoped gate correction requires a fresh evidence directory; retain previous FAIL/INCONCLUSIVE/proof';
   beginVerification(host, o.iid, o.evidenceHost);
   const preflight = await browserPreflight(sandbox, o.evidenceHost);
   if (preflight) return preflight;
   const ver = await sandbox.run({
     agent: o.agent,
-    promptFile: o.promptFile ?? VERIFY_PROMPT,
+    promptFile: o.execution?.context.identity.gate ? o.execution.context.codePath('prompt.verify.md') : o.promptFile ?? VERIFY_PROMPT,
     promptArgs: { ...o.promptArgs, TIP_SHA: o.tip },
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
@@ -93,7 +111,7 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
   if (ver.commits.length || after !== o.tip || dirty) {
     return `Verifier changed the branch (commits=${ver.commits.length}, head=${after.slice(0, 8)}, dirty=${!!dirty}). Not posting or pushing; inspect ${sandbox.worktreePath ?? "the worktree"}.`;
   }
-  try { validateEvidence(o.evidenceHost); }
+  try { current(); validateEvidence(o.evidenceHost); }
   catch (e) { return `${(e as Error).message}. Retain evidence in ${o.evidenceHost}; custom verifier prompts must be explicitly upgraded to write verification.json (policy 1).`; }
   return undefined;
 }
@@ -136,7 +154,8 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   const authorize = (): string | undefined => {
     try {
       if (h.identity.project !== h.project || h.identity.ticket !== iid || h.identity.tip !== tip || h.identity.baseline !== h.baseSha || h.identity.branch !== branch || h.identity.base !== base) return 'handoff identity mismatch';
-      readProof(h.state, h.identity, h.proofId);
+      const frozen = readProof(h.state, h.identity, h.proofId);
+      const gateHold=gateProofHold(h.state,frozen.proof);if(gateHold)return gateHold;
       return h.recheck();
     } catch (e) { return `Verification authorization failed: ${(e as Error).message}`; }
   };

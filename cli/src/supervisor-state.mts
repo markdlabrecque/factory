@@ -1,5 +1,5 @@
 // Host-owned supervisor journal: atomic CAS transitions, retained incidents/denials and separately charged resources.
-// Retains operator fences, diagnosis/review completion, host outbox receipts and exact local resolution audits; never applies gates or resets charges.
+// Retains operator fences, diagnosis/review completion, host outbox receipts, exact local resolution and fenced application observations; never executes effects or resets charges.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
@@ -52,6 +52,7 @@ export type Event = { id: string; at: string } & (
   | { kind: 'diagnosis'; diagnostic: Diagnostic; owner: Owner; actual: Resources | null; processConfirmed: boolean; request: HumanRequest | null }
   | { kind: 'reconcile-worker'; reservationId: string }
   | { kind: 'intent'; intent: Intent; owner: Owner }
+  | { kind: 'complete-intent'; intentId: string; fence: string; owner: Owner; evidence: string[] }
   | { kind: 'reconcile-intent'; intentId: string; outcome: IntentMemory['outcome']; evidence: string[] }
 );
 const demand = (x: unknown, message: string): void => { if (!x) throw Error(`Supervisor state held: ${message}`); };
@@ -336,6 +337,13 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       const id = supervisorHash(i.id); demand(!s.intents[id], 'intent already exists; never replay effects');
       s.intents[id] = { intent: i, owner: event.owner, outcome: 'pending', evidence: [] }; break;
     }
+    case 'complete-intent': {
+      const m = s.intents[supervisorHash(event.intentId)];
+      demand(m?.outcome === 'pending' && same(m.owner,event.owner) && m.intent.fence === event.fence && m.intent.expiresAt > event.at, 'late/foreign application completion');
+      liveOwner(event.owner);
+      demand(Array.isArray(event.evidence) && event.evidence.length > 0 && event.evidence.length <= 128 && event.evidence.every(text), 'application evidence required');
+      m.outcome = 'observed-applied'; m.evidence = event.evidence; break;
+    }
     case 'reconcile-intent': {
       const m = s.intents[supervisorHash(event.intentId)]; demand(m && ['pending','unknown'].includes(m.outcome), 'intent already reconciled');
       demand(environment.ownerState(m.owner) === 'dead', 'unknown/live intent owner holds');
@@ -356,6 +364,8 @@ function readJournal(stateDir: string): Journal {
   for (const [key, s] of entries(j.projects)) { validateSupervisor(s, s.project); demand(key === supervisorHash(s.project.root), 'foreign root key'); }
   return j;
 }
+/** Read-only validated project inventory for cross-project host proof binding; no repair or authority inference. */
+export function readSupervisorProjects(stateDir: string): SupervisorState[] { return Object.values(readJournal(stateDir).projects); }
 export function readSupervisor(stateDir: string, project: ProjectIdentity): SupervisorState {
   validateProject(project); const s = readJournal(stateDir).projects[supervisorHash(project.root)];
   return s ? validateSupervisor(s, project) : emptySupervisor(project);
