@@ -153,8 +153,8 @@ This finding does not block source-only contracts, state, snapshot or configurat
 
 ## Durable supervisor state and accounting
 
-`cli/src/supervisor-state.mts` is a bookkeeping API, not a worker, mode switch,
-notification bridge, admission replacement or action authorizer. Nothing calls it
+`cli/src/supervisor-state.mts` persists bookkeeping and audited operator mode fences;
+it is not a worker, notification bridge, admission replacement or action authorizer. Nothing calls it
 from the scheduler or enables paid work. A persisted proposal, review or intent
 never authorizes a run, gate edit, proof, push, merge or recovery attempt. Existing
 run/receipt/proof/delivery/recovery stores and saved evidence are not modified.

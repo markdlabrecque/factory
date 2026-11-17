@@ -1,5 +1,5 @@
 // Host-owned supervisor journal: atomic CAS transitions, retained incidents/denials and separately charged resources.
-// Retains diagnosis/review completion, host outbox receipts and exact local resolution audits; never applies gates or resets charges.
+// Retains operator fences, diagnosis/review completion, host outbox receipts and exact local resolution audits; never applies gates or resets charges.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
