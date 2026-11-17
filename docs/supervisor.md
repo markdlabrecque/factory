@@ -63,7 +63,7 @@ complete original collector. Every current read rebuilds external originals and
 the authoritative prior-decision set before any later cache comparison, rereads
 private versioned host policy, validates the exact own hold, and reports cumulative
 host/project/role budget preflight without changing history. Budget preflight is
-not authorization: the eventual worker must still commit `reserve-advisory` under
+not authorization: the existing worker still commits `reserve-advisory` under
 the journal lock. Collected `no-commit.json` is the actual normal producer's named
 failure original; a stopped stage alone is still insufficient.
 
@@ -75,15 +75,35 @@ from absence, refunds charges, repairs ownership or releases a successor. A
 settled projection does not replace original receipt validation/fresh ESRCH in the
 actual release APIs. No telemetry is fabricated by preparation/inspection.
 
-**Still incomplete:** `diagnoseProject` does not yet consume this preparation's
-owned boundary. Worker reservation/grant/registration integration, fresh parent
-control/material observations at the child's final authorization boundary,
-validated usable-advice settlement/publication, idempotent receipt reconciliation,
-and deterministic stop/auth/controller-loss composition remain required. This
-API neither accepts/retrieves an API key nor starts a provider child; it must not
-be treated as positive completion of the real advisory-host journey. The offline
-fixture proves actual flat normal producer -> host preparation -> complete input
-and pinned SDK closure, not a host-to-provider send or advice semantics.
+The prepared object's explicit source-only `invoke(apiKey, signal?)` delegates to
+`diagnoseProject`, not a parallel supervisor. It accepts an explicit handoff secret
+but never retrieves credentials. The existing worker preserves reuse before budgets,
+retained human/denial checks and cumulative reservation. Its owned branch freezes
+input, reserves through `reserve-advisory`, starts the pinned child, constructs the
+immutable grant from actual ready PID/start and registers it before handoff.
+
+At the last HTTP gate, the runner requests one bounded observation through the
+original runner ↔ guard ↔ controller IPC. The controller rebuilds actual registration,
+backend/registry controls, private policy, complete material, exact hold and runtime;
+the child validates that data before the unchanged journal-lock one-use authorization.
+An observation is not permission. A lost/unresponsive controller cannot produce a
+fresh send; immutable deadlines and disconnect whole-group cleanup remain armed.
+Prepared-host calls have no static observation bypass. Static direct-boundary data
+is retained only for legacy component fixtures, not public host authority. Preflight
+for an already active exact own reservation excludes it only from NEW-call arithmetic
+before adding it back; durable cumulative charge never changes or refunds.
+
+After process closure, raw output is retained privately, current originals are
+rebuilt again outside locks, and genuine known raw usage plus owned cleanup can
+close via T05 **local-human-required only**. This stage never publishes usable
+advice, even for valid-looking output, and deliberately retains exclusion/runtime
+pins. Unknown/no-send/uncertain startup retains full charge and ownership.
+
+**Still incomplete:** validated usable-advice settlement/publication, composed safe
+release, idempotent receipt reconciliation and full release gates remain required.
+The reused actual normal producer fixture now reaches owned worker → pinned SDK →
+network-denied synthetic SSE → raw usage/cleanup → durable local HUMAN. It proves
+wiring, not advice semantics, installed rollout or all of T09.
 
 ## Complete saved-run input collection
 

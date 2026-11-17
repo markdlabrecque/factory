@@ -19,9 +19,17 @@ normal producer's `no-commit.json` is a supported complete failure original.
 
 Preparation does not start a child, reserve paid work or grant a request. A failure
 after acquisition retains exclusion/pins, including when controls become off.
-The existing worker/owned-boundary integration and final child authorization and
-usable-publication rereads remain unfinished; do not interpret this API as public
-activation, mount isolation, confirmed no-send or a complete diagnosis journey.
+The prepared object's explicit `invoke` delegates to the existing diagnosis worker
+using the pinned owned boundary. Pins transfer to the actual ready child before
+grant registration/handoff. Final-send IPC rebuilds current controls, policy,
+complete basis, exact hold and runtime, then the child uses the same journal-lock
+authorization as stop. A second asynchronous rebuild precedes local terminal closure.
+Only known raw usage and confirmed owned cleanup can produce local HUMAN in this
+stage; raw output is retained, not published as usable advice. Prepared-host final
+observations cannot be replaced by static controls; legacy direct component
+fixtures are not host authority. Usable advice, safe release composition and receipt
+reconciliation remain unfinished. Do not interpret this API as activation, mount
+isolation, confirmed no-send or the completed advisory journey.
 
 ## Protected advisory runtime selection
 

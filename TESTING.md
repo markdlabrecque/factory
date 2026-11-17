@@ -68,10 +68,10 @@ source-only reviewer/outbox implementation and remaining paid-runtime/applicatio
 prerequisites; contract fixtures alone do not activate downstream action. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
-## Advisory host preparation boundary (partial)
+## Advisory host owned-worker boundary (partial)
 
 ```sh
-node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-host.test.mts cli/test/supervisor-input.test.mts cli/test/runtime-bundle.test.mts cli/test/projects.test.mts cli/test/tick.test.mts orchestrator/verification-entrypoint-sandbox.test.mts
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-host.test.mts cli/test/supervisor-input.test.mts cli/test/supervisor-worker.test.mts cli/test/supervisor-process.test.mts cli/test/supervisor-runtime.test.mts cli/test/runtime-bundle.test.mts cli/test/projects.test.mts cli/test/tick.test.mts orchestrator/verification-entrypoint-sandbox.test.mts
 ```
 
 Cheap units prove fresh existing scheduler/registry controls (including absent
@@ -87,10 +87,18 @@ synthetic; source/flat imports, normal lifecycle, immutable custody, Git, admiss
 runtime artifacts/pins and collector I/O are real. Fake installed packages alone
 are not provider capability evidence.
 
-This is **not** the required completed host -> worker -> owned provider -> terminal
-advice composition. Owned worker integration, final authorization/publication
-rereads, usable-advice settlement and deterministic stop/auth/controller-loss
-barriers remain outstanding. No paid/live probe or model semantics is claimed.
+The SAME producer fixture now invokes the copied host's existing worker, actual
+owned process and pinned SDK using T04's network-denied synthetic SSE preload,
+then checks genuine raw accounting/cleanup and durable local HUMAN settlement.
+The existing T04 process fixture adds deterministic last-send observation barriers:
+stop-before-auth, changed source and actual controller disconnect all leave no
+send and retain full charge/ownership. Existing journal units own both stop/auth
+orderings; no duplicate provider matrix was added. Worker units cover asynchronous
+observations while retaining synchronous component fixtures.
+
+This is **not** completed terminal advice composition: usable-advice settlement,
+composed safe release, receipt reconciliation and final acceptance remain outstanding.
+No paid/live probe or model semantics is claimed.
 The unchanged 15-second direct-child, 120-second test, four 180-second shard and
 concurrency-four limits still apply; complete mandatory/release gates are separate.
 

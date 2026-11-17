@@ -2,7 +2,8 @@
 // No Docker daemon, credentials, browser installation, tracker or service manager is used.
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import cp, { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { once } from 'node:events';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,6 +22,7 @@ import { fixtureReport } from './fixtures/verification.mts';
 import { proofRoot } from './verification.mts';
 import { createHash } from 'node:crypto';
 import { MODEL_POLICY } from './model-policy.mts';
+import { supervisorHash } from './supervisor-contract.mts';
 import { prepareRuntimeBundle, regenerateRuntimeManifest } from '../cli/src/runtime-bundle.mts';
 import { addProject } from '../cli/src/projects.mts';
 import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../cli/src/runtime-ownership.mts';
@@ -179,7 +181,7 @@ max_calls = 10
 max_tokens = 5000000
 max_cost_usd = 50
 max_calls = 5
-timeout_seconds = 600
+timeout_seconds = 15
 [supervisor.review]
 max_tokens = 5000000
 max_cost_usd = 50
@@ -508,6 +510,33 @@ console.log('sha256:'+'a'.repeat(64));
         await assert.rejects(prepared.current(),/global=off/,'fresh existing controls narrow even an already prepared host');
         assert(checkSupervisorHold(state,prepared.hold),'control change never erases acquired exclusion or invents no-send release');
         assert.equal(readFileSync(runFile,'utf8'),rawRun,'host preparation preserves the exact raw saved record');
+        // Extend this SAME genuine normal producer through the owned worker and pinned SDK. Reuse T04's
+        // network-denied SSE preload; no fabricated grant/terminal receipt and no model-semantics claim.
+        backend.enabled=true;
+        const preloadConfig=join(fake,'advisory-preload.json'), barrier=join(fake,'advisory-network.json');
+        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier}));
+        const preload=new URL('../cli/test/supervisor-process-preload.mts',import.meta.url); preload.searchParams.set('config',preloadConfig);
+        const originalSpawn=cp.spawn;
+        cp.spawn=((command: any,args: any[],opts: any)=> {
+          if (String(args[0]).endsWith('supervisor-guard.mjs')) {
+            args=['--import',preload.href,...args]; opts={...opts,stdio:[...opts.stdio,'ignore']};
+          }
+          return originalSpawn(command,args,opts);
+        }) as any;
+        syncBuiltinESMExports();
+        let diagnosis;
+        try { diagnosis=await prepared.invoke('sk-synthetic-offline-not-a-secret'); }
+        finally { cp.spawn=originalSpawn; syncBuiltinESMExports(); }
+        assert.equal(diagnosis.state,'human-required',JSON.stringify(diagnosis));
+        assert(existsSync(barrier),'the actual SDK reached only the network-denied synthetic SSE transport');
+        const terminal=readSupervisor(state,project), key=supervisorHash(options.invocationId);
+        assert.equal(terminal.advisory?.settlements?.[key]?.disposition,'local-human-required');
+        assert.equal(terminal.reservations[key].state,'finished');
+        assert(terminal.reservations[key].actual!.tokens>0);
+        assert.equal(Object.keys(terminal.advisory!.sends).length,1);
+        assert.equal(inspectSupervisorHost(terminal,prepared.hold).state,'settled');
+        assert(checkSupervisorHold(state,prepared.hold),'this stage deliberately retains exact exclusion/runtime until stage 3 release');
+        assert.equal(readFileSync(runFile,'utf8'),rawRun,'owned diagnosis never rewrites actual saved run custody');
       }
       if (scenario === 'no-commit-stale') {
         assert.equal(run.executionId, 'new-execution'); assert.equal(run.note, 'new execution owns this record');

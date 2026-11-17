@@ -68,7 +68,10 @@ export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: st
       // Pins exist before start. A failed/uncertain transfer retains them, even after child cleanup.
       try { lease = await transferAdvisoryRuntimeLease(o.paths,lease,handle.process.evidence); }
       catch (error) { await handle.terminate(); throw error; }
-      return {...handle,handoff(request) { assertCurrent(); context.assertCurrent({strictOriginals:true}); handle.handoff(request); }};
+      return {...handle,handoff(request, observe) {
+        if (typeof observe !== 'function') throw Error('Advisory held: pinned host requires fresh IPC observations');
+        assertCurrent(); context.assertCurrent({strictOriginals:true}); handle.handoff(request, observe);
+      }};
     }});
   return Object.freeze({context,boundary,identity:Object.freeze({host:host.id,hostDependencies:host.dependencies,selected:selected.id,dependencies:selected.dependencies,profile:ADVISORY_PROFILE_ID}),
     lease:() => structuredClone(lease), assertCurrent,

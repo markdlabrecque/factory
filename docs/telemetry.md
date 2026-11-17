@@ -24,9 +24,12 @@ The source-only `prepareSupervisorHost` and `inspectSupervisorHost` APIs do not
 publish supervisor send/completion events. Preparation creates exact exclusion,
 protected runtime pins and private original snapshots, not a journal reservation
 or usable diagnosis. Its read-only cutpoint projection is local actionable
-inspection, not terminal usage, no-send evidence or permission to release. Later
-worker integration must use the existing committed journal observations; absence
-of telemetry can never reconstruct a grant, prove cleanup, refund a reservation
+inspection, not terminal usage, no-send evidence or permission to release. The
+worker invocation uses the existing committed journal observations for reservation,
+registration, send and T05 local-human settlement, not fabricated completion events.
+This partial path retains raw output and known derived usage but emits no usable
+advice or execution authority. Final-send IPC observations are data, not a second
+permission store or telemetry-derived authorization. Absence of telemetry can never reconstruct a grant, prove cleanup, refund a reservation
 or confirm that an authorized request was remotely cancelled.
 
 ## Coverage and attribution

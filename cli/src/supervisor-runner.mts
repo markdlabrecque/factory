@@ -18,7 +18,17 @@ process.once('message', async (m: any) => {
     setTimeout(() => process.exit(1), remaining); // Same immutable deadline also survives unexpected anchor loss.
     readOwnedProcess(o.stateDir,g);
     let result: any;
-    try { result = await requestAdvisory(o); }
+    const observe = m.freshObservation === true ? () => new Promise<any>((accept, reject) => {
+      // Same immutable deadline bounds a lost/unresponsive controller. Observation is data, never send permission.
+      const timeout = setTimeout(() => reject(Error('Advisory held: current observation unavailable')), Math.max(1, Date.parse(g.deadline) - Date.now()));
+      process.once('message', (reply: any) => {
+        clearTimeout(timeout);
+        if (reply?.kind !== 'observation' || Object.keys(reply).length !== 2) reject(Error('Advisory held: invalid observation'));
+        else accept(reply.value);
+      });
+      process.send!({ kind: 'observe' }, e => { if (e) { clearTimeout(timeout); reject(e); } });
+    }) : undefined;
+    try { result = await requestAdvisory({ ...o, observe }); }
     finally {
       // An exception after authorization is spent too. Missing terminal metadata publishes UNKNOWN, never zero.
       const a = readSupervisor(o.stateDir, g.project).advisory?.sends[supervisorHash(g.invocationId)];

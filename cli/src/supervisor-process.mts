@@ -117,7 +117,7 @@ export function readOwnedCleanup(stateDir: string, g: DiagnosisGrant): CleanupEv
     && v.state === 'absent' && advisoryTime(v.at), 'invalid cleanup receipt');
   return v;
 }
-export type OwnedProcess = { child: ChildProcess; evidence: ProcessEvidence; handoff(request: unknown): void; terminate(): Promise<boolean> };
+export type OwnedProcess = { child: ChildProcess; evidence: ProcessEvidence; handoff(request: unknown, observe?: () => Promise<unknown>): void; terminate(): Promise<boolean> };
 /** Launch only the inventoried runner and guard. No caller-selected executable, argv, environment or provider seam. */
 export async function startOwnedProcess(o: { runtimeRoot: string; stateDir: string; project: DiagnosisGrant['project']; invocationId: string;
   fence: string; runtime: string; dependencies: string; deadline: string; cwd: string; maxOutputBytes: number }): Promise<OwnedProcess> {
@@ -141,10 +141,23 @@ export async function startOwnedProcess(o: { runtimeRoot: string; stateDir: stri
     const evidence = validateProcessEvidence({ version: 1, invocationId: o.invocationId, fence: o.fence, project: o.project,
       runtime: o.runtime, dependencies: o.dependencies, deadline: o.deadline, controller, guard: processIdentity(child.pid!), worker: processIdentity(workerPID) });
     publish(dir,'process.json',evidence); // Must succeed BEFORE caller registers grant or receives a handoff capability.
-    let handed = false, terminated: Promise<boolean> | undefined;
-    return { child, evidence, handoff(request) {
+    let handed = false, terminated: Promise<boolean> | undefined, observing = false;
+    let observation: (() => Promise<unknown>) | undefined;
+    child.on('message', async (m: any) => {
+      if (m?.kind !== 'observe') return;
+      if (!handed || !observation || observing || Object.keys(m).length !== 1) return stop();
+      observing = true;
+      try {
+        const value = await observation();
+        if (!child.connected || Date.now() >= Date.parse(o.deadline) || Buffer.byteLength(JSON.stringify(value)) > 4_000_000) return stop();
+        child.send({ kind: 'observation', value }, e => { if (e) stop(); });
+      } catch { stop(); }
+      // Exactly one observation per one-use send; no retry or replacement observation.
+    });
+    return { child, evidence, handoff(request, observe) {
+      observation = observe;
       advisoryDemand(!handed && child.connected && Date.now() < Date.parse(o.deadline), 'handoff already spent or expired'); handed = true;
-      child.send({ kind: 'handoff', request, maxOutputBytes: o.maxOutputBytes }, e => { if (e) stop(); });
+      child.send({ kind: 'handoff', request, freshObservation: !!observe, maxOutputBytes: o.maxOutputBytes }, e => { if (e) stop(); });
     }, terminate() {
       return terminated ??= (async () => { stop(); await closed; return groupAbsent(evidence.guard.group); })();
     } };

@@ -57,7 +57,8 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
         advance: (ms: number) => { clock += ms; }, accounting: (value: typeof actual) => { actual = value; }, cleanup: (value: boolean) => { gone = value; }, spawned: () => spawned };
     }
     const f = fixture('observe');
-    const result = await diagnoseProject(f.options()); assert.equal(result.state, 'proposed');
+    const asyncOptions = f.options(), syncCurrent = asyncOptions.current;
+    const result = await diagnoseProject({...asyncOptions,current:async () => syncCurrent()}); assert.equal(result.state, 'proposed');
     const saved = f.state(); assert.equal(saved.charged.diagnosis.tokens, 100); assert.equal(Object.values(saved.reservations)[0].state, 'finished');
     assert.deepEqual(supervisorDecisionSources(readFileSync(supervisorFile(f.stateDir),'utf8'),f.a.snapshot.project,236,'2026-11-17T12:01:00.000Z'),
       supervisorDecisionSources(null,f.a.snapshot.project,236,AT),'own real retained diagnostic output is not an authoritative prior decision');

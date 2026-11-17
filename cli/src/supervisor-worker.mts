@@ -1,5 +1,6 @@
-// Explicit short-lived diagnosis orchestration, outside scheduler/admission locks. Reserves the host journal before Pi,
-// retains frozen inputs/output and proposals only, rechecking durable operator mode. No scheduler, reviewer, repair, tracker, edit or delivery effects.
+// Explicit short-lived diagnosis orchestration outside scheduler/admission locks. Owned prepared-host work reserves,
+// registers the actual child and requires fresh final-send IPC; raw evidence closes only to local HUMAN in this stage.
+// Legacy component proposal fixtures remain separate. No scheduler, reviewer, repair, tracker, edit or delivery effects.
 import { existsSync, readFileSync, mkdirSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -9,7 +10,9 @@ import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts'
 import type { ModelFamily } from '../../orchestrator/model-policy.mts';
 import type { Diagnostic, DiagnosisDecision, DiagnosisMemory } from '../../orchestrator/supervisor.mts';
 import type { Facts, Resources, Limits, SupervisorState, Event } from './supervisor-state.mts';
-import { readSupervisor, commitSupervisor, incidentIdentity, supervisorHumanHold, supervisorRevisionHold } from './supervisor-state.mts';
+import { diagnosisGrant, ADVISORY_PROFILE_ID } from './supervisor-advisory-contract.mts';
+import { hostAdvisoryPolicyIdentity } from './supervisor-host-policy.mts';
+import { readSupervisor, commitSupervisor, settleAdvisory, incidentIdentity, supervisorHumanHold, supervisorRevisionHold } from './supervisor-state.mts';
 const flat = existsSync(new URL('./supervisor-contract.mts', import.meta.url));
 const { supervisorHash, validateSnapshot } = await import(flat ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 const { diagnosisBasis, diagnosisContext, parseDiagnosis, validateDiagnostic, validateDiagnosisDecision, DIAGNOSIS_OUTPUT_BYTES } = await import(flat ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
@@ -33,9 +36,14 @@ export type DiagnosisAuthorization = {
   registered: boolean; globalAllowed: boolean; paused: boolean; outsideAdmissionLocks: boolean;
   /** Integer micro-USD and token cumulative limits shared by ALL projects in this host journal. */
   shared: Resources; capacity: number;
+  /** Data from the genuine prepared host; never a permission/capability. */
+  advisory?: { policy: import('./supervisor-state.mts').AdvisoryRegistration; controls: import('./supervisor-state.mts').AdvisoryControls;
+    runtime: string; dependencies: string; attemptId: string | null; preflightHold: string | null };
 };
 export type WorkerOptions = {
-  stateDir: string; current(): DiagnosisAuthorization; boundary?: ComponentDiagnosisBoundary;
+  stateDir: string; current(): DiagnosisAuthorization | Promise<DiagnosisAuthorization>; boundary?: ComponentDiagnosisBoundary | DiagnosisBoundary;
+  /** Explicit handoff-only secret, never discovered or journaled. */
+  apiKey?: string;
   signal?: AbortSignal; now?: () => number; invocationId: string; fence: string;
   /** Explicit provider-extension path, not a credential. No provider discovery or fallback. */
   subscriptionExtension?: string;
@@ -65,8 +73,8 @@ function memory(s: SupervisorState): DiagnosisMemory[] {
 }
 /** No automatic caller/scheduler wiring. Host must invoke after releasing its admission/scheduler locks. */
 export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult> {
-  const current = () => {
-    const a = o.current(), control = readSupervisor(o.stateDir, a.snapshot.project).control;
+  const current = async () => {
+    const a = await o.current(), control = readSupervisor(o.stateDir, a.snapshot.project).control;
     // A persisted mode can narrow current host authorization, never upgrade it.
     const mode = control?.mode === 'stopped' || a.snapshot.mode === 'stopped' ? 'stopped'
       : control?.mode === 'observe' || a.snapshot.mode === 'observe' ? 'observe' : a.snapshot.mode;
@@ -76,7 +84,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
   const timer = o.timer ?? ((f, ms) => { const t = setTimeout(f, ms); return () => clearTimeout(t); });
   let a: DiagnosisAuthorization, s: SupervisorState, owner: Owner;
   try {
-    a = structuredClone(current()); const hold = hostHold(a); if (hold) return held(hold);
+    a = structuredClone(await current()); const hold = hostHold(a); if (hold) return held(hold);
     const rel = relative(resolve(a.snapshot.project.root), resolve(o.stateDir));
     if (!rel || !rel.startsWith('..') && !rel.startsWith('/')) return held('Journal must be host-owned outside project/agent mounts');
     owner = ownerOf(process.pid); if (!owner.start) return held('Unknown controller PID/start identity');
@@ -125,6 +133,8 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     }
     if (o.signal?.aborted) return held('Diagnosis cancelled before reservation');
     const b = o.boundary, model = modelForRole(a.family, 'supervisor').model;
+    if (b && 'kind' in b && b.kind === 'owned-openai')
+      return await ownedDiagnosis(o, a, s, owner, b, current);
     if (!b || b.model !== model || b.enforceable !== true || !resources(b.reservation)) return held('Provider-enforceable all-in token/cost ceilings for fixed Mid are unavailable; paid work held');
     const limits = a.policy.limits;
     const preflight = supervisorCallHold(a.policy, 'diagnosis', { registered: a.registered, mode: a.snapshot.mode, globalAllowed: a.globalAllowed,
@@ -149,7 +159,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     let child: ChildProcess | undefined, outcome: Diagnostic['outcome'] = 'process-failed', reason = 'Worker failed before launch';
     let stdout = '', stderr = '', confirmed = true, actual: Resources | null = null, decision: DiagnosisDecision | null = null;
     try {
-      const fresh = current(); const hold = hostHold(fresh);
+      const fresh = await current(); const hold = hostHold(fresh);
       const { snapshot: freshSnapshot, ...freshAuth } = fresh, { snapshot: oldSnapshot, ...oldAuth } = a;
       if (hold || diagnosisBasis(freshSnapshot) !== basisHash || !same(freshAuth, oldAuth) || o.signal?.aborted) { outcome = 'cancelled'; reason = hold ?? 'Authorization changed before spawn'; }
       else {
@@ -191,7 +201,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     if (!confirmed || actual === null) { outcome = 'process-failed'; reason = 'Unknown process-group cleanup or final accounting; reservation/capacity retained'; }
     if (outcome === 'proposed') {
       try {
-        const fresh = current();
+        const fresh = await current();
         if (o.signal?.aborted || hostHold(fresh) || diagnosisBasis(fresh.snapshot) !== basisHash || !same(fresh.facts, a.facts)
           || fresh.family !== a.family || !same(fresh.policy, a.policy) || !same(fresh.shared, a.shared) || fresh.capacity !== a.capacity)
           { outcome = 'stale'; reason = 'Current authorization/material basis changed; no proposal authority'; }
@@ -225,4 +235,66 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     if (request || !decision) return { state: 'human-required', reason, diagnosticId: diagnostic.id };
     return { state: 'proposed', decision, diagnosticId: diagnostic.id };
   } catch (e) { return held(String(e)); }
+}
+
+/** Owned branch of the same worker, after exact reuse/human/denial checks. This stage only closes to T05 local HUMAN.
+ * It never represents valid-looking raw output as usable advice, nor releases admission/runtime ownership. */
+async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: SupervisorState, owner: Owner,
+  b: DiagnosisBoundary, current: () => Promise<DiagnosisAuthorization>): Promise<DiagnosisResult> {
+  const data = a.advisory, project = a.snapshot.project, basis = diagnosisBasis(a.snapshot), incidentId = incidentIdentity(project,a.facts);
+  if (!data || data.preflightHold || a.family !== 'openai' || !o.apiKey || o.signal?.aborted)
+    return held(data?.preflightHold ?? 'Genuine prepared host observations and explicit auth required');
+  const limits = a.policy.limits!;
+  const at = data.policy.at, deadline = new Date(Date.parse(at) + limits.diagnosis.timeoutSeconds * 1000).toISOString();
+  const dir = join(o.stateDir,'supervisor',supervisorHash(project.root),supervisorHash(o.invocationId));
+  mkdirSync(dir,{recursive:true,mode:0o700});
+  const inputRef = join(dir,'input.json');
+  writeDurable(inputRef,JSON.stringify({snapshot:a.snapshot,basis,incidentId}) + '\n');
+  const commit = (event: Event) => { s = commitSupervisor(o.stateDir,project,s.revision,event); };
+  commit({kind:'reserve-advisory',id:`${o.invocationId}:reserve`,at,policy:data.policy,controls:data.controls,
+    limits:{project:{tokens:limits.maxTokens,cost:money(limits.maxCostUsd)},shared:a.shared,capacity:a.capacity,
+      reviewCalls:limits.review.maxCalls,reviewTimeoutMs:limits.review.timeoutSeconds*1000},
+    reservation:{id:o.invocationId,incidentId,kind:'diagnosis',owner,fence:o.fence,at,deadline,reserved:b.reservation,
+      actual:null,state:'active',reviewId:null}});
+  let handle: Awaited<ReturnType<DiagnosisBoundary['start']>> | undefined, output = Buffer.alloc(0), errors = Buffer.alloc(0);
+  let cancelled = false;
+  const abort = () => { cancelled = true; if (handle) void handle.terminate(); };
+  o.signal?.addEventListener('abort',abort,{once:true});
+  const fresh = async () => {
+    const f = await current(), d = f.advisory;
+    if (cancelled || o.signal?.aborted || hostHold(f) || !d || d.preflightHold || diagnosisBasis(f.snapshot) !== basis
+      || !same(f.facts,a.facts) || f.family !== a.family || !same(f.policy,a.policy) || !same(f.shared,a.shared) || f.capacity !== a.capacity
+      || !same(d,data)) throw Error('Current host controls/policy/material/ownership changed; no new send or usable publication');
+    return {snapshot:f.snapshot,policy:d.policy,controls:d.controls};
+  };
+  try {
+    await fresh();
+    handle = await b.start({project,invocationId:o.invocationId,fence:o.fence,deadline,maxOutputBytes:DIAGNOSIS_OUTPUT_BYTES});
+    const child = handle.process.child;
+    child.stdout?.on('data',chunk => { output = Buffer.concat([output,Buffer.from(chunk)]).subarray(0,DIAGNOSIS_OUTPUT_BYTES); });
+    child.stderr?.on('data',chunk => { errors = Buffer.concat([errors,Buffer.from(chunk)]).subarray(0,8192); });
+    const closed = new Promise<void>(accept => { child.once('close',()=>accept()); child.once('error',()=>accept()); });
+    const worker = handle.process.evidence.worker;
+    const grant = diagnosisGrant({version:1,project,ticket:(a.snapshot.scope as {ticket:number}).ticket,runId:a.facts.runId,attemptId:data.attemptId,
+      incidentId,basis,invocationId:o.invocationId,fence:o.fence,holdId:data.policy.holdId,runtime:data.runtime,dependencies:data.dependencies,
+      profile:ADVISORY_PROFILE_ID,policy:hostAdvisoryPolicyIdentity(data.policy.host),owner:{pid:worker.pid,start:worker.start},deadline,reserved:b.reservation});
+    s = readSupervisor(o.stateDir,project);
+    commit({kind:'register-advisory-worker',id:`${o.invocationId}:register`,at:new Date().toISOString(),reservationId:o.invocationId,fence:o.fence,owner,grant});
+    const observation = await fresh();
+    handle.handoff({grant,...observation,apiKey:o.apiKey},fresh);
+    await closed;
+    const confirmed = await handle.terminate();
+    // Retain raw local output even if the final rebuild or durable closure fails. No made-up diagnostic/advice certificate.
+    writeDurable(join(dir,'raw-output.json'),JSON.stringify({grantId:grant.id,inputRef,stdout:capped(output,DIAGNOSIS_OUTPUT_BYTES),stderr:capped(errors,8192),confirmed}) + '\n');
+    // Rebuild outside every lock again before publication. Even stale output may close only as local HUMAN, never advice.
+    let reason = 'Owned provider output retained; usable advice publication is not implemented in this stage';
+    try { await fresh(); } catch (e) { reason = String(e); }
+    if (!confirmed || handle.usage() === null) return held('Unknown owned cleanup/accounting; full charge, exclusion and runtime pins retained');
+    s = readSupervisor(o.stateDir,project);
+    s = await settleAdvisory(o.stateDir,project,s.revision,o.invocationId);
+    return {state:'human-required',reason,diagnosticId:grant.id};
+  } catch (e) {
+    if (handle) await handle.terminate();
+    return held(String(e));
+  } finally { o.signal?.removeEventListener('abort',abort); }
 }

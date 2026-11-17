@@ -1,5 +1,5 @@
-// Non-CLI host preparation and read-only restart inspection. Rebuilds genuine controls and complete originals under
-// exact exclusion/runtime ownership. This preparatory API does not reserve, authorize, send, settle or execute advice.
+// Source-only non-CLI host preparation/invocation and read-only restart inspection. Rebuilds genuine controls and
+// complete originals under exact ownership; invokes the existing worker. No activation, advice execution or automatic release.
 import { existsSync, realpathSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +9,7 @@ import type { TicketContextSource } from '../../orchestrator/ticket-context.mts'
 import type { ProjectIdentity } from '../../orchestrator/supervisor-contract.mts';
 import type { SupervisorState, AdvisoryControls } from './supervisor-state.mts';
 import { readSupervisor, readSupervisorProjects } from './supervisor-state.mts';
+import { diagnoseProject } from './supervisor-worker.mts';
 import { readRegistry } from './project-registry.mts';
 import { schedulingState } from './scheduling-observation.mts';
 import { readHostAdvisoryPolicy, advisoryLimitHold } from './supervisor-host-policy.mts';
@@ -41,7 +42,7 @@ export type SupervisorHostOptions = {
 };
 /** Acquire exact exclusion before any paid reservation. Failure after acquisition intentionally retains ownership.
  * Returned current() always rebuilds originals before cache comparison, outside every admission/journal/runtime lock.
- * This is preparation for the owned worker integration, not a public diagnosis/activation entrypoint. */
+ * Explicit invoke delegates to the owned branch of the existing worker; no CLI/activation or automatic release. */
 export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   o = {...o,paths:structuredClone(o.paths),project:structuredClone(o.project),rollout:structuredClone(o.rollout)};
   const project = canonicalAdmissionProject(o.project), p = structuredClone(o.paths);
@@ -71,6 +72,7 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     throw Error('Supervisor host held: selected project/tracker changed');
   const output = join(p.state,'supervisor','originals',supervisorHash(project),supervisorHash(o.invocationId));
   mkdirSync(output,{recursive:true,mode:0o700});
+  let registrationAt: string | undefined;
   const current = async () => {
     runtime.assertCurrent(); runtime.context.assertCurrent({strictOriginals:true});
     const controls = await assertControls();
@@ -84,21 +86,44 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     if (input.snapshot.material.runId !== saved.executionId) throw Error('Supervisor host held: saved execution changed');
     const state = readSupervisor(p.state,project), policy = runtime.context.config.supervisor;
     const all = readSupervisorProjects(p.state);
+    const own = state.reservations[supervisorHash(o.invocationId)];
+    if (own && (own.id !== hold.invocationId || own.fence !== hold.fence || own.owner.pid !== hold.owner.pid || own.owner.start !== hold.owner.start))
+      throw Error('Supervisor host held: foreign own reservation');
+    // NEW-call preflight subtracts only this exact already-reserved active call, then adds it back. No refund/reset;
+    // cumulative totals remain inclusive everywhere durable, and other active/ambiguous work still excludes it.
+    const ownActive = own?.state === 'active';
     const used = (states: SupervisorState[], role?: 'diagnosis') => {
-      const rs = states.flatMap(s => Object.values(s.reservations)).filter(r => !role || r.kind === role);
+      const rs = states.flatMap(s => Object.values(s.reservations).filter(r => !(ownActive && s.project.root === project.root && r.id === own.id))).filter(r => !role || r.kind === role);
       return {tokens:rs.reduce((n,r)=>n+r.reserved.tokens,0),cost:rs.reduce((n,r)=>n+r.reserved.cost,0),calls:rs.length};
     };
     const mode = state.control?.mode ?? input.snapshot.mode;
     // Capacity/budget checks here are advisory preflight only; reserve-advisory MUST repeat them under journal lock.
     const reason = advisoryLimitHold({host:host.policy,project:policy,hostUsed:used(all),projectUsed:used([state]),roleUsed:used([state],'diagnosis'),
-      active:all.flatMap(s=>Object.values(s.reservations)).filter(r=>r.state!=='finished').length,
-      incidentCalls:Object.values(state.reservations).filter(r=>r.kind==='diagnosis' && state.incidents[r.incidentId]?.facts.runId===saved.executionId).length,
+      active:all.flatMap(s=>Object.values(s.reservations)).filter(r=>r.state!=='finished').length - (ownActive ? 1 : 0),
+      incidentCalls:Object.values(state.reservations).filter(r=>r.kind==='diagnosis' && state.incidents[r.incidentId]?.facts.runId===saved.executionId).length - (ownActive ? 1 : 0),
       ...controls,mode});
+    runtime.assertCurrent(); runtime.context.assertCurrent({strictOriginals:true});
+    if (!checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed during collection');
     return {input,controls,host,policy,mode,preflightHold:reason ?? null};
   };
   // Return no send permission, no auth value and no implicit cleanup on failure. The exact IDs remain inspectable.
   const initial = await current();
-  return Object.freeze({project,hold:structuredClone(hold),runtime,current,initial});
+  registrationAt = new Date().toISOString();
+  const authorization = async () => {
+    const c = await current();
+    return {snapshot:{...c.input.snapshot,mode:c.mode},facts:c.input.facts,family:runtime.context.config.AGENT.family,
+      policy:c.policy,registered:c.controls.registered,globalAllowed:c.controls.global==='on',paused:c.controls.projectControl!=='enabled',
+      outsideAdmissionLocks:true,shared:{tokens:c.host.policy.cumulative.tokens,cost:c.host.policy.cumulative.cost},capacity:c.host.policy.capacity,
+      advisory:{policy:{holdId:hold.id,host:c.host.policy,project:c.policy,at:registrationAt!},controls:c.controls,
+        runtime:runtime.identity.selected,dependencies:runtime.identity.dependencies,attemptId:saved.recovery?.id ?? null,preflightHold:c.preflightHold}};
+  };
+  return Object.freeze({project,hold:structuredClone(hold),runtime,current,initial,
+    /** Explicit source API only. No credential discovery, scheduling, review, recovery or release. */
+    invoke: (apiKey: string, signal?: AbortSignal) => {
+      registrationAt = new Date().toISOString();
+      return diagnoseProject({stateDir:p.state,current:authorization,boundary:runtime.boundary,
+        invocationId:o.invocationId,fence:hold.fence,apiKey,signal});
+    }});
 }
 
 export type HostCutpoint = 'exclusion-only' | 'reserved' | 'registered' | 'authorized' | 'settled' | 'inconsistent';
