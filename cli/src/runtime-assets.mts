@@ -19,7 +19,7 @@ export const RUNTIME_ASSETS: readonly RuntimeAsset[] = Object.freeze([
   { source: 'board/supervisor.mts', destination: 'supervisor-view.mts' },
   // The flat runtime keeps the probe entrypoint and board store under distinct names.
   { source: 'board/readiness.mts', destination: 'readiness-store.mts' },
-  ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts', 'supervisor-facts.mts', 'supervisor-state.mts', 'supervisor-worker.mts', 'supervisor-schedule.mts', 'supervisor-review.mts', 'supervisor-escalation.mts', 'supervisor-gate-apply.mts', 'sandcastle-patch.mts', 'sandcastle-patch.json'].map(name => ({ source: `cli/src/${name}`, destination: name })),
+  ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts', 'supervisor-facts.mts', 'supervisor-state.mts', 'supervisor-advisory-contract.mts', 'supervisor-host-policy.mts', 'supervisor-worker.mts', 'supervisor-schedule.mts', 'supervisor-review.mts', 'supervisor-escalation.mts', 'supervisor-gate-apply.mts', 'sandcastle-patch.mts', 'sandcastle-patch.json'].map(name => ({ source: `cli/src/${name}`, destination: name })),
   // Host broker and pure paid-call preflight have distinct flat names; never overwrite either asset.
   { source: 'cli/src/supervisor-policy.mts', destination: 'supervisor-broker.mts' },
   { source: 'orchestrator/main.mts', destination: 'main.mts' },

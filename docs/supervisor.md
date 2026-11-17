@@ -59,6 +59,70 @@ source APIs do not mean those installed journeys pass acceptance. The advisory M
 requires its own actual public copied-install diagnosis evidence and the complete
 mandatory tests/review; source merge is not installation or live pilot approval.
 
+## Advisory grants, finite host policy and one-use send permission
+
+The source-only advisory foundation adds `supervisor-advisory-contract.mts` and
+`supervisor-host-policy.mts` to every complete runtime. It does not enable a paid
+command, instantiate a provider boundary or provision policy. The fixed
+[provider profile](design/supervisor-provider-contract.md) is identified by
+`b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587`.
+It reserves exactly 1,054,096 tokens and 5,808,792 integer micro-USD per diagnosis;
+reasoning is already included. Project USD ceilings convert down, while provider
+reservation arithmetic rounds up with integer arithmetic. Unknown profiles/prices,
+overflow or inadequate host/project/diagnosis limits hold. Required review limits
+remain validated but advisory diagnosis never consumes a review call.
+
+The host-only version-1 policy loader reads `Paths.config/supervisor.json`, outside
+all known project/agent mounts, with explicit enablement, this exact profile,
+finite cumulative token/cost/call ceilings and capacity **one**. The file and its
+config directory must be owner-owned/private; linked, oversized, changed-during-read,
+missing/unreadable or malformed policy holds without repair. The trusted host must
+supply all canonical mount roots to the loader; an unknown root is not safe absence.
+See [policy schema](project-config.md#advisory-host-policy-source-foundation) and
+[operator boundary](factory-cli.md#advisory-host-policy-foundation).
+
+`reserve-advisory` validates the host, project and role ceilings under the existing
+supervisor lock. Cumulative totals count **all** legacy/new reservations across
+both roles and all host projects, never only measured actual usage. Increasing
+ceilings does not erase history, refresh allowance or make an unsettled reservation
+replaceable. Current registration/global-on/project-enabled and non-stopped mode
+are necessary; observe is sufficient for advice only. Policy/controls are trusted
+host observations, not model claims or project capability booleans; the later host
+must acquire real exclusion first and reread actual controls/material/policy.
+The recorded exact exclusion ID is binding, not proof of an admission claim.
+No cross-store transaction or exclusion acquisition is implemented by this step.
+
+After reserve and child launch, `register-advisory-worker` binds one immutable
+identity-hashed grant to exact invocation/fence, ticket/current saved run and
+optional recovery attempt, incident/basis, canonical project/tracker, runtime and
+dependencies, provider/profile, policy, exclusion, separate worker PID/start,
+deadline and exact resources. The worker must wait: PID existence is not send
+permission. Unknown/foreign/stale/duplicate registration is refused.
+`authorizeAdvisorySend` consumes the registered grant under **the same journal
+lock/CAS as stop**, records the exact payload/profile/worker receipt, then returns
+new permission **only once**. A replay can read the retained receipt but cannot
+obtain permission or resend. Different event IDs cannot bypass spent permission.
+The request itself must occur outside locks; T02 must consume this API at the final
+transport gate, not infer permission from a persisted event or missing record.
+
+Ordering is definitive: stop commits first -> authorization refuses; authorization
+commits first -> owned in-flight request stays consumed after stop. Stop does not
+prove it was unsent or remotely cancelled, and later usable publication is refused.
+Missing send receipt with a live/unknown registered worker is not no-send evidence.
+Legacy workers cannot reserve around an unsettled advisory reservation. No legacy
+finish callback can settle a new advisory reservation without the later raw-provider
+and owned-cleanup receipt integration; unknown outcomes may remain ambiguous.
+
+Journal version 1 remains readable for old projects without changing their data.
+New optional **validated** advisory indexes retain policies, registrations and send
+receipts. Older strict readers reject the unknown index rather than ignoring it;
+never remove it to downgrade. Legacy active reservations have no grant/policy and
+cannot be promoted into new request permission or known no-send. Existing charges,
+held incidents, denial indexes, review limits and operator fences are preserved.
+Source policy/ordering tests and a disposable policy/journal/owned-child boundary
+prove local behavior; no actual provider/admission/installed-host authority or
+operational policy provisioning is claimed here.
+
 ## Operator modes, inspection and held recovery
 
 [`factory supervisor status|explain|mode|stop`](factory-cli.md#supervisor-inspection-and-project-controls)

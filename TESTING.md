@@ -84,6 +84,26 @@ paid workers, tracker calls, recovery resets, notification adapters or actions r
 The state asset joins the complete inventory; existing run/proof/recovery suites
 remain mandatory in all four commit shards and the separate lifecycle gate.
 
+## Advisory policy, grants and one-use authorization
+
+```sh
+node --test cli/test/supervisor-host-policy.test.mts cli/test/supervisor-state.test.mts cli/test/supervisor-worker.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Cheap units own fixed-profile all-in arithmetic, downward project USD ceiling
+conversion, overflow/unknown policy, cumulative host/project/role/call ceilings,
+review configuration preservation, grant/fence/worker corruption, legacy refusal,
+stop-before-send and send-before-stop, and replay without fresh permission. One
+private temporary filesystem/journal boundary validates permissions, symlink and
+corrupt-policy refusal/preservation and atomic durable receipt reopen. A local
+IPC-only child provides actual PID/start ownership; it makes no provider request
+and exits through its explicit IPC barrier, not sleeps or raw-PID killing. Complete
+bundle tests import the new inventoried modules unchanged without source fallback.
+Policy/controls in transition units are injected trusted observations, not proof of
+real admission, host authority, provider settlement or installed diagnosis. No real
+home policy, credentials, services, packages or provider operations run. The usual
+four full shards, separate lifecycle job and documentation checks remain mandatory.
+
 ## Bounded supervisor diagnosis
 
 ```sh
