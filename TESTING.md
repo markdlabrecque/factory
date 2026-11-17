@@ -68,6 +68,25 @@ source-only reviewer/outbox implementation and remaining paid-runtime/applicatio
 prerequisites; contract fixtures alone do not activate downstream action. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
+## Complete saved-run input boundary
+
+```sh
+node --test cli/test/supervisor-input.test.mts cli/test/supervisor-facts.test.mts cli/test/supervisor-worker.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Cheap units prove authoritative decision selection and audited-human-resolution
+bytes. The existing worker boundary additionally proves its actual retained own
+diagnosis is not a prior-decision original. One disposable readiness-project
+fixture exercises real local Git/filesystem reads, private original freezing and
+independent basis/binding recomputation with controlled read-only tracker responses
+(including child/parent second pages and changed-page refusal). It compares dirty
+bytes, index hash and refs before/after success and refusal, and covers legacy/missing
+run identities, oversized/missing originals, aliases and unsupported overrides.
+Tracker transport, runtime package installation and saved-run inputs are synthetic;
+these tests establish no paid provider, installed mount, quiescence or cleanup
+authority. The fixture Git helper has per-call bounds; whole-test 120-second bounds
+and the unchanged four 180-second shards remain required.
+
 ## Shared admission exclusion
 
 ```sh

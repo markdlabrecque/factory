@@ -4,6 +4,86 @@ This is the authoritative reference for the project supervisor feature. The impl
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
+## Complete saved-run input collection
+
+`cli/src/supervisor-input.mts` exports `collectSupervisorInput` (also named
+`completeSnapshot`) for an explicit positive ticket, a selected validated execution
+context and a uniquely registered canonical checkout. This is source-only host
+composition, not a public diagnosis command, admission capability or provider call.
+It never refreshes/reconciles a run, settles ownership, changes Git/tracker state,
+launches a reviewer, acquires a hold or grants quiescence authority.
+
+The collector requires exact saved execution/baseline/ownership and, when present,
+finished recovery-attempt identity plus matching saved ticket-input originals.
+Legacy/missing identities, managed entries, retained claims and pending recovery
+keep collection held. It binds the current local branch/base commit objects,
+selected runtime/dependency IDs, normalized settings, complete current ticket hash,
+model policy and admission generation **and ownership collections**. The material
+`policy` digest also binds the privately frozen `bindings` record (exact run,
+attempt, receipt, config, saved input, normalized settings, current base SHA and
+ownership). This preserves the existing snapshot schema while making every one
+of these inputs independently recomputable. Changing ownership without advancing
+a normal generation still invalidates/holds. The optional `expectedOwnHold` names
+the exact host-held ID/project/invocation/fence/process-start identity. Both
+immutable admission reads must match it; a missing or replaced own hold refuses
+collection. Only that exact own hold and non-authoritative journal publication
+are excluded from the basis, so preclaim collection and exact-own-hold collection
+remain stable. Every conflicting foreign hold refuses, including pending children,
+canonical-root aliases and admission namespace collisions, without requiring a
+generation change. Unrelated project holds do not enter the material basis. This
+read-only check never prunes owners or transacts admission and establishes neither
+global capacity nor permission at admission/send time.
+
+All eight source roles are represented. Child/immediate-parent and ordered human
+comments include every page and two complete stability-checked passes under one
+30-second collection deadline. Configured Markdown guidelines remain separate
+from Factory prompt/model-policy constraints. Gate rules/config and named saved
+failure originals are preserved, including referenced command-output artifacts.
+For a finished recovery, the validated attempt's canonical ticket/attempt-scoped
+`evidence` supplies the current verdict/report/blocked originals, not the earlier
+implementation's `run.evidenceDir`. The attempt must match the saved run/base,
+worktree, Git directory and previous-evidence relationship. Missing current
+originals hold even if an older implementation verdict exists; changing the current
+failure changes the basis.
+Absent parent/comments/decisions and absent additive guidelines are explicitly
+not-applicable; missing required originals, oversized text or relevant image/video
+originals hold with an actionable explanation rather than truncation. Complete
+project workflow overrides currently hold; no Factory fallback is invented.
+
+`prior-decisions` is the relevant ticket/project authoritative set at the collection
+cutoff: validated independent-review records/provenance and their exact frozen
+input references, plus audited local human resolutions. Applicable human policy
+already supplied in ticket/configured instruction originals is not duplicated.
+Decision members retain their original JSON bytes and stable references, sorted
+by locator/content. The mutable journal, revisions, counters, charges, observations,
+diagnostic output and summaries are not originals in this role. Rebuilding this
+set precedes any worker cache comparison. New material human/review decisions
+change the basis without clearing denials, human holds or cumulative budgets.
+Bounded `DiagnosisMemory` remains supplemental only.
+
+Original reads reject aliases, special files, invalid text, oversized or unstable
+bytes. Selected-context saved-layout checks apply bounded canonical regular-file
+reads to **all** top-level state JSON before project filtering, and to ownership
+receipts (8 MiB per record). Aliases and special files refuse before opening;
+NOFOLLOW/NONBLOCK plus descriptor/stability checks protect the subsequent open,
+including FIFO substitution, with no second unbounded receipt read.
+Both mandatory context freshness checks request strict project-original validation,
+so inherited config/instruction reads cannot first open an aliased, oversized or
+substituted special file before the collector's own safe reader. All shared config
+and instruction readers (including initial context loading) enforce 256 KiB per
+file, at most 128 configured instruction paths and 1 MiB composed text per role
+across the six fixed roles. Ordinary contained Markdown aliases remain supported
+outside strict collection. See [local input bounds](project-config.md#local-input-bounds).
+Each direct Git child has a 1.5-second deadline/output bound and disables
+optional index locks, fsmonitor and hooks; no diff/textconv, fetch or write command
+is used. The bounded tracker transport remains `commandContextSource`; injected
+transports must honor its supplied budgets. The collector writes only a new
+0700 directory/0600 `originals.json` under an already private, canonical host
+output directory outside checkout and selected-runtime mounts. It rechecks current
+material, decision set, ownership and refs before freezing. Selected-context
+validation remains mandatory; fixture packages are not installed-host authority.
+See [input tests](../TESTING.md#complete-saved-run-input-boundary).
+
 ## Advisory MVP scope and OpenAI build gate
 
 The owner approved a smaller first release: **explicit operator-requested advisory

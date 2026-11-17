@@ -1,5 +1,6 @@
-// Data-only v2 project configuration. No project code, environment expansion or fallback.
-import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+// Bounded data-only v2 project configuration. No project code, environment expansion or fallback.
+import { lstatSync, realpathSync, statSync } from 'node:fs';
+import { readBoundedText } from './ownership.mts';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { PROJECT_ASSET_BASENAME, requireProjectLayout } from './project-layout.mts';
 import type { ModelFamily } from './model-policy.mts';
@@ -44,11 +45,11 @@ export function resolveCheckoutPath(checkout: string, path: string, kind: 'file'
   return target;
 }
 /** Missing, malformed and unreadable configurations fail closed. */
-export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
+export function loadTomlConfig(scaffoldDir: string, options: { strictOriginals?: boolean } = {}): EffectiveConfig {
   if (basename(resolve(scaffoldDir)) === PROJECT_ASSET_BASENAME) requireProjectLayout(dirname(resolve(scaffoldDir)));
   const path = resolve(scaffoldDir, 'factory.toml');
   let text: string;
-  try { text = readFileSync(path, 'utf8'); } catch (e) {
+  try { text = readBoundedText(options.strictOriginals ? path : realpathSync(path), 256 * 1024, 'project configuration'); } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       // A dangling symlink is a present but unreadable configuration, not legacy opt-out.
       let present = false;
@@ -57,7 +58,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
       }
       if (!present) throw new Error(`${path}: missing version 2 configuration; initialize a supported new project`);
     }
-    throw new Error(`${path}: cannot read configuration (${(e as NodeJS.ErrnoException).code})`);
+    throw new Error(`${path}: cannot read configuration (unsafe/oversized, invalid text or unreadable; ${(e as NodeJS.ErrnoException).code ?? 'validation failed'})`);
   }
   const fail = (key: string, why: string): never => { throw new Error(`${path}: ${key}: ${why}`); };
   let raw: Table;
@@ -143,6 +144,7 @@ export function loadTomlConfig(scaffoldDir: string): EffectiveConfig {
       catch { fail(`instructions.${role}`, 'expected repository-relative Markdown paths without parent traversal'); }
     }
   }
+  if (Object.values(instructions).reduce((n, paths) => n + paths.length, 0) > 128) fail('instructions', 'at most 128 configured paths across all roles');
   const l = section('labels', ['needs_human','done'], true);
   const needsHuman = str(l, 'needs_human', 'labels'), done = str(l, 'done', 'labels');
   const s = section('selection', ['milestone','assignee','author','search','exclude_assignees','issue_type','confidential','labels','order']);

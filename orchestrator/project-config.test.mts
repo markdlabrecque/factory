@@ -23,6 +23,14 @@ test('profiles normalize independently of executable legacy settings', () => {
     assert.equal(c.TRACKER.kind, profile === 'personal' ? 'github' : 'gitlab');
   });
 });
+test('configuration bytes and total instruction path count are bounded before consumers load files', () => {
+  const text=personal();
+  fixture(text+' '.repeat(256*1024-Buffer.byteLength(text)),dir=>assert.equal(loadTomlConfig(dir).source.mode,'toml'));
+  fixture(text+' '.repeat(256*1024+1-Buffer.byteLength(text)),dir=>assert.throws(()=>loadTomlConfig(dir),/oversized/));
+  const paths=Array(129).fill('"missing.md"').join(',');
+  fixture(text+`\n[instructions]\ncommon = [${paths}]\n`,dir=>assert.throws(()=>loadTomlConfig(dir),/128 configured paths/));
+});
+
 test('absent and v1 configuration fail closed without conversion', () => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-config-'));
   try { assert.throws(() => loadTomlConfig(dir), /missing version 2/); } finally { rmSync(dir, { recursive: true }); }

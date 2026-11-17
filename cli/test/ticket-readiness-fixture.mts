@@ -14,7 +14,7 @@ export function readinessFixture(t: TestContext) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'ticket-readiness-'))), p = paths(home);
   const root = join(home, 'site'), bin = join(home, 'bin'), fake = join(home, 'fake');
   mkdirSync(join(root, '.factory'), { recursive: true }); mkdirSync(bin); mkdirSync(fake);
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', timeout: 1500, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git('init', '-q', '-b', 'main');
   writeFileSync(join(root, '.gitignore'), '.factory/*\n!.factory/factory.toml\n.factory-workflow/\n');
   const config = join(root, '.factory/factory.toml');

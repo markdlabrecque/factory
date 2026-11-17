@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diagnoseProject } from '../src/supervisor-worker.mts';
+import { supervisorDecisionSources } from '../src/supervisor-input.mts';
 import type { ComponentDiagnosisBoundary as DiagnosisBoundary, WorkerOptions } from '../src/supervisor-worker.mts';
 import { readSupervisor, supervisorFile, commitSupervisor } from '../src/supervisor-state.mts';
 import { supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-contract.mts';
@@ -58,6 +59,8 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
     const f = fixture('observe');
     const result = await diagnoseProject(f.options()); assert.equal(result.state, 'proposed');
     const saved = f.state(); assert.equal(saved.charged.diagnosis.tokens, 100); assert.equal(Object.values(saved.reservations)[0].state, 'finished');
+    assert.deepEqual(supervisorDecisionSources(readFileSync(supervisorFile(f.stateDir),'utf8'),f.a.snapshot.project,236,'2026-11-17T12:01:00.000Z'),
+      supervisorDecisionSources(null,f.a.snapshot.project,236,AT),'own real retained diagnostic output is not an authoritative prior decision');
     const d = Object.values(saved.diagnostics!)[0]; assert.equal(d.outcome, 'proposed'); assert.match(d.stderr, /retained worker/);
     assert.deepEqual(saved.intents, {}); assert.deepEqual(saved.reviews, {}); assert.deepEqual(saved.proposals, {});
     assert.ok(readFileSync(d.inputRef, 'utf8').includes('original human-planning'));

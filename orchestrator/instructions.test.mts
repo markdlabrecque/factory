@@ -24,6 +24,15 @@ test('common and role instructions freeze in order, deduplicating canonical alia
   assert.equal(frozen.text, 'literal {{TICKET}} $(echo nope)\n\nimplement');
   assert.notEqual(frozen.hashes['impl.md'], loadInstructions(root, lists, 'implementation').hashes['impl.md']);
   assert.ok(Object.isFrozen(frozen) && Object.isFrozen(frozen.hashes));
+  const paths=['a.md','b.md','c.md','d.md'];
+  for (const [i,path] of paths.entries()) writeFileSync(join(root,path),'x'.repeat(256*1024-(i===3?6:0)));
+  const bounded={...lists,common:paths,implementation:[]};
+  assert.equal(Buffer.byteLength(loadInstructions(root,bounded,'implementation').text),1024*1024,'aggregate boundary includes separators');
+  writeFileSync(join(root,'d.md'),'x'.repeat(256*1024-5));
+  assert.throws(()=>loadInstructions(root,bounded,'implementation'),/aggregate/);
+  writeFileSync(join(root,'a.md'),'x'.repeat(256*1024+1));
+  assert.throws(()=>loadInstructions(root,bounded,'implementation'),/oversized/);
+  assert.throws(()=>loadInstructions(root,{...lists,common:Array(129).fill('missing.md')},'implementation'),/128 configured paths/,'path cap precedes file reads');
 });
 
 test('unreadable instruction fails closed', t => {

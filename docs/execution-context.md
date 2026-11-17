@@ -6,6 +6,31 @@ bundle contains the workflow, Board helpers, TOML parser, Factory templates and
 private locked dependencies. A project does not supply individual executable or
 template overrides to this workflow.
 
+## Explicit saved-run diagnosis collector
+
+The source-only `cli/src/supervisor-input.mts` collector consumes an already selected
+`ExecutionContext`, checks current selection before and after collection, and
+requires one explicit ticket in a uniquely registered canonical checkout. It
+reuses the selected config/instruction/template/runtime identities without
+credential discovery, user auth/settings reads or project executable imports.
+Complete project-mode overrides currently hold as unsupported by this collector;
+standard Factory source is never substituted for an override.
+
+Its frozen `originals.json` contains the complete snapshot, incident facts, current
+frozen ticket input and exact material `bindings`. The snapshot policy digest binds
+those original run/attempt/receipt/config/saved-input bytes, normalized settings,
+current base SHA and ownership along with Factory model policy; runtime/dependency,
+baseline/tip and current ticket hashes remain explicit snapshot material. Originals
+are read with bounded stable no-alias reads and written 0600 in a new 0700 host
+directory outside project/runtime mounts. Finished recovery inputs use the exact
+validated attempt-scoped current evidence, never an older implementation verdict.
+Own-hold exclusion requires an explicit exact identity, matched against both
+read-only admission observations; conflicting foreign holds still refuse even
+without a generation increment. Neither a selected context nor a fixture
+runtime proves actual installed mount or cleanup authority. Refer to the
+[complete input contract](supervisor.md#complete-saved-run-input-collection) for
+source roles, authoritative decisions, cache stability and refusal conditions.
+
 ## Launcher contract
 
 A trusted launcher selects a prepared runtime once and supplies:
@@ -46,6 +71,21 @@ Git and `.env` use the checkout. Sandbox image/setup settings come from its TOML
 Logs, evidence, recovery artifacts, diagnostic sessions, SDK patches and implementation worktrees use the shared `.factory` layout. New private runtime preparation applies the pinned [Sandcastle patch](sandcastle-patch.md) after npm with scripts disabled and before dependency hashing. Failed preparation leaves prior bundles and descriptor bytes intact. Analysis worktrees and shared records retain their shared
 state layout. `.factory/sandbox` is an explicitly mounted project helper
 directory; an empty project receives no installed sample image or Drupal setup. Repository source examples live under `.factory/`, but executable runtime assembly reads the canonical `orchestrator/`, `board/` and CLI template inventories. The retired project workflow copies are not runtime inputs.
+Saved-layout assertions inspect every top-level state JSON before project filtering
+and all selected-project ownership receipts with canonical, stable regular-file
+reads bounded to 8 MiB each. Aliases and special files refuse before opening;
+NOFOLLOW/NONBLOCK and descriptor checks prevent a replacement FIFO from blocking.
+Receipt validation uses the same bounded bytes, not a second unrestricted read.
+Initial context loading and `assertCurrent` also bound every project config and
+instruction read through the same canonical regular-file descriptor primitive:
+256 KiB per file, 128 configured instruction paths total, and 1 MiB composed text
+per role (six roles), including separators. Invalid text and unstable reads refuse.
+Ordinary contained instruction aliases remain supported; supervisor collection
+calls `assertCurrent({strictOriginals:true})` at both freshness checks to reject
+aliases before any inherited instruction read. NOFOLLOW/NONBLOCK and descriptor
+checks apply here too, not merely in the collector's later original reads.
+Selected immutable runtime manifest/template validation remains unchanged.
+Malformed unrelated JSON remains under its normal schema reader's authority.
 `codePath` and `projectPath` reject lexical traversal between these roots. Existing old-layout run/ownership paths are never rewritten into `.factory` authority. Exact saved-container settlement may proceed while a layout hold blocks new launches; that maintenance does not authorize repair or adopt a branch. Already-running processes keep their immutable selected runtime, even after a new descriptor is published.
 
 ## Frozen inputs and proof
