@@ -17,7 +17,7 @@ node --test board/board-prototype.test.mjs
 
 It is not included in the three `.mts` globs above or the CI shard inventory. Run it when checking the prototype or its documented presentation contracts. Historical test counts in design and research reports describe those revisions, not the current suite.
 
-CI runs on pull requests targeting `main` or `develop`, with the same required jobs and deadlines for both integration targets. It runs four parallel jobs through `scripts/test-shard.sh`. Normal-entrypoint integration scenarios are partitioned by input, proof, sandbox and model routing across `orchestrator/verification-entrypoint*.test.mts`. They retain the same shared fixture and assertions; separate files distribute their process cost rather than leaving all scenarios serial in one shard. The runner expands exactly the three globs above, sorts paths with `LC_ALL=C`, and assigns zero-based file position modulo four to shards 1 through 4. New matching files enter the inventory automatically. Each shard retains `--test-concurrency=4`, the hard 180-second deadline and `--test-timeout=120000`. No test-name filters or exclusions apply.
+CI runs on pull requests targeting `main` or `develop`, with the same required jobs and deadlines for both integration targets. The copied refresh scenarios are partitioned by delivery, models, original input, Board, selection and ownership across `orchestrator/refresh*.test.mts`, sharing `refresh-fixture.mts`. All 45 existing registrations and their test bodies are retained; splitting the formerly serial file distributes process cost without reducing coverage or raising time limits. It runs four parallel jobs through `scripts/test-shard.sh`. Normal-entrypoint integration scenarios are partitioned by input, proof, sandbox and model routing across `orchestrator/verification-entrypoint*.test.mts`. They retain the same shared fixture and assertions; separate files distribute their process cost rather than leaving all scenarios serial in one shard. The runner expands exactly the three globs above, sorts paths with `LC_ALL=C`, and assigns zero-based file position modulo four to shards 1 through 4. New matching files enter the inventory automatically. Each shard retains `--test-concurrency=4`, the hard 180-second deadline and `--test-timeout=120000`. No test-name filters or exclusions apply.
 
 Reproduce CI from the repository root with Node 24 and GNU `timeout`:
 
@@ -283,7 +283,7 @@ Init and update fixtures verify data-only assets and preserve project bytes and 
 
 ```sh
 node --test orchestrator/context.test.mts orchestrator/models.test.mts orchestrator/v2-contract.test.mts cli/test/runtime-bundle.test.mts cli/test/runtime-ownership.test.mts
-node --test orchestrator/verification-entrypoint*.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
+node --test orchestrator/verification-entrypoint*.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh*.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
 ```
 
 `cli/test/shared-runtime.test.mts` exercises a copied install and data-only init
@@ -456,7 +456,7 @@ Run the changed boundary first:
 
 ```sh
 node --test board/delivery.test.mts orchestrator/delivery*.test.mts cli/test/delivery-followup-schedule.test.mts
-node --test orchestrator/refresh.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
+node --test orchestrator/refresh*.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
 ```
 
 Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
@@ -491,7 +491,7 @@ credentials or a service manager.
 ## Host launch readiness tests
 
 ```sh
-node --test orchestrator/launch-readiness.test.mts orchestrator/refresh.test.mts cli/test/run.test.mts cli/test/recovery-prepare.test.mts cli/test/recovery-run.test.mts board/refresh-worker.test.mts board/install.test.mts
+node --test orchestrator/launch-readiness.test.mts orchestrator/refresh*.test.mts cli/test/run.test.mts cli/test/recovery-prepare.test.mts cli/test/recovery-run.test.mts board/refresh-worker.test.mts board/install.test.mts
 ```
 
 These fixtures use temporary projects/state and local Git with stubbed tracker, image, agent and process boundaries. They check project holds before tracker analysis or new queue/admission/container effects, explicit shared ticket attribution, input/workspace isolation, preserved dirty/unrelated worktrees and stale registrations, fresh success without stopped-run retry, late path/branch/image-readiness races, direct report-write failure and zero pre-charge recovery attempts. Recovery fixtures change or fail structured input after image readiness and assert typed ticket-only reports without charge. Manual, dispatch and real scheduled routing share the host hold identity; a late scheduler-policy refusal or cancellation cannot spawn after the asynchronous gate. Exact-owned-container settlement/cleanup remains exercised during a host hold. Explicit Board and scheduled read-only refresh guard opaque overrides too; standalone Board install/update fixtures execute the shipped host probe/store dependencies. Routing, pause/off/unknown policy and process-group cancellation regressions remain in the complete suite. No installed app, real registered project, service manager, Docker daemon or authentication is used.
@@ -500,7 +500,7 @@ These fixtures use temporary projects/state and local Git with stubbed tracker, 
 
 ```sh
 node --test cli/test/ticket-readiness.test.mts orchestrator/ticket-readiness.test.mts
-node --test --test-concurrency=4 orchestrator/refresh.test.mts cli/test/run.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/workflow-routing.test.mts board/readiness-view.test.mts
+node --test --test-concurrency=4 orchestrator/refresh*.test.mts cli/test/run.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/workflow-routing.test.mts board/readiness-view.test.mts
 node --test --test-concurrency=4 orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
 ```
