@@ -1,0 +1,143 @@
+// Two offline copied-public-CLI wiring journeys; normal producer/custody is shared, HTTP/platform responses synthetic.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdirSync, chmodSync, writeFileSync, readFileSync, readdirSync, existsSync, cpSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { normalEntrypointFixture } from '../../orchestrator/verification-entrypoint-fixture.mts';
+import { ADVISORY_PROFILE_ID } from '../src/supervisor-advisory-contract.mts';
+import { readSupervisor, supervisorFile } from '../src/supervisor-state.mts';
+import { readAdmission } from '../../board/admission.mts';
+import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+async function journey(t:any, unknown:boolean) {
+  await normalEntrypointFixture(t,'no-commit-custody-public','openai','mid',true,async c=>{
+    const {home,root,p,state,fake,bin,runtime,project,run,git,rawRun}=c;
+    mkdirSync(p.config,{recursive:true,mode:0o700}); chmodSync(p.config,0o700); chmodSync(state,0o700);
+    writeFileSync(p.projects,JSON.stringify({version:1,projects:[{name:'fixture',root,schedule:{enabled:true,branch:'main',since:new Date().toISOString()}}]}));
+    writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:1}}),{mode:0o600});
+    // Synthetic user-approved expiring record, read through the default production source, NOT installed quiescence proof.
+    writeFileSync(join(p.config,'supervisor-rollout.json'),JSON.stringify({version:1,project,host:runtime.id,hostDependencies:runtime.manifest.dependencies,
+      selected:runtime.id,dependencies:runtime.manifest.dependencies,recordedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+3600000).toISOString(),
+      olderRuntimesQuiesced:true,unmanagedWorkQuiesced:true}),{mode:0o600});
+    const calls=join(fake,'public-programs.jsonl');
+    writeFileSync(join(bin,'systemctl'),`#!${process.execPath}
+import {appendFileSync} from 'node:fs';
+const a=process.argv.slice(2);appendFileSync(${JSON.stringify(calls)},JSON.stringify({program:'systemctl',args:a})+'\\n');
+if(a[0]!=='--user'||a[1]!=='show')process.exit(90);
+console.log('LoadState=loaded\\nActiveState='+ (a[2].endsWith('.timer')?'active':'inactive')+'\\nUnitFileState=enabled');
+`,{mode:0o755});
+    // Replace normal-stage tracker with strict read-only complete-originals transport, recording every query.
+    writeFileSync(join(bin,'gh'),`#!${process.execPath}
+import {appendFileSync} from 'node:fs';const a=process.argv.slice(2);
+appendFileSync(${JSON.stringify(calls)},JSON.stringify({program:'gh',args:a})+'\\n');
+if(a[0]!=='api'||a.some(v=>['POST','PATCH','PUT','DELETE'].includes(v)))process.exit(90);
+if(a[1]==='graphql'){console.log(JSON.stringify({data:{repository:{issue:{parent:null}}}}));}
+else if(a[1].includes('/comments')) console.log('[]');
+else if(a[1].includes('/issues/7'))console.log(JSON.stringify({number:7,title:'Fix login',body:'Complete current human instruction: inspect retained no-commit evidence.'}));
+else process.exit(90);
+`,{mode:0o755});
+    cpSync(join(bin,'gh'),join(bin,'gh-axi'));
+    for(const name of ['docker','op','pi','npm']) writeFileSync(join(bin,name),`#!${process.execPath}\nimport {appendFileSync} from 'node:fs';appendFileSync(${JSON.stringify(calls)},JSON.stringify({program:${JSON.stringify(name)},args:process.argv.slice(2)})+'\\n');process.exit(90);\n`,{mode:0o755});
+    // Deliberately retain both staged and unstaged work and an untracked file before diagnosis.
+    writeFileSync(join(root,'staged.txt'),'staged original'); git(root,'add','staged.txt');
+    writeFileSync(join(root,'app.txt'),'dirty original'); writeFileSync(join(root,'untracked.txt'),'untracked original');
+    const worktree=join(root,'.factory/worktrees',run.branch);
+    const preservation=()=>({status:git(root,'status','--porcelain=v1','--untracked-files=all'),refs:git(root,'show-ref'),index:readFileSync(join(root,'.git/index')).toString('base64'),
+      worktrees:git(root,'worktree','list','--porcelain'),worktreeStatus:git(worktree,'status','--porcelain=v1','--untracked-files=all'),worktreeIndex:readFileSync(git(worktree,'rev-parse','--git-path','index')).toString('base64'),worktreeApp:readFileSync(join(worktree,'app.txt'),'utf8'),
+      app:readFileSync(join(root,'app.txt'),'utf8'),staged:readFileSync(join(root,'staged.txt'),'utf8'),untracked:readFileSync(join(root,'untracked.txt'),'utf8'),run:readFileSync(join(state,'owner_repo--7.json'),'utf8')});
+    const before=preservation(); assert.equal(before.run,rawRun);
+    const trace=join(fake,'requests.jsonl'), config=join(fake,'public-preload.json');
+    writeFileSync(config,JSON.stringify({unknown,trace,inputRoot:join(state,'supervisor',supervisorHash(root)),journal:supervisorFile(state),
+      originalSource:fileURLToPath(new URL('../../',import.meta.url)),forbiddenOriginal:new URL('../src/paths.mts',import.meta.url).href}));
+    const preload=new URL('./supervisor-acceptance-preload.mts',import.meta.url);preload.searchParams.set('config',config);
+    const cli=join(p.app,'cli/bin/factory.mts');
+    const env={HOME:home,FACTORY_HOME:home,PATH:`${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,LANG:'C',OPENAI_API_KEY:'sk-synthetic-offline-not-a-secret'};
+    const evidence:any={executable:process.execPath,instrumentation:['--import',preload.href],source:p.app,runtime:runtime.directory,runtimeId:runtime.id,dependencies:runtime.manifest.dependencies,commands:[],synthetic:['read-only tracker/service replies','expiring operator assertion','HTTP SSE and usage; not remote enforcement, invoice or model quality']};
+    const command=(...args:string[])=>{
+      const argv=[cli,'supervisor',...args,'--project',root];
+      const r=spawnSync(process.execPath,['--import',preload.href,...argv],{env,cwd:root,encoding:'utf8',timeout:15000});
+      evidence.commands.push({argv,status:r.status,stdout:r.stdout,stderr:r.stderr});
+      return r;
+    };
+    if(!unknown){
+      const r=command('diagnose','7','--json'); assert.equal(r.status,0,r.stdout+r.stderr);
+      const first=JSON.parse(r.stdout);assert.equal(first.state,'proposed');assert.equal(first.recommendation.authority,'advice-only');
+      assert.equal(first.recommendation.nextStep.kind,'wait');assert.match(first.recommendation.rationale,/Synthetic typed wait/);
+      const terminal=readSupervisor(state,project), charge=structuredClone(terminal.charged);
+      const reservation=Object.values(terminal.reservations)[0];assert.equal(reservation.state,'finished');assert.deepEqual(reservation.actual,{tokens:35,cost:220});
+      assert.equal(Object.values(terminal.advisory!.settlements!)[0].disposition,'retained-advice');
+      assert.equal(Object.keys(readAdmission(state).supervisorHolds).length,0);
+      const leases=join(p.runtimes,'.leases');assert.equal(existsSync(leases)?readdirSync(leases).length:0,0);
+      for(const action of ['status','explain']) {const r=command(action,'--json');assert.equal(r.status,0,r.stdout+r.stderr);assert.deepEqual(JSON.parse(r.stdout).proposedNextAction.recommendation,first.recommendation);}
+      const {buildSupervisorData}=await import(pathToFileURL(join(p.app,'board/supervisor.mts')).href);
+      const board=await buildSupervisorData(state,0,{registry:p.projects,read:async()=>JSON.parse(command('status','--json').stdout)});
+      assert.deepEqual(board.projects[0].status!.proposedNextAction!.recommendation,first.recommendation);
+      const again=command('diagnose','7','--json');assert.equal(again.status,0,again.stdout+again.stderr);
+      const reused=JSON.parse(again.stdout);assert.equal(reused.state,'reused');assert.equal(reused.diagnosticId,first.diagnosticId);assert.deepEqual(reused.basis,first.basis);
+      assert.deepEqual(readSupervisor(state,project).charged,charge);assert.equal(Object.keys(readAdmission(state).supervisorHolds).length,0);
+      assert.equal(existsSync(leases)?readdirSync(leases).length:0,0,'unchanged fresh diagnosis creates no runtime pin');
+      assert.equal(Object.keys(readSupervisor(state,project).reservations).length,1,'unchanged fresh diagnosis creates no reservation');
+    }else{
+      const argv=[cli,'supervisor','diagnose','7','--project',root,'--json'];
+      const child=spawn(process.execPath,['--import',preload.href,...argv],{env,cwd:root,stdio:['ignore','pipe','pipe','ipc','pipe','pipe','pipe']});
+      t.after(()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');});
+      let stdout='',stderr='';child.stdout!.on('data',b=>stdout+=b);child.stderr!.on('data',b=>stderr+=b);
+      const closed=once(child,'close');
+      await Promise.race([once(child.stdio[5] as any,'data'),closed.then(()=>{throw Error('CLI ended before real send: '+stdout+stderr);})]);
+      const sent=readSupervisor(state,project);assert.equal(Object.keys(sent.advisory!.sends).length,1);assert.equal(Object.values(sent.reservations)[0].state,'active');
+      const stopped=command('stop');assert.equal(stopped.status,1,stopped.stdout+stopped.stderr);assert.match(stopped.stdout,/pending/);
+      const pending=JSON.parse(command('status','--json').stdout);assert.equal(pending.cancellation.pendingTotal,1);
+      const denied=command('diagnose','7','--json');assert.notEqual(denied.status,0);assert.equal(Object.keys(readSupervisor(state,project).advisory!.sends).length,1);
+      const human=once(child,'message');(child.stdio[6] as any).write('x');
+      const message=await Promise.race([human,closed.then(()=>{throw Error('CLI ended before durable human barrier: '+stdout+stderr);})]);
+      assert.equal(message[0].kind,'durable-human');
+      child.kill('SIGKILL');await closed;
+      evidence.commands.push({argv,signal:child.signalCode,stdout,stderr,barrier:'after real parent-directory fsync of human journal'});
+      const retained=readSupervisor(state,project), reservation=Object.values(retained.reservations)[0];
+      assert.equal(reservation.actual,null);assert.notEqual(reservation.state,'finished');assert.deepEqual(retained.charged,sent.charged);
+      assert.equal(Object.keys(readAdmission(state).supervisorHolds).length,1);
+      assert.ok(readdirSync(join(p.runtimes,'.leases')).length>0);
+      assert.equal(Object.keys(retained.humans).length,1);assert.equal(Object.values(retained.humans)[0].delivery.attempts,0);
+      const restart=JSON.parse(command('status','--json').stdout);assert.equal(restart.humanRequests.length,1);assert.equal(restart.cancellation.pendingTotal,1);
+      const replacement=command('diagnose','7','--json');assert.notEqual(replacement.status,0);
+      const managed=spawnSync(process.execPath,[cli,'run','7','--project',root],{env,cwd:root,encoding:'utf8',timeout:15000});
+      evidence.commands.push({argv:[cli,'run','7','--project',root],status:managed.status,stdout:managed.stdout,stderr:managed.stderr});
+      assert.notEqual(managed.status,0);assert.match(managed.stdout+managed.stderr,/held by supervisor/);
+      assert.deepEqual(readSupervisor(state,project).charged,sent.charged);
+    }
+    assert.equal(readFileSync(trace,'utf8').trim().split('\n').length,1,'only one actual serialized request');
+    assert.equal(Object.keys(readSupervisor(state,project).advisory!.sends).length,1);
+    assert.deepEqual(preservation(),before,'dirty work, index, refs and exact saved normal execution preserved');
+    evidence.journal=JSON.parse(readFileSync(supervisorFile(state),'utf8'));evidence.admission=readAdmission(state);
+    const retainFiles=(directory:string)=>existsSync(directory)?Object.fromEntries(readdirSync(directory,{recursive:true,withFileTypes:true}).filter(d=>d.isFile()).map(d=>{
+      const file=join(d.parentPath,d.name);return [file,readFileSync(file).toString('base64')];})):{};
+    evidence.originalsAndOwnership=retainFiles(join(state,'supervisor'));
+    evidence.runtimePins=retainFiles(join(p.runtimes,'.leases'));
+    evidence.normalCustody=retainFiles(join(state,'payload-custody'));
+    evidence.sourceFallback='Production import resolution denied against original repository; explicit negative import rejected in every public CLI process';
+    evidence.manifest=runtime.manifest;
+    const originals=Object.entries(evidence.originalsAndOwnership).filter(([name])=>name.endsWith('/originals.json')).map(([,bytes])=>JSON.parse(Buffer.from(bytes as string,'base64').toString()));
+    assert.ok(originals.length>1,'fresh production collection rebuilt full originals');
+    const prior=originals.map(o=>o.snapshot.sources.filter((s:any)=>s.role==='prior-decisions'));
+    for(const sources of prior) assert.deepEqual(sources,prior[0],'cached output never becomes an authoritative prior decision');
+    evidence.authoritativePriorSet=prior[0];
+    assert.ok(evidence.normalCustody && Object.keys(evidence.normalCustody).length>0);
+    evidence.request=JSON.parse(readFileSync(trace,'utf8'));
+    assert.equal(evidence.request.payload.model,'gpt-6.1-terra');
+    assert.equal(evidence.request.payload.stream,true);
+    assert.equal(evidence.request.payload.store,false);
+    assert.equal(evidence.request.payload.truncation,'disabled');
+    assert.equal(evidence.request.payload.max_output_tokens,4096);
+    evidence.programs=readFileSync(calls,'utf8');evidence.preservation=before;
+    evidence.normalTrackerCalls=readFileSync(join(fake,'gh.jsonl'),'utf8');
+    assert.equal(/"program":"(?:docker|op|pi|npm)"/.test(evidence.programs),false,'no forbidden program invoked');
+    const artifact=process.env.FACTORY_270_EVIDENCE;
+    if(artifact){mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,unknown?'journey-b.json':'journey-a.json'),JSON.stringify(evidence,null,2));}
+    t.diagnostic(JSON.stringify({copiedCLI:cli,runtime:runtime.id,journey:unknown?'B':'A',requests:1,artifact:artifact??'not retained'}));
+  });
+}
+test('copied public diagnosis retains non-executing advice and unchanged fresh CLI reuses it without another charge', {timeout:120000},t=>journey(t,false));
+test('copied public stop retains owned pending work and durable human request across controller loss with unknown usage', {timeout:120000},t=>journey(t,true));

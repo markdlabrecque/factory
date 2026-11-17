@@ -36,6 +36,51 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Public copied-install advisory journeys
+
+```sh
+FACTORY_270_EVIDENCE=/tmp/factory-270-evidence node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-acceptance.test.mts
+```
+
+Exactly two end-to-end wiring cases reuse `normalEntrypointFixture`'s actual saved
+normal execution and sealed payload custody. They run the private copied
+`cli/bin/factory.mts`, production host/platform readers, selected flat runtime,
+worker, owned guard/child, and four digest-checked provider archives. The package
+installer remains synthetic; it is **not** the evidence that the real pinned
+provider SDK loaded. The production adapter's archive loader and actual serialized
+HTTP request provide that evidence. A test-only preload denies native outbound
+network and substitutes SSE below the provider boundary. It rejects original
+repository production imports after instrumentation loads and explicitly probes
+that rejection in each public CLI process. Test instrumentation itself is imported
+from test files; it is not a public CLI capability or runtime inventory asset.
+
+A proves known usage/owned cleanup settlement, useful non-executing retained advice
+in fresh status/explain processes and the production Board projection (fed fresh
+public status JSON), then exact unchanged diagnostic/basis reuse with the same
+authoritative prior-decision set and no second request, reservation, exclusion or pin.
+B uses native pipes at actual send, then runs public stop in another process.
+Already authorized work honestly remains pending, while replacement authorization
+is refused. After synthetic unknown terminal usage, another IPC barrier pauses the
+controller **after real parent-directory fsync** of its durable human request;
+the test kills that exact native child before CLI return. Restart retains the human
+request, full charge, exclusion and runtime pins and refuses managed manual work.
+The existing process/T04 units own controller loss while payload-live and both
+stop/authorization orderings; these two cases do not duplicate their fault matrix.
+
+Read-only `gh`/`gh-axi` and `systemctl` stubs record every public-phase call and
+reject mutations; Docker, Pi, npm and 1Password commands reject invocation.
+Synthetic auth is environment-only. Private finite policy and an explicitly
+user-approved synthetic expiring operator assertion use the production default
+record source, not injected host capabilities or emptied prerequisites. Dirty,
+staged, untracked and parked worktree content, index, refs and raw saved run are
+compared without reset/checkout/clean. Optional JSON evidence captures actual
+argv/output, request, journal, complete frozen originals, ownership/custody, pins,
+manifest identities and work-preservation snapshots before disposable cleanup.
+This proves local source/filesystem/process wiring, not real provider enforcement,
+actual billing, useful model judgment, installed quiescence or a pilot. All four
+mandatory shards, separate bounded browser lifecycle, docs checks and independent
+review remain required; this focused command replaces none of them.
+
 ## Explicit diagnosis command boundary
 
 `cli/test/supervisor-command.test.mts` covers strict named-ticket parsing, redacted
