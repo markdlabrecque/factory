@@ -182,7 +182,13 @@ supervisor/admission locks or network/process waits under either lock are added.
 Runtime compatibility checks occur before admission locking. Quiescence of all old
 runtimes and unmanaged work plus complete compatible active-runtime selection are
 explicit rollout gates, not a claim of exclusion against nonparticipating code.
-See [shared admission exclusion](supervisor.md#shared-admission-exclusion).
+See [shared admission exclusion](supervisor.md#shared-admission-exclusion) and its
+[entrypoint-to-guard trace](supervisor.md#managed-entrypoint-audit-trace). The trace
+distinguishes preflight entries from exact-token implementation/recovery/delivery
+claims; neither layer replaces frozen proof, continuation or send-authorization
+checks. Direct main/dispatch and shell bootstrap are guarded independently of the
+CLI wrapper, so supported selected-issue entry does not rely on its caller behaving
+correctly. No runtime module or dependency is added by this audit.
 
 ### Exact scoped gate-input corrections
 

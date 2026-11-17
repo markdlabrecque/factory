@@ -70,6 +70,11 @@ No-send closure is unsupported: absent authorization, exited controller, referen
 strings or callbacks do not prove no-send/cleanup. Unknown evidence stays held.
 See [the exclusion protocol](supervisor.md#shared-admission-exclusion) for strict
 journal compatibility, source-only boundaries and the journal's sole send authority.
+The [managed entrypoint audit trace](supervisor.md#managed-entrypoint-audit-trace)
+maps each CLI/direct/recovery/delivery start to its guard, genuine ownership and
+first protected effect. A dispatched handoff retains its exact token; a refused
+handoff cannot silently become a fresh manual start. Recovery refusal occurs before
+pending-charge replay or consuming an advisory candidate, not after charging it.
 
 Before any future activation, quiesce older runtimes and unmanaged work and select a
 complete compatible runtime everywhere. The guarantee does not cover mixed old or

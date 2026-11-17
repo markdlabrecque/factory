@@ -102,6 +102,44 @@ ownership atomically instead of returning unowned permission. `admitRun` and cla
 transfer also refuse exclusion, covering normal, recovery and CI delivery admission.
 Uncertain entry handoff/cleanup and orphan entries remain held, not death-pruned.
 
+### Managed entrypoint audit trace
+
+The supported current runtime has two ownership layers: a durable **entry** protects
+preflight/collection/launch, then the existing token-fenced **run claim** protects
+implementation, recovery or delivery. Entry ownership is not a run claim, a recovery
+charge, proof, or send permission. The audited paths are:
+
+| ENTRYPOINT | GUARD | OWNERSHIP | BEFORE EFFECT |
+| --- | --- | --- | --- |
+| `factory run <ticket>` (`cli/src/commands/run.mts`), including selected `--issue`; CLI dispatch and scheduler tick | `runDispatchSh` in `cli/src/commands/dispatch.mts` → `claimManagedEntry` | Canonical project entry across the selected complete workflow, including overrides | Readiness probes and spawning `dispatch.sh`; no opaque override executes on refusal |
+| Standard `dispatch.sh` bootstrap | `orchestrator/context-process.mts` → `claimManagedEntry` | Separate entry across shell preflight/child lifetime | Shell readiness commands and the standard dispatch/main child |
+| Direct standard `orchestrator/dispatch.mts` | Top-level `claimManagedEntry`; later `claimRun`/`admitRun` | Entry across analysis/tracker work; exact launch token handed to child | Runtime launch/readiness, tracker collection/analysis, branch or implementation launch |
+| Direct standard `orchestrator/main.mts`, including `--issue` | Top-level `claimManagedEntry`; `board/board.mts:adoptClaim` → exclusion check and token adoption or `admitRun` | Entry before collection; dispatched token is retained, genuine tokenless manual start gets a normal claim | Readiness/tracker/model work; normal claim before sandbox/implementation |
+| Recovery preparation and launch (`cli/src/recovery-prepare.mts`, `recovery-run.mts`) | `claimManagedEntry`; `cli/src/recovery-claim.mts:claimRecovery` checks exclusion under admission lock | Entry before preparation/remote fetch; existing recovery claim and durable attempt ledger | Remote preparation/branch fetch or container/model work; exclusion check precedes pending-charge replay and candidate consumption |
+| Recovery child (`main.mts --recover`) | Main entry guard, existing exact attempt validation and `adoptClaim` | Existing recovery token/attempt, not fresh normal ownership | Git/container/model work; failed launch handoff cannot become a manual retry |
+| CI delivery continuation (`orchestrator/dispatch.mts`) | Dispatch entry guard; `board/board.mts:claimDelivery` → `admitRun` exclusion check | Existing waiting checkpoint plus exact delivery token | Continuation's remote delivery/merge work; frozen proof/exact-SHA checks remain required |
+| Board writes / parent-child claim transfer | `writeStage` exclusion check and exact held token; `admission.mts:transferClaim` exclusion check | Exact current token, never displayed advice or a proposal | Stored execution progress or ownership transfer |
+
+A failed dispatched handoff cannot fall back to tokenless admission. Manual admission
+increments the existing normal generation once; preflight entries do not. Recovery
+charges, consumed candidates, frozen proof and continuation gates are unchanged.
+Read-only project/runtime selection before these guards grants no execution authority.
+This trace covers current managed code only, not arbitrary invocation of internal
+helpers by nonparticipating/older code.
+
+**Evidence boundary:** `cli/test/supervisor-admission.test.mts` reuses the same real
+filesystem/two-process IPC race for diagnosis versus diagnosis, normal admission,
+tokenless manual admission and the dispatch/recovery/delivery pre-effect entry guards.
+Ready/go/result/exit barriers keep owners live through assertions; no sleep, retry,
+forced settlement or winner release is used. Each round uses an isolated store and
+accepts either legitimate winner, never two. Recovery/delivery race at their entry
+guard: actual repair/delivery admission needs a saved stopped/waiting record, which
+itself conservatively prevents diagnosis quiescence. Separate actual recovery-claim
+and held-store table tests prove refusal before replay/charge/candidate consumption
+and admission callbacks, preserving bytes and generations. Real flat main/dispatch/
+shell and CLI fixtures prove wiring and zero external effects under a durable hold;
+command/provider responses remain synthetic, not installed or live authority.
+
 **Narrow source-only terminal settlement and release:** `settleAdvisory` in
 `supervisor-state.mts` requires the actual registered grant and durable send authorization,
 T03's revalidated immutable known usage and T04's exact owned process plus durable
