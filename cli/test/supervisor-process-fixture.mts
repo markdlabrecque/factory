@@ -14,6 +14,9 @@ import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
 import { ownerOf } from '../../board/admission.mts';
 import { denyNetwork } from './supervisor-provider-fixture.mts';
+import { factoryToml } from './config-fixture.mts';
+import { paths } from '../src/paths.mts';
+import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor, preflightRuntimeRemoval, releaseRuntimeLease } from '../src/runtime-ownership.mts';
 
 if (process.argv[2] === '--controller') {
   denyNetwork();
@@ -44,7 +47,23 @@ if (process.argv[2] === '--controller') {
     let state = commitSupervisor(stateDir,snapshot.project,0,{id:'observe',at,kind:'observe',facts,snapshotHash:supervisorHash(snapshot),reason:'offline'});
     state = commitSupervisor(stateDir,snapshot.project,state.revision,{id:'reserve',at,kind:'reserve-advisory',reservation:reservation as any,policy:f.registration,controls:f.controls,
       limits:{project:{tokens:10_000_000,cost:100_000_000},shared:{tokens:10_000_000,cost:100_000_000},capacity:1,reviewCalls:5,reviewTimeoutMs:600000}});
-    const boundary = createOpenAIDiagnosisBoundary({runtimeRoot,stateDir});
+    let pinned: any;
+    if (process.argv[6] === '--runtime') {
+      const p = paths(join(root,'home'));
+      mkdirSync(join(snapshot.project.root,'.factory'));
+      writeFileSync(join(snapshot.project.root,'.factory/factory.toml'),factoryToml('owner/repo'));
+      // The test supplies a bundle already assembled into this disposable host's store.
+      withRuntimeLock(p,()=>{recordRuntimeOwnership(p,manifest.id);writeRuntimeDescriptor(p,manifest.id);});
+      const { createSupervisorRuntime } = await import(pathToFileURL(join(runtimeRoot,'supervisor-runtime.mts')).href);
+      pinned = await createSupervisorRuntime({paths:p,projectRoot:snapshot.project.root,stateDir,invocationId:'invocation',fence:hold.fence});
+      try { releaseRuntimeLease(p,pinned.lease().token); throw Error('Generic release accepted protected pin'); }
+      catch(e) { if (!String(e).includes('Invalid runtime lease')) throw e; }
+      try { withRuntimeLock(p,()=>preflightRuntimeRemoval(p)); throw Error('Removal accepted protected pin'); }
+      catch(e) { if (!String(e).includes('Invalid runtime lease')) throw e; }
+      try { await pinned.release(); throw Error('Unsettled release accepted'); }
+      catch(e) { if (!String(e).includes('settlement held')) throw e; }
+    }
+    const boundary = pinned?.boundary ?? createOpenAIDiagnosisBoundary({runtimeRoot,stateDir});
     const handle = await boundary.start({project:snapshot.project,invocationId:'invocation',fence:hold.fence,deadline,maxOutputBytes:65536});
     const { id: _id, ...body } = f.g;
     const grant = diagnosisGrant({...body,project:snapshot.project,ticket:snapshot.scope.ticket,runId:facts.runId,incidentId,
@@ -78,6 +97,7 @@ if (process.argv[2] === '--controller') {
     let released = false, reopened = false, staleHeld = false;
     if (scenario === 'complete') {
       journal = await settleAdvisory(stateDir,snapshot.project,journal.revision,'invocation');
+      if (pinned) await pinned.release();
       const revision = journal.revision;
       reopened = (await settleAdvisory(stateDir,snapshot.project,revision,'invocation')).revision === revision;
       released = releaseSupervisorHold(stateDir,hold).released;
@@ -89,6 +109,6 @@ if (process.argv[2] === '--controller') {
       catch (e) { if (!String(e).includes('known immutable provider usage required')) throw e; }
       if (releaseSupervisorHold(stateDir,hold).released || !checkSupervisorHold(stateDir,hold)) throw Error('Unknown usage released');
     }
-    process.send!({kind:'result',cleanup,again,usage,output,released,reopened,staleHeld,charge:journal.charged.diagnosis,sends:Object.keys(journal.advisory!.sends).length},()=>process.disconnect());
+    process.send!({kind:'result',cleanup,again,usage,output,released,reopened,staleHeld,pinned:pinned?.lease(),charge:journal.charged.diagnosis,sends:Object.keys(journal.advisory!.sends).length},()=>process.disconnect());
   } catch (e) { process.send!({kind:'error',error:String(e)},()=>process.exit(1)); }
 }

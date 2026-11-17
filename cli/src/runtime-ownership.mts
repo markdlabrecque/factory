@@ -1,5 +1,5 @@
 // Runtime descriptors and leases use locked atomic metadata writes outside the immutable store.
-// PID/start-identity transactions fence complete async install/uninstall operations; uncertain owners prevent removal.
+// PID/start transactions fence install/uninstall; protected v2 advisory pins survive owner death until exact durable terminal evidence.
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -8,6 +8,7 @@ const { ownerOf, ownerState, withAdmissionLock, writeDurable } = await import(ex
 import type { Owner } from '../../board/admission.mts';
 import { validateRuntimeBundle } from './runtime-bundle.mts';
 import type { Paths } from './paths.mts';
+import type { ProjectIdentity } from '../../orchestrator/supervisor-contract.mts';
 
 export type RuntimeDescriptor = { version: 1; id: string };
 export type RuntimeLease = { version: 1; token: string; id: string; owner: Owner };
@@ -203,4 +204,91 @@ export function preflightRuntimeRemoval(p: Paths): void {
       catch { throw new Error(`Unknown ownership of runtime bundle: ${name}`); }
     }
   }
+}
+
+/** V2 is intentionally unreadable by V1 readers/GC: dead PID pruning must fail closed.
+ * One protected record pins both identities (including a project override outside the store).
+ * There is no exit hook, dead-owner recovery, generic transfer or generic release for V2. */
+export type AdvisoryRuntimeBinding = { stateDir: string; project: ProjectIdentity;
+  invocationId: string; fence: string; profile: string;
+  pins: { root: string; id: string; dependencies: string }[] };
+export type AdvisoryRuntimeLease = { version: 2; token: string; id: string; owner: Owner;
+  binding: AdvisoryRuntimeBinding; process: import('./supervisor-process.mts').ProcessEvidence | null };
+function readAdvisoryLease(p: Paths, token: string): AdvisoryRuntimeLease {
+  if (!tokenPattern.test(token)) throw Error('Invalid protected runtime token');
+  const file = leasePath(p, token);
+  for (const path of [leaseDir(p), file]) if (lstatSync(path).isSymbolicLink()) throw Error('Invalid protected runtime lease');
+  const v = JSON.parse(readFileSync(file, 'utf8'));
+  if (v.version !== 2 || v.token !== token || !idPattern.test(v.id) || !v.binding || !Array.isArray(v.binding.pins)) throw Error('Invalid protected runtime lease');
+  return v;
+}
+export function acquireAdvisoryRuntimeLease(p: Paths, id: string, binding: AdvisoryRuntimeBinding): AdvisoryRuntimeLease {
+  binding = structuredClone(binding);
+  const owner = ownerOf(process.pid);
+  if (ownerState(owner) !== 'alive') throw Error('Unknown protected runtime owner');
+  return withRuntimeLock(p, () => {
+    assertRuntimeAvailable(p); assertRuntimeStore(p);
+    if (!runtimeOwned(p, id) || !binding.invocationId || !binding.fence || !binding.stateDir || !binding.profile || !binding.pins.length
+      || !binding.pins.some(pin => pin.id === id && pin.root === join(p.runtimes,id))) throw Error('Invalid protected runtime binding');
+    for (const pin of binding.pins) {
+      const m = validateRuntimeBundle(pin.root);
+      if (m.id !== pin.id || m.dependencies !== pin.dependencies) throw Error('Protected runtime changed');
+    }
+    const lease: AdvisoryRuntimeLease = { version: 2, token: randomUUID(), id, owner, binding, process: null };
+    mkdirSync(leaseDir(p), { recursive: true, mode: 0o700 });
+    if (lstatSync(leaseDir(p)).isSymbolicLink()) throw Error('Invalid protected runtime directory');
+    writeRuntimeMetadata(p, leasePath(p,lease.token), JSON.stringify(lease) + '\n');
+    return structuredClone(lease);
+  });
+}
+/** Recheck the exact retained record before any start/handoff. Missing/mutated pins never re-create ownership. */
+export function assertAdvisoryRuntimeLease(p: Paths, expected: AdvisoryRuntimeLease): void {
+  withRuntimeLock(p, () => {
+    assertRuntimeAvailable(p); assertRuntimeStore(p);
+    if (JSON.stringify(readAdvisoryLease(p,expected.token)) !== JSON.stringify(expected)) throw Error('Protected runtime ownership changed');
+    for (const pin of expected.binding.pins) {
+      const m = validateRuntimeBundle(pin.root);
+      if (m.id !== pin.id || m.dependencies !== pin.dependencies) throw Error('Protected runtime changed');
+    }
+  });
+}
+/** Only the exact initial ready child, once. No reconstructed-PID signalling or dead-owner adoption. */
+export async function transferAdvisoryRuntimeLease(p: Paths, expected: AdvisoryRuntimeLease,
+  evidence: import('./supervisor-process.mts').ProcessEvidence): Promise<AdvisoryRuntimeLease> {
+  const { validateProcessEvidence, processIdentity } = await import('./supervisor-process.mts');
+  evidence = structuredClone(validateProcessEvidence(evidence));
+  if (JSON.stringify(processIdentity(evidence.worker.pid)) !== JSON.stringify(evidence.worker) || ownerState(expected.owner) !== 'alive') throw Error('Unknown ready child or controller');
+  return withRuntimeLock(p, () => {
+    const lease = readAdvisoryLease(p,expected.token), b = lease.binding;
+    if (JSON.stringify(lease) !== JSON.stringify(expected) || lease.process
+      || evidence.invocationId !== b.invocationId || evidence.fence !== b.fence || JSON.stringify(evidence.project) !== JSON.stringify(b.project)
+      || !b.pins.some(pin => pin.id === evidence.runtime && pin.dependencies === evidence.dependencies)) throw Error('Protected runtime transfer mismatch');
+    lease.owner = { pid: evidence.worker.pid, start: evidence.worker.start }; lease.process = evidence;
+    writeRuntimeMetadata(p,leasePath(p,lease.token),JSON.stringify(lease) + '\n');
+    return structuredClone(lease);
+  });
+}
+/** Release only after durable T05 local-human settlement, original known usage and fresh whole-group absence.
+ * Evidence reads/imports happen before the runtime lock; final exact-record CAS cannot release a successor. */
+export async function releaseAdvisoryRuntimeLease(p: Paths, expected: AdvisoryRuntimeLease): Promise<void> {
+  const { readSupervisor } = await import('./supervisor-state.mts');
+  const { readOwnedProcess, readOwnedCleanup } = await import('./supervisor-process.mts');
+  const { readProviderUsage } = await import('./supervisor-openai-usage.mts');
+  const { supervisorHash } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
+  const { ADVISORY_PROFILE_ID } = await import('./supervisor-advisory-contract.mts');
+  expected = structuredClone(expected);
+  const b = expected.binding, s = readSupervisor(b.stateDir,b.project), key = supervisorHash(b.invocationId);
+  const g = s.advisory?.workers[key]?.grant, a = s.advisory?.sends[key], terminal = s.advisory?.settlements?.[key];
+  if (!g || !a || !terminal || !expected.process || b.profile !== ADVISORY_PROFILE_ID || g.profile !== b.profile
+    || g.invocationId !== b.invocationId || g.fence !== b.fence || terminal.grantId !== g.id || terminal.fence !== b.fence
+    || terminal.disposition !== 'local-human-required' || terminal.authorization !== a.receipt
+    || g.owner.pid !== expected.owner.pid || g.owner.start !== expected.owner.start) throw Error('Protected runtime settlement held');
+  const evidence = readOwnedProcess(b.stateDir,g), cleanup = readOwnedCleanup(b.stateDir,g), usage = readProviderUsage(b.stateDir,g,a);
+  if (supervisorHash(evidence) !== supervisorHash(expected.process) || terminal.process !== supervisorHash(evidence)
+    || terminal.cleanup !== supervisorHash(cleanup) || usage.state !== 'known' || supervisorHash(terminal.usage) !== supervisorHash(usage.receipt)) throw Error('Protected runtime evidence held');
+  withRuntimeLock(p, () => {
+    assertRuntimeStore(p);
+    if (JSON.stringify(readAdvisoryLease(p,expected.token)) !== JSON.stringify(expected)) throw Error('Protected runtime successor mismatch');
+    rmSync(leasePath(p,expected.token));
+  });
 }

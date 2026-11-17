@@ -4,6 +4,48 @@ This is the authoritative reference for the project supervisor feature. The impl
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
+## Protected runtime ownership before public composition
+
+`createSupervisorRuntime` in `cli/src/supervisor-runtime.mts` is the trusted
+source-only factory for the real `owned-openai` diagnosis boundary. It reuses
+workflow resolution, execution context, runtime manifests and the existing runtime
+ownership lock/store. It validates every selected source/artifact against the
+trusted factory's bytes **before** importing selected JavaScript, and calls the
+request path's exported `verifyPinnedProvider` to extract and import the actual
+digest-pinned four-archive public SDK closure offline. Fake installed package names,
+self-regenerated manifests, TOML, model claims or callbacks do not establish that
+closure. Exact complete byte-compatible overrides are accepted by this module;
+other overrides are explicitly unsupported here, without changing normal Factory's
+complete-override contract. The saved-run collector still independently holds all
+project overrides, and binary/public activation remains held.
+
+The factory pins both host and selected source/dependency IDs, their exact paths,
+project/invocation/fence and T00 profile before owned-child start. It returns a
+wrapped real diagnosis boundary, not Pi print flags or a second client. The request
+route remains the existing Pi-AI 1.5.2 `openai-responses` stream, OpenAI 7.19.0,
+zero SDK retries and one-use journal authorization at final native fetch. No token
+count probe, auth discovery or live account proof occurs. The fixed profile remains
+I=1,050,000 / O=4,096, 1,054,096 reserved tokens / 5,808,792 micro-USD,
+explicit cache/default service/high thinking/fixed `gpt-6.1-terra`. Known usage
+supports a derived charge, never an invoice reconciliation claim.
+
+Protected runtime leases deliberately use version 2, not an optional purpose field
+on a version-1 normal lease. Thus old readers/GC fail closed rather than dropping
+pins on PID death. Actual T04 readiness transfers the exact child identity once;
+original full process evidence remains tied to the lease. Unknown cleanup,
+accounting, owner death, failed handoff and currently unsupported no-send closure
+retain ownership. Generic transfer/release and removal refuse protected leases.
+Only actual T05 durable `local-human-required` settlement plus matching original
+known usage and fresh whole-group ESRCH permit exact-token/record release; full
+reservation charge is preserved. Imports/evidence reads occur outside the runtime
+lock, with a final exact-record CAS inside; no cross-store locks or provider work
+are nested. Cleanup never signals reconstructed PIDs/groups or resets accounting.
+
+The [execution context reference](execution-context.md#protected-advisory-runtime-selection)
+describes the supported-copy boundary. T09 still owes actual public-host rollout,
+quiescence, mounts/resource isolation and control prerequisites. This module grants
+none of those authorities and creates no usable advice or notification.
+
 ## Complete saved-run input collection
 
 `cli/src/supervisor-input.mts` exports `collectSupervisorInput` (also named

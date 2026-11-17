@@ -6,6 +6,41 @@ bundle contains the workflow, Board helpers, TOML parser, Factory templates and
 private locked dependencies. A project does not supply individual executable or
 template overrides to this workflow.
 
+## Protected advisory runtime selection
+
+`cli/src/supervisor-runtime.mts` supplies a source-only trusted composition API,
+`createSupervisorRuntime`. It resolves the existing complete workflow and loads its
+actual execution context only **after** comparing every inventoried source/artifact
+byte with the trusted factory's inventory and positively importing the existing
+four-archive Pi/OpenAI public SDK closure offline. A regenerated project manifest,
+ABI shim, model/TOML value or capability callback is not positive adapter proof.
+The current advisory compatibility set is exact byte-compatible complete copies;
+other complete project overrides remain valid for normal Factory but hold here
+without executing their JavaScript. The saved-run collector separately still holds
+all project-mode overrides; this module does not broaden that contract.
+
+Before starting a child it acquires one protected version-2 runtime-store lease
+binding canonical host and selected paths, both source/dependency identities,
+project, invocation, fence, state directory and fixed provider profile. Identical
+host/selected paths deduplicate; distinct paths with equal content IDs retain both
+pins. Ordinary version-1 lease readers (including older GC/removal) reject version
+2 rather than interpreting dead PID ownership as permission to prune. There is no
+exit-hook release or dead-owner adoption. Selection/settings/source/dependencies
+are checked again before start and handoff; no fallback or repair occurs.
+
+After actual T04 readiness the lease transfers once to the exact worker PID/start
+identity and retains the complete original process evidence. Unknown cleanup,
+no-send, failed startup/handoff, death or missing accounting retain the pin. Release
+reads actual T05 durable local-human terminal settlement, original known T03 usage
+and fresh T04 whole-group absence outside the runtime lock, then removes only an
+exact matching token/record under that lock. It cannot release a successor, kill a
+reconstructed PID/group, reset charges, or turn retained advice into authority.
+
+This is not public activation or a usable-advice command. Later public composition
+must establish real rollout quiescence, mount/resource isolation and control
+prerequisites; no installed-proof boolean is accepted here. Auth remains an
+explicit trusted handoff parameter, never discovered from user configuration.
+
 ## Explicit saved-run diagnosis collector
 
 The source-only `cli/src/supervisor-input.mts` collector consumes an already selected
