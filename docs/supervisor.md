@@ -1,6 +1,6 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implemented foundation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state and an explicitly invoked bounded proposal-only diagnosis worker**. There is no scheduler wiring, action-mode switch, supervisor CLI, notification service, reviewer, gate applicator or pilot rollout here. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state and diagnosis modules and the diagnosis prompt ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
+This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, and a durable host tracker-comment outbox with exact local resolution**. There is no scheduler wiring, action-mode switch, notification service, gate applicator or pilot rollout here. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review and escalation modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. A future action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
@@ -14,7 +14,7 @@ A supervisor is a durable logical project responsibility, not a permanent model 
 
 `context.mts` freezes supervisor/review additive instructions and their hashes alongside normalized policy and complete selected-runtime identity. Common then role inputs remain contained, additive guidelines; they cannot replace Factory constraints or original source bytes. See [frozen inputs](execution-context.md#supervisor-and-independent-review-inputs). No future worker/prompt asset is referenced until it exists; new actual assets enter the single complete inventory in the change that introduces them. Overrides must be complete and reviewed, never mixed with installed helpers.
 
-**Activation remains blocked:** configured limits or an `act` observation cannot clear the unattended approved-channel/acknowledgement/authenticated-resumption blocker below, install a reviewer worker, atomically apply a correction, produce fresh verification, or clear a durable denial. No mode/restart/reviewer shopping removes denial; approval is never verifier PASS. The executable action set remains empty.
+**Activation remains blocked:** configured limits or an `act` observation cannot demonstrate provider-enforceable paid ceilings/accounting, authorize tracker notification, atomically apply a correction, produce fresh verification, or clear a durable denial. The owner-approved source-only bridge and fresh reviewer orchestration are implemented below; they do not activate a live adapter or pilot. No mode/restart/reviewer shopping removes denial; approval is never verifier PASS. The executable action set remains empty.
 
 ## Authority and gate inventory
 
@@ -68,7 +68,7 @@ These are schema-supported proposal categories, **not currently executable gate 
 
 Any material change to child/parent/human context, guidelines, Factory policy, gate/failure evidence, exact diff, risks/alternatives, prior decisions, project/ticket, run/base/baseline/tip, runtime/dependencies/settings or admission generation invalidates the input hash. Observe/stop, off/pause, expired effect, superseding incident or lost ownership fences any later application even if a review was previously approved. A corrected gate requires new analysis/proof wherever its inputs changed; approval is never a verification PASS. Consumption/expiry must prevent reuse on unrelated tickets or subsequent runs. Atomic consumption is not implemented here.
 
-A denial latches the incident into human-required and requests `FlagAHuman` semantics. Never automatically launch another reviewer to override it. Changed inputs do not silently remove the denial. Operator resumption must be an authenticated, durable decision identifying actor, denied proposal/review, reason and permitted next action. It may abandon the proposal or authorize a revised proposal with a new fresh review; it cannot convert denial to approval, reuse old proof or waive Factory constraints. The state/action increments must implement that audit/fence before action can ship.
+A denial latches the incident into human-required and requests `FlagAHuman` semantics. Never automatically launch another reviewer to override it. Changed inputs do not silently remove the denial. Operator resumption must be an authenticated, durable decision identifying actor, denied proposal/review, reason and permitted next action. It may abandon the proposal or authorize a revised proposal with a new fresh review; it cannot convert denial to approval, reuse old proof or waive Factory constraints. The exact local resolution command below records that audit without changing the original denial, approving a gate or resetting any charge.
 
 Ticket-only evidence/expectation failure stops that ticket's proposed action. Project/runtime/config/ownership ambiguity and required Factory-wide changes stop new supervisor decisions/actions for the project. Existing execution owners retain their work and settlement responsibilities; an escalation is not permission to kill them, reset budgets, delete saved work or rewrite evidence. Notification never resumes anything.
 
@@ -76,26 +76,26 @@ Ticket-only evidence/expectation failure stops that ticket's proposed action. Pr
 
 Inspected source:
 
-- `models.mts:piAnalysisArgs` constructs a new print-mode Pi invocation with `--no-session`, no resume/continue/session selectors, `--tools read,grep,find,ls`, `--no-extensions`, `--no-skills` and `--no-context-files`. Only the configured subscription provider may be loaded explicitly with `-e`. The same argument builder accepts the family's fixed Large model for a future reviewer; diagnosis continues to use Mid.
+- `models.mts:piAnalysisArgs` constructs a new print-mode Pi invocation with `--no-session`, no resume/continue/session selectors, `--tools read,grep,find,ls`, `--no-extensions`, `--no-skills` and `--no-context-files`. Only the configured subscription provider may be loaded explicitly with `-e`. The independent review worker uses the same argument builder with the family's fixed Large model and the stricter `--no-tools` restriction; diagnosis continues to use Mid.
 - `analyze.mts:runPi` uses a new `spawnSync("pi", args, {cwd,input,...})` each time with complete frozen prompt on stdin, bounded timeout/output. This is an existing host CLI boundary, not an invented Sandcastle reviewer API. Its analysis JSON extractor is not a strict review parser and must not be reused as approval parsing without strict validation.
 - `main.mts` uses Sandcastle `pi` and `sandbox.run` for implementation; `handoff.mts:runVerifier` uses a separate verifier invocation and checks candidate immutability. Neither proves fresh supervisor review sessions or exposes `FlagAHuman`.
 
 Offline evidence: `supervisor-contract.test.mts` exercises the existing `piAnalysisArgs` with both fixed Large family models across two new local Node recorder processes. It verifies frozen stdin bytes, exact allowlisted argv, separate process identities, no session/resume selectors and no human tool in the allowlist. `models.test.mts` already covers provider-extension selection and unavailable-extension refusal. These tests prove **Factory argument construction and a local process boundary**, not live Pi behavior, provider isolation, a semantic independent review or any SDK feature. No paid model, real Pi, authentication or container is used.
 
-**Reviewer prerequisite:** the downstream review worker must connect this existing fresh host invocation pattern to complete retained review input, strict bounded output parsing, fixed Large policy, durable invocation/denial audit, enforced budgets/capacity, read-only isolated workspace and cancellation. It must prove those with offline adapters before action is enabled. A separate process alone is not sufficient independence if it reloads proposer history or has mutation tools. No reviewer worker is installed by this ticket.
+**Implemented source boundary:** `supervisor-review.mts` connects this pattern to complete frozen input, strict output, fixed Large policy, durable host completion/provenance, reservations, empty isolated cwd/home and cancellation. Offline adapters prove Factory orchestration below, not live provider ceiling enforcement. A separate process alone is not independence if it reloads proposer history or mutation tools; this worker passes no transcript and disables all tools and discovery.
 
-## Unattended FlagAHuman investigation and concrete blocker
+## Unattended FlagAHuman investigation and owner-approved bridge
 
 **Unavailable primitive:** the inspected Factory runtime has no registered `FlagAHuman` tool or unattended host notification/acknowledgement adapter. `piAnalysisArgs` explicitly disables discovered extensions and allows only filesystem readers. `analyze.mts` provides no MCP/tool bridge. `main.mts` and existing needs-human labels/stages/logs do not call this interactive harness's tool. The interactive T3/Pi session's available `FlagAHuman` is not inherited by Factory agents. No unsupported SDK registration or fictitious notification API is claimed.
 
-The proposed host boundary is `HumanRequest` plus the following required semantics, **not an implemented bridge**:
+The original investigation established these `HumanRequest` requirements. The owner subsequently approved tracker comments and explicit host-user resolution; `supervisor-escalation.mts` now implements the source-only bridge described below (not a model tool or notification service):
 
 1. On denial, required Factory-wide change, unavailable primitive or unresolved authority, durably fence the affected ticket/project's new supervisor work and persist an immutable actionable request **before** external notification. Include exact review/proposal IDs, bounded findings, original evidence locations, the human question and next action. Preserve all existing saved work and owners.
-2. Retain `delivery.state = pending` and attempts on failure/crash. A log message, Board badge, issue label, successful local write or agent statement is not delivery. A future outbox writer must use host-owned atomic durable publication outside agent mounts; outbox loss/corruption holds action. Contract tests validate the record; the durable-state foundation below persists pending requests but does not deliver them.
+2. Retain `delivery.state = pending` and attempts on failure/crash. A log message, Board badge, issue label, successful local write or agent statement is not delivery. The outbox writer uses host-owned atomic durable publication outside agent mounts; outbox loss/corruption holds action. The durable journal persists the stop and outbox; the separately explicit delivery adapter performs tracker I/O only after that commit.
 3. Deliver to an explicitly operator-approved unattended channel with a stable request idempotency key. Record `notified` only after an actual adapter acknowledgement/receipt, channel and time. Notification errors remain pending and stopped; bounded redelivery must not restart work or spend agent/recovery budgets. Notification acceptance and human resolution are separate events.
 4. An authenticated operator resolves/resumes explicitly with retained audit and fresh gates. No automatic reviewer shopping, model escalation, Factory-wide edit, global rollout or authority renewal follows notification.
 
-**Blocking prerequisite for dependent action work:** before gate review/application/action activation, implement and independently verify a real host escalation/outbox + approved unattended notification adapter + fail-closed stop/resumption integration. The owner/operator must choose/approve the actual channel and its acknowledgement/authentication contract; this investigation does not authorize a new service, credential, installation or Factory-wide policy change. The downstream review task must either deliver that approved source-only bridge with offline failure/crash/duplicate/stop fixtures, or remain held and call the available human escalation surface. The application/lifecycle/pilot tasks cannot treat merging this investigation as proof of delivery. Until that prerequisite and the reviewer worker evidence above are satisfied, the executable action set remains empty.
+**Owner decision and residual action prerequisites:** the owner approved a source-only durable idempotent tracker-comment outbox. Ticket requests target that exact issue; project requests require a configured operator issue. Successful API comment identity/URL acknowledges notification, never approval. Resolution is an explicit exact audited local host-user command. The implemented offline bridge/reviewer evidence below discharges those source-boundary prerequisites, not live delivery, provider enforcement, atomic gate application or fresh verification. No service, credential, installation, Factory-wide policy change or pilot is authorized. The executable gate-action set remains empty.
 
 This finding does not block source-only contracts, state, snapshot or configuration work that preserves observe-only/inert defaults. It **does** block dependent action activation. No live pilot, paid runtime probe, service/registry mutation, production access or secret retrieval was performed.
 
@@ -159,9 +159,9 @@ scope superseded; returning to old facts never resurrects the old incident.
 All old incidents, exact proposals, independent-review audits, pending human
 requests and intent observations remain retained. Denials and Factory-wide
 classifications hold subsequent new decisions conservatively at project scope,
-including after a material change. There is no resume/clear-denial API. A future
-authenticated operator integration must retain its own explicit audit and fresh
-authority; notification alone can never clear a hold.
+including after a material change. The explicit host-user resolution API below
+retains denial and records one exact successor or abandonment. It never clears
+the denial or turns notification into approval.
 
 Each event has a stable host idempotency ID and exact canonical payload digest.
 Exact replay is a no-op, including after restart or display-history eviction;
@@ -215,10 +215,10 @@ retention design must preserve every safety index and charge before removing
 original records. Supervisor activity never renews recovery budgets or rewrites
 saved work.
 
-This state foundation does **not** discharge the approved-channel/acknowledgement/
-authentication decision for unattended FlagAHuman, the fresh read-only fixed-Large
-review worker evidence, or atomic contained/preimage/fenced application with new
-proof. All remain prerequisites for action activation. Defaults remain inert;
+The state foundation alone grants no notification/review authority. The separately
+explicit source-only review/outbox boundary below implements the approved comment
+and local-resolution contract. Provider-enforced paid ceilings and atomic
+contained/preimage/fenced application with new proof remain activation prerequisites. Defaults remain inert;
 there is no automatic supervisor loop or pilot opt-in. Explicit diagnosis is described below.
 
 ## Read-only work snapshots and progress
@@ -322,7 +322,7 @@ paid agent, secret store or installed project is used.
 `cli/src/supervisor-worker.mts:diagnoseProject` is an explicit, short-lived host call,
 not a resident model session or a second provider stack. These actual assets join
 the complete selected runtime. Complete project overrides must include them; no
-absent future reviewer/bridge/application asset is imported. Scheduler wakeups and
+absent future application asset is imported. Scheduler wakeups and
 operator commands are not implemented by diagnosis.
 
 ### Input, output and unchanged decisions
@@ -360,7 +360,7 @@ JSON must be the entire stdout value, at most 192 KiB; stderr retains at most 8 
 Unknown/missing fields, unknown actions, code fences, malformed output, mismatched
 scope/run, protected gate category, expired substitution and stale basis hold.
 There is no approve/apply/execute/deliver output. Structural validation cannot prove
-semantic equivalence or authorize a proposed gate correction. The future fresh
+semantic equivalence or authorize a proposed gate correction. The fresh
 independent reviewer/host must reject disguised policy bypasses.
 
 The decision basis hashes every snapshot field **except observation time**. Original
@@ -414,7 +414,7 @@ exact fixed model, or with unknown pricing/usage, the worker returns held before
 reservation/spawn. Offline injected process adapters prove Factory orchestration,
 not real provider enforcement. A separately evidenced adapter is required before
 any paid diagnosis activation; no live paid probe is authorized by this source
-change. This is distinct from the unresolved human notification/action bridge.
+change. This is distinct from the implemented source-only human outbox bridge and still-absent gate applicator.
 
 The worker rechecks current authorization/material inputs before spawn and again
 before accepting output. The injected/host deadline is finite (configured lower
@@ -437,9 +437,10 @@ gap. Gate proposals bind their retained diagnosis snapshot, not an incident's fi
 observation; the incident's original snapshot and call counters remain unchanged.
 Failures and explicit escalations cannot be retained as reusable success without
 their human stop. Notification is **not**
-delivered by logs, local writes, sidecars or this return value. No adapter
-acknowledgement, authenticated resumption or denial clearing is invented. The
-unattended approved-channel/acknowledgement/authentication blocker remains. Review,
+delivered by logs, local writes, sidecars or this return value. The separate
+outbox adapter below can acknowledge actual tracker receipts under explicit host
+authorization; the local command records exact successor permission. Neither
+clears denial or supplies missing provider enforcement/application authority. Review,
 application, recovery admission, labels, budgets, exact-SHA delivery and pilot work
 remain separately owned and unenabled.
 
@@ -457,6 +458,119 @@ The existing complete-runtime fixture imports the actual flat worker and prompt.
 These tests run no Pi, provider, reviewer, repair, tracker, service, Docker,
 credential operation or pilot.
 
+## Independent exact-proposal review and host escalation
+
+`orchestrator/gate-review.mts` and `prompt.gate-review.md` compose the entire shared
+`ReviewInput`, without supervisor/reviewer transcripts. Original child, parent,
+ordered human planning/comments, guidelines, Factory constraints, gate purpose/rule,
+failure evidence and prior decisions remain original bytes, including explicit
+missing/truncated notices. The exact proposal includes alternatives, risks and
+before/after; the snapshot binds run/base/baseline/tip/runtime/dependencies/settings/
+policy/admission generation. Missing material context escalates without launching
+an approvable review. Relevant changes require a different proposal/input identity.
+
+`cli/src/supervisor-review.mts:reviewGateProposal` is an explicit host API, not a
+scheduler or action executor. Act plus current registered/global/unpaused host
+authorization is necessary. The fixed configured-family `gateReview` Large model
+is independent of diagnosis Mid; no fallback or model/provider escalation exists.
+The worker commits finite project/role/global token/cost/call/capacity reservation
+before spawn, with PID/start owner, fresh invocation/reviewer UUIDs, fence and at
+most configured ten-minute deadline. Every reservation stays fully charged, even
+on failure. Unknown cleanup/accounting retains ambiguous capacity and prevents a
+replacement. The trusted adapter must enforce all-in provider ceilings even after
+controller death. **No shipped default paid Pi adapter proves that capability.**
+Absent it, the worker durably requests a human and launches no paid process.
+
+The supplied existing `piAnalysisArgs` invocation uses `--no-session`, no resume,
+`--no-tools`, `--no-extensions`, `--no-skills`, `--no-context-files`, explicit
+configured subscription extension only and stdin originals. Each call has an empty
+private cwd/home/agent directory and a minimal environment; no proposer/prior-review
+workspace or transcript is inherited. The trusted adapter must honor these exact
+arguments/environment. Host input/process/result sidecars remain outside that cwd
+and project mounts. Time, stdout (16 KiB), stderr (8 KiB), cancellation and owned-group
+cleanup are bounded. A normal exit does not accept output before pipes close.
+
+Only entire strict JSON with exact input/proposal/invocation/reviewer/model/policy
+identity and written rationale can approve or deny. The host assigns audit IDs and
+times; model claims cannot establish provenance. Malformed, stale, cancelled, late,
+unknown-accounted and inconclusive output holds and creates one bounded actionable
+human request. Completion and required human stop publish in **one journal commit**.
+A denial retains the original proposal/gate/work and latches across mode/restart/
+material changes. A Factory-wide classification directly creates a project-scoped
+request, without a reviewer or application. Approval is neither independent
+verification nor merge/application authority.
+
+Cached approval requires the new host `reviewCompletions` provenance index, settled
+known accounting and exact retained original input/identity bytes. Legacy audit-only
+`review` events are never usable approvals and cannot trigger reviewer shopping.
+All actual modules/prompts/outbox assets ship in the complete selected inventory;
+complete overrides cannot omit them.
+
+### Durable managed comment outbox
+
+`deliverSupervisorRequest` reads the retained human stop before external I/O. Its
+current host authorization must explicitly permit notification in act mode; observe,
+stopped or absent authorization performs **no tracker write**. Ticket scope targets
+only that ticket. Project scope requires an explicit `operatorIssue` in the same
+canonical tracker project; there is no arbitrary ticket fallback. This is host API
+configuration, not a new TOML setting or installed notifier service.
+
+Before POST, the journal durably records one attempted target and stable managed
+marker binding project/incident/request/proposal. The actual adapter uses bounded,
+shell-free `gh-axi api` or `glab api` issue-comment endpoints. GitHub's ergonomic
+wrapper response is requested losslessly with `--full --jq @base64`; only its
+untruncated response envelope and actual API comment ID/body/URL are accepted.
+GitLab retains the actual note ID and canonical issue note URL. A successful
+local write/log, label, model claim or exit code without that receipt is not delivery.
+Only the exact target/marker receipt becomes `notified`; this never resolves the stop.
+
+Failure, process crash or uncertain response remains pending. Subsequent explicit
+delivery calls can list the exact target and acknowledge exactly one managed
+comment; they **never repeat the POST**, even when the list is empty or eventually
+consistent. This intentionally favors missing notification over duplicate unchanged
+threads. Unknown/multiple/mis-scoped receipts and a changed target remain pending
+for operator reconciliation. There is no automatic retry loop, budget reset,
+resume, project mutation or gate mutation. A crash after attempted publication but
+before POST also remains pending: an operator must inspect it, not assume it was
+safe to repost. Existing owners and saved work are never killed or cleaned up.
+
+### Exact local operator resolution
+
+[`factory supervisor resolve`](factory-cli.md#supervisor-human-request-resolution)
+uses the existing private host-user state-directory trust boundary. The command
+requires exact incident, request and proposal IDs, a reason, confirmation and either
+abandonment or one different exact successor proposal hash. Actor comes from the
+local OS identity, not `USER`, a tracker comment, model field or actor flag. Unknown
+or unsettled process/accounting still holds. The immutable resolution audit does not
+change the denied record, delivery state, original work, charge or recovery budget.
+
+A permitted successor needs a **new material incident**, its exact frozen proposal
+and a new independent review. Diagnosis may collect that new material proposal, but
+publication/review must match the exact pre-authorized successor hash; it cannot
+rephrase or replace the original. Resolution chains retain A→B→C history while only
+the current leaf authorizes the next exact review; old authorizations are not eternal
+conflicting pins. Cycles and reuse of the original denied incident are refused.
+Abandonment permits no replacement. No command automatically launches/resumes work,
+converts denial to approval, resets limits or waives Factory constraints. Scheduler
+integration, atomic contained gate application/fresh proof and live pilot remain
+separately owned, unimplemented prerequisites.
+
+Offline evidence (unit policy matrices plus minimal disposable process/tracker-API
+and local CLI boundaries, injected clocks/owners, no sleeps or live probes):
+
+```sh
+node --test orchestrator/gate-review.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-command.test.mts cli/test/supervisor-state.test.mts cli/test/supervisor-worker.test.mts cli/test/runtime-bundle.test.mts
+```
+
+These prove distinct process/reviewer identities, stdin originals/no inherited
+context or tools, denial→actual injected tracker boundary, stop-before-POST,
+lost-response reconciliation, failure retention/dedup/restart, exact project route,
+no observation writes, legacy audit refusal, retained-original tamper refusal,
+A→B→C exact local resolution/fresh diagnosis and unchanged cumulative charges.
+They do not prove live model semantics, provider enforcement or delivered live
+notifications. No live configuration, install, service, credential, tracker probe,
+paid call, gate edit or pilot is performed.
+
 ## Reproduce offline evidence
 
 ```sh
@@ -464,4 +578,4 @@ node --test orchestrator/supervisor-contract.test.mts orchestrator/supervisor-po
 node --test cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
 ```
 
-Policy and schema matrices are unit tests; one minimal local Node process fixture tests argv/stdin. There is no browser E2E or notification E2E because no notification implementation exists. Run all commit-tier shards and the separate browser lifecycle command in [TESTING.md](../TESTING.md) before delivery. Passing offline tests does not constitute a pilot or prove an unavailable SDK primitive.
+Policy and schema matrices are unit tests; one minimal local Node process fixture tests argv/stdin. There is no browser or live notification E2E; offline process/notification adapter evidence is documented below. Run all commit-tier shards and the separate browser lifecycle command in [TESTING.md](../TESTING.md) before delivery. Passing offline tests does not constitute a pilot or prove an unavailable SDK primitive.

@@ -9,7 +9,7 @@ import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts'
 import type { ModelFamily } from '../../orchestrator/model-policy.mts';
 import type { Diagnostic, DiagnosisDecision, DiagnosisMemory } from '../../orchestrator/supervisor.mts';
 import type { Facts, Resources, Limits, SupervisorState, Event } from './supervisor-state.mts';
-import { readSupervisor, commitSupervisor, incidentIdentity } from './supervisor-state.mts';
+import { readSupervisor, commitSupervisor, incidentIdentity, supervisorHumanHold, supervisorRevisionHold } from './supervisor-state.mts';
 const flat = existsSync(new URL('./supervisor-contract.mts', import.meta.url));
 const { supervisorHash, validateSnapshot } = await import(flat ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 const { diagnosisBasis, diagnosisContext, parseDiagnosis, validateDiagnostic, validateDiagnosisDecision, DIAGNOSIS_OUTPUT_BYTES } = await import(flat ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
@@ -82,7 +82,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     if (!same(a.facts.scope, a.snapshot.scope) || a.facts.runId !== a.snapshot.material.runId) return held('Incident/snapshot scope mismatch');
     commit({ id: stamp('observe'), at: iso(), kind: 'observe', facts: a.facts, snapshotHash: supervisorHash(a.snapshot), reason: 'Bounded project diagnosis' });
     const m = s.incidents[incidentId];
-    if (m.superseded || Object.keys(s.humans).length || Object.values(s.incidents).some(x => x.denied || x.incident.state === 'human-required')) return held('Retained human/denial/supersession holds diagnosis');
+    if (m.superseded || m.denied || m.incident.state === 'human-required' || supervisorHumanHold(s) || supervisorRevisionHold(s)) return held('Retained human/denial/supersession holds diagnosis');
     // Known unchanged decisions (especially waits) do not spend another call after restart.
     const known = Object.values(s.diagnostics ?? {}).find(d => d.incidentId === incidentId && d.basisHash === basisHash && d.outcome === 'proposed');
     if (o.signal?.aborted) return held('Diagnosis cancelled before reuse/reservation');
@@ -192,6 +192,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
         else {
           decision = parseDiagnosis(stdout, a.snapshot, incidentId);
           if (decision.action.kind === 'gate-change' && Date.parse(decision.action.proposal.change.expiresAt) <= now()) throw Error('Gate proposal already expired');
+          if (decision.action.kind === 'gate-change' && supervisorRevisionHold(s, decision.action.proposal.id)) throw Error('Diagnosis differs from exact operator-permitted revision');
           reason = decision.rationale;
         }
       } catch (e) { outcome = 'malformed'; reason = String(e).slice(0, 4000); }
