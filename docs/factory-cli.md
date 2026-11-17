@@ -84,6 +84,35 @@ No automatic release/refund/retry follows. Do not interpret stop as implementati
 container, tracker POST or admitted gate-operation cancellation. Resolve remains the
 exact separate command below, never a blanket approve/resume.
 
+## Supervisor scheduler lifecycle boundary
+
+`factory tick` now collects short project checkpoint/completed-pass/failure hints and
+hands them off **after releasing its lock**, without awaiting model/reviewer work.
+Rotation, shared dispatch caps, recovery admission/charges, saved absolute CLI/Node/PATH
+routing and macOS `factory supervise` retain their existing meaning. Refresh hints do
+not grant authority. A trusted source host can also signal gate/delivery/prerequisite/
+requirement or exact audited owner-response changes through the same bounded helper.
+Full original snapshots and material identity, not hint IDs or model output, decide
+reuse; unchanged retained waits spend no new paid call after restart.
+
+The default transport has no host binding and launches nothing. The explicit
+[`supervisorWakeups` source API](supervisor.md#outside-lock-event-and-lifecycle-transport)
+connects the committed diagnosis, independent review and optional scoped application
+APIs. Every scheduled stage requires current one-project durable act/pilot plus host
+global-on/unpaused/registered authorization. Durable observe/stop and cancellation
+fence scheduled diagnosis too. A live owning host can abort only its retained
+supervisor/reviewer controller; no raw PID or implementation process group is killed.
+A separate CLI still reports unsettled cross-process cancellation as pending.
+
+This source hook does **not** establish missing runtime capabilities: provider-enforced
+all-in ceilings/accounting, a joint implementation/supervisor finite resource lease,
+an authenticated cross-process cancellation channel, or an execution owner explicitly
+carrying the scoped amended context through new analysis/separate verification/new
+proof/current delivery. Missing capabilities hold; the CLI still refuses act. Approval
+or an application artifact is not verifier PASS/merge authority. No automatic pilot,
+rollout, resume, tracker POST, recovery budget source or second retry scheduler is added.
+See the feature reference for exact transport, cancellation and residual boundaries.
+
 ## Supervisor human-request resolution
 
 ```sh
@@ -110,7 +139,7 @@ replacement. A revised exact hash requires a new material incident and fresh
 independent review; A→B→C resolution chains retain all history without resetting
 budgets. This command does not automatically resume a worker or clear the original
 denial. The inspection/mode/stop controls above do not replace exact resolution;
-scheduler wiring remains separate work.
+the outside-lock source hook below does not resume it.
 
 The [source-only escalation contract](supervisor.md#durable-managed-comment-outbox)
 delivers one managed comment to the exact ticket or an explicitly configured

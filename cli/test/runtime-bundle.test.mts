@@ -49,6 +49,9 @@ test('complete inventory, deterministic identity, private install and validation
   const worker = await import(pathToFileURL(join(a.directory, 'supervisor-worker.mts')).href);
   assert.equal(typeof worker.diagnoseProject, 'function', 'complete selected worker imports without source-tree dependencies');
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-worker.mts')), readFileSync(join(f.source, 'cli/src/supervisor-worker.mts')), 'worker ships unchanged');
+  const lifecycle = await import(pathToFileURL(join(a.directory, 'supervisor-schedule.mts')).href);
+  assert.equal(typeof lifecycle.supervisorWakeups, 'function', 'flat lifecycle imports only inventoried worker/review/application helpers');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-schedule.mts')), readFileSync(join(f.source, 'cli/src/supervisor-schedule.mts')));
   const broker = await import(pathToFileURL(join(a.directory, 'supervisor-broker.mts')).href);
   assert.equal(typeof broker.brokerSupervisor, 'function');
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-broker.mts')), readFileSync(join(f.source, 'cli/src/supervisor-policy.mts')));
