@@ -46,6 +46,45 @@ describes the supported-copy boundary. T09 still owes actual public-host rollout
 quiescence, mounts/resource isolation and control prerequisites. This module grants
 none of those authorities and creates no usable advice or notification.
 
+## Non-CLI host preparation (partial composition)
+
+`cli/src/supervisor-host.mts` now exports `prepareSupervisorHost`. This is a
+preparatory source API, **not a completed diagnosis host or public command**. It
+reads the existing service-manager `schedulingState` observation and strict project
+registry on every `current()` call. An unregistered/aliased checkout, missing
+project scheduling opt-in, pause, global off/unknown or unreadable host policy
+holds preparation. `scheduling-observation.mts` and `project-registry.mts` are shared
+with the existing scheduler/registry callers, not second permission stores.
+
+Preparation requires one explicitly named ticket/current saved execution and the
+actual source-owned normal custody chain. It claims exact shared admission
+exclusion before any paid reservation, then uses the trusted runtime factory and
+complete original collector. Every current read rebuilds external originals and
+the authoritative prior-decision set before any later cache comparison, rereads
+private versioned host policy, validates the exact own hold, and reports cumulative
+host/project/role budget preflight without changing history. Budget preflight is
+not authorization: the eventual worker must still commit `reserve-advisory` under
+the journal lock. Collected `no-commit.json` is the actual normal producer's named
+failure original; a stopped stage alone is still insufficient.
+
+Failures after acquiring exclusion deliberately retain it and any runtime pins.
+`inspectSupervisorHost` is a read-only cutpoint projection of validated journal
+state and an exact hold: exclusion-only, reserved, registered, authorized, settled,
+or inconsistent. Each has a local next action; none grants resend, infers no-send
+from absence, refunds charges, repairs ownership or releases a successor. A
+settled projection does not replace original receipt validation/fresh ESRCH in the
+actual release APIs. No telemetry is fabricated by preparation/inspection.
+
+**Still incomplete:** `diagnoseProject` does not yet consume this preparation's
+owned boundary. Worker reservation/grant/registration integration, fresh parent
+control/material observations at the child's final authorization boundary,
+validated usable-advice settlement/publication, idempotent receipt reconciliation,
+and deterministic stop/auth/controller-loss composition remain required. This
+API neither accepts/retrieves an API key nor starts a provider child; it must not
+be treated as positive completion of the real advisory-host journey. The offline
+fixture proves actual flat normal producer -> host preparation -> complete input
+and pinned SDK closure, not a host-to-provider send or advice semantics.
+
 ## Complete saved-run input collection
 
 `cli/src/supervisor-input.mts` exports `collectSupervisorInput` (also named

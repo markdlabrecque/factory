@@ -6,6 +6,23 @@ bundle contains the workflow, Board helpers, TOML parser, Factory templates and
 private locked dependencies. A project does not supply individual executable or
 template overrides to this workflow.
 
+## Host preparation and current originals
+
+The source-only `prepareSupervisorHost` API in `cli/src/supervisor-host.mts` claims
+exact custody-backed admission exclusion before creating the protected runtime
+context. Its asynchronous `current()` rereads the existing scheduler backend and
+registry opt-in, validates private host policy and exact hold ownership, and
+rebuilds the complete saved-run originals outside locks. Each private collection
+gets its own host-only destination; generated freezes and observations do not
+become authoritative prior decisions or recursively change the basis. The actual
+normal producer's `no-commit.json` is a supported complete failure original.
+
+Preparation does not start a child, reserve paid work or grant a request. A failure
+after acquisition retains exclusion/pins, including when controls become off.
+The existing worker/owned-boundary integration and final child authorization and
+usable-publication rereads remain unfinished; do not interpret this API as public
+activation, mount isolation, confirmed no-send or a complete diagnosis journey.
+
 ## Protected advisory runtime selection
 
 `cli/src/supervisor-runtime.mts` supplies a source-only trusted composition API,

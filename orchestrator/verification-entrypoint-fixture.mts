@@ -4,13 +4,17 @@ import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bindExecution, stageExecutionPackages } from '../cli/test/execution-fixture.mts';
 import { buildAssets } from '../cli/src/scaffold.mts';
 import { paths } from '../cli/src/paths.mts';
-import { Fake } from '../cli/src/platform/fake.mts';
+import { Fake, FakeSchedule } from '../cli/src/platform/fake.mts';
+import { inspectSupervisorHost } from '../cli/src/supervisor-host.mts';
+import { readSupervisor } from '../cli/src/supervisor-state.mts';
+import { ADVISORY_PROFILE_ID } from '../cli/src/supervisor-advisory-contract.mts';
+import { structuredContextSource } from './ticket-context-source.mts';
 import { install } from '../cli/src/commands/install.mts';
 import { pathToFileURL } from 'node:url';
 import { fixtureReport } from './fixtures/verification.mts';
@@ -165,6 +169,23 @@ export async function createSandbox(o) {
     }
     const config = join(root, '.factory/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
+    if (scenario === 'no-commit-custody') writeFileSync(config,readFileSync(config,'utf8') + `
+[supervisor]
+enabled = true
+max_tokens = 10000000
+max_cost_usd = 100
+max_calls = 10
+[supervisor.diagnosis]
+max_tokens = 5000000
+max_cost_usd = 50
+max_calls = 5
+timeout_seconds = 600
+[supervisor.review]
+max_tokens = 5000000
+max_cost_usd = 50
+max_calls = 5
+timeout_seconds = 600
+`);
     const completeAcceptance = scenario === 'readiness-acceptance';
     if (scenario === 'pass' || completeAcceptance || scenario === 'instruction-edit' || scenario === 'publication') {
       writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal) !`shell`');
@@ -455,9 +476,38 @@ console.log('sha256:'+'a'.repeat(64));
           assert.equal(payloadRunClosed(state,{...run,...patch},expected),false);
         assert.equal(payloadRunClosed(state,run,{...expected,project:{...project,root:home}}),false);
         assert.throws(() => claimSupervisorHold(state,{...options,savedRun:{...options.savedRun,executionId:'stale-execution'}}),/unknown run ownership/);
-        const hold = claimSupervisorHold(state,options);
-        assert(checkSupervisorHold(state,hold));
-        assert.equal(readFileSync(runFile,'utf8'),rawRun,'admission preserves the exact raw saved record');
+        // Real normal producer -> exact exclusion -> selected artifact/runtime pins -> complete original collector.
+        // The only synthetic surfaces are the existing SDK/platform/tracker boundaries; no provider call is made.
+        mkdirSync(p.config,{recursive:true,mode:0o700}); chmodSync(p.config,0o700); chmodSync(state,0o700);
+        writeFileSync(p.projects,JSON.stringify({version:1,projects:[{name:'fixture',root,schedule:{enabled:true,branch:'main',since:new Date().toISOString()}}]}));
+        writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:10}}),{mode:0o600});
+        const backend = new FakeSchedule(p); backend.enabled=true; backend.timer='active';
+        let human = 'Complete current human instructions';
+        const source = structuredContextSource(project.tracker,({args}) => {
+          if (args[1]==='graphql') return JSON.stringify({data:{repository:{issue:{parent:null}}}});
+          if (args[1].includes('/comments?')) return '[]';
+          return JSON.stringify({number:7,title:'Fix login',body:human});
+        });
+        const hp={...p,state,runtimeDescriptor:runtime.env.FACTORY_RUNTIME_DESCRIPTOR!,runtimes:dirname(runtime.directory),data:dirname(dirname(runtime.directory))};
+        const { prepareSupervisorHost } = await import(pathToFileURL(join(runtime.directory,'supervisor-host.mts')).href);
+        const prepared=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:options.invocationId,backend,tracker:source,rollout:options.rollout});
+        assert(checkSupervisorHold(state,prepared.hold));
+        assert.equal(prepared.initial.preflightHold,null);
+        assert.equal(inspectSupervisorHost(readSupervisor(state,project),prepared.hold).state,'exclusion-only');
+        const rebuilt=await prepared.current();
+        assert.equal(rebuilt.input.basis,prepared.initial.input.basis,'rebuilding originals does not recursively include its own freezes or observations');
+        human += '\nNew material human instruction';
+        const changed=await prepared.current();
+        assert.notEqual(changed.input.basis,rebuilt.input.basis,'new current human original changes the material basis');
+        assert(checkSupervisorHold(state,prepared.hold),'new material never clears exact exclusion');
+        const diagnosticFile=join(run.evidenceDir,'no-commit.json'), diagnosticBytes=readFileSync(diagnosticFile,'utf8');
+        writeFileSync(diagnosticFile,JSON.stringify({...JSON.parse(diagnosticBytes),executionId:'foreign-execution'}));
+        await assert.rejects(prepared.current(),/no-commit original belongs to an unknown\/stale execution/);
+        writeFileSync(diagnosticFile,diagnosticBytes);
+        backend.enabled=false;
+        await assert.rejects(prepared.current(),/global=off/,'fresh existing controls narrow even an already prepared host');
+        assert(checkSupervisorHold(state,prepared.hold),'control change never erases acquired exclusion or invents no-send release');
+        assert.equal(readFileSync(runFile,'utf8'),rawRun,'host preparation preserves the exact raw saved record');
       }
       if (scenario === 'no-commit-stale') {
         assert.equal(run.executionId, 'new-execution'); assert.equal(run.note, 'new execution owns this record');

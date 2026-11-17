@@ -68,6 +68,32 @@ source-only reviewer/outbox implementation and remaining paid-runtime/applicatio
 prerequisites; contract fixtures alone do not activate downstream action. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
+## Advisory host preparation boundary (partial)
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-host.test.mts cli/test/supervisor-input.test.mts cli/test/runtime-bundle.test.mts cli/test/projects.test.mts cli/test/tick.test.mts orchestrator/verification-entrypoint-sandbox.test.mts
+```
+
+Cheap units prove fresh existing scheduler/registry controls (including absent
+opt-in, aliases, duplicate registration and failed backend query), early missing
+policy refusal, and observational restart cutpoints through one-use authorization.
+They do not manufacture terminal certificates. The reused actual flat normal
+producer fixture now imports the copied host module, claims exact custody-backed
+exclusion, verifies/pins the actual four-archive SDK closure, freezes complete
+saved-run originals including source-produced `no-commit.json`, rebuilds the same
+basis and refuses a later genuine fake-platform off observation without erasing
+the hold. SDK sandbox/Docker, tracker responses and scheduler observations are
+synthetic; source/flat imports, normal lifecycle, immutable custody, Git, admission,
+runtime artifacts/pins and collector I/O are real. Fake installed packages alone
+are not provider capability evidence.
+
+This is **not** the required completed host -> worker -> owned provider -> terminal
+advice composition. Owned worker integration, final authorization/publication
+rereads, usable-advice settlement and deterministic stop/auth/controller-loss
+barriers remain outstanding. No paid/live probe or model semantics is claimed.
+The unchanged 15-second direct-child, 120-second test, four 180-second shard and
+concurrency-four limits still apply; complete mandatory/release gates are separate.
+
 ## Complete saved-run input boundary
 
 ```sh

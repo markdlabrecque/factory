@@ -5,14 +5,14 @@
 // scheduler switch and the branch saved when it was switched on (schedule.mts); missing means off, so a newly
 // added project is never scheduled until someone opts it in.
 import { execFileSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { closeSync, existsSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { readRegistry } from './project-registry.mts';
+import type { Project, Registry } from './project-registry.mts';
+export { readRegistry } from './project-registry.mts';
+export type { ProjectSchedule, Project, Registry } from './project-registry.mts';
 import { scaffoldName } from './paths.mts';
 import type { Paths } from './paths.mts';
-/** A project's scheduler switch. `branch` is the branch checked out when it was switched on; scheduled passes use it. */
-export type ProjectSchedule = { enabled: boolean; branch: string; since: string };
-export type Project = { name: string; root: string; schedule?: ProjectSchedule };
-export type Registry = { version: 1; projects: Project[] };
 export type ProjectRow = Project & { exists: boolean; scaffold: boolean };
 
 /** Canonical Git checkout root of a path (worktrees are distinct roots; symlink aliases collapse). */
@@ -23,16 +23,6 @@ export function canonicalRoot(path: string): string {
   try { top = execFileSync('git', ['-C', real, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
   catch { throw new Error(`Not a Git checkout: ${real}`); }
   return realpathSync(top);
-}
-export function readRegistry(p: Paths): Registry {
-  if (!existsSync(p.projects)) return { version: 1, projects: [] };
-  let data: any;
-  try { data = JSON.parse(readFileSync(p.projects, 'utf8')); } catch { throw new Error(`Project registry is not valid JSON: ${p.projects}. Fix or remove it; Factory will not overwrite it.`); }
-  const ok = data?.version === 1 && Array.isArray(data.projects)
-    && data.projects.every((x: any) => typeof x?.name === 'string' && typeof x?.root === 'string' && isAbsolute(x.root)
-      && (x.schedule === undefined || (typeof x.schedule?.enabled === 'boolean' && typeof x.schedule.branch === 'string' && x.schedule.branch !== '' && typeof x.schedule.since === 'string')));
-  if (!ok) throw new Error(`Unsupported project registry: ${p.projects}. Fix or remove it; Factory will not overwrite it.`);
-  return data;
 }
 export function mutate(p: Paths, change: (r: Registry) => boolean): boolean {
   mkdirSync(p.config, { recursive: true });
