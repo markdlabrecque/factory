@@ -876,6 +876,14 @@
     refs.readiness = el('section', 'panel readiness');
     refs.readiness.setAttribute('aria-label', 'Current readiness observations');
     app.appendChild(refs.readiness);
+    refs.supervisor = el('section', 'panel readiness');
+    refs.supervisor.setAttribute('aria-label', 'Project supervisor observations');
+    refs.supervisor.appendChild(el('h2', null, 'Project supervisors'));
+    refs.supervisor.appendChild(el('p', null, 'Read-only observations, NOT admission authority. Delivery is not approval; review approval is not verifier PASS, execution or completion.'));
+    refs.supervisorBody = el('div');
+    refs.supervisorBody.appendChild(el('p', null, 'UNKNOWN: supervisor observations have not been read.'));
+    refs.supervisor.appendChild(refs.supervisorBody);
+    app.appendChild(refs.supervisor);
 
     var ops = el('div', 'ops');
     GROUPS.forEach(function (g, i) {
@@ -1297,6 +1305,59 @@
     poller.start();
     startTimers();
     startReadiness();
+    startSupervisor();
+  }
+
+  // supervisor-render:start
+  function paintSupervisor(container, snapshot) {
+    container.replaceChildren();
+    container.appendChild(el('p', null, 'Observed ' + snapshot.generatedAt + ' · page offset ' + snapshot.offset + '. Compare journal revisions across pages.'));
+    if (snapshot.reason) container.appendChild(el('p', null, snapshot.reason));
+    snapshot.projects.forEach(function (p) {
+      var section = el('section', 'readiness-project');
+      section.appendChild(el('h3', null, p.name));
+      var s = p.status;
+      if (p.state !== 'known' || !s) section.appendChild(el('p', null, p.reason || 'UNKNOWN'));
+      else {
+        section.appendChild(el('p', null, 'Mode: ' + s.mode + ' · revision ' + s.revision + (s.hostDecision.humanRequired ? ' · HUMAN DECISION NEEDED' : ' · no retained human hold')));
+        section.appendChild(el('p', null, s.hostDecision.refusal));
+        s.incidents.forEach(function (i) { section.appendChild(el('p', null, i.id + ': ' + i.state + ' — ' + i.reason)); });
+        s.humanRequests.forEach(function (h) {
+          section.appendChild(el('h4', null, h.resolution ? 'Resolved locally (not approval)' : 'HUMAN DECISION NEEDED'));
+          section.appendChild(el('p', null, h.question));
+          section.appendChild(el('p', null, 'Next: ' + h.nextAction + ' · delivery: ' + h.delivery.state + ' (receipt is not approval)'));
+        });
+        var details = el('details'), summary = el('summary', null, 'Proposal / review / evidence references / budgets / confirmed progress and safety history page');
+        details.appendChild(summary);
+        // Text nodes only, never ticket/model HTML or clickable arbitrary file paths. The page includes explicit omission counts.
+        details.appendChild(el('pre', null, JSON.stringify(p, null, 2)));
+        section.appendChild(details);
+      }
+      container.appendChild(section);
+    });
+  }
+  // supervisor-render:end
+  function startSupervisor() {
+    var offset = 0, busy = false;
+    var previous = el('button', 'btn', 'Previous supervisor page'), next = el('button', 'btn', 'Next supervisor page');
+    previous.type = next.type = 'button';
+    previous.disabled = true;
+    board.refs.supervisor.appendChild(previous); board.refs.supervisor.appendChild(next);
+    function load() {
+      if (busy) return; busy = true; previous.disabled = next.disabled = true;
+      fetch('/api/supervisor?offset=' + offset, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw Error('unknown'); return r.json(); }).then(function (d) {
+        if (d.version !== 1 || d.authority !== 'observation-only' || !Array.isArray(d.projects)) throw Error('unknown');
+        paintSupervisor(board.refs.supervisorBody, d);
+        next.disabled = !d.projects.some(function (p) { return p.status && Object.values(p.status.pagination.collections).concat(p.outcomes ? Object.values(p.outcomes.pagination.collections) : []).some(function (c) { return c.after > 0; }); });
+      }).catch(function () { board.refs.supervisorBody.replaceChildren(el('p', null, 'UNKNOWN: supervisor observation failed; no repair attempted.')); next.disabled = true; })
+        .finally(function () { busy = false; previous.disabled = offset === 0; });
+    }
+    previous.addEventListener('click', function () { offset = Math.max(0, offset - 128); load(); });
+    next.addEventListener('click', function () { offset += 128; load(); });
+    // Explicit observation refresh only; never a model/tracker refresh or a control endpoint.
+    var refresh = el('button', 'btn', 'Refresh supervisor observations'); refresh.type = 'button';
+    refresh.addEventListener('click', load); board.refs.supervisor.appendChild(refresh);
+    load();
   }
 
   function startReadiness() {

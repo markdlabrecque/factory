@@ -8,7 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { ownerOf } from '../../board/admission.mts';
 import { supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-contract.mts';
 import type { Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
-import { emptySupervisor, incidentIdentity, transitionSupervisor, validateSupervisor, readSupervisor, commitSupervisor, supervisorFile, HISTORY_LIMIT } from '../src/supervisor-state.mts';
+import { emptySupervisor, incidentIdentity, transitionSupervisor, validateSupervisor, readSupervisor, commitSupervisor, supervisorFile, HISTORY_LIMIT, supervisorObservation } from '../src/supervisor-state.mts';
 import type { SupervisorState, Event, Reservation, Limits } from '../src/supervisor-state.mts';
 import type { Diagnostic } from '../../orchestrator/supervisor.mts';
 
@@ -177,6 +177,10 @@ test('intent must be durable inert proposal before observation; reconciliation n
   assert.equal(apply(after, reconcile, 'dead'), after);
   assert.throws(() => apply(after, { ...reconcile, id: 'repeat-with-other-id' }, 'dead'), /already reconciled/);
   assert.deepEqual(after.proposals, s.proposals);
+  for (const [state, input] of [[s,event],[after,reconcile]] as const) {
+    const emitted = supervisorObservation(state,input);
+    assert.equal(emitted.ticket,'233'); assert.equal(emitted.supervisor!.incidentId,iid); assert.equal(emitted.supervisor!.proposalId,proposal().id);
+  }
 });
 
 test('strict schema rejects corruption, foreign identity, unknown owner and lost counters', () => {
@@ -307,4 +311,11 @@ test('diagnosis retention preserves old journals and requires exact fence, finit
   const malformed = structuredClone(saved); Object.values(malformed.diagnostics!)[0].decision!.action = { kind: 'approve' } as any;
   assert.throws(() => validateSupervisor(malformed, project));
   assert.deepEqual(saved.proposals, {}); assert.deepEqual(saved.intents, {}); assert.deepEqual(saved.reviews, {});
+  const proposed = record({ decision: { ...body.decision!, action: { kind: 'gate-change', proposal: proposal() } } });
+  const proposedState = apply(state,event(proposed));
+  assert.equal(supervisorObservation(proposedState,event(proposed)).supervisor!.proposalId,proposal().id);
+  const unconfirmed = { ...event(failed), processConfirmed: false } as Event;
+  const held = apply(state,unconfirmed);
+  assert.equal(supervisorObservation(held,unconfirmed).supervisor!.usage,null);
+  assert.deepEqual(supervisorObservation(saved,event()).supervisor!.usage,{tokens:10,cost:10});
 });
