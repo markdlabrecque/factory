@@ -664,4 +664,5 @@ finally {
     }
   }
 }
-process.exit(normalExit);
+// Preserve complete-workflow module continuation; active handles still retain entry/lease ownership until actual exit.
+process.exitCode = normalExit;
