@@ -1,0 +1,12 @@
+{
+  "name": "factory-advisory-openai-artifacts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Provenance lock for unmodified published artifacts; offline runtime loads only the complete public openai-responses subpath closure, not all provider APIs",
+  "dependencies": {
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-telemetry": "1.5.2",
+    "openai": "7.19.0",
+    "partial-json": "0.1.7"
+  }
+}

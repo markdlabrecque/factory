@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "offline public OpenAI Responses subpath fixture; not a complete installed Pi distribution",
+  "scope": "unmodified published artifacts for the complete public OpenAI Responses subpath closure; not a complete Pi distribution; package-lock.json records full upstream provenance graph, not an offline all-provider installation",
   "packages": [
     {
       "name": "openai",

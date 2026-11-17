@@ -124,29 +124,43 @@ credential, install or paid probe is exercised. An absent demonstrated provider
 ceiling/accounting adapter holds paid work; stub evidence does not supply it.
 All four commit shards and the separate lifecycle gate remain mandatory.
 
-## Pinned advisory provider request spike
+## Pinned advisory provider request gate
 
 ```sh
 node --test cli/test/supervisor-openai-request.test.mts
 node cli/test/supervisor-provider-fixture.mts --offline-spike
 ```
 
-One integration boundary uses unmodified published Pi-AI 1.5.2 / OpenAI 7.19.0
-artifacts from checked-in, hash-verified archives. Its child extracts only a
-disposable private module tree; no npm, registry, user configuration or package
-installation runs in tests. The manifest preserves original package identities
-and declared dependencies; the selected subpath needs only the archived reachable
-closure, not the unrelated provider SDKs declared by the full Pi-AI distribution.
+One provider integration boundary exercises the actual request adapter loaded from
+a complete disposable copied runtime, with real immutable grant/registered IPC child
+and journal authorization. Unmodified published Pi-AI 1.5.2 / OpenAI 7.19.0 archives
+now ship as runtime assets under `cli/src/supervisor-provider/`, not test-only data.
+Their original package manifests/licenses and full upstream provenance lock are
+retained; the loader extracts only the complete selected public subpath closure
+into a private temporary tree. Root backend/tsx installation remains a fake fixture;
+**provider code/dependency availability is real**, verified by archive identity and
+actual selected-subpath load/request, not that fake installer. No npm, registry,
+user configuration or real installation runs in tests.
+
 Synthetic non-secret auth, a clean child environment, disabled global fetch and
-native socket/HTTP/TLS paths, and an injected fetch with no network fallback keep
-all responses offline. The actual serializer's request fields, direct-hook refusal,
-shared one-shot transport fence and raw terminal event are exercised. This is not
-a fake Pi SDK or a fake production `DiagnosisBoundary`. Eligibility, HTTP/SSE,
-request IDs and usage are synthetic. Journal authorization, fault permutations,
-watchdog/accounting/host wiring, remote enforcement, billing and useful diagnosis
-are separate later gates. The [provider contract](docs/design/supervisor-provider-contract.md)
-records the conservative bound and evidence limits. Extend this same request suite
-for the production request adapter rather than creating another boundary matrix.
+native socket/HTTP/TLS paths, and the SDK-supported HTTP seam with no fallback keep
+all responses offline. Deterministic IPC barriers exercise stop-first zero-send
+and authorization-first in-flight stop; real 429/503 SDK error paths and context
+overflow yield one transmission without retries/compaction; repeated requests,
+changed input, inherited debug/TLS configuration and corrupt selected artifacts refuse.
+A fixture-side filesystem barrier mutates real copied prompt/dependency bytes after
+initial validation and input read; the final gate refuses with zero authorization
+and sends, without sleeps or a production callback/flag. Duplicate terminal events
+are explicitly marked ambiguous rather than exposing the first as known usage.
+Cheap payload permutations reject tools, background/continuation/cache-warm/extra
+fields, other service tiers and enlarged bounds. The actual raw terminal callback
+runs before normalized/default-zero usage. This is not a fake Pi SDK or a fake
+production `DiagnosisBoundary`. HTTP/SSE, request IDs/usage, current host controls
+and exclusion identity are synthetic; journal/ownership/copy/load/gate behavior is
+actual. No actual admission claim, watchdog/owned cleanup, durable usage settlement,
+installed host wiring, remote enforcement, billing or useful advice is proven.
+The [provider contract](docs/design/supervisor-provider-contract.md) records the
+conservative bound and limits. Extend this same suite, not a duplicate boundary matrix.
 It enters the unchanged four-shard inventory automatically; the independent
 browser lifecycle gate remains mandatory.
 
