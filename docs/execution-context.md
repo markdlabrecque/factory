@@ -146,6 +146,44 @@ contracts and all agent-mount exclusions. The old injected print worker remains
 component-only. See the [owned boundary](supervisor.md#owned-short-lived-advisory-process-boundary)
 for lifecycle, strict evidence and explicit platform limitations.
 
+### Shared admission version compatibility
+
+The complete runtime inventory includes `supervisor-admission.mts` alongside the
+mandatory v2 `admission.mts` reader/writer. Validated v1 state migrates only on commit,
+preserving claims/generations/recovery pending and candidate accounting. Old actual
+v1 readers reject v2. No optional exclusion bypass or downgrade is supported. Complete
+copy/import fixtures must include both assets unchanged; never fall back to source
+code from a selected flat runtime.
+
+Managed CLI dispatch/manual/selected-issue, shell bootstrap, standard direct main/
+dispatch and recovery launch acquire durable entry ownership before effecting work.
+Normal/recovery/delivery admissions and claim adoption/transfer also refuse a
+conflicting supervisor hold. Tokenless manual adoption takes a real normal claim.
+Entries bind canonical root and tracker; aliases sharing the same root or sanitized
+tracker namespace conflict even when display names, hosts or roots differ. Entries
+have no generation/recovery charge and orphan entries are not pruned by owner death.
+Existing normal/delivery claim pruning remains unchanged; supervisor holds are never
+pruned by owner death. Raw run records without definitive ownership/payload cleanup
+prevent new holds regardless of stage, starting/claim metadata or controller death;
+no shipped legacy raw producer provides that proof.
+
+This is source exclusion, not public advisory finalization. A separate source-only
+`settleAdvisory` journal primitive validates actual registered grant/authorization,
+immutable known T03 usage and exact T04 whole-group cleanup outside locks, then uses
+a private one-use frozen event and journal CAS to retain a finished reservation,
+full reserved charge and local-human-required terminal receipt. No legacy pending
+notification or usable advice is produced. Exact release reads validated durable
+closure before taking the admission lock and rechecks the full current hold identity;
+replay cannot resend or clear a successor. Strict old journal readers refuse the new
+settlements field; three-field old advisory records remain explicitly readable.
+No-send, absence-only or caller-callback cleanup authority is supplied. Journal send
+authorization remains the sole one-use permission under its own lock; no nested
+supervisor/admission locks or network/process waits under either lock are added.
+Runtime compatibility checks occur before admission locking. Quiescence of all old
+runtimes and unmanaged work plus complete compatible active-runtime selection are
+explicit rollout gates, not a claim of exclusion against nonparticipating code.
+See [shared admission exclusion](supervisor.md#shared-admission-exclusion).
+
 ### Exact scoped gate-input corrections
 
 The source-only [`applyReviewedGate`](supervisor.md#exact-scoped-verification-guidance-application)
@@ -242,7 +280,7 @@ configuration. Standalone Board installation uses the same bundle builder and
 records `~/.local/share/sandcastle-board-runtime/runtime.json`; Factory installation
 supplies its own `runtime.json`. Missing descriptors and missing/ambiguous checkouts
 publish token-fenced assessment failures. Board never falls back to local dispatch
-files. Refresh remains read-only with respect to runs, admission and tracker mutation,
+files. Refresh remains read-only with respect to runs, charged admission and tracker mutation,
 with bounded process groups and existing request coalescing.
 
 ### Maintaining a complete code override

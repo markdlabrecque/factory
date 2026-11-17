@@ -1,5 +1,5 @@
 // Host-owned supervisor journal: durably synced scoped CAS transitions, retained incidents/denials and separately charged resources.
-// Retains operator fences, completion, receipts, resolution audits and fenced application observations; emits redacted telemetry after commit, never executes effects or resets charges.
+// Retains operator fences and local terminal advisory settlements grounded in immutable usage/whole-group cleanup; never executes effects, notifies or resets charges.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
@@ -10,7 +10,11 @@ const { supervisorHash, validateProject, validateScope, validateIncident, valida
 import type { Diagnostic } from '../../orchestrator/supervisor.mts';
 import type { ProducerEvent } from '../../board/execution-events.mts';
 import { validateDiagnosisGrant, validateSendAuthorization, ADVISORY_PROFILE_ID, advisoryReservation } from './supervisor-advisory-contract.mts';
-import type { DiagnosisGrant, SendAuthorization } from './supervisor-advisory-contract.mts';
+import type { DiagnosisGrant, SendAuthorization, ProviderUsageReceipt } from './supervisor-advisory-contract.mts';
+import { validateProviderUsageReceipt } from './supervisor-advisory-contract.mts';
+export type AdvisorySettlement = { grantId: string; holdId: string; invocationId: string; fence: string;
+  authorization: string; usage: ProviderUsageReceipt; process: string; cleanup: string; at: string; disposition: 'local-human-required' };
+const settlementEvents = new WeakMap<object, { stateDir: string; project: string; revision: number }>();
 import { validateHostAdvisoryPolicy, hostAdvisoryPolicyIdentity, advisoryLimitHold } from './supervisor-host-policy.mts';
 import type { HostAdvisoryPolicy } from './supervisor-host-policy.mts';
 import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts';
@@ -40,7 +44,7 @@ export type SupervisorState = {
   diagnostics?: Record<string, Diagnostic>;
   /** Legacy reservations have no advisory policy/grant: absence is uncertainty, never reconstructed no-send. */
   advisory?: { policies: Record<string, AdvisoryRegistration>; workers: Record<string, { grant: DiagnosisGrant; at: string }>;
-    sends: Record<string, SendAuthorization> };
+    sends: Record<string, SendAuthorization>; settlements?: Record<string, AdvisorySettlement> };
   reviewCompletions?: Record<string, { inputRef: string; policy: string; proposer: string }>;
   deliveries?: Record<string, { requestId: string; target: number; attemptedAt: string }>;
   resolutions?: Record<string, { requestId: string; proposalId: string; actor: string; reason: string; at: string; nextProposalId: string | null }>;
@@ -65,6 +69,7 @@ export type Event = { id: string; at: string } & (
   | { kind: 'register-advisory-worker'; reservationId: string; fence: string; owner: Owner; grant: DiagnosisGrant }
   | { kind: 'authorize-advisory-send'; grantId: string; reservationId: string; fence: string; worker: Owner; payload: string;
       policy: AdvisoryRegistration; controls: AdvisoryControls }
+  | { kind: 'settle-advisory'; reservationId: string; settlement: AdvisorySettlement }
   | { kind: 'finish'; reservationId: string; fence: string; owner: Owner; actual: Resources }
   | { kind: 'diagnosis'; diagnostic: Diagnostic; owner: Owner; actual: Resources | null; processConfirmed: boolean; request: HumanRequest | null }
   | { kind: 'reconcile-worker'; reservationId: string }
@@ -170,7 +175,8 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
       && (r.reviewId === null || r.kind === 'review' && text(r.reviewId) && s.reviews[supervisorHash(r.reviewId)]?.invocationId === r.id), 'invalid reservation');
   }
   if (s.advisory) {
-    object(s.advisory, ['policies','workers','sends']);
+    // Explicit compatibility for the shipped three-field advisory journal. Never drop an unknown field.
+    object(s.advisory, ['policies','workers','sends', ...(Object.hasOwn(s.advisory, 'settlements') ? ['settlements'] : [])]);
     for (const [key, p] of entries(s.advisory.policies)) {
       validateAdvisoryRegistration(p);
       const r = s.reservations[key]; demand(r?.kind === 'diagnosis' && p.at === r.at && same(r.reserved, advisoryReservation()), 'orphan advisory policy');
@@ -186,6 +192,16 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
     for (const [key, a] of entries(s.advisory.sends)) {
       const w = s.advisory.workers[key]; demand(w && a.at >= w.at, 'send without registered worker'); validateSendAuthorization(a, w.grant);
     }
+  }
+  for (const [key, v] of entries(s.advisory?.settlements ?? {})) {
+    object(v, ['grantId','holdId','invocationId','fence','authorization','usage','process','cleanup','at','disposition']);
+    const g = s.advisory!.workers[key]?.grant, a = s.advisory!.sends[key], r = s.reservations[key];
+    demand(g && a && r && key === supervisorHash(v.invocationId) && v.grantId === g.id && v.holdId === g.holdId
+      && v.invocationId === g.invocationId && v.fence === g.fence && v.authorization === a.receipt
+      && hash(v.process) && hash(v.cleanup) && time(v.at) && v.at >= a.at && v.disposition === 'local-human-required', 'foreign settlement');
+    validateProviderUsageReceipt(v.usage, g, a);
+    demand(v.usage.state === 'known' && r.state === 'finished' && same(r.actual, v.usage.resources)
+      && s.incidents[r.incidentId].incident.state === 'human-required', 'settlement lost closure/accounting/human hold');
   }
   demand(Object.values<any>(s.reservations).filter(r => r.state === 'active').length <= 1, 'multiple project decisions');
   object(s.charged, ['diagnosis','review']); resources(s.charged.diagnosis); resources(s.charged.review);
@@ -221,7 +237,7 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
   const key = supervisorHash(event.id), digest = supervisorHash(event);
   if (state.events[key]) { demand(state.events[key] === digest, 'event id reused with different bytes'); return state; }
   // An observation/stop fence must remain writable even when an old worker's ownership is unknown.
-  for (const projectState of event.kind === 'control' ? [] : [state, ...(environment.projects ?? [])]) {
+  for (const projectState of ['control','settle-advisory'].includes(event.kind) ? [] : [state, ...(environment.projects ?? [])]) {
     for (const r of Object.values(projectState.reservations)) if (r.state === 'active') demand(environment.ownerState(r.owner) !== 'unknown', 'unknown worker owner holds journal');
     for (const m of Object.values(projectState.intents)) if (m.outcome === 'pending') demand(environment.ownerState(m.owner) !== 'unknown', 'unknown intent owner holds journal');
   }
@@ -330,6 +346,14 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       const receipt = { version: 1 as const, grantId: w.grant.id, invocationId: r.id, fence: r.fence, worker: event.worker,
         profile: ADVISORY_PROFILE_ID, payload: event.payload, at: event.at };
       s.advisory!.sends[key] = validateSendAuthorization({ ...receipt, receipt: supervisorHash(receipt) }, w.grant); break;
+    }
+    case 'settle-advisory': {
+      const key = supervisorHash(event.reservationId), r = s.reservations[key], v = event.settlement;
+      demand(r && r.state !== 'finished' && !s.advisory?.settlements?.[key] && v.at === event.at, 'stale advisory settlement');
+      s.advisory!.settlements ??= {}; s.advisory!.settlements[key] = structuredClone(v);
+      r.actual = structuredClone(v.usage.resources); r.state = 'finished';
+      // Local terminal disposition only: no deliverable legacy HumanRequest or usable advice.
+      s.incidents[r.incidentId].incident.state = 'human-required'; break;
     }
     case 'finish': {
       const r = owned(event.reservationId, event.fence, event.owner); resources(event.actual);
@@ -469,6 +493,12 @@ export function readSupervisor(stateDir: string, project: ProjectIdentity): Supe
  * stateDir MUST be host-owned, outside project/agent mounts, as for admission/recovery. No async effects inside locks. */
 export function commitSupervisor(stateDir: string, project: ProjectIdentity, expectedRevision: number, event: Event): SupervisorState {
   validateProject(project);
+  if (event.kind === 'settle-advisory') {
+    const brand = settlementEvents.get(event);
+    demand(brand && brand.stateDir === stateDir && brand.project === supervisorHash(project)
+      && brand.revision === expectedRevision && Object.isFrozen(event), 'unverified advisory settlement event');
+    settlementEvents.delete(event); // One use, including failed CAS/write attempts.
+  }
   const after = withAdmissionLock(join(stateDir, 'supervisor'), write => {
     const j = readJournal(stateDir), key = supervisorHash(project.root);
     const before = j.projects[key] ? validateSupervisor(j.projects[key], project) : emptySupervisor(project);
@@ -492,6 +522,34 @@ export function authorizeAdvisorySend(stateDir: string, project: ProjectIdentity
     id: `advisory-send:${input.grantId}` });
   demand(after.revision === expectedRevision + 1 && after.advisory?.sends[key], 'replay is not new permission');
   return structuredClone(after.advisory!.sends[key]);
+}
+/** Source-only final closure. Imports and immutable evidence I/O are OUTSIDE the journal lock.
+ * CAS rechecks the exact grant/send; this creates no advice, delivery request, refund or new permission.
+ * Missing usage, unregistered/no-send and uncertain cleanup remain held. Reopen only observes closure. */
+export async function settleAdvisory(stateDir: string, project: ProjectIdentity, expectedRevision: number,
+  invocationId: string): Promise<SupervisorState> {
+  const before = readSupervisor(stateDir,project), key = supervisorHash(invocationId);
+  demand(before.revision === expectedRevision, 'revision CAS failed');
+  if (before.advisory?.settlements?.[key]) return before;
+  const g = before.advisory?.workers[key]?.grant, a = before.advisory?.sends[key];
+  demand(g && a, 'registered grant and durable send authorization required');
+  // Dynamic imports avoid the process/usage modules' journal-reader TLA cycle.
+  const { readProviderUsage } = await import('./supervisor-openai-usage.mts');
+  const { readOwnedCleanup, readOwnedProcess } = await import('./supervisor-process.mts');
+  const usage = readProviderUsage(stateDir,g!,a!);
+  demand(usage.state === 'known', 'known immutable provider usage required');
+  if (usage.state !== 'known') throw Error('Supervisor state held: usage unknown');
+  const process = readOwnedProcess(stateDir,g!), cleanup = readOwnedCleanup(stateDir,g!);
+  const at = new Date().toISOString();
+  const event: Event = { kind: 'settle-advisory', id: `advisory-settlement:${g!.id}`, at, reservationId: invocationId,
+    settlement: { grantId:g!.id, holdId:g!.holdId, invocationId, fence:g!.fence, authorization:a!.receipt,
+      usage:structuredClone(usage.receipt), process:supervisorHash(process), cleanup:supervisorHash(cleanup), at,
+      disposition:'local-human-required' } };
+  const freeze = (v: any): void => { if (v && typeof v === 'object') { Object.values(v).forEach(freeze); Object.freeze(v); } };
+  freeze(event);
+  settlementEvents.set(event,{stateDir,project:supervisorHash(project),revision:expectedRevision});
+  try { return commitSupervisor(stateDir,project,expectedRevision,event); }
+  finally { settlementEvents.delete(event); }
 }
 /** Select scalar attribution from the committed state, never raw adapter usage or source text. */
 export function supervisorObservation(after: SupervisorState, event: Event): ProducerEvent {

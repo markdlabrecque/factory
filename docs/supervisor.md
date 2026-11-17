@@ -50,8 +50,10 @@ provider/model fallback or a weaker spending guarantee.
 Only after that evidence exists can a real host connect complete saved-run input,
 current controls, atomic exclusive admission and the existing diagnosis/journal/
 projection APIs. A busy-state read or `admissionHold` assertion is not exclusion.
-The host must add a durable hold respected by competing manual, dispatch, recovery
-and delivery admission, without manufacturing an execution or recovery charge.
+The source admission primitives now provide a durable hold respected by managed
+manual, dispatch, recovery and delivery entry/admission, without manufacturing an
+execution or recovery charge. Public host composition remains held; narrow source-only terminal closure/release is available
+as described in [shared admission exclusion](#shared-admission-exclusion).
 Crash ordering must retain an uncertain hold; no model call occurs under a lock.
 Do not expose an effecting or paid CLI route before these prerequisites pass.
 
@@ -59,6 +61,91 @@ The broader contracts below remain retained for deferred autonomy. Their compone
 source APIs do not mean those installed journeys pass acceptance. The advisory MVP
 requires its own actual public copied-install diagnosis evidence and the complete
 mandatory tests/review; source merge is not installation or live pilot approval.
+
+## Shared admission exclusion
+
+`board/admission.mts` writes **version 2** with mandatory `supervisorHolds` and
+`entries` collections. A fully validated version-1 store migrates explicitly on
+its next successful commit; reads alone do not write. Claims, project generations,
+recovery admitted counts, pending attempts and consumed-candidate mappings retain
+their meaning. Invalid JSON, unknown versions, missing collections and exclusion
+fields smuggled into version 1 fail closed without overwriting the file. The actual
+previous v1 reader rejects v2. Writers refuse downgrade; rollback requires compatible
+readers/writers, not dropping exclusion fields or changing the version number.
+
+The inventoried `cli/src/supervisor-admission.mts` supplies source-only claim/check/
+release primitives. A claim resolves the canonical checkout root and binds the
+structured tracker, fresh hold ID/fence, invocation and exact owner PID/start.
+Identity checks require **both** root and tracker; conflict checks additionally
+exclude either the same root or the same sanitized tracker project/run-state key
+namespace (including aliases across roots, tracker kinds or hosts). Display names
+are not authority. Holds have pending/settled evidence-reference collections;
+these strings are not permissions or settlement proof. Release instead reads a validated terminal supervisor-journal receipt.
+Claiming/checking holds changes no normal generation, repair charge or progress.
+Dead supervisor owners are never pruned. Normal/delivery dead-claim pruning and
+recovery settlement retain their existing semantics.
+
+The initial claim requires conservative **shared run-state quiescence**, because
+legacy claims and raw run records cannot establish exact canonical-root ownership:
+no live/unknown normal/delivery claims, recovery claims or pending charges, managed
+entries or any raw run record without definitive ownership and whole-payload cleanup.
+No shipped legacy raw-record producer supplies this proof, so even queued, waiting,
+done or stopped records hold, including dead controllers, dangling claims, starting
+handoffs and unresolved recovery payloads. A stage label is not cleanup. This may hold unrelated
+projects sharing the store rather than infer their ownership. Existing conflicting
+supervisor holds refuse even when their owners died. Managed entry claims canonicalize
+root aliases too. They wrap CLI manual/dispatch (including complete overrides), shell
+bootstrap, direct standard main/dispatch, and recovery launch before readiness,
+tracker/model work or remote branch fetch. They are separate from implementation
+claims and do not charge generations. Tokenless `adoptClaim` now acquires normal
+ownership atomically instead of returning unowned permission. `admitRun` and claim
+transfer also refuse exclusion, covering normal, recovery and CI delivery admission.
+Uncertain entry handoff/cleanup and orphan entries remain held, not death-pruned.
+
+**Narrow source-only terminal settlement and release:** `settleAdvisory` in
+`supervisor-state.mts` requires the actual registered grant and durable send authorization,
+T03's revalidated immutable known usage and T04's exact owned process plus durable
+whole-group ESRCH cleanup receipt. Evidence reads and dynamic imports happen outside
+the journal lock. A module-private one-use, recursively frozen event binds directory,
+project and revision; `commitSupervisor` rejects caller-fabricated settlement events.
+The journal CAS revalidates the exact current grant/send and atomically finishes the
+reservation with known actual resources, retaining **all reserved charge**, and sets
+an enduring `local-human-required` disposition. This publishes no usable advice,
+legacy pending HumanRequest, tracker/outbox request or execution authority.
+
+The strict optional `advisory.settlements` map binds grant, hold, invocation, fence,
+authorization, validated usage and process/cleanup hashes to the finished reservation.
+Existing strict three-field advisory journals are explicitly accepted unchanged;
+unknown fields are never dropped. Older strict readers refuse the new field.
+Reopening an existing settlement observes closure without resend or another commit.
+`releaseSupervisorHold` reads validated closure outside the admission lock, then
+rechecks exact root/tracker/invocation/fence/controller owner and deletes only the
+matching hold under its separate lock. A stale release cannot clear a successor.
+This is stable cross-store terminal evidence, **not** two-file atomicity.
+
+No-send settlement is deliberately unsupported here. Absent authorization alone,
+unprepared orphans, live/unknown workers, uncertain handoff, missing/unknown usage
+or cleanup all retain exclusion and full charge. Do not manually remove an orphan.
+Runtime leases and public trusted host composition remain future work; this primitive
+does not provide refund, restart/retry, notification or activation authority.
+
+Admission and supervisor locks remain separate. There is no cross-store atomic
+transaction, nested admission/supervisor lock, subprocess wait, tracker collection,
+network or model work under either lock. Runtime validation/canonicalization run
+before claim locking. The supervisor journal alone owns one-use send authorization;
+this module adds no second permission store. Existing journal units prove both
+stop/authorization orderings. The reused owned-process integration additionally proves
+actual source journal finalization and exact admission release/reopen with full charge retained.
+
+**Rollout gates:** all older/nonparticipating active runtimes and unmanaged work
+must be quiesced, and a complete selected runtime must validate and contain the
+same v2 admission reader/writer and inventoried helper. Required explicit operator
+quiescence attestations are prerequisites, not evidence that arbitrary host work is
+excluded. Mixed old runtimes, untracked active work and unmanaged entrypoints remain
+unsupported/unknown. Importing a helper, injected callbacks, a complete copied fake
+install, source merge or a synthetic evidence reference does not establish installed
+host authority, public advisory wiring or pilot approval. No live
+activation, paid request, installation or rollout is performed by these primitives.
 
 ## Bounded direct Pi request source adapter
 
@@ -185,7 +272,8 @@ A guard deadline still bounds a worker blocked in legacy Darwin owner lookup.
 print-mode `diagnoseProject` injection is explicitly `ComponentDiagnosisBoundary`:
 its booleans are not provider enforcement, and it cannot consume/settle a new
 advisory reservation through legacy finish. Complete facts, real exclusion,
-installed trusted host construction and final advisory settlement remain later work.
+installed trusted host construction remain later work. The separate narrow journal
+primitive above now closes known usage/cleanup into a local terminal human hold.
 
 One disposable process integration uses unchanged copied production assets and
 actual journal, archive loader, SDK, raw/scalar filesystem receipts, session/group
@@ -198,7 +286,11 @@ attempt/error; neither that signal nor the inherited pipe establishes cleanup.
 Independent whole-group checks remain required. A task may still show running
 kernel-exit work before zombie/reaping state after closing descriptors; present or
 unknown groups remain held, not counted absent. Provider acceptance/billing, semantic
-advice, actual admission and installed host authority are not demonstrated.
+advice and installed host authority are not demonstrated. The normal fixture now
+claims an actual durable hold, binds its ID/fence into policy/reservation/grant, and
+proves known 35-token/220-derived-micro-USD usage plus whole-group cleanup can produce
+real terminal journal closure, exact release, idempotent reopen and stale-release
+refusal against a newly claimed successor. Unknown lifecycle cases retain exclusion.
 
 ## Raw provider usage and private receipts
 

@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { readdirSync, readFileSync } from 'node:fs';
 import type { RunState } from '../../board/board.mts';
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
-import { generationOf, keyFor, withAdmission, withAdmissionLock } from '../../board/admission.mts';
+import { generationOf, keyFor, supervisorExclusion, withAdmission, withAdmissionLock } from '../../board/admission.mts';
 import type { AdmissionTx } from '../../board/admission.mts';
 import { admitRun, readRuns, writeRecord } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
@@ -82,6 +82,8 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
   if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('Recovery cap must be a positive safe integer');
   const dir = o.dir ?? runStateDir(p);
   return withAdmission(dir, tx => {
+    const exclusion = supervisorExclusion(tx.state, o.tracker, o.root);
+    if (exclusion) return { ok: false, reason: exclusion };
     let entered=false;
     try { return withAdmissionLock(`${executionManifestFile(dir,o.tracker,o.ticket)}.publication`, () => {
     entered=true;

@@ -1,6 +1,8 @@
+// Durable managed admission precedes preparation probes/model work; uncertain group cleanup retains its entry.
 // Run the selected complete workflow under saved scheduler Node/PATH, with project-mode review. Preparation owns a bounded process group,
 // confirms cleanup before interpreting stdout, and never consumes an attempt. Tests inject process boundaries.
 import { spawn } from 'node:child_process';
+import { claimManagedEntry, releaseManagedEntry } from '../../board/admission.mts';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -22,6 +24,12 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
   let workflow;
   try { workflow = projectWorkflow(p, o.root, o.workflowEnv); } catch (error) { return held('config', String(error), 'project'); }
   if (o.signal?.aborted) return held('timeout','Preparation cancelled','project');
+  const tracker = workflow.config.TRACKER;
+  let entry: string;
+  try { entry = claimManagedEntry(o.dir, { root: o.root, tracker: { kind: tracker.kind, host: tracker.gitlabHost ?? tracker.host!, project: tracker.project } }); }
+  catch (error) { return held('ownership', String(error), 'project'); }
+  let uncertain = false;
+  try {
   const { projectLaunchReadiness, readinessReason } = await import('../../orchestrator/launch-readiness.mts');
   const hostHold = readinessReason(await projectLaunchReadiness({ projectRoot: o.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id, runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: o.dir, base: o.base, signal: o.signal }));
   if (o.signal?.aborted) return held('timeout','Preparation cancelled','project');
@@ -34,7 +42,6 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
   if (existsSync(owner)) return held('ownership',`Previous preparation ownership is unconfirmed: ${owner}; confirm its named process group/workspace cleanup before removing this record`,'project');
   try { writeFileSync(owner,JSON.stringify({root:o.root,at:new Date().toISOString()}),{flag:'wx',mode:0o600}); }
   catch (e) { return held('ownership',String(e),'project'); }
-  let uncertain = false;
   const run = async (args:string[],timeout:number): Promise<{ok:boolean;output:string;code?:'timeout'|'ownership';reason?:string}> => {
     if (o.signal?.aborted) return {ok:false,output:'',code:'timeout',reason:'Preparation cancelled'};
     return new Promise(accept => {
@@ -83,4 +90,5 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
     return value;
   } catch (e) { return held('config',String(e),'project'); }
   finally { if (!uncertain) rmSync(owner,{force:true}); }
+  } finally { if (!uncertain) releaseManagedEntry(o.dir, entry); }
 }

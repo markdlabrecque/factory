@@ -68,6 +68,43 @@ source-only reviewer/outbox implementation and remaining paid-runtime/applicatio
 prerequisites; contract fixtures alone do not activate downstream action. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
+## Shared admission exclusion
+
+```sh
+node --test cli/test/supervisor-admission.test.mts cli/test/run.test.mts cli/test/recovery-claim.test.mts cli/test/recovery-run.test.mts cli/test/runtime-bundle.test.mts orchestrator/verification-entrypoint-sandbox.test.mts
+```
+
+Cheap schema/migration and namespace units cover mandatory v2 collections, explicit
+v1 migration and optional-exclusion refusal. One disposable filesystem boundary
+preserves corrupt bytes, verifies the frozen actual develop v1 reader refuses v2,
+checks accounting preservation, canonical symlink identity, exact fences, unknown
+raw ownership, managed-entry exclusion, tokenless adoption and existing dead normal/
+delivery pruning. Its one real two-child claim race uses ready/go/result/exit IPC
+barriers, with no sleeps, retry loops or timing tolerances. Both contenders invoke
+the real durable primitive against one store; exactly one wins. Actual winner exit
+proves supervisor holds survive owner death. The successor/pending-reference setup
+is synthetic stored input, not a produced settlement receipt. These admission-only
+cases prove refusal, **not** finalization or no-send authority. The reused
+`cli/test/supervisor-process.test.mts` normal integration proves the positive path:
+actual claim, policy/reservation/grant hold binding, real copied SDK/process boundary
+with network-denied synthetic SSE/auth, immutable known 35-token/220-derived-cost
+usage, whole-group ESRCH, actual journal-produced local-human terminal settlement,
+retained full charge, exact release, idempotent reopen and stale-release refusal
+against an actually claimed successor. Fabricated commit events and corrupted receipt
+bindings fail closed. Other lifecycle cases retain unknown usage/exclusion. Cheap raw
+filesystem permutations cover live parked/terminal records, dangling claims, starting
+handoffs and unresolved recovery payloads regardless of stage or controller death.
+No-send finalization, runtime leases and installed public host authority are not proved. One reused
+standard-entrypoint fixture invokes the actual flat main, dispatch and shell bootstrap
+against a real durable hold, proving zero tracker/provider/readiness/container work.
+Actual recovery-claim refusal preserves synthetic pending accounting byte-for-byte
+before replay/candidate consumption. Complete flat inventory/import tests exercise
+the shipped helper without source fallback;
+fake private package installation is not new dependency or installed-host evidence.
+CLI preflight entries do not create run generations/repair charges. No live dispatch,
+provider/auth probe, installation, tracker, service or rollout occurs. The four
+mandatory shards, unchanged limits and separate browser lifecycle gate still apply.
+
 ## Supervisor durable state
 
 ```sh

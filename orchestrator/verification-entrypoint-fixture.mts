@@ -21,6 +21,7 @@ import { prepareRuntimeBundle, regenerateRuntimeManifest } from '../cli/src/runt
 import { addProject } from '../cli/src/projects.mts';
 import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../cli/src/runtime-ownership.mts';
 import { resolveWorkflow } from './workflow.mts';
+import { claimSupervisorHold, checkSupervisorHold } from '../cli/src/supervisor-admission.mts';
 
 
 export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false) {
@@ -181,6 +182,21 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(bin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(fake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
     }
     assert.equal(existsSync(join(root, 'node_modules')), false, 'the project never supplies fixture dependencies');
+    if (scenario === 'supervisor-held') {
+      const hold = claimSupervisorHold(state, { project: { root, tracker: { kind: 'github', host: 'github.com', project: 'owner/repo' } },
+        invocationId: 'entrypoint-exclusion', runtimeRoot: runtime.directory,
+        rollout: { olderRuntimesQuiesced: true, unmanagedWorkQuiesced: true } });
+      const env = { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SANDCASTLE_STATE_DIR: state };
+      for (const name of ['main.mts', 'dispatch.mts', 'context-process.mts']) {
+        const result = spawnSync(process.execPath, [join(runtime.directory, name), '--issue', '7', '--base', 'main'], { cwd: root, env, encoding: 'utf8', timeout: 15000 });
+        assert.notEqual(result.status, 0, name); assert.match(result.stderr, /held by supervisor/, name);
+        assert(checkSupervisorHold(state, hold));
+      }
+      for (const name of ['gh.jsonl', 'docker-calls.jsonl', 'pi-calls', 'live', 'implementer-agent.json'])
+        assert.equal(existsSync(join(fake, name)), false, `${name}: no tracker/provider/readiness/container work`);
+      assert.equal(existsSync(join(state, 'owner_repo--7.json')), false);
+      return;
+    }
     if (scenario === 'project-override') {
       assert.ok(copied);
       const override = join(root, '.factory-workflow');

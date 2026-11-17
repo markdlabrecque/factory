@@ -14,6 +14,7 @@ import { status } from '../src/commands/status.mts';
 import { doctorReadiness, diagnosticContext } from '../src/readiness.mts';
 import { FakeSchedule } from '../src/platform/fake.mts';
 import { setProjectSchedule, writeScheduleConfig } from '../src/schedule.mts';
+import { readAdmission } from '../../board/admission.mts';
 import { readReadiness, readStoredReadiness, scopedReadiness } from '../../board/readiness.mts';
 import { handleRequest } from '../../board/board-server.mts';
 import { projectLaunchReadiness } from '../../orchestrator/launch-readiness.mts';
@@ -59,7 +60,12 @@ async function freshHost(f: ReturnType<typeof readinessFixture>) {
 function noLaunch(f: ReturnType<typeof readinessFixture>) {
   assert.equal(existsSync(join(f.fake, 'unexpected.jsonl')), false, 'no agent, container, auth, npm or service boundary');
   assert.equal(existsSync(join(f.p.state, 'owner_repo--7.json')), false, 'no invented queued/stopped execution');
-  assert.equal(existsSync(join(f.p.state, 'admission')), false);
+  if (existsSync(join(f.p.state, 'admission'))) {
+    // Managed entry ownership precedes host probing; no implementation/recovery admission is manufactured.
+    const admission = readAdmission(f.p.state);
+    assert.deepEqual(admission.claims, {}); assert.deepEqual(admission.generations, {});
+    assert.deepEqual(admission.recovery, {}); assert.deepEqual(admission.supervisorHolds, {});
+  }
 }
 
 for (const path of ['evidence', 'worktrees']) test(`clean Git ${path} filesystem hold across manual, dispatch and real tick; next pass fails separately on incomplete parent input`, async t => {
@@ -179,7 +185,7 @@ test('unusable shared state fails directly before tracker and cannot manufacture
   mkdirSync(join(f.p.state, '..'), {recursive:true}); writeFileSync(f.p.state, 'state directory obstruction');
   const errors: string[] = [], saved = console.error; console.error = (...args) => {errors.push(args.join(' '));};
   try { assert.equal(await run(f.p, '7', {cwd:f.root}), 1); } finally { console.error = saved; }
-  assert.match(errors.join('\n'), /host readiness hold/); assert.match(errors.join('\n'), /report write failed/);
+  assert.match(errors.join('\n'), /admission held/); assert.match(errors.join('\n'), /ENOTDIR/);
   assert.equal(readFileSync(f.p.state, 'utf8'), 'state directory obstruction');
   assert.notEqual(readStoredReadiness(f.p.state, f.root).state, 'current');
   assert.equal(existsSync(join(f.fake, 'gh.jsonl')), false); noLaunch(f);

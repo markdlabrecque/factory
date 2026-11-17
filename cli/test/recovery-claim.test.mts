@@ -47,6 +47,24 @@ const run = (dir: string, iid: string) => readRuns(dir).find(r => r.project === 
 const used = (p: ReturnType<typeof paths>, t: number) => readRecovery(p, root).budgets[t]?.used ?? 0;
 const reason = (x: unknown) => (x as { reason: string }).reason;
 
+test('supervisor exclusion refuses the actual recovery entry before pending-charge replay or candidate consumption', t => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'factory-held-repair-'))); t.after(() => rmSync(home, { recursive: true, force: true }));
+  const p = paths(home), checkout = join(home, 'project'), dir = join(home, 'runs');
+  mkdirSync(join(checkout, '.factory'), { recursive: true }); writeFileSync(join(checkout, '.factory/factory.toml'), factoryToml('proj'));
+  // Synthetic crash-state input tests refusal only; these references do not establish final settlement.
+  withAdmission(dir, tx => {
+    tx.state.supervisorHolds.hold = { id: 'hold', project: { root: checkout, tracker: { kind: 'github', host: 'github.com', project: 'proj' } },
+      owner: ownerOf(process.pid), invocationId: 'invocation', fence: 'fence', pending: [], settled: [] };
+    tx.state.recovery.proj = { admitted: 1, pending: [{ id: ID(1), iid: '7', root: checkout, at: at(1) }], candidates: { ['a'.repeat(64)]: ID(1) } };
+    tx.commit();
+  });
+  const before = readFileSync(admissionFile(dir)), ledger = readRecovery(p, checkout);
+  const refused = actualClaimRecovery(p, { root: checkout, tracker: 'proj', ticket: 7, pid: process.pid, at: at(10), dir, id: ID(2), candidateId: 'b'.repeat(64) });
+  assert.equal(refused.ok, false); assert.match(reason(refused), /held by supervisor/);
+  assert.deepEqual(readFileSync(admissionFile(dir)), before); assert.deepEqual(readRecovery(p, checkout), ledger);
+  assert.equal(existsSync(join(dir, 'proj--7.json')), false);
+});
+
 test('a refused claim changes neither the board, the admission record nor the recovery record', t => {
   const { p, dir, pid } = fixture(t);
   // The stopped ticket the attempt would repair, and the cap filled by other projects' runs.

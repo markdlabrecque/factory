@@ -16,6 +16,14 @@ import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
 import { fixtureTicketHash } from './fixtures/ticket-input.mts';
 
+import { readAdmission } from '../board/admission.mts';
+/** Refresh may own a durable managed entry, never an implementation/recovery admission or generation. */
+export function assertUnchargedAdmission(dir: string): void {
+  const state = readAdmission(dir);
+  assert.deepEqual(state.claims, {}); assert.deepEqual(state.generations, {});
+  assert.deepEqual(state.recovery, {}); assert.deepEqual(state.supervisorHolds, {});
+}
+
 export const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 // Selected fixtures use v2 model tiers. No model label is required.
