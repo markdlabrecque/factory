@@ -150,8 +150,11 @@ overflow yield one transmission without retries/compaction; repeated requests re
 Pure precondition units own changed frozen input and inherited debug/TLS configuration
 refusal before provider startup; copied-bundle validation owns corrupt selected
 artifacts. These cases do not need repeated SDK/process bootstraps. The same nine
-transport scenarios retain the real SDK/request/journal boundaries and original
-15-second child limit, four-way file concurrency and 180-second shard deadlines.
+transport scenarios retain the real SDK/request/journal boundaries. Each independent
+fresh request scenario has a 15-second subprocess limit instead of sharing one
+aggregate subprocess budget; the complete matrix retains the standard 120-second
+test bound, four-way file concurrency and 180-second shard deadline. Every scenario
+keeps all original assertions; there is no production deadline change or retry.
 A fixture-side filesystem barrier mutates real copied prompt/dependency bytes after
 initial validation and input read; the final gate refuses with zero authorization
 and sends, without sleeps or a production callback/flag. Duplicate terminal events
@@ -182,7 +185,9 @@ inventoried/copied factory, guard, runner, T02 request gate and T03 raw/scalar
 publication. A test-only preload supplies the existing provider fixture's synthetic
 terminal HTTP/SSE and non-secret auth; all real native socket/HTTP/TLS transport is
 permanently denied. It also adds an inherited observation pipe and filesystem/IPC
-barriers. No production bypass flag or second SDK scenario matrix is introduced.
+barriers. Filesystem barrier JSON is closed in a private temporary file and atomically
+renamed before the named watcher event; file creation alone is not a completed
+message. No production bypass flag or second SDK scenario matrix is introduced.
 The extra pipe is only an exit barrier: a separate kernel whole-group absence
 observation is required for cleanup. A still-present orphan zombie group remains
 held, with explicit Linux zombie evidence, not inferred absent from leader/pipe

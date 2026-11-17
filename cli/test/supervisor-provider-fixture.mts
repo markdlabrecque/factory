@@ -36,11 +36,11 @@ export const providerTerminal = () => ({ type: 'response.completed', response: {
     cache_write_tokens_details: { ttl_30m_tokens: 0, ttl_12h_tokens: 0 } }, output_tokens: 10,
     output_tokens_details: { reasoning_tokens: 8 }, total_tokens: 35 } } });
 export const offlineText = 'a'.repeat(16_384); // Synthetic model output only; never useful advice or measured usage.
-export function providerTextStream() {
+export function providerTextStream(text = '{}') {
   const item = { type: 'message', id: 'msg_offline', role: 'assistant', status: 'completed',
-    content: [{ type: 'output_text', text: offlineText, annotations: [] }] };
+    content: [{ type: 'output_text', text, annotations: [] }] };
   return sse({ type: 'response.output_item.added', output_index: 0, item: { ...item, content: [] } })
-    + sse({ type: 'response.output_text.delta', output_index: 0, item_id: item.id, content_index: 0, delta: offlineText })
+    + sse({ type: 'response.output_text.delta', output_index: 0, item_id: item.id, content_index: 0, delta: text })
     + sse({ type: 'response.output_item.done', output_index: 0, item }) + sse(providerTerminal());
 }
 const host = { version: 1 as const, enabled: true as const, profile: ADVISORY_PROFILE_ID, capacity: 1 as const,
@@ -104,13 +104,15 @@ if (process.argv[2] === '--request-worker') {
   process.send!({ ready: true });
 }
 
-export async function runProviderSpike() {
+export const providerScenarios = ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','mid-load-prompt','mid-load-dependencies'] as const;
+export async function runProviderSpike(selected?: string) {
+  if (selected && !providerScenarios.includes(selected as any)) throw Error('Unknown offline provider scenario');
   denyNetwork();
   const root = mkdtempSync(join(tmpdir(), 'factory-provider-boundary-'));
   try {
     const bundle = prepareRuntimeBundle({ sourceRoot: fileURLToPath(new URL('../../', import.meta.url)), runtimeStore: join(root, 'runtimes'), install: installPackages });
     const scenarios: any[] = [];
-    for (const scenario of ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','mid-load-prompt','mid-load-dependencies']) {
+    for (const scenario of providerScenarios.filter(s => !selected || s === selected)) {
       let runtimeRoot = bundle.directory;
       if (scenario.startsWith('mid-load-')) {
         runtimeRoot = join(root, `runtime-${scenario}`); cpSync(bundle.directory, runtimeRoot, { recursive: true });
@@ -162,13 +164,13 @@ export async function runProviderSpike() {
         await closed;
       } finally { if (child.connected) child.send({ abort: true }, () => {}); await closed; }
     }
-    const complete = scenarios[0];
+    const complete = scenarios.find(s => s.scenario === 'complete');
     return { artifact: 'PiAI1.5.2 / OpenAI7.19.0 copied-runtime public subpath closure', invalidTransmissions: 0,
-      transmissions: complete.transmissions, extraRequestDenied: complete.extraRequestDenied, payload: complete.payload,
-      rawUsage: complete.terminal.response.usage, requestId: complete.response.requestId,
+      transmissions: complete?.transmissions, extraRequestDenied: complete?.extraRequestDenied, payload: complete?.payload,
+      rawUsage: complete?.terminal.response.usage, requestId: complete?.response.requestId,
       scenarios: scenarios.map(({ serialized, payload, terminal, result, ...trace }) => trace),
       runtime: bundle.id, dependencies: bundle.manifest.dependencies,
       evidence: 'actual production gate/pinned serializer/copied artifacts/journal/registered child; synthetic HTTP/SSE, host controls and exclusion ID; no live provider/admission/settlement' };
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
-if (process.argv[2] === '--offline-spike') console.log(JSON.stringify(await runProviderSpike()));
+if (process.argv[2] === '--offline-spike') console.log(JSON.stringify(await runProviderSpike(process.argv[3])));

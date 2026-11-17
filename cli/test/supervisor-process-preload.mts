@@ -1,12 +1,15 @@
 // TEST ONLY: inject offline HTTP beneath unchanged real guard/runner/adapter; native/global outbound is permanently denied.
 import cp from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, renameSync } from 'node:fs';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
-import { denyNetwork, providerTextStream } from './supervisor-provider-fixture.mts';
+import { denyNetwork, providerTextStream, offlineText } from './supervisor-provider-fixture.mts';
 const config = JSON.parse(readFileSync(new URL(import.meta.url).searchParams.get('config')!, 'utf8'));
 denyNetwork();
+const publish = (descendant: number | null) => {
+  const temp=config.barrier+'.tmp'; writeFileSync(temp,JSON.stringify({descendant}),{flag:'wx',mode:0o600}); renameSync(temp,config.barrier);
+};
 const original = cp.spawn;
 cp.spawn = ((command: any, args: any[], options: any) => {
   // Pass only test instrumentation plus an extra observation pipe, never a production bypass/environment selector.
@@ -24,10 +27,10 @@ if (process.argv[1]?.endsWith('supervisor-runner.mts')) {
       const child = original(process.execPath,['--input-type=module','-e',"process.on('message',()=>{}); process.send({ready:true});"],
         { stdio: ['ignore','ignore','ignore','ipc',4], env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C' } });
       await once(child,'message');
-      writeFileSync(config.barrier,JSON.stringify({ descendant: child.pid }));
+      publish(child.pid!);
       await new Promise(() => {});
     }
-    writeFileSync(config.barrier,JSON.stringify({ descendant: null }));
-    return new Response(providerTextStream(), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
+    publish(null);
+    return new Response(providerTextStream(offlineText), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
   };
 }

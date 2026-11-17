@@ -8,6 +8,7 @@ import { diagnosisGrant } from '../src/supervisor-advisory-contract.mts';
 import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
 import { supervisorFixture } from './supervisor-fixture.mts';
 import { usageFixture } from './supervisor-usage-fixture.mts';
+import { providerScenarios } from './supervisor-provider-fixture.mts';
 
 test('pure worker environment and frozen input preconditions refuse drift before provider startup', () => {
   const keys=['PATH','HOME','LANG','LC_ALL','LC_CTYPE','TZ','NODE_CHANNEL_FD','NODE_CHANNEL_SERIALIZATION_MODE'];
@@ -26,10 +27,16 @@ test('pure worker environment and frozen input preconditions refuse drift before
 });
 
 test('copied pinned Pi adapter consumes real journal permission before one bounded request and exposes raw terminal usage', () => {
-  const output = execFileSync(process.execPath, [fileURLToPath(new URL('./supervisor-provider-fixture.mts', import.meta.url)),
-    '--offline-spike'], { timeout: 15000, maxBuffer: 1024 * 1024,
-    env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C' }, encoding: 'utf8' });
-  const evidence = JSON.parse(output);
+  // Bound each independent fresh request handshake, not the aggregate nine-case matrix.
+  // The unchanged standard test/shard bounds still cap the complete integration.
+  const rows = providerScenarios.map(scenario => {
+    try { return JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./supervisor-provider-fixture.mts', import.meta.url)),
+      '--offline-spike', scenario], { timeout: 15000, maxBuffer: 1024 * 1024,
+      env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C' }, encoding: 'utf8' })); }
+    catch (error) { throw new Error(`Offline provider scenario ${scenario} failed`, { cause: error }); }
+  });
+  const evidence = { ...rows[0], scenarios: rows.flatMap(r => r.scenarios) };
+  for (const row of rows) { assert.equal(row.invalidTransmissions,0); assert.equal(row.runtime,evidence.runtime); assert.equal(row.dependencies,evidence.dependencies); }
   assert.equal(evidence.invalidTransmissions, 0);
   assert.equal(evidence.transmissions, 1);
   assert.equal(evidence.extraRequestDenied, true);
