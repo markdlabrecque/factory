@@ -1,6 +1,6 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, and a durable host tracker-comment outbox with exact local resolution**. There is no scheduler wiring, action-mode switch, notification service, gate applicator or pilot rollout here. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review and escalation modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
+This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, and a source-only thin advisory host broker**. There is no scheduler wiring, action-mode switch, notification service, gate applicator or pilot rollout here. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation and broker modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. A future action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
@@ -457,6 +457,89 @@ retained input/output, observe-only gate proposal persistence and restart reuse.
 The existing complete-runtime fixture imports the actual flat worker and prompt.
 These tests run no Pi, provider, reviewer, repair, tracker, service, Docker,
 credential operation or pilot.
+
+## Thin host action broker
+
+`cli/src/supervisor-policy.mts:brokerSupervisor` is a pure typed host broker over a
+retained successful diagnosis, its current material snapshot, durable incident/
+denial journal and explicit current host authorization. It does not accept model
+claims as host records. It returns wait, held/refused, a human-approval-only draft,
+an actionable pending `HumanRequest`, or an **advisory** exact ticket/execution
+candidate. Gate amendments are refused here: only the separately reviewed apply
+module may consider them. No gate edits, tracker writes, labels, ticket creation,
+new dispatch, continuation, proof override or recovery-budget reset exists here.
+Draft requirements/labels/dependencies remain draft text requiring human approval.
+
+This is source-only integration, not activation or a new scheduler. The optional
+`afterPass.supervisor` host hook is reached only inside the existing successful-pass,
+two-pass confirmed jam scan, after current stopped-run, budget, workflow and local
+ownership screening. A production caller does not supply it yet. Omission preserves
+existing automation, as must a disabled/observe/stopped caller (return no candidate;
+do not install an effecting hook). The broker itself holds those modes without
+writes. The host hook may narrow action-mode admission, never expand it. It must
+record host outcomes durably and separately from the model diagnosis; a failed
+record operation stops the scan. For a human-required result the caller must commit
+the existing journal `human` event/required stop before any bridge notification.
+Returning a request or recording a local outcome is **not** notification delivery.
+The broker does not install or invoke the separately committed managed-comment
+bridge described below and never fabricates its receipt. Missing trusted bridge
+integration and explicit action-activation authority hold repair candidates,
+pending and stopped. No uncommitted reviewer/notification/application interface is imported.
+
+A candidate uses the same `prepareRecovery`, `launchRecovery`, `claimRecovery` and
+Board admission owner as automatic repair. Fresh execution analysis, original input,
+workspace/image readiness, saved ownership, current project/scheduler authorization,
+activity generation, capacity, project recovery exclusion and bounded charged
+attempts remain authoritative. Its exact execution ID must match the host run.
+The candidate's synchronous host callback rechecks its exact facts/fence and clock
+after asynchronous preparation/readiness and again inside atomic admission. Late
+pause/off/unknown/stale/cancellation cannot turn old advice into authority.
+
+The existing admission record optionally retains `recovery[project].candidates`,
+a SHA-256 candidate-ID to attempt-UUID safety index. It is consumed in the **same**
+atomic replacement as the existing claim and charge; replay after crash/settlement
+cannot spend a second attempt for that candidate. No separate recovery truth store,
+refund or automatic retention/reset exists. Automatic and advisory races use the
+same project exclusion and charge. The broker also requires authoritative existing
+attempt observations; a repair charged since that diagnosis (including automatic
+repair) holds replay instead of silently proposing the next attempt. Because the
+committed diagnosis contract has no atomically retained recovery-admission baseline
+and attempt start times precede asynchronous readiness/admission, this broker
+conservatively holds **any prior charged attempt for that ticket**, even one older
+than diagnosis. It does not infer a supervisor retry right from timestamps or a
+new diagnosis. Existing automatic recovery without a supervisor candidate hook
+retains its remaining-attempt policy. The host must supply the actual `RecoveryState`,
+not a status projection. Unknown accounting, root mismatch or incomplete retained
+sequence history (including normal history truncation) holds; bounded history is
+never proof that no prior charge exists. Charged current ticket budgets also hold. A genuinely new diagnosis still cannot renew recovery
+budgets or bypass jam confirmation.
+
+Waiting CI returns wait and remains on existing delivery follow-through; it does
+not start a model, analysis or repair budget through this broker. Failed CI may
+produce a scoped human-approval draft or eligible existing stopped-run repair.
+An open PR is never branch modification/delivery authority. Existing exact-SHA
+proof, before-merge authorization, saved evidence and owners remain untouched.
+Same-execution continuation is separate; this adds no retry/reset/exclusion removal.
+
+The flat selected runtime ships this actual asset as `supervisor-broker.mts`,
+distinct from `orchestrator/supervisor-policy.mts` (the paid-call preflight) which
+continues to ship as `supervisor-policy.mts`. Both import safely; no absent future
+asset is referenced. A later complete-runtime publication is operator work, not
+part of source delivery. Paid diagnosis remains held without demonstrated provider-
+enforced all-in ceilings and known pricing/accounting. The committed offline review/
+outbox evidence below is preserved, but does not itself wire broker activation.
+Trusted notification/review integration, reviewed application/fresh proof, lifecycle
+wiring and explicit one-project pilot approval remain separate activation
+prerequisites; offline authorized facts do not discharge them.
+
+Focused unit policy matrices and the extended existing disposable afterPass race
+fixture prove host allow/hold/refuse/draft identity and at most one attempt/charge,
+with paused/active/unknown/exhausted/CI-wait no-launch cases. Fixtures use injected
+clocks/process/container/tracker boundaries, not live models or notification:
+
+```sh
+node --test cli/test/supervisor-policy.test.mts cli/test/jam-detect.test.mts cli/test/recovery-claim.test.mts cli/test/recovery-run.test.mts cli/test/runtime-bundle.test.mts
+```
 
 ## Independent exact-proposal review and host escalation
 

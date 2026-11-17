@@ -1,5 +1,5 @@
 // Authoritative source mapping for the flat runtime and shared project scaffold files.
-// Dispatch, preparation, supervisor context/state/diagnosis/review/outbox, delivery proof and recovery ship as one complete inventory.
+// Dispatch, preparation, supervisor context/state/diagnosis/review/outbox/broker, delivery proof and recovery ship as one complete inventory.
 export const FROM_ORCHESTRATOR = ['recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'host-launch.mts', 'launch-readiness.mts', 'readiness-identity.mts', 'ticket-context.mts', 'ticket-context-source.mts', 'ticket-input.mts', 'ticket-input-evidence.mts', 'delivery-followup.mts', 'verification.mts', 'readiness.mts', 'readiness-schema.mts', 'no-commit.mts', 'sandbox-readiness.mts',
   'capabilities.mts', 'ci.mts', 'models.mts', 'model-policy.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
@@ -19,6 +19,8 @@ export const RUNTIME_ASSETS: readonly RuntimeAsset[] = Object.freeze([
   // The flat runtime keeps the probe entrypoint and board store under distinct names.
   { source: 'board/readiness.mts', destination: 'readiness-store.mts' },
   ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts', 'supervisor-facts.mts', 'supervisor-state.mts', 'supervisor-worker.mts', 'supervisor-review.mts', 'supervisor-escalation.mts', 'sandcastle-patch.mts', 'sandcastle-patch.json'].map(name => ({ source: `cli/src/${name}`, destination: name })),
+  // Host broker and pure paid-call preflight have distinct flat names; never overwrite either asset.
+  { source: 'cli/src/supervisor-policy.mts', destination: 'supervisor-broker.mts' },
   { source: 'orchestrator/main.mts', destination: 'main.mts' },
   ...['prompt.md', 'prompt.verify.md'].map(name => ({ source: `cli/templates/project/${name}`, destination: name })),
   { source: 'package.json', destination: 'package.json' },

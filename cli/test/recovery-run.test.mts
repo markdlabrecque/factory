@@ -32,6 +32,8 @@ import { containerFor, readAttemptRecord, writeAttemptRecord } from '../../orche
 import type { AttemptRecord, Docker } from '../../orchestrator/recovery.mts';
 import { paths } from '../src/paths.mts';
 import { afterPass } from '../src/jam-detect.mts';
+import type { AfterPassOptions } from '../src/jam-detect.mts';
+import type { BrokerAdmissionOutcome, BrokerOutcome } from '../src/supervisor-policy.mts';
 import { projectFixture, refreshManifest } from './workflow-fixture.mts';
 import { recordReview, WORKFLOW } from '../src/recovery-review.mts';
 import {preparedFixture, preparedContextSource} from './prepared-fixture.mts';
@@ -39,7 +41,7 @@ import { ContextReadError } from '../../orchestrator/ticket-context.mts';
 import { readStoredReadiness } from '../../board/readiness.mts';
 import { inspectRecoveryCandidate, launchRecovery, ownedRecoveryTracker, settleRecovery } from '../src/recovery-run.mts';
 import type { Spawner } from '../src/recovery-run.mts';
-import { beginAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
+import { beginAttempt, finishAttempt, observePass, readRecovery } from '../src/recovery-state.mts';
 
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 
@@ -632,27 +634,57 @@ for (const phase of ['spawn', 'record', 'after-commit'] as const) {
   });
 }
 
-test('real afterPass skips three missing branches, then admits one; subsequent passes cannot admit twice', async t => {
+test('real afterPass shares one attempt/charge between automatic and advisory repair; held paths never launch', async t => {
   const f = fixture(t);
   for (const ticket of [1, 2, 3]) writeFileSync(join(f.dir, `${keyFor(String(ticket), 'proj')}.json`),
     JSON.stringify({ ...f.run(), iid: String(ticket), branch: `${ticket}-missing`, evidenceDir: undefined }));
   const report = join(f.home, 'pass.json');
   const lines: string[] = [];
-  const pass = async (id: string) => {
+  // Exact host execution identity is required even when a PR exists.
+  writeFileSync(join(f.dir, 'proj--7.json'), JSON.stringify({ ...f.run(), executionId: 'run-supervised' }));
+  const outcomes: (BrokerOutcome | BrokerAdmissionOutcome)[] = [];
+  const supervisor: AfterPassOptions['supervisor'] = { select: (ticket, runId) => ticket === 7 ? { state: 'candidate', candidate: {
+    id: 'a'.repeat(64), ticket, runId: runId!, authorize: () => true,
+  } } : undefined, record: outcome => { outcomes.push(outcome); } };
+  const pass = async (id: string, supervised = false) => {
     writeFileSync(report, JSON.stringify({ version: 1, pass: id, project: 'proj', at: at(15), tickets: [7, 3, 2, 1], observed: [] }));
     await afterPass(f.p, { root: f.root, tracker: 'proj', name: 'site', pass: id, report, dir: f.dir,
-      log: l => lines.push(l), mayLaunch: async () => true,
+      log: l => lines.push(l), mayLaunch: async () => true, ...(supervised ? { supervisor } : {}),
       prepare:async (_p,o)=>preparedFixture(o),
       settle: (p, o) => settleRecovery(p, { ...o, docker: f.common.docker }),
       launch: (p, o) => launchRecovery(p, { ...f.common, ...o, uuid: () => IDS[0] }),
     });
   };
   await pass('confirm-1');
-  await pass('confirm-2');
-  assert.equal(lines.filter(l => l.includes('ticket-refused branch-missing')).length, 3);
+  await Promise.all([pass('confirm-2', true), pass('automatic-race')]);
+  assert.ok(lines.filter(l => l.includes('ticket-refused branch-missing')).length >= 3);
   assert.equal(f.launched.length, 1, lines.join('\n'));
   assert.deepEqual(readRecovery(f.p, f.root).attempts.map(a => a.ticket), [7]);
   await Promise.all([pass('concurrent-a'), pass('concurrent-b')]);
   assert.equal(f.launched.length, 1);
   assert.equal(readAdmission(f.dir).recovery.proj.admitted, 1);
+  assert.equal(readRecovery(f.p, f.root).budgets['7'].used, 1);
+  assert.ok(outcomes.some(o => o.state === 'held' || o.state === 'admitted'));
+  assert.equal(readFileSync(join(f.worktree, 'wip.txt'), 'utf8'), 'uncommitted\n');
+  assert.equal(readFileSync(join(f.evidence, 'before-1.png'), 'utf8'), 'old evidence');
+  for (const hold of ['paused', 'active', 'unknown', 'exhausted', 'ci-wait'] as const) {
+    const h = fixture(t);
+    if (hold === 'active') claimRun({ dir: h.dir, project: 'proj', iid: '8', pid: process.pid, cap: 99 });
+    if (hold === 'exhausted') for (let i = 0; i < 2; i++) {
+      const a = beginAttempt(h.p, h.root, { ticket: 7, at: at(10 + i), replay: true });
+      // A finished charge leaves saved work and confirmation intact, without a reset.
+      finishAttempt(h.p, h.root, a.seq, { at: at(12 + i), result: 'failed' });
+    }
+    const report = join(h.home, 'held-pass.json');
+    writeFileSync(report, JSON.stringify({ version: 1, pass: hold, project: 'proj', at: at(15), tickets: [7], observed: [] }));
+    await afterPass(h.p, { root: h.root, tracker: 'proj', name: 'held', pass: hold, report, dir: h.dir,
+      log: () => {}, mayLaunch: async () => hold !== 'paused', prepare: async (_p, o) => preparedFixture(o),
+      supervisor: { select: () => hold === 'ci-wait' ? { state: 'wait', expectation: 'Existing CI follow-through' } : { state: 'held', reason: hold }, record: () => {} },
+      settle: (p, o) => settleRecovery(p, { ...o, docker: h.common.docker }),
+      launch: (p, o) => launchRecovery(p, { ...h.common, ...o }),
+    });
+    assert.equal(h.launched.length, 0, hold);
+    assert.equal(readAdmission(h.dir).recovery.proj?.admitted ?? 0, 0, hold);
+    assert.equal(readRecovery(h.p, h.root).budgets['7']?.used ?? 0, hold === 'exhausted' ? 2 : 0, hold);
+  }
 });

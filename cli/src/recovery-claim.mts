@@ -1,4 +1,4 @@
-// Admission rechecks stopped state and the validated work snapshot under the shared lock. Strict recovery reads never reconcile or hide malformed run records.
+// Admission consumes optional advisory identity with the one claim/charge, and rechecks stopped state and validated work under the shared lock. Strict recovery reads never reconcile or hide malformed run records.
 // #137: recovery uses the TOML dispatch cap against the shared board; absent TOML keeps the legacy default.
 // Recovery's atomic claim (slice four, #57; admission record since #75). A repair attempt needs three things at once: a
 // slot under the shared run cap (counted across every project in the run-state folder, as dispatcher launches are),
@@ -72,7 +72,7 @@ export const recoveryWork = (r: RunState) => JSON.stringify([r.iid, r.project, r
 /** Claim capacity, ticket and project ownership for one repair attempt by process `pid`, or nothing. `tracker` is the
  *  project's TRACKER.project, the name its run records carry; `id` the attempt's UUID. */
 export function claimRecovery(p: Paths, o: { root: string; tracker: string; ticket: number; pid: number; at: string; id: string;
-  preparation?: Preparation;
+  preparation?: Preparation; candidateId?: string;
   cap?: number; branch?: string; log?: string; dir?: string; container?: string; record?: string;
   expected?: RunState; generation?: number; episode?: string; validate?: () => void;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
@@ -86,6 +86,8 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
     try { return withAdmissionLock(`${executionManifestFile(dir,o.tracker,o.ticket)}.publication`, () => {
     entered=true;
     replayAdmitted(p, tx, o.root, o.tracker);
+    if (o.candidateId !== undefined && (!/^[a-f0-9]{64}$/.test(o.candidateId) || tx.state.recovery[o.tracker]?.candidates?.[o.candidateId]))
+      return { ok: false, reason: 'Advisory candidate invalid or already consumed; no new attempt' };
     const generation = generationOf(tx.state, o.tracker);
     const problem = attemptProblem(readRecovery(p, o.root), o.ticket, generation);
     if (problem) return { ok: false, reason: problem };
@@ -116,6 +118,7 @@ export function claimRecovery(p: Paths, o: { root: string; tracker: string; tick
     const branch = o.branch ?? a.current?.branch;
     const r = tx.state.recovery[o.tracker] ??= { admitted: 0, pending: [] };
     r.admitted++;
+    if (o.candidateId) (r.candidates ??= {})[o.candidateId] = o.id;
     r.pending.push({ id: o.id, iid: String(o.ticket), root: o.root, at: o.at, ...(branch ? { branch } : {}), ...(o.log ? { log: o.log } : {}),
       ...(o.container ? { container: o.container } : {}), ...(o.record ? { record: o.record } : {}) });
     tx.commit(); // the claim and its charge, in one replacement
