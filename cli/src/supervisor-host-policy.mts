@@ -2,7 +2,7 @@
 import { constants, openSync, closeSync, fstatSync, readSync, lstatSync, realpathSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { existsSync } from 'node:fs';
-import { ADVISORY_PROFILE_ID, advisoryReservation, advisoryCount, advisoryDemand, advisoryRecord } from './supervisor-advisory-contract.mts';
+import { ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE_ID, advisoryReservation, advisoryCount, advisoryDemand, advisoryRecord } from './supervisor-advisory-contract.mts';
 import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts';
 import { usdCeilingMicroUSD } from './supervisor-advisory-contract.mts';
 const { supervisorHash } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
@@ -10,7 +10,7 @@ export type AdvisoryCeiling = { tokens: number; cost: number; calls: number };
 export type HostAdvisoryPolicy = { version: 1; enabled: true; profile: string; capacity: 1; cumulative: AdvisoryCeiling };
 export function validateHostAdvisoryPolicy(p: any): HostAdvisoryPolicy {
   advisoryRecord(p, ['version','enabled','profile','capacity','cumulative']); advisoryRecord(p.cumulative, ['tokens','cost','calls']);
-  advisoryDemand(p.version === 1 && p.enabled === true && p.capacity === 1 && p.profile === ADVISORY_PROFILE_ID
+  advisoryDemand(p.version === 1 && p.enabled === true && p.capacity === 1 && [ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE_ID].includes(p.profile)
     && ['tokens','cost','calls'].every(k => advisoryCount(p.cumulative[k]) && p.cumulative[k] > 0), 'explicit enabled known profile and finite host ceilings/capacity one required'); return p;
 }
 export const hostAdvisoryPolicyIdentity = (p: HostAdvisoryPolicy) => supervisorHash(validateHostAdvisoryPolicy(p));
@@ -61,7 +61,7 @@ export function advisoryLimitHold(o: { host: HostAdvisoryPolicy; project: Superv
     advisoryDemand(['tokens','cost','calls'].every(k => o.roleUsed[k as keyof AdvisoryCeiling] <= o.projectUsed[k as keyof AdvisoryCeiling]
       && o.projectUsed[k as keyof AdvisoryCeiling] <= o.hostUsed[k as keyof AdvisoryCeiling]), 'inconsistent cumulative accounting');
     advisoryDemand(advisoryCount(o.active) && o.active < h.capacity && advisoryCount(o.incidentCalls) && o.incidentCalls < 2, 'capacity or incident allowance held');
-    const reservation = { ...advisoryReservation(), calls: 1 };
+    const reservation = { ...advisoryReservation(h.profile), calls: 1 };
     const ceilings = [h.cumulative, ...caps.map(c => ({ tokens: c.maxTokens, cost: usdCeilingMicroUSD(c.maxCostUsd), calls: c.maxCalls }))];
     for (let i = 0; i < ceilings.length; i++) for (const unit of ['tokens','cost','calls'] as const)
       advisoryDemand(advisoryCount(ceilings[i][unit]) && ceilings[i][unit] > 0 && Number.isSafeInteger(used[i][unit] + reservation[unit])

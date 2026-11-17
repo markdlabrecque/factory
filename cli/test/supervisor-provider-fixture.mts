@@ -16,7 +16,7 @@ import { prepareRuntimeBundle } from '../src/runtime-bundle.mts';
 import { installPackages } from './runtime-fixture.mts';
 import { supervisorFixture } from './supervisor-fixture.mts';
 import { commitSupervisor, readSupervisor, incidentIdentity } from '../src/supervisor-state.mts';
-import { diagnosisGrant, ADVISORY_PROFILE_ID, advisoryReservation } from '../src/supervisor-advisory-contract.mts';
+import { diagnosisGrant, ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE_ID, advisoryReservation } from '../src/supervisor-advisory-contract.mts';
 import { hostAdvisoryPolicyIdentity } from '../src/supervisor-host-policy.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
@@ -74,17 +74,24 @@ if (process.argv[2] === '--request-worker') {
       }
       const { requestAdvisory, validateAdvisoryPayload } = await import(pathToFileURL(join(o.runtimeRoot, 'supervisor-openai-request.mts')).href);
       let transmissions = 0, serialized = '', payload: any;
-      const terminal = providerTerminal();
+      const terminal = providerTerminal(), subscription = o.scenario === 'subscription';
       const transport: typeof fetch = async (url, init) => {
         assert.equal(String(url), 'https://api.openai.com/v1/responses'); assert.equal(init!.method, 'POST'); assert.equal(init!.redirect, 'error');
-        assert.equal(new Headers(init!.headers).get('authorization'), 'Bearer sk-synthetic-offline-not-a-secret');
+        assert.equal(new Headers(init!.headers).get('authorization'), subscription ? 'Bearer synthetic-chatgpt-not-a-token' : 'Bearer sk-synthetic-offline-not-a-secret');
         serialized = init!.body as string; payload = JSON.parse(serialized);
         const system = payload.input[0].content, user = payload.input[1].content[0].text;
-        validateAdvisoryPayload(payload, system, user);
-        assert.throws(() => validateAdvisoryPayload({ ...payload, background: true }, system, user));
-        assert.throws(() => validateAdvisoryPayload({ ...payload, truncation: 'auto' }, system, user));
+        validateAdvisoryPayload(payload, system, user, o.grant.profile);
+        assert.throws(() => validateAdvisoryPayload({ ...payload, background: true }, system, user, o.grant.profile));
+        assert.throws(() => validateAdvisoryPayload({ ...payload, truncation: 'auto' }, system, user, o.grant.profile));
+        if (subscription) {
+          assert.equal(Object.hasOwn(payload,'max_output_tokens'),false);
+          assert.equal(Object.hasOwn(payload,'prompt_cache_options'),false);
+          assert.deepEqual(payload.reasoning,{effort:'high',summary:'auto'});
+          assert.equal(payload.input.length,2);
+        } else {
         assert.equal(payload.max_output_tokens, 4096); assert.deepEqual(payload.reasoning, { effort: 'medium', summary: 'auto' });
         assert.deepEqual(payload.input.at(-1), { type: 'configuration_update', reasoning: { effort: 'high' } });
+        }
         transmissions++;
         if (o.scenario === 'inflight-stop') { process.send!({ inflight: true }); await once(process, 'message'); }
         const status = o.scenario === 'retry-429' ? 429 : o.scenario === 'retry-503' ? 503 : o.scenario === 'overflow' ? 400 : 200;
@@ -93,7 +100,7 @@ if (process.argv[2] === '--request-worker') {
           { status, headers: { 'content-type': 'application/json', 'retry-after': '0' } });
         return new Response(sse(terminal) + (o.scenario === 'duplicate-terminal' ? sse(terminal) : ''), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
       };
-      const options = { ...o, apiKey: 'sk-synthetic-offline-not-a-secret', fetch: transport };
+      const options = { ...o, apiKey: subscription ? 'synthetic-chatgpt-not-a-token' : 'sk-synthetic-offline-not-a-secret', fetch: transport };
       let result: any, refused: string | undefined;
       try { result = await requestAdvisory(options); } catch (e) { refused = String(e); }
       let extraRequestDenied = false;
@@ -106,7 +113,7 @@ if (process.argv[2] === '--request-worker') {
   process.send!({ ready: true });
 }
 
-export const providerScenarios = ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','mid-load-prompt','mid-load-dependencies'] as const;
+export const providerScenarios = ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','mid-load-prompt','mid-load-dependencies','subscription'] as const;
 export async function runProviderSpike(selected?: string) {
   if (selected && !providerScenarios.includes(selected as any)) throw Error('Unknown offline provider scenario');
   denyNetwork();
@@ -115,6 +122,8 @@ export async function runProviderSpike(selected?: string) {
     const bundle = prepareRuntimeBundle({ sourceRoot: fileURLToPath(new URL('../../', import.meta.url)), runtimeStore: join(root, 'runtimes'), install: installPackages });
     const scenarios: any[] = [];
     for (const scenario of providerScenarios.filter(s => !selected || s === selected)) {
+      const profile = scenario === 'subscription' ? SUBSCRIPTION_PROFILE_ID : ADVISORY_PROFILE_ID;
+      const selectedHost = {...host,profile};
       let runtimeRoot = bundle.directory;
       if (scenario.startsWith('mid-load-')) {
         runtimeRoot = join(root, `runtime-${scenario}`); cpSync(bundle.directory, runtimeRoot, { recursive: true });
@@ -129,11 +138,11 @@ export async function runProviderSpike(selected?: string) {
         const stateDir = join(root, `state-${scenario}`), project = snapshot.project, at = new Date().toISOString();
         const incidentId = incidentIdentity(project, facts), owner = ownerOf(process.pid), worker = ownerOf(child.pid!);
         const reservation = { id: 'invocation', incidentId, kind: 'diagnosis' as const, owner, fence: 'fresh-fence', at,
-          deadline: new Date(Date.parse(at) + 60_000).toISOString(), reserved: advisoryReservation(), actual: null, state: 'active' as const, reviewId: null };
-        const registration = { holdId: 'synthetic-exclusion-binding-not-an-admission-claim', host, project: policy, at };
+          deadline: new Date(Date.parse(at) + 60_000).toISOString(), reserved: advisoryReservation(profile), actual: null, state: 'active' as const, reviewId: null };
+        const registration = { holdId: 'synthetic-exclusion-binding-not-an-admission-claim', host: selectedHost, project: policy, at };
         const grant = diagnosisGrant({ version: 1, project, ticket: 236, runId: facts.runId, attemptId: null, incidentId, basis: diagnosisBasis(snapshot),
           invocationId: reservation.id, fence: reservation.fence, holdId: registration.holdId, runtime: bundle.id, dependencies: bundle.manifest.dependencies,
-          profile: ADVISORY_PROFILE_ID, policy: hostAdvisoryPolicyIdentity(host), owner: worker, deadline: reservation.deadline, reserved: reservation.reserved });
+          profile, policy: hostAdvisoryPolicyIdentity(selectedHost), owner: worker, deadline: reservation.deadline, reserved: reservation.reserved });
         let state = commitSupervisor(stateDir, project, 0, { id: 'observe', at, kind: 'observe', facts, snapshotHash: supervisorHash(snapshot), reason: 'offline original input' });
         state = commitSupervisor(stateDir, project, state.revision, { id: 'reserve', at, kind: 'reserve-advisory', reservation, policy: registration, controls,
           limits: { project: { tokens: 10_000_000, cost: 100_000_000 }, shared: { tokens: 10_000_000, cost: 100_000_000 }, capacity: 1, reviewCalls: 5, reviewTimeoutMs: 60_000 } });
@@ -153,7 +162,7 @@ export async function runProviderSpike(selected?: string) {
         if (['stop-first','mid-load-prompt','mid-load-dependencies'].includes(scenario)) { assert.equal(outcome.transmissions, 0); assert.equal(sends.length, 0); }
         else { assert.equal(outcome.transmissions, 1, JSON.stringify(outcome)); assert.equal(sends.length, 1); assert.equal(outcome.extraRequestDenied, true); }
         if (scenario.startsWith('mid-load-')) assert.equal(outcome.driftApplied, true, 'deterministic drift barrier reached');
-        if (['complete','inflight-stop'].includes(scenario)) {
+        if (['complete','inflight-stop','subscription'].includes(scenario)) {
           assert.equal(outcome.result.stopReason, 'stop', outcome.result.errorMessage);
           assert.equal(outcome.terminal.response.usage.total_tokens, 35);
           assert.equal(sends[0].payload, createHash('sha256').update(outcome.serialized).digest('hex'));
@@ -161,7 +170,7 @@ export async function runProviderSpike(selected?: string) {
         } else assert.ok(outcome.refused || outcome.result.stopReason === 'error');
         if (scenario === 'inflight-stop') assert.equal(journal.control!.mode, 'stopped');
         if (scenario === 'duplicate-terminal') assert.match(outcome.terminalProblem, /ambiguous/);
-        assert.deepEqual(journal.charged.diagnosis, advisoryReservation(), 'no refund/settlement is claimed');
+        assert.deepEqual(journal.charged.diagnosis, advisoryReservation(profile), 'no refund/settlement is claimed');
         scenarios.push({ scenario, ...outcome, authorizations: sends.length });
         await closed;
       } finally { if (child.connected) child.send({ abort: true }, () => {}); await closed; }

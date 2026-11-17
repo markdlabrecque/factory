@@ -35,6 +35,9 @@ test('local signals abort only the owner and await its result before signal exit
 
 test('diagnosis accepts only an explicit ticket/project and projects no arbitrary worker output', () => {
   assert.equal(parseSupervisorDiagnosis(['7'],{project:'registered',json:true}),7);
+  for (const auth of ['api-key','pi-login']) assert.equal(parseSupervisorDiagnosis(['7'],{project:'registered',auth}),7);
+  for (const auth of ['', 'ambient','openai-codex']) assert.throws(()=>parseSupervisorDiagnosis(['7'],{project:'registered',auth}));
+  assert.throws(()=>parseSupervisorControl('status',[],{auth:'pi-login'}),/only to supervisor diagnose/);
   for (const args of [[],['0'],['01'],['#7'],['-1'],['1e2'],['9007199254740992'],['7','8']]) assert.throws(()=>parseSupervisorDiagnosis(args,{project:'registered'}));
   for (const options of [{},{project:''},{project:'registered',pilot:true},{project:'registered',offset:'0'},{project:'registered',model:'arbitrary'},{project:'registered',actor:'operator'}]) assert.throws(()=>parseSupervisorDiagnosis(['7'],options));
   const s=emptySupervisor(reviewFixture('/fixture/project').input.snapshot.project);

@@ -7,18 +7,57 @@ This selects and implements a supported request surface, **not a complete `Diagn
 public diagnose command, paid permission or operational acceptance**. Existing paid
 launch holds remain. The fixed role is `openai/gpt-6.1-terra`, high thinking.
 
-## Login-backed capability hold
+## Owner-approved subscription profile
 
-The [ticket 286 investigation](../research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
-proves offline that this pinned serializer's OpenAI Sign in with ChatGPT branch
-omits the approved `max_output_tokens: 4096` and explicit cache mode, and replaces
-the configuration-update sequence with top-level high reasoning. The current
-payload gate correctly refuses it before transport. No runtime auth selector,
-credential discovery, fallback, dependency change or relaxed payload contract is
-introduced. A supported login-specific remote ceiling and compatible usage/cache/
-accounting contract remain prerequisites; a bearer-export interface alone is not
-sufficient. The API-key contract below remains unchanged. Subscription usage is
-not an API invoice, and source findings do not unblock the live evaluation.
+The [original ticket 286 investigation](../research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
+correctly proved the pinned login serializer is incompatible with the API-key
+remote-bound/cache/price contract. The owner subsequently approved an explicit
+**different contract**: subscription access, a local best-effort 4,096-output-token
+target, no guaranteed remote cap or API-dollar ceiling, honest token logging and
+unchanged ownership/one-call/replay safeguards. This is not evidence that the
+previously missing remote primitive exists. The API-key contract below, including
+its profile hash, remains unchanged. Historical acceptance is not live subscription
+acceptance and installation/live diagnosis still need separate authorization.
+
+`SUBSCRIPTION_PROFILE_ID` binds the distinct auth/output/cache/accounting policy to
+the immutable grant, host policy, selected adapter and runtime lease. Public
+`--auth pi-login` must match that private host profile. The final gate accepts only
+the actual pinned direct OpenAI login payload: same model/endpoint, developer/user
+text, `stream: true`, `store: false`, default service, top-level high reasoning,
+encrypted reasoning inclusion and disabled truncation; **no** max-output/cache
+fields or configuration update. Extra tools/continuation/background/endpoint
+changes remain refused. The original payload still refuses under the API-key
+profile. No provider fallback, unrestricted session or new provider stack is added.
+
+`supervisor-auth.mts` uses Pi's supported explicit bearer-export command only before
+new acquisition. Its 20-second host deadline/output bounds/abort and child-group
+handling are separate from Pi's own 15-second signal and expiry validation. It
+supplies an isolated environment (PATH/HOME/LANG and offline metadata preference),
+no project cwd, stderr logging or credential persistence. Pi may refresh its own
+credential under its own lock; no Factory lock is held. Auth failure holds without
+reservation; success is rechecked against current policy/originals before reserve.
+Cache reuse skips export. The secret travels only through existing private process
+IPC, never grants, journal, basis/runtime/dependency identity or agent mounts.
+
+The 4,096-output-token target is **post-response best-effort**: this pinned stream
+may reveal true output/reasoning counters only at terminal completion. No extension,
+local estimate, timeout or abort can promise a remote cap. Above-target usage stays
+known; advice is withheld and an atomic human stop retained. Admission reserves
+1,054,096 tokens (not a hard complete-request bound for this route) and no API
+monetary debit. A known overrun of that admission amount increases cumulative token
+charge to actual; smaller actual usage never refunds the reservation. Subsequent
+preflight uses those increased charges. Missing/inconsistent terminal usage or
+unknown cleanup remains ambiguous and retains exclusion/pins with no replay.
+
+Raw counters remain associated with the exact request/model/grant. Subscription
+cache policy is provider-managed; authoritative nonzero cache writes are permitted
+without fabricating API prices. Known subscription receipts label
+`subscription-api-invoice-not-applicable`, resources.cost=0, and projections say
+API invoice not applicable. This is an owner-approved accounting policy, not proof
+of zero resource use, a provider invoice, unlimited subscription entitlement or
+API-price parity. Existing API historical debits are never erased; old positive
+USD schema/ceilings remain compatibility guards, not a subscription price schedule.
+The existing owned process/journal/receipt cleanup boundary is reused in full.
 
 ## Selected supported surface
 

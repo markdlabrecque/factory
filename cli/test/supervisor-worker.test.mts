@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diagnoseProject } from '../src/supervisor-worker.mts';
 import { supervisorDecisionSources } from '../src/supervisor-input.mts';
+import { SUBSCRIPTION_PROFILE_ID } from '../src/supervisor-advisory-contract.mts';
 import type { ComponentDiagnosisBoundary as DiagnosisBoundary, WorkerOptions } from '../src/supervisor-worker.mts';
 import { readSupervisor, supervisorFile, commitSupervisor } from '../src/supervisor-state.mts';
 import { supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-contract.mts';
@@ -63,6 +64,13 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
       assert.equal((await diagnoseProject({...missingAuth.options(),boundary:owned,apiKey,beforeReserve:async()=>{acquired=true;}})).state,'held');
       assert.equal(acquired,false);assert.deepEqual(missingAuth.state().reservations,{});
     }
+    const login=fixture('login-failure');
+    const loginCurrent=() => ({...structuredClone(login.a),advisory:{policy:{host:{profile:SUBSCRIPTION_PROFILE_ID}}}} as any);
+    for (const resolveCredential of [undefined,async()=>{throw Error('secret auth failure');},async()=> 'sk-not-oauth',async()=> 'bad token',async()=> '']) {
+      const result=await diagnoseProject({...login.options(),current:loginCurrent,boundary:owned,apiKey:'sk-no-fallback',resolveCredential,beforeReserve:async()=>{acquired=true;}});
+      assert.equal(result.state,'held'); assert.equal(acquired,false); assert.deepEqual(login.state().reservations,{});
+      assert.match(JSON.stringify(result),/Pi login handoff unavailable/); assert.equal(JSON.stringify(result).includes('secret'),false);
+    }
     const f = fixture('observe');
     const asyncOptions = f.options(), syncCurrent = asyncOptions.current;
     const result = await diagnoseProject({...asyncOptions,current:async () => syncCurrent()}); assert.equal(result.state, 'proposed');
@@ -77,7 +85,7 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
     f.a.snapshot.observedAt = '2026-11-17T12:01:00.000Z';
     f.b.start = () => { throw Error('unchanged wait must not launch a process'); };
     assert.equal((await diagnoseProject(f.options())).state, 'reused'); assert.deepEqual(f.state().charged, saved.charged);
-    assert.equal((await diagnoseProject({...f.options(),boundary:owned,beforeReserve:async()=>{throw Error('cache must not acquire');}})).state,'reused');
+    assert.equal((await diagnoseProject({...f.options(),boundary:owned,resolveCredential:async()=>{throw Error('cache must not resolve auth');},beforeReserve:async()=>{throw Error('cache must not acquire');}})).state,'reused');
     const preCancelledReuse = new AbortController(); preCancelledReuse.abort();
     assert.equal((await diagnoseProject({ ...f.options(), signal: preCancelledReuse.signal })).state, 'held');
     const corruptedInput = JSON.parse(readFileSync(d.inputRef, 'utf8')); corruptedInput.snapshot.material.settings = 'f'.repeat(64);

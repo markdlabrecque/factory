@@ -8,11 +8,25 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { providerUsage, captureProviderEvidence, persistProviderUsage, readProviderUsage, providerResources } from '../src/supervisor-openai-usage.mts';
-import { validateProviderUsageReceipt } from '../src/supervisor-advisory-contract.mts';
+import { SUBSCRIPTION_PROFILE_ID, validateProviderUsageReceipt } from '../src/supervisor-advisory-contract.mts';
 import { commitSupervisor, authorizeAdvisorySend, readSupervisor } from '../src/supervisor-state.mts';
 import { ownerOf, withAdmissionLock } from '../../board/admission.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 import { usageFixture } from './supervisor-usage-fixture.mts';
+test('subscription known usage remains known over both soft output and cumulative admission targets; API invoice is not applicable', () => {
+  const f = usageFixture(undefined,undefined,SUBSCRIPTION_PROFILE_ID), u=f.raw.terminal.response.usage;
+  assert.equal(f.g.reserved.cost,0);
+  const known=providerUsage(f.g,f.a,f.raw);
+  assert.deepEqual(known.resources,{tokens:35,cost:0});
+  assert.equal(known.costKind,'subscription-api-invoice-not-applicable');
+  u.output_tokens=2_000_000; u.total_tokens=u.input_tokens+u.output_tokens;
+  const over=providerUsage(f.g,f.a,f.raw);
+  assert.equal(over.state,'known'); assert.equal(over.resources!.tokens,2_000_025);
+  assert.equal(over.usage!.reasoning,8); assert.equal(over.cachePolicy,'provider-managed');
+  delete (u as any).output_tokens;
+  const unknown=providerUsage(f.g,f.a,f.raw);
+  assert.equal(unknown.state,'unknown');assert.equal(unknown.resources,null);assert.equal(unknown.costKind,null);
+});
 test('raw explicit counters, not normalized Pi defaults, establish known conservative derived resources', () => {
   const f = usageFixture(), r = providerUsage(f.g,f.a,f.raw);
   assert.equal(r.state,'known'); assert.deepEqual(r.resources,{ tokens: 35, cost: 220 }); assert.equal(r.usage!.reasoning,8);

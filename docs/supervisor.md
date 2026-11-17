@@ -1,12 +1,49 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, a source-only thin advisory host broker and exact scoped gate-input application**. The scheduler has a short hint hook and an explicit outside-lock source lifecycle transport, but no live action activation adapter, notification service or pilot rollout. The CLI supplies explicit named-ticket advisory diagnosis through the existing trusted host, read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. New public paid acquisition remains held without independent rollout/quiescence evidence; no CLI flag fabricates it. The explicit gate applicator below publishes only one exact scoped verification-guidance input artifact; it never edits project files or branches. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation, broker, scoped application and lifecycle modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
+This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, a source-only thin advisory host broker and exact scoped gate-input application**. The scheduler has a short hint hook and an explicit outside-lock source lifecycle transport, but no live action activation adapter, notification service or pilot rollout. The CLI supplies explicit named-ticket advisory diagnosis through the existing trusted host, read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. New public paid acquisition remains held without independent rollout/quiescence evidence; no CLI flag fabricates it. The explicit gate applicator below publishes only one exact scoped verification-guidance input artifact; it never edits project files or branches. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation, broker, scoped application and lifecycle modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. API-key launch requires demonstrated provider-enforceable ceilings and known pricing/accounting; explicitly approved subscription diagnosis instead uses the best-effort contract below. Both require host authorization and retain unknown-accounting holds.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
 The [source acceptance matrix, sanitized index and operator-held runbook](supervisor-acceptance.md)
 separate actual offline public wiring from synthetic transport and unrun operations.
 Final-head release gates remain parent-owned; no paid/installed acceptance follows from source merge.
+
+## Explicit advisory authentication profiles
+
+The public named-ticket command supports `--auth api-key|pi-login`; API-key is the
+default and its existing hard-bound contract/profile hash is unchanged. Selection
+must match the private host policy and is bound through grant, final payload,
+receipt and runtime lease. No fallback or project-selected provider/auth/endpoint
+is permitted. The owner explicitly approved subscription mode after the original
+hard-bound investigation; this approval does not claim a remote cap exists.
+
+For `pi-login`, the host lazily calls supported Pi bearer export before new
+acquisition, outside Factory locks, with a 20-second parent deadline and bounded
+secret-safe output/cancellation/group handling. Pi may refresh its own login;
+Factory does not read auth files or persist/export credentials to agent mounts.
+Retained unchanged advice needs no auth. Current controls/policy/originals are
+rebuilt after auth and before reservation. No actual auth or live request ran as
+part of this source implementation.
+
+Subscription calls have a **4,096-output-token best-effort local/post-response
+target, no guaranteed remote output cap and no API-dollar ceiling**. The pinned
+serializer's missing remote/cache fields are accepted only under the separate
+subscription profile; top-level high reasoning is required. True usage may arrive
+only at terminal completion. Timeout/abort/output-byte limits do not guarantee
+that remote hidden reasoning stops, even after all local processes die.
+
+Admission reserves 1,054,096 tokens and zero API monetary debit. Known usage above
+the soft target stays known, withholds usable advice and atomically requires a
+human. Charge is `max(reserved, known actual)` for tokens; smaller usage never
+refunds, and the next preflight includes any overrun. Subscription receipts and
+projections explicitly label API invoice **not applicable**, not measured zero
+resources or API-price equivalence. Existing API debits/positive USD schema stay
+intact. Missing usage/cleanup retains full charge, exclusion and runtime pins,
+never replay. The [provider contract](design/supervisor-provider-contract.md#owner-approved-subscription-profile)
+and [CLI](factory-cli.md#explicit-subscription-diagnosis) own exact policy/auth
+mechanics. References below to enforced bounds/prices apply to the API-key profile
+unless explicitly identified as subscription behavior. Review/action activation
+and installation/live diagnosis are not authorized by this source support.
 
 ## Offline public copied-install evidence
 
@@ -39,8 +76,9 @@ Service/tracker read responses, bounded SSE/usage, normal sandbox/agent behavior
 and the private user-approved expiring operator rollout assertion are synthetic.
 The assertion uses the default production record reader, but establishes no
 installed quiescence. Native outbound is denied; read-only program stubs record
-calls and reject writes/forbidden programs; only synthetic environment auth is
-passed. Optional evidence records actual argv/public JSON, request trace,
+calls and reject writes/forbidden programs. Journey A uses synthetic API-key
+environment auth; B uses an exact-argv fake Pi bearer export before reservation,
+with synthetic credentials only. Optional evidence records actual argv/public JSON, request trace,
 journal/originals, custody/process ownership, manifest IDs, retained pins and exact
 work/index/ref preservation before fixture teardown. Test-only instrumentation is
 not installed production code and needs no runtime inventory entry. These cases
@@ -68,10 +106,12 @@ project/invocation/fence and T00 profile before owned-child start. It returns a
 wrapped real diagnosis boundary, not Pi print flags or a second client. The request
 route remains the existing Pi-AI 1.5.2 `openai-responses` stream, OpenAI 7.19.0,
 zero SDK retries and one-use journal authorization at final native fetch. No token
-count probe, auth discovery or live account proof occurs. The fixed profile remains
+count probe or live account proof occurs. The API-key profile remains
 I=1,050,000 / O=4,096, 1,054,096 reserved tokens / 5,808,792 micro-USD,
-explicit cache/default service/high thinking/fixed `gpt-6.1-terra`. Known usage
-supports a derived charge, never an invoice reconciliation claim.
+explicit cache/default service/high thinking/fixed `gpt-6.1-terra`. Its known usage
+supports a derived charge, never an invoice reconciliation claim. Explicit
+subscription selection pins its distinct profile through this same ownership
+pipeline, with the soft target and no API monetary debit described above.
 
 Protected runtime leases deliberately use version 2, not an optional purpose field
 on a version-1 normal lease. Thus old readers/GC fail closed rather than dropping
@@ -499,21 +539,20 @@ and the complete frozen snapshot whose project/ticket/run/runtime/dependencies a
 diagnosis basis match the grant. The system prompt comes from that runtime; the
 user context preserves the original snapshot plus journal memory. Inputs are
 detached before asynchronous work. There are no resource/tool/model/session options.
-Only an explicit Standard API key is accepted, never credential discovery or a
-subscription token. The worker environment permits only `PATH`, `HOME`, `LANG`,
+The default profile accepts only an explicit Standard API key. The separate
+subscription profile accepts only the supported host Pi OAuth handoff, with no
+ambient discovery/fallback. The worker environment permits only `PATH`, `HOME`, `LANG`,
 `LC_ALL`, `LC_CTYPE`, `TZ` and Node's two IPC channel keys. Every other variable,
 including TLS-verification, provider/logging/proxy/Node overrides, holds without
 reading or hashing its value. The owned worker must not inherit user settings.
 
-The [Pi-login capability investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
-is **BLOCKED**, not a shipped authentication option: the pinned `openai` direct
-ChatGPT-login serializer omits `max_output_tokens` and explicit cache controls.
-An offline regression proves the existing payload gate refuses it before transport.
-Pi's supported bearer-export command does not repair those missing remote premises.
-No credentials were resolved; the API-key route, one-call reservation and all
-unknown-accounting/ownership holds remain unchanged. Login-backed evaluation needs
-upstream finite-bound support and reviewed route-specific accounting, not a token
-passed through the API-key field or an enlarged allowance.
+The [original Pi-login capability finding](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
+remains a blocker for an API-key-equivalent hard-bound claim, not for the owner's
+subsequently approved explicit subscription contract. An offline regression still
+proves the API-key payload gate refuses the login shape; a separate profile-bound
+fixture exercises that actual shape through the same final transport/journal gate.
+No remote bound was added or assumed. Neither the API-key profile nor its existing
+unknown-accounting/ownership protections are weakened.
 
 The complete selected public `openai-responses` import closure is shipped as
 hash-pinned, unmodified published archives under `supervisor-provider/`, with
@@ -721,15 +760,19 @@ The source-only advisory foundation adds `supervisor-advisory-contract.mts` and
 command, instantiate the request adapter or provision policy. The fixed
 [provider profile](design/supervisor-provider-contract.md) is identified by
 `b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587`.
-It reserves exactly 1,054,096 tokens and 5,808,792 integer micro-USD per diagnosis;
+The API-key profile reserves exactly 1,054,096 tokens and 5,808,792 integer micro-USD per diagnosis;
 reasoning is already included. Project USD ceilings convert down, while provider
 reservation arithmetic rounds up with integer arithmetic. Unknown profiles/prices,
 overflow or inadequate host/project/diagnosis limits hold. Required review limits
 remain validated but advisory diagnosis never consumes a review call.
 
 The host-only version-1 policy loader reads `Paths.config/supervisor.json`, outside
-all known project/agent mounts, with explicit enablement, this exact profile,
-finite cumulative token/cost/call ceilings and capacity **one**. The file and its
+all known project/agent mounts, with explicit enablement, one exact supported
+profile, finite cumulative token/cost/call ceilings and capacity **one**. Explicit
+subscription selection uses profile
+`0b7aba594431e7177b998d11e40c6f14c41ec778db583e110129813b990e5310`,
+the same token admission target and zero API monetary debit; see the revised
+contract above, not the API price derivation. The file and its
 config directory must be owner-owned/private; linked, oversized, changed-during-read,
 missing/unreadable or malformed policy holds without repair. The trusted host must
 supply all canonical mount roots to the loader; an unknown root is not safe absence.
@@ -738,7 +781,9 @@ See [policy schema](project-config.md#advisory-host-policy-source-foundation) an
 
 `reserve-advisory` validates the host, project and role ceilings under the existing
 supervisor lock. Cumulative totals count **all** legacy/new reservations across
-both roles and all host projects, never only measured actual usage. Increasing
+both roles and all host projects, never only measured actual usage; known
+subscription overruns increase the cumulative token debit above the reservation.
+Increasing
 ceilings does not erase history, refresh allowance or make an unsettled reservation
 replaceable. Current registration/global-on/project-enabled and non-stopped mode
 are necessary; observe is sufficient for advice only. Policy/controls are trusted

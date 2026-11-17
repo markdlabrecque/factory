@@ -97,7 +97,7 @@ unpause a project merely to diagnose. A separate advisory authorization switch i
 ## Explicit advisory diagnosis
 
 ```sh
-factory supervisor diagnose <ticket> --project <name|path> [--json]
+factory supervisor diagnose <ticket> --project <name|path> [--auth api-key|pi-login] [--json]
 ```
 
 This explicit request selects exactly one registered canonical project and its current
@@ -117,13 +117,44 @@ unsupported family is held before new paid acquisition; exact retained reuse nee
 no new paid call or key. The private host/project cumulative ceilings, owned worker,
 one-use send gate, receipt settlement and exact cleanup/reconciliation are unchanged.
 
-Pi's existing OpenAI **Sign in with ChatGPT** login is not supported for this
-bounded advisory command yet. The [pinned-source/offline investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
-shows that its serializer omits the approved remote output cap and explicit cache
-policy. There is no login-auth flag or automatic fallback; do not export a bearer
-into `OPENAI_API_KEY` to bypass the hold. Supported upstream request bounds and a
-reviewed subscription-accounting policy are prerequisites, not a request to obtain
-a separate key or rerun the saved implementation.
+### Explicit subscription diagnosis
+
+`--auth pi-login` selects Pi's existing OpenAI **Sign in with ChatGPT** login;
+`--auth api-key` (the default) retains the hard-bound API-key contract above.
+There is **no fallback** between them. The private host policy must select the
+matching [profile](project-config.md#advisory-host-policy-source-foundation), or
+the command holds before auth/reservation. Project TOML and ticket text cannot
+select a credential, endpoint or profile. The model remains fixed OpenAI Mid/high.
+
+For a new subscription call only, the host invokes supported
+`pi auth print-bearer-token --min-expiry 50m --provider openai` from a disposable
+non-project working directory. Pi may refresh its own login. The parent imposes a
+20-second deadline, bounded stdout/stderr, cancellation and owned-group termination;
+failures return fixed secret-safe prose, never credential output. No auth values
+are written to Factory files, logs, basis hashes or agent mounts. Auth resolution
+precedes exclusion/runtime pins/reservation and runs outside their locks; the host
+then rebuilds current authorization. Exact retained advice reuse needs no auth.
+An expired/missing/malformed login holds; the API-key environment is ignored for
+this selection. Do not place bearer tokens in `OPENAI_API_KEY`.
+
+Under the owner's revised contract, subscription output has a **4,096-token
+best-effort target, not a remote ceiling**. The pinned serializer omits remote
+output/cache controls and emits top-level high reasoning. True usage may arrive
+only at terminal completion, so the target is checked locally at settlement;
+it cannot stop hidden reasoning at token 4,096 or cap generation after local
+process death. Existing wall-clock/process/output-byte guards still apply.
+Over-target advice is withheld with a durable human stop; known usage is logged
+as known, even above the target. Cumulative token charge is the larger of the
+admission reservation and known actual usage, with no refund/reset. Missing usage
+or unconfirmed cleanup retains the charge/exclusion/pins and forbids replay.
+
+Subscription calls reserve the existing 1,054,096-token admission target and **zero
+API monetary debit**, not a larger API-price-derived reservation. Projections label
+`costKind: subscription-api-invoice-not-applicable` and `apiInvoice: not-applicable`;
+zero debit is not measured zero resource use or an invoice. Positive finite legacy
+USD configuration and prior API charges remain intact, but no API-rate charge is
+invented for this route. See the [revised provider contract](design/supervisor-provider-contract.md#owner-approved-subscription-profile).
+Source/offline support does not install/activate anything or authorize a live call.
 
 **Default held rollout prerequisite:** new paid acquisition reads the private operator
 record `Paths.config/supervisor-rollout.json`. Absence or any unsafe/invalid binding holds

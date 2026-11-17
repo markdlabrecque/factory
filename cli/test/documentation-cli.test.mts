@@ -23,7 +23,7 @@ test('documented operator forms agree with CLI help and parser', t => {
   const forms = [
     'factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]',
     'factory run <ticket> [--project <name>]',
-    'factory supervisor diagnose <ticket> --project <name|path> [--json]',
+    'factory supervisor diagnose <ticket> --project <name|path> [--auth api-key|pi-login] [--json]',
     'factory schedule status [--project <name|path>] [--json]',
     'factory recovery status [--project <name|path>] [--json]',
   ];

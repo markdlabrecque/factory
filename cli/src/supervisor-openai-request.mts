@@ -1,5 +1,5 @@
 // Load the pinned, inventoried Pi subpath closure; consume journal permission at the final bounded HTTP gate. No action/settlement authority.
-import { ADVISORY_PROFILE, validateDiagnosisGrant } from './supervisor-advisory-contract.mts';
+import { ADVISORY_PROFILE, ADVISORY_PROFILE_ID, subscriptionProfile, validateDiagnosisGrant } from './supervisor-advisory-contract.mts';
 import type { DiagnosisGrant } from './supervisor-advisory-contract.mts';
 import { authorizeAdvisorySend, readSupervisor } from './supervisor-state.mts';
 import type { AdvisoryControls, AdvisoryRegistration } from './supervisor-state.mts';
@@ -85,7 +85,7 @@ export async function requestAdvisory(o: AdvisoryRequest) {
   const manifest = validateRuntimeBundle(o.runtimeRoot);
   if (realpathSync(o.runtimeRoot) !== realpathSync(dirname(fileURLToPath(import.meta.url))) || manifest.id !== grant.runtime
     || manifest.dependencies !== grant.dependencies || worker.pid !== grant.owner.pid || worker.start !== grant.owner.start
-    || typeof o.apiKey !== 'string' || !/^sk-[A-Za-z0-9_-]+$/.test(o.apiKey) || o.signal?.aborted)
+    || typeof o.apiKey !== 'string' || !(subscriptionProfile(grant.profile) ? /^(?!sk-)[A-Za-z0-9._~+\/-]+=*$/.test(o.apiKey) && o.apiKey.length <= 16384 : /^sk-[A-Za-z0-9_-]+$/.test(o.apiKey)) || o.signal?.aborted)
     throw Error('Advisory held: selected bundle, explicit auth, exact registered worker and live request required');
   const snapshot = validateAdvisoryInput(o.snapshot, grant);
   const retained = readSupervisor(o.stateDir, grant.project), key = supervisorHash(grant.invocationId);
@@ -110,7 +110,7 @@ export async function requestAdvisory(o: AdvisoryRequest) {
       attempted = true; // Even an invalid or ambiguous attempt may never become a replacement request.
       if (String(url) !== ADVISORY_PROFILE.endpoint || init?.method !== 'POST' || typeof init.body !== 'string' || o.signal?.aborted)
         throw Error('Advisory held: unsupported final transport');
-      validateAdvisoryPayload(JSON.parse(init.body), system, user);
+      validateAdvisoryPayload(JSON.parse(init.body), system, user, grant.profile);
       const final = validateRuntimeBundle(o.runtimeRoot);
       if (final.id !== grant.runtime || final.dependencies !== grant.dependencies) throw Error('Advisory held: runtime changed before authorization');
       const observation = o.observe ? await o.observe() : { snapshot, policy: o.policy, controls: o.controls };
@@ -133,7 +133,7 @@ export async function requestAdvisory(o: AdvisoryRequest) {
       onPayload(value: any) {
         value.truncation = 'disabled';
         // Pi leaves own undefined cache-key/retention properties; validate the exact JSON wire object, not JS-only keys.
-        const wire = JSON.parse(JSON.stringify(value)); validateAdvisoryPayload(wire, system, user); return wire;
+        const wire = JSON.parse(JSON.stringify(value)); validateAdvisoryPayload(wire, system, user, grant.profile); return wire;
       },
       onResponse(value: any) { response = { status: value.status, requestId: value.headers['x-request-id'] ?? null }; },
       onProviderStreamEvent(value: any) {
@@ -154,7 +154,7 @@ export async function requestAdvisory(o: AdvisoryRequest) {
 
 /** Validate the complete serialized payload against the exact text supplied by the trusted caller.
  * The context window bound is a provider admission premise, not a local token estimate. */
-export function validateAdvisoryPayload(value: unknown, system: string, user: string): void {
+export function validateAdvisoryPayload(value: unknown, system: string, user: string, profile = ADVISORY_PROFILE_ID): void {
   const expected = {
     model: ADVISORY_PROFILE.model,
     input: [
@@ -171,6 +171,13 @@ export function validateAdvisoryPayload(value: unknown, system: string, user: st
     include: ['reasoning.encrypted_content'],
     truncation: 'disabled',
   };
+  if (subscriptionProfile(profile)) {
+    // Pinned direct ChatGPT login serializer intentionally omits remote output/cache controls.
+    expected.input.pop();
+    delete (expected as any).prompt_cache_options;
+    delete (expected as any).max_output_tokens;
+    expected.reasoning.effort = 'high';
+  } else if (profile !== ADVISORY_PROFILE_ID) throw Error('Advisory held: unsupported profile');
   if (typeof system !== 'string' || !system || typeof user !== 'string' || !user)
     throw Error('Advisory held: complete text input required');
   // Canonical structural comparison rejects extra fields, tools, cache marks and continuations.

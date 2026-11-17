@@ -10,6 +10,21 @@ export const ADVISORY_PROFILE = Object.freeze({ version: 1, provider: 'openai', 
   price: 'terra-standard-2026-11-17-v1', service: 'default', cache: 'explicit-unmarked',
   input: 1_050_000, output: 4096, inputMicroNumerator: 550, outputMicroNumerator: 825, denominator: 100 });
 export const ADVISORY_PROFILE_ID = supervisorHash(ADVISORY_PROFILE);
+/** Explicit owner-approved subscription contract. Output is an admission target, NOT a remote ceiling. */
+const { inputMicroNumerator: _inputPrice, outputMicroNumerator: _outputPrice, denominator: _denominator, ...subscriptionIdentity } = ADVISORY_PROFILE;
+export const SUBSCRIPTION_PROFILE = Object.freeze({ ...subscriptionIdentity, version: 2, auth: 'pi-login',
+  price: 'subscription-api-invoice-not-applicable', cache: 'provider-managed', outputPolicy: 'best-effort-local-target', remoteCap: false });
+export const SUBSCRIPTION_PROFILE_ID = supervisorHash(SUBSCRIPTION_PROFILE);
+export type AdvisoryAuth = 'api-key' | 'pi-login';
+export function advisoryProfile(id: string) {
+  advisoryDemand(id === ADVISORY_PROFILE_ID || id === SUBSCRIPTION_PROFILE_ID, 'unsupported advisory profile');
+  return id === SUBSCRIPTION_PROFILE_ID ? SUBSCRIPTION_PROFILE : ADVISORY_PROFILE;
+}
+export const subscriptionProfile = (id: string) => id === SUBSCRIPTION_PROFILE_ID;
+export function profileForAuth(auth: AdvisoryAuth = 'api-key') {
+  advisoryDemand(auth === 'api-key' || auth === 'pi-login', 'explicit supported auth selection required');
+  return auth === 'pi-login' ? SUBSCRIPTION_PROFILE_ID : ADVISORY_PROFILE_ID;
+}
 export const advisoryHash = (x: unknown): x is string => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 export const advisoryText = (x: unknown): x is string => typeof x === 'string' && x.trim().length > 0 && x.length <= 200 && !x.includes('\0');
 export const advisoryCount = (x: unknown): x is number => Number.isSafeInteger(x) && Number(x) >= 0;
@@ -23,11 +38,12 @@ export function validateAdvisoryOwner(x: any): Owner {
   advisoryRecord(x, ['pid','start']); advisoryDemand(Number.isSafeInteger(x.pid) && x.pid > 0 && advisoryText(x.start), 'exact PID/start owner required'); return x;
 }
 /** Upward rounded in integer micro-USD. The profile fixes service/cache/long-context/regional premises. */
-export function advisoryReservation() {
-  const p = ADVISORY_PROFILE;
+export function advisoryReservation(profile = ADVISORY_PROFILE_ID) {
+  const p = advisoryProfile(profile);
+  if (subscriptionProfile(profile)) return { tokens: p.input + p.output, cost: 0 };
   const tokens = p.input + p.output;
-  const numerator = BigInt(p.input) * BigInt(p.inputMicroNumerator) + BigInt(p.output) * BigInt(p.outputMicroNumerator);
-  const cost = Number((numerator + BigInt(p.denominator - 1)) / BigInt(p.denominator));
+  const numerator = BigInt(p.input) * BigInt(ADVISORY_PROFILE.inputMicroNumerator) + BigInt(p.output) * BigInt(ADVISORY_PROFILE.outputMicroNumerator);
+  const cost = Number((numerator + BigInt(ADVISORY_PROFILE.denominator - 1)) / BigInt(ADVISORY_PROFILE.denominator));
   advisoryDemand(Number.isSafeInteger(tokens) && Number.isSafeInteger(cost), 'reservation overflow');
   return { tokens, cost };
 }
@@ -55,33 +71,34 @@ export function validateDiagnosisGrant(g: any): DiagnosisGrant {
   validateProject(g.project); validateAdvisoryOwner(g.owner); advisoryRecord(g.reserved, ['tokens','cost']);
   advisoryDemand(g.version === 1 && Number.isSafeInteger(g.ticket) && g.ticket > 0 && advisoryText(g.runId)
     && (g.attemptId === null || advisoryText(g.attemptId)) && ['invocationId','fence','holdId'].every(k => advisoryText(g[k]))
-    && ['id','incidentId','basis','runtime','dependencies','policy'].every(k => advisoryHash(g[k])) && g.profile === ADVISORY_PROFILE_ID
-    && advisoryTime(g.deadline) && supervisorHash(g.reserved) === supervisorHash(advisoryReservation()), 'unsupported or incomplete grant');
+    && ['id','incidentId','basis','runtime','dependencies','policy'].every(k => advisoryHash(g[k])) && [ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE_ID].includes(g.profile)
+    && advisoryTime(g.deadline) && supervisorHash(g.reserved) === supervisorHash(advisoryReservation(g.profile)), 'unsupported or incomplete grant');
   const { id, ...body } = g; advisoryDemand(id === supervisorHash(body), 'grant identity mismatch'); return g;
 }
 export type ProviderUsage = { input: number; cacheRead: number; cacheWrite: number; output: number; reasoning: number; total: number };
 export type ProviderUsageReceipt = { version: 1; id: string; grantId: string; authorization: string; invocationId: string; fence: string; profile: string; price: string; rawHash: string;
   requestId: string | null; responseId: string | null; terminalStatus: 'completed' | 'incomplete' | 'failed' | null;
-  serviceTier: 'default' | null; cachePolicy: 'explicit-unmarked' | null;
+  serviceTier: 'default' | null; cachePolicy: 'explicit-unmarked' | 'provider-managed' | null;
   state: 'known' | 'unknown'; reason: 'complete' | 'identity' | 'terminal' | 'policy' | 'counters' | 'bounds' | 'evidence';
-  usage: ProviderUsage | null; resources: { tokens: number; cost: number } | null; costKind: 'derived-upper-micro-usd' | null };
+  usage: ProviderUsage | null; resources: { tokens: number; cost: number } | null; costKind: 'derived-upper-micro-usd' | 'subscription-api-invoice-not-applicable' | null };
 export function validateProviderUsageReceipt(r: any, g: DiagnosisGrant, a: SendAuthorization): ProviderUsageReceipt {
   validateSendAuthorization(a, g);
+  const subscription = subscriptionProfile(g.profile), profile = advisoryProfile(g.profile);
   advisoryRecord(r, ['version','id','grantId','authorization','invocationId','fence','profile','price','rawHash','requestId','responseId','terminalStatus','serviceTier','cachePolicy','state','reason','usage','resources','costKind']);
-  advisoryDemand(r.version === 1 && r.grantId === g.id && r.authorization === a.receipt && r.invocationId === g.invocationId && r.fence === g.fence && r.profile === g.profile && r.price === ADVISORY_PROFILE.price
+  advisoryDemand(r.version === 1 && r.grantId === g.id && r.authorization === a.receipt && r.invocationId === g.invocationId && r.fence === g.fence && r.profile === g.profile && r.price === profile.price
     && advisoryHash(r.rawHash) && (r.requestId === null || typeof r.requestId === 'string' && /^req_[A-Za-z0-9_-]{1,180}$/.test(r.requestId))
     && (r.responseId === null || typeof r.responseId === 'string' && /^resp_[A-Za-z0-9_-]{1,180}$/.test(r.responseId))
     && [null,'completed','incomplete','failed'].includes(r.terminalStatus), 'foreign provider receipt');
   if (r.state === 'known') {
     advisoryRecord(r.usage, ['input','cacheRead','cacheWrite','output','reasoning','total']); advisoryRecord(r.resources, ['tokens','cost']);
-    advisoryDemand(r.reason === 'complete' && r.serviceTier === 'default' && r.cachePolicy === 'explicit-unmarked' && r.requestId !== null && r.responseId !== null && ['completed','incomplete'].includes(r.terminalStatus)
-      && Object.values(r.usage).every(advisoryCount) && r.usage.input > 0 && r.usage.input <= ADVISORY_PROFILE.input
-      && r.usage.cacheRead <= r.usage.input && r.usage.cacheWrite === 0 && r.usage.reasoning <= r.usage.output && r.usage.output <= ADVISORY_PROFILE.output
+    advisoryDemand(r.reason === 'complete' && r.serviceTier === 'default' && r.cachePolicy === (subscription ? 'provider-managed' : 'explicit-unmarked') && r.requestId !== null && r.responseId !== null && ['completed','incomplete'].includes(r.terminalStatus)
+      && Object.values(r.usage).every(advisoryCount) && r.usage.input > 0 && (subscription || r.usage.input <= ADVISORY_PROFILE.input)
+      && r.usage.cacheRead <= r.usage.input && (subscription ? r.usage.cacheWrite <= r.usage.input : r.usage.cacheWrite === 0) && r.usage.reasoning <= r.usage.output && (subscription || r.usage.output <= ADVISORY_PROFILE.output)
       && Number.isSafeInteger(r.usage.input + r.usage.output) && r.usage.total === r.usage.input + r.usage.output
       && r.resources.tokens === r.usage.total && advisoryCount(r.resources.cost) && r.resources.cost <= g.reserved.cost
-      && r.costKind === 'derived-upper-micro-usd', 'invalid known provider receipt');
+      && r.costKind === (subscription ? 'subscription-api-invoice-not-applicable' : 'derived-upper-micro-usd'), 'invalid known provider receipt');
     const p = ADVISORY_PROFILE, numerator = BigInt(r.usage.input) * BigInt(p.inputMicroNumerator) + BigInt(r.usage.output) * BigInt(p.outputMicroNumerator);
-    advisoryDemand(r.resources.cost === Number((numerator + BigInt(p.denominator - 1)) / BigInt(p.denominator)), 'derived provider charge mismatch');
+    advisoryDemand(r.resources.cost === (subscription ? 0 : Number((numerator + BigInt(p.denominator - 1)) / BigInt(p.denominator))), 'derived provider charge mismatch');
   } else advisoryDemand(r.state === 'unknown' && ['identity','terminal','policy','counters','bounds','evidence'].includes(r.reason)
     && r.usage === null && r.resources === null && r.costKind === null && r.serviceTier === null && r.cachePolicy === null, 'unknown usage cannot imply zero');
   const { id, ...body } = r; advisoryDemand(id === supervisorHash(body), 'provider receipt identity mismatch'); return r;

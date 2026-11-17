@@ -57,7 +57,7 @@ factory logs [ticket] [-f] [--recovery] [--project <name>]
 factory update --dry-run|--apply [--project <name|path>] [--json]
 factory workflow status --source <Factory-checkout> [--project <name|path>] [--docker-socket <local-path>] [--json]
 factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]
-factory supervisor diagnose <ticket> --project <name|path> [--json]
+factory supervisor diagnose <ticket> --project <name|path> [--auth api-key|pi-login] [--json]
 factory supervisor status|explain [--json] [--offset <n>] [--project <name|path>]
 factory supervisor mode observe|act [--pilot --confirm] [--project <name|path>]
 factory supervisor stop [--project <name|path>]
@@ -86,7 +86,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   update: { 'dry-run': { type: 'boolean' }, apply: { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
   workflow: { source: { type: 'string' }, project: { type: 'string' }, 'docker-socket': { type: 'string' }, json: { type: 'boolean' } },
   recovery: { json: { type: 'boolean' }, confirm: { type: 'boolean' }, project: { type: 'string' } },
-  supervisor: { offset: { type: 'string' }, json: { type: 'boolean' }, pilot: { type: 'boolean' }, project: { type: 'string' }, incident: { type: 'string' }, request: { type: 'string' }, proposal: { type: 'string' }, reason: { type: 'string' }, revised: { type: 'string' }, abandon: { type: 'boolean' }, confirm: { type: 'boolean' } },
+  supervisor: { auth: { type: 'string' }, offset: { type: 'string' }, json: { type: 'boolean' }, pilot: { type: 'boolean' }, project: { type: 'string' }, incident: { type: 'string' }, request: { type: 'string' }, proposal: { type: 'string' }, reason: { type: 'string' }, revised: { type: 'string' }, abandon: { type: 'boolean' }, confirm: { type: 'boolean' } },
   schedule: { json: { type: 'boolean' }, project: { type: 'string' } },
   legacy: { json: { type: 'boolean' } },
   clean: { 'dry-run': { type: 'boolean' }, json: { type: 'boolean' }, project: { type: 'string' } },
@@ -132,6 +132,7 @@ try {
       if (v.confirm && first !== 'review') throw new Error('--confirm applies to recovery review');
       process.exitCode = await recovery(p, first, { project: v.project, json: v.json, confirm: v.confirm });
     } else if (command === 'supervisor') {
+      if (v.auth !== undefined && first !== 'diagnose') throw Error('--auth applies only to supervisor diagnose');
       if (first === 'diagnose') {
         // Validate before any backend/host access. Signals request owned cancellation; await durable settlement.
         parseSupervisorDiagnosis(positionals.slice(1),v);

@@ -1,5 +1,6 @@
 // Passive supervisor inspection, audited fences/resolution and explicit named-ticket advisory diagnosis.
 // Only diagnose composes the trusted host; no activation, scheduling, action or cross-process PID cancellation.
+import { SUBSCRIPTION_PROFILE_ID } from '../supervisor-advisory-contract.mts';
 import { userInfo } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readSupervisor, commitSupervisor, supervisorHumanHold } from '../supervisor-state.mts';
@@ -37,9 +38,10 @@ export function supervisorResolve(p: Paths, action: string | undefined, extra: s
 
 /** Strict named-current-run surface, deliberately independent of mode/resolve options. */
 export function parseSupervisorDiagnosis(extra: string[], o: Record<string, unknown>): number {
-  if (Object.entries(o).some(([k,v]) => v !== undefined && !['project','json'].includes(k))
+  if (Object.entries(o).some(([k,v]) => v !== undefined && !['project','json','auth'].includes(k))
+    || o.auth !== undefined && !['api-key','pi-login'].includes(String(o.auth))
     || typeof o.project !== 'string' || !o.project.trim() || extra.length !== 1 || !/^[1-9][0-9]*$/.test(extra[0])
-    || !Number.isSafeInteger(Number(extra[0]))) throw Error('Expected factory supervisor diagnose <ticket> --project <name|path> [--json]');
+    || !Number.isSafeInteger(Number(extra[0]))) throw Error('Expected factory supervisor diagnose <ticket> --project <name|path> [--auth api-key|pi-login] [--json]');
   return Number(extra[0]);
 }
 /** One bounded advice contract for diagnose, passive CLI and Board. Never expose full drafts or gate patches. */
@@ -58,9 +60,12 @@ export function retainedRecommendation(decision: DiagnosisDecision | null | unde
 /** Actual is a resource estimate, not an invoice. Legacy component reports never prove provider settlement. */
 export function retainedAccounting(s: SupervisorState, r: Reservation | undefined) {
   const settlement = r ? s.advisory?.settlements?.[supervisorHash(r.id)] : undefined;
-  return { costUnit: 'micro-usd', reserved: r?.reserved ?? null, actual: r?.actual ?? null,
+  const subscription = settlement?.usage?.costKind === 'subscription-api-invoice-not-applicable'
+    || !!r && s.advisory?.policies[supervisorHash(r.id)]?.host.profile === SUBSCRIPTION_PROFILE_ID;
+  return { costKind: subscription ? 'subscription-api-invoice-not-applicable' : 'derived-upper-micro-usd',
+    apiInvoice: subscription ? 'not-applicable' : 'not-measured', costUnit: 'micro-usd', reserved: r?.reserved ?? null, actual: r?.actual ?? null,
     known: r ? r.actual !== null : null, provenance: !r || r.actual === null ? 'unknown' : settlement ? 'provider-usage-derived' : 'legacy-component-reported',
-    providerInvoice: false, refunds: false, meaning: 'Reserved charge is retained; known resource usage and derived charge are not a provider invoice or refund.' };
+    providerInvoice: false, refunds: false, meaning: subscription ? 'API invoice not applicable; zero monetary debit is not measured zero usage. Token targets admit calls, not remotely cap them; known overruns increase charge, unknown stays reserved.' : 'Reserved charge is retained; known resource usage and derived charge are not a provider invoice or refund.' };
 }
 /** Redacted terminal result: retain only selected identities, accounting and bounded advice, never worker bodies. */
 export function supervisorDiagnosisProjection(s: SupervisorState, ticket: number, invocationId: string, result: DiagnosisResult, runId: string | null = null) {
@@ -108,7 +113,7 @@ export async function supervisorDiagnose(p: Paths, extra: string[], o: Superviso
     project={root:realpathSync(ctx.root),tracker:tomlIdentity(ctx.scaffold)};
     runId=findRun(p,ctx,String(ticket)).run?.executionId ?? null;
     if (!runId) throw Error('Supervisor host held: exact current saved execution required');
-    const host=await (services.prepare ?? prepareSupervisorHost)({paths:p,project,ticket,invocationId,backend:services.backend,tracker:commandContextSource(project.tracker)});
+    const host=await (services.prepare ?? prepareSupervisorHost)({paths:p,project,ticket,invocationId,backend:services.backend,tracker:commandContextSource(project.tracker),auth:o.auth});
     const result=await host.invoke(services.apiKey ?? '',services.signal);
     const state=readSupervisor(runStateDir(p),project);
     output(JSON.stringify(supervisorDiagnosisProjection(state,ticket,invocationId,result,runId),null,o.json ? undefined : 2));
@@ -123,9 +128,10 @@ export async function supervisorDiagnose(p: Paths, extra: string[], o: Superviso
   }
 }
 
-export type SupervisorOptions = { project?: string; json?: boolean; pilot?: boolean; confirm?: boolean; offset?: string };
+export type SupervisorOptions = { auth?: 'api-key' | 'pi-login'; project?: string; json?: boolean; pilot?: boolean; confirm?: boolean; offset?: string };
 export const SUPERVISOR_PAGE_SIZE = 128;
 export function parseSupervisorControl(action: string | undefined, extra: string[], o: SupervisorOptions) {
+  if (o.auth !== undefined) throw Error('--auth applies only to supervisor diagnose');
   if (o.offset !== undefined && (!['status','explain'].includes(action ?? '') || !/^(0|[1-9]\d*)$/.test(o.offset) || !Number.isSafeInteger(Number(o.offset)))) throw Error('--offset requires a nonnegative safe integer and status or explain');
   if (action === 'mode' && extra.length === 1 && ['observe','act'].includes(extra[0])) {
     if (o.json || (extra[0] !== 'act' && (o.pilot || o.confirm))) throw Error('Use --pilot --confirm only with mode act; --json only with status/explain');

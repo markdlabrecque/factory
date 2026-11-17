@@ -8,11 +8,13 @@ import type { ScheduleBackend } from './platform/scheduler.mts';
 import type { TicketContextSource } from '../../orchestrator/ticket-context.mts';
 import type { ProjectIdentity } from '../../orchestrator/supervisor-contract.mts';
 import type { SupervisorState, AdvisoryControls } from './supervisor-state.mts';
-import { readSupervisor, readSupervisorProjects } from './supervisor-state.mts';
+import { chargedResources, readSupervisor, readSupervisorProjects } from './supervisor-state.mts';
 import { diagnoseProject } from './supervisor-worker.mts';
 import { readRegistry } from './project-registry.mts';
 import { schedulingState } from './scheduling-observation.mts';
 import { readHostAdvisoryPolicy, advisoryLimitHold } from './supervisor-host-policy.mts';
+import { profileForAuth, type AdvisoryAuth } from './supervisor-advisory-contract.mts';
+import { resolvePiLogin } from './supervisor-auth.mts';
 import { createSupervisorRuntime } from './supervisor-runtime.mts';
 import { readSupervisorRollout, assertRolloutWindow, type RolloutPin } from './supervisor-rollout.mts';
 import { canonicalAdmissionProject, claimSupervisorHold, checkSupervisorHold, releaseSupervisorHold } from './supervisor-admission.mts';
@@ -35,6 +37,9 @@ export async function readSupervisorHostControls(paths: Paths, root: string, bac
 
 export type SupervisorHostOptions = {
   paths: Paths; project: ProjectIdentity; ticket: number; invocationId: string;
+  auth?: AdvisoryAuth;
+  /** Source-only offline resolver seam. Public CLI cannot select a resolver. */
+  resolveLogin?: (signal?: AbortSignal) => Promise<string>;
   backend: Pick<ScheduleBackend, 'status'>;
   /** Explicit bounded read-only tracker source. Auth is not discovered by this API. */
   tracker: TicketContextSource;
@@ -47,7 +52,7 @@ export type SupervisorHostOptions = {
  * Explicit invoke delegates to the existing owned worker; no activation. Only exact terminal receipts permit release. */
 export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   o = {...o,paths:structuredClone(o.paths),project:structuredClone(o.project),rollout:structuredClone(o.rollout)};
-  const project = canonicalAdmissionProject(o.project), p = structuredClone(o.paths);
+  const project = canonicalAdmissionProject(o.project), p = structuredClone(o.paths), profile = profileForAuth(o.auth);
   if (supervisorHash(project) !== supervisorHash(o.project) || !Number.isSafeInteger(o.ticket) || o.ticket <= 0
     || !/^[A-Za-z0-9_-]{1,200}$/.test(o.invocationId)) throw Error('Supervisor host held: exact project/ticket/invocation required');
   const assertControls = async () => {
@@ -58,7 +63,8 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   };
   await assertControls();
   // Missing/unsafe host policy is refused before claiming ownership. No directory/policy provisioning here.
-  readHostAdvisoryPolicy(p.config,[project.root]);
+  if (readHostAdvisoryPolicy(p.config,[project.root]).policy.profile !== profile)
+    throw Error('Supervisor host held: explicit auth selection differs from host profile');
   const runKey = keyFor(String(o.ticket),project.tracker.project);
   const saved = JSON.parse(readSupervisorOriginal(join(p.state,`${runKey}.json`)));
   if (saved.project !== project.tracker.project || saved.iid !== String(o.ticket) || typeof saved.executionId !== 'string')
@@ -69,7 +75,7 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   // Read-only collection/reuse precedes paid ownership: a cache hit creates no hold or pin.
   const fence = randomUUID();
   let hold: ReturnType<typeof claimSupervisorHold> | undefined, released = false;
-  const runtime = await createSupervisorRuntime({paths:p,projectRoot:project.root,stateDir:p.state,invocationId:o.invocationId,fence,deferLease:true});
+  const runtime = await createSupervisorRuntime({paths:p,projectRoot:project.root,stateDir:p.state,invocationId:o.invocationId,fence,deferLease:true,profile});
   let rolloutPin: RolloutPin | undefined;
   const readRollout = () => readSupervisorRollout(p.config,{project,host:runtime.identity.host,
     hostDependencies:runtime.identity.hostDependencies,selected:runtime.identity.selected,dependencies:runtime.identity.dependencies},
@@ -95,6 +101,7 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     if (rolloutPin && supervisorHash(readRollout()) !== supervisorHash(rolloutPin))
       throw Error('Supervisor host held: rollout attestation changed during invocation');
     const host = readHostAdvisoryPolicy(p.config,[project.root,runtime.context.runtimeRoot]);
+    if (host.policy.profile !== profile) throw Error('Supervisor host held: auth profile changed');
     if (hold && !released && !checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed');
     // Unique collection timestamp only names the private freeze; it never changes the material basis.
     const collectionOutput = join(output,randomUUID());
@@ -112,7 +119,7 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     const ownActive = own?.state === 'active';
     const used = (states: SupervisorState[], role?: 'diagnosis') => {
       const rs = states.flatMap(s => Object.values(s.reservations).filter(r => !(ownActive && s.project.root === project.root && r.id === own.id))).filter(r => !role || r.kind === role);
-      return {tokens:rs.reduce((n,r)=>n+r.reserved.tokens,0),cost:rs.reduce((n,r)=>n+r.reserved.cost,0),calls:rs.length};
+      return {tokens:rs.reduce((n,r)=>n+chargedResources(r).tokens,0),cost:rs.reduce((n,r)=>n+chargedResources(r).cost,0),calls:rs.length};
     };
     const mode = state.control?.mode ?? input.snapshot.mode;
     // Capacity/budget checks here are advisory preflight only; reserve-advisory MUST repeat them under journal lock.
@@ -142,7 +149,8 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     invoke: async (apiKey: string, signal?: AbortSignal) => {
       registrationAt = new Date().toISOString();
       const result = await diagnoseProject({stateDir:p.state,current:authorization,boundary:runtime.boundary,
-        invocationId:o.invocationId,fence,apiKey,signal,beforeReserve:acquire});
+        invocationId:o.invocationId,fence,apiKey:o.auth === 'pi-login' ? undefined : apiKey,signal,beforeReserve:acquire,
+        resolveCredential:o.auth === 'pi-login' ? (o.resolveLogin ?? resolvePiLogin) : undefined});
       if (hold && readSupervisor(p.state,project).advisory?.settlements?.[supervisorHash(o.invocationId)]) {
         try {
           await runtime.release();

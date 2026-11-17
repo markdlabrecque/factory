@@ -10,7 +10,8 @@ import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts'
 import type { ModelFamily } from '../../orchestrator/model-policy.mts';
 import type { Diagnostic, DiagnosisDecision, DiagnosisMemory } from '../../orchestrator/supervisor.mts';
 import type { Facts, Resources, Limits, SupervisorState, Event } from './supervisor-state.mts';
-import { diagnosisGrant, ADVISORY_PROFILE_ID } from './supervisor-advisory-contract.mts';
+import { diagnosisGrant, subscriptionProfile } from './supervisor-advisory-contract.mts';
+import { validPiBearer } from './supervisor-auth.mts';
 import { hostAdvisoryPolicyIdentity } from './supervisor-host-policy.mts';
 import { readSupervisor, commitSupervisor, settleAdvisory, incidentIdentity, supervisorHumanHold, supervisorRevisionHold } from './supervisor-state.mts';
 const flat = existsSync(new URL('./supervisor-contract.mts', import.meta.url));
@@ -44,6 +45,8 @@ export type WorkerOptions = {
   stateDir: string; current(): DiagnosisAuthorization | Promise<DiagnosisAuthorization>; boundary?: ComponentDiagnosisBoundary | DiagnosisBoundary;
   /** Explicit handoff-only secret, never discovered or journaled. */
   apiKey?: string;
+  /** Host-only lazy handoff: cache reuse needs no auth; resolution precedes acquisition and every lock. */
+  resolveCredential?: (signal?: AbortSignal) => Promise<string>;
   signal?: AbortSignal; now?: () => number; invocationId: string; fence: string;
   /** Genuine host delays acquisition until after exact cache reuse. Called once before any reserve attempt. */
   beforeReserve?: () => Promise<void>;
@@ -138,7 +141,14 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     if (b && 'kind' in b && b.kind === 'owned-openai') {
       if (a.advisory?.preflightHold) return held(a.advisory.preflightHold);
       // Exact cached reuse above needs no auth. Refuse an obviously impossible NEW call before exclusion/pins.
-      if (a.family !== 'openai' || !o.apiKey || o.apiKey.length > 16384 || /[\s\x00-\x1f\x7f]/.test(o.apiKey)) return held('Bounded explicit OpenAI API-key handoff required for a new diagnosis');
+      if (a.family !== 'openai') return held('Explicit OpenAI advisory family required; no fallback');
+      if (subscriptionProfile(a.advisory?.policy.host.profile ?? '')) {
+        if (!o.resolveCredential) return held('Pi login handoff unavailable; no fallback or reservation');
+        try { o = {...o,apiKey:await o.resolveCredential(o.signal)}; }
+        catch { return held('Pi login handoff unavailable; no fallback or reservation'); }
+        if (!validPiBearer(o.apiKey) || o.signal?.aborted) return held('Pi login handoff unavailable; no fallback or reservation');
+      }
+      if (o.signal?.aborted || !o.apiKey || o.apiKey.length > 16384 || /[\s\x00-\x1f\x7f]/.test(o.apiKey)) return held('Bounded explicit OpenAI API-key handoff required for a new diagnosis');
       await o.beforeReserve?.();
       a = structuredClone(await current());
       if (hostHold(a) || diagnosisBasis(a.snapshot) !== basisHash) return held('Authorization/material changed during paid acquisition; exact ownership retained');
@@ -306,7 +316,7 @@ async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: Su
     const worker = handle.process.evidence.worker;
     const grant = diagnosisGrant({version:1,project,ticket:(a.snapshot.scope as {ticket:number}).ticket,runId:a.facts.runId,attemptId:data.attemptId,
       incidentId,basis,invocationId:o.invocationId,fence:o.fence,holdId:data.policy.holdId,runtime:data.runtime,dependencies:data.dependencies,
-      profile:ADVISORY_PROFILE_ID,policy:hostAdvisoryPolicyIdentity(data.policy.host),
+      profile:data.policy.host.profile,policy:hostAdvisoryPolicyIdentity(data.policy.host),
       ...(data.policy.rollout ? {rollout:data.policy.rollout.identity} : {}),owner:{pid:worker.pid,start:worker.start},deadline,reserved:b.reservation});
     s = readSupervisor(o.stateDir,project);
     commit({kind:'register-advisory-worker',id:`${o.invocationId}:register`,at:new Date().toISOString(),reservationId:o.invocationId,fence:o.fence,owner,grant});

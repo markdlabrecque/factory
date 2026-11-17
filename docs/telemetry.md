@@ -112,7 +112,13 @@ kind. IDs correlate retained originals without exporting prompts, before/after
 bodies, model prose, raw evidence, receipts, exception strings or credentials.
 A null usage is UNKNOWN, never zero. Full reserved ceilings stay charged in the
 journal; known actual usage is separate, does not refund budgets, and is attributed
-only to completion events. Role/project totals are displayed from that same journal,
+only to completion events. Under explicit subscription diagnosis, known token
+usage remains known even above the soft output target; cumulative journal token
+charge increases to `max(reserved, actual)`. Monetary `cost: 0` is a not-applicable
+API debit, not a provider invoice or measured zero resource use. The journal's
+profile-bound receipt and CLI accounting projection retain the explicit
+`subscription-api-invoice-not-applicable` meaning; the compact telemetry allowlist
+is unchanged and cannot independently reconstruct that price/auth contract. Role/project totals are displayed from that same journal,
 not reconstructed from incomplete telemetry. Refused review/diagnosis outcomes
 retain host outcome IDs; an observed-not-applied intent is not invented as a refusal.
 

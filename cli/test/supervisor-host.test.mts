@@ -8,7 +8,7 @@ import { paths } from '../src/paths.mts';
 import { FakeSchedule } from '../src/platform/fake.mts';
 import { readSupervisorHostControls, inspectSupervisorHost, prepareSupervisorHost } from '../src/supervisor-host.mts';
 import { emptySupervisor, incidentIdentity, transitionSupervisor } from '../src/supervisor-state.mts';
-import { ADVISORY_PROFILE, ADVISORY_PROFILE_ID, advisoryReservation, diagnosisGrant } from '../src/supervisor-advisory-contract.mts';
+import { ADVISORY_PROFILE, ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE, SUBSCRIPTION_PROFILE_ID, advisoryReservation, diagnosisGrant } from '../src/supervisor-advisory-contract.mts';
 import { hostAdvisoryPolicyIdentity } from '../src/supervisor-host-policy.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 const project = {root:'/fixture/project',tracker:{kind:'github' as const,host:'github.com',project:'owner/repo'}};
@@ -19,16 +19,17 @@ const host={version:1 as const,enabled:true as const,profile:ADVISORY_PROFILE_ID
 const role={maxTokens:5_000_000,maxCostUsd:50,maxCalls:5,timeoutSeconds:600};
 const policy={enabled:true,limits:{maxTokens:10_000_000,maxCostUsd:100,maxCalls:10,diagnosis:role,review:role}};
 const controls={registered:true,global:'on' as const,projectControl:'enabled' as const};
-function fixture() {
+function fixture(profile = ADVISORY_PROFILE_ID) {
+  const selectedHost = {...host,profile};
   const facts={scope:{kind:'ticket' as const,ticket:7},requirements:h,gate:h,runId:'run',failure:h}, incidentId=incidentIdentity(project,facts);
   const apply=(s:any,e:any)=>transitionSupervisor(s,e,{ownerState:()=> 'alive'});
   const observed=apply(emptySupervisor(project),{id:'observe',at,kind:'observe',facts,snapshotHash:h,reason:'saved failure'});
-  const reservation={id:hold.invocationId,incidentId,kind:'diagnosis' as const,owner,fence:hold.fence,at,deadline:'2026-11-17T00:10:00.000Z',reserved:advisoryReservation(),actual:null,state:'active' as const,reviewId:null};
-  const registration={holdId:hold.id,host,project:policy,at};
+  const reservation={id:hold.invocationId,incidentId,kind:'diagnosis' as const,owner,fence:hold.fence,at,deadline:'2026-11-17T00:10:00.000Z',reserved:advisoryReservation(profile),actual:null,state:'active' as const,reviewId:null};
+  const registration={holdId:hold.id,host:selectedHost,project:policy,at};
   const reserved=apply(observed,{id:'reserve',at,kind:'reserve-advisory',reservation,policy:registration,controls,
     limits:{project:{tokens:10_000_000,cost:100_000_000},shared:{tokens:10_000_000,cost:100_000_000},capacity:1,reviewCalls:5,reviewTimeoutMs:600_000}});
   const grant=diagnosisGrant({version:1,project,ticket:7,runId:'run',attemptId:null,incidentId,basis:h,invocationId:hold.invocationId,fence:hold.fence,holdId:hold.id,
-    runtime:h,dependencies:h,profile:ADVISORY_PROFILE_ID,policy:hostAdvisoryPolicyIdentity(host),owner:worker,deadline:reservation.deadline,reserved:reservation.reserved});
+    runtime:h,dependencies:h,profile,policy:hostAdvisoryPolicyIdentity(selectedHost),owner:worker,deadline:reservation.deadline,reserved:reservation.reserved});
   const registered=apply(reserved,{id:'register',at,kind:'register-advisory-worker',reservationId:hold.invocationId,fence:hold.fence,owner,grant});
   const authorized=apply(registered,{id:'send',at,kind:'authorize-advisory-send',reservationId:hold.invocationId,fence:hold.fence,worker,grantId:grant.id,payload:h,policy:registration,controls});
   return {observed,reserved,registered,authorized};
@@ -61,6 +62,29 @@ test('terminal publication is atomic with final journal fences and never refunds
       assert.equal(Object.values(after.diagnostics!)[0].decision,null,'no fake proposed output');
     }
     assert.deepEqual(transitionSupervisor(after,e,{ownerState:()=> 'unknown'}),after,'event replay cannot resend or recharge');
+  }
+});
+
+test('subscription terminal overrun stays known, cumulatively increases charge without refund and atomically requires a human',()=>{
+  for(const output of [10,4097,2_000_000]) {
+    const {authorized}=fixture(SUBSCRIPTION_PROFILE_ID), key=supervisorHash(hold.invocationId), g=authorized.advisory!.workers[key].grant, a=authorized.advisory!.sends[key];
+    const total=25+output;
+    const ub={version:1,grantId:g.id,authorization:a.receipt,invocationId:g.invocationId,fence:g.fence,profile:g.profile,price:SUBSCRIPTION_PROFILE.price,
+      rawHash:h,requestId:'req_unit',responseId:'resp_unit',terminalStatus:'completed',serviceTier:'default',cachePolicy:'provider-managed',state:'known',reason:'complete',
+      usage:{input:25,cacheRead:0,cacheWrite:0,output,reasoning:8,total},resources:{tokens:total,cost:0},costKind:'subscription-api-invoice-not-applicable'};
+    const decision={version:1,incidentId:g.incidentId,basisHash:h,classification:'expectation',rationale:'Synthetic wait',alternatives:['Inspect originals'],action:{kind:'wait',expectation:'Human instruction'}};
+    const db={reservationId:g.invocationId,incidentId:g.incidentId,basisHash:h,snapshotHash:h,fence:g.fence,startedAt:at,completedAt:at,inputRef:'/host/input.json',outcome:'proposed',reason:'Synthetic wait',stdout:'{}',stderr:'',decision};
+    const event:any={kind:'settle-advisory',id:'terminal',at,reservationId:g.invocationId,diagnostic:{id:supervisorHash(db),...db},
+      request:{version:1,id:'human',project,scope:{kind:'ticket',ticket:7},incidentId:g.incidentId,proposalId:supervisorHash(db),reason:'authority-uncertain',question:'Inspect subscription target overrun?',nextAction:'Inspect known counters; preserve charge',evidence:['/host/input.json'],stop:'required',delivery:{state:'pending',attempts:0}},
+      settlement:{grantId:g.id,holdId:g.holdId,invocationId:g.invocationId,fence:g.fence,authorization:a.receipt,usage:{id:supervisorHash(ub),...ub},process:h,cleanup:h,at,disposition:'local-human-required'}};
+    const after=transitionSupervisor(authorized,event,{ownerState:()=> 'alive'});
+    assert.deepEqual(after.reservations[key].actual,{tokens:total,cost:0});
+    assert.deepEqual(after.charged.diagnosis,{tokens:Math.max(g.reserved.tokens,total),cost:0});
+    assert.equal(after.advisory!.settlements![key].disposition,output>4096?'local-human-required':'retained-advice');
+    if(output>4096) assert.equal(after.incidents[g.incidentId].incident.state,'human-required');
+    assert.deepEqual(transitionSupervisor(after,event,{ownerState:()=> 'unknown'}),after);
+    const foreign=structuredClone(authorized);foreign.advisory!.policies[key].host.profile=ADVISORY_PROFILE_ID;
+    assert.throws(()=>transitionSupervisor(foreign,event,{ownerState:()=> 'alive'}),/orphan advisory policy|foreign worker grant/);
   }
 });
 
