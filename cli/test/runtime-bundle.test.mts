@@ -73,6 +73,10 @@ test('complete inventory, deterministic identity, private install and validation
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'cli/src', name)), 'advisory assets ship unchanged');
   const owned = await import(pathToFileURL(join(a.directory, 'supervisor-openai.mts')).href);
   assert.equal(typeof owned.createOpenAIDiagnosisBoundary, 'function');
+  const runtime = await import(pathToFileURL(join(a.directory, 'supervisor-runtime.mts')).href);
+  assert.equal(typeof runtime.createSupervisorRuntime, 'function', 'trusted composition ships with all private imports');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-runtime.mts')), readFileSync(join(f.source, 'cli/src/supervisor-runtime.mts')));
+  assert.equal(typeof request.verifyPinnedProvider, 'function', 'same actual SDK closure verifier is available before child start');
   const processBoundary = await import(pathToFileURL(join(a.directory, 'supervisor-process.mts')).href);
   assert.equal(typeof processBoundary.confirmOwnedCleanup, 'function');
   for (const name of ['supervisor-openai.mts', 'supervisor-process.mts', 'supervisor-runner.mts', 'supervisor-guard.mjs']) {

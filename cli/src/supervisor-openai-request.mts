@@ -46,6 +46,14 @@ async function pinnedProvider(runtime: string, temporary: string) {
   return { stream, model };
 }
 
+/** Offline positive closure verification using the very same pinned loader as the request path.
+ * Imports only digest-verified public SDK artifacts; never sends, discovers auth or probes tokens. */
+export async function verifyPinnedProvider(runtime: string): Promise<void> {
+  const temporary = mkdtempSync(join(tmpdir(), 'factory-advisory-verify-'));
+  try { await pinnedProvider(runtime, temporary); }
+  finally { rmSync(temporary, { recursive: true, force: true }); }
+}
+
 /** Pure preconditions are independently testable without starting a provider process. Neither helper grants authority. */
 export function validateAdvisoryEnvironment(keys: readonly string[]) {
   const allowed = new Set(['PATH','HOME','LANG','LC_ALL','LC_CTYPE','TZ','NODE_CHANNEL_FD','NODE_CHANNEL_SERIALIZATION_MODE']);

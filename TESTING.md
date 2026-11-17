@@ -113,7 +113,23 @@ against an actually claimed successor. Fabricated commit events and corrupted re
 bindings fail closed. Other lifecycle cases retain unknown usage/exclusion. Cheap raw
 filesystem permutations cover live parked/terminal records, dangling claims, starting
 handoffs and unresolved recovery payloads regardless of stage or controller death.
-No-send finalization, runtime leases and installed public host authority are not proved. One reused
+No-send finalization and installed public host authority are not proved. Runtime
+pinning is separately covered by `cli/test/supervisor-runtime.test.mts`: cheap
+selection/source/dependency/override/dead-owner permutations and one reuse of the
+existing T04 process fixture in protected-runtime mode. The latter imports the
+actual copied-private module, positively loads the real pinned SDK closure offline,
+transfers exact ready worker evidence, rejects premature/generic release/removal,
+and releases only after real T05 durable settlement, known T03 usage and ESRCH.
+A stale release leaves a separate successor pin intact. Ordinary runtime package
+fixtures are synthetic; they are not the SDK capability evidence. HTTP/SSE, auth,
+policies and rollout controls remain synthetic with outbound network denied, not
+installed host or live-account proof. Run the focused boundary with:
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-runtime.test.mts cli/test/runtime-ownership.test.mts cli/test/runtime-bundle.test.mts cli/test/workflow-routing.test.mts
+```
+
+One reused
 standard-entrypoint fixture invokes the actual flat main, dispatch and shell bootstrap
 against a real durable hold, proving zero tracker/provider/readiness/container work.
 Actual recovery-claim refusal preserves synthetic pending accounting byte-for-byte
