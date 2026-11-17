@@ -111,12 +111,15 @@ unsupported family is held before new paid acquisition; exact retained reuse nee
 no new paid call or key. The private host/project cumulative ceilings, owned worker,
 one-use send gate, receipt settlement and exact cleanup/reconciliation are unchanged.
 
-**Current prerequisite:** new paid acquisition also requires independent older-runtime
-and unmanaged-work quiescence evidence. No trusted public source of that evidence is
-shipped yet. The CLI supplies no fabricated attestation, so it holds a new call before
-creating exclusion/pins. Source host callers with independently established prerequisites
-retain their existing explicit API. This command is not installed journey or pilot approval;
-no policy provisioning, scheduling, review, recovery, gate edit, delivery or notification occurs.
+**Default held rollout prerequisite:** new paid acquisition reads the private operator
+record `Paths.config/supervisor-rollout.json`. Absence or any unsafe/invalid binding holds
+before exclusion/pins. This is expiring **human attestation**, not automated proof that
+older runtimes or unmanaged work stopped. Actual runtime compatibility and raw saved-run
+custody/claims checks still apply, including legacy/unknown records. Component-only host
+callers retain their explicit prerequisite API; the public CLI cannot inject it. See the
+[manual maintenance-window contract](#operator-rollout-attestation). No installed journey,
+live pilot permission, policy provisioning, scheduling, review, recovery, gate edit,
+delivery or notification is implied.
 Do not enable/mutate a project merely to get past a hold.
 
 Output is version-1 JSON (`--json` compact, otherwise pretty) with advice-only authority,
@@ -185,6 +188,53 @@ No automatic release/refund/retry follows. Do not interpret stop as implementati
 container, tracker POST or admitted gate-operation cancellation. Resolve remains the
 exact separate command below, never a blanket approve/resume.
 
+## Operator rollout attestation
+
+This source contract is for a **future separately authorized operator maintenance window**,
+not permission to configure or activate a live installation. During that window the operator
+must independently stop/quiesce older Factory runtimes and unmanaged work sharing the run
+store, establish host-only mount/resource isolation, and inspect ownership/custody. A human
+assertion cannot bypass unknown legacy records, live claims, unsupported artifact ABI,
+changed selected dependencies, policies or controls. No automated quiescence proof is claimed.
+
+Only after those checks, a future authorized operator may manually write UTF-8 JSON at
+`Paths.config/supervisor-rollout.json` with this exact schema (placeholders are not valid IDs):
+
+```json
+{
+  "version": 1,
+  "project": {"root": "/canonical/project", "tracker": {"kind": "github", "host": "github.com", "project": "owner/repo"}},
+  "host": "<host complete-runtime SHA-256>",
+  "hostDependencies": "<host dependency-manifest SHA-256>",
+  "selected": "<selected complete-runtime SHA-256>",
+  "dependencies": "<selected dependency-manifest SHA-256>",
+  "recordedAt": "2026-11-17T00:00:00.000Z",
+  "expiresAt": "2026-11-17T01:00:00.000Z",
+  "olderRuntimesQuiesced": true,
+  "unmanagedWorkQuiesced": true
+}
+```
+
+Use actual current complete-runtime identities, not arbitrary source commit IDs. The directory
+must be canonical, current-UID-owned mode **0700**, outside project/runtime mounts; the record
+must be a current-UID-owned mode **0600** regular file with one link, at most 16 KiB. Aliases,
+links, special files, invalid UTF-8, unknown fields/versions, foreign structured tracker/project
+or either runtime/dependency identity, future recording time and expired/stale windows hold.
+Times are canonical UTC ISO strings; the entire attested window is at most 24 hours. No
+secrets, keys, budgets, enable/mode or approval fields belong in this record. No command creates,
+renews or edits it, and there are no rollout/debug/actor/capability flags.
+
+A new call needs the **full configured diagnosis timeout** remaining at registration; otherwise
+it is refused rather than silently extending expiry. Fresh reads before authorization and
+publication must match the pinned record identity. Expiry, replacement or content changes
+invalidate inflight new authorization/usable output; cleanup/accounting still remain required.
+The immutable grant and registered policy pin its identity, transitively binding receipts.
+Renewal requires repeating the operator checks; renewal alone does not change diagnosis basis,
+resend unchanged advice, replenish incident allowance, reset cumulative history or raise spending
+authority. The separate finite enabled host policy, all project/role caps, global ON and project
+opt-in remain mandatory. Status/explain do not read this record or refresh platform/provider
+state, acquire leases or write. Offline tests use disposable synthetic operator assertions only.
+
 ## Advisory host policy foundation
 
 The advisory source foundation defines a private host policy at
@@ -197,7 +247,8 @@ directory and policy file must be owner-only, outside all agent/project mounts;
 missing, unreadable, linked, malformed, unknown or insufficient policy holds.
 
 The explicit diagnosis command above consumes this foundation; no host-policy
-provisioning/inspection command or public quiescence attestation is shipped. Existing status/explain remain passive journal
+provisioning/inspection command is shipped. The separate rollout record below is read-only.
+Existing status/explain remain passive journal
 observations, not validation of current host spending permission. The source host
 loader can inspect and validate policy without writing it; a later explicitly
 approved installation/configuration step must establish the private directory and

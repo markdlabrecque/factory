@@ -19,7 +19,8 @@ import { validateHostAdvisoryPolicy, hostAdvisoryPolicyIdentity, advisoryLimitHo
 import type { HostAdvisoryPolicy } from './supervisor-host-policy.mts';
 import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts';
 export type AdvisoryControls = { registered: boolean; global: 'on' | 'off' | 'unknown'; projectControl: 'enabled' | 'paused' | 'unknown' };
-export type AdvisoryRegistration = { holdId: string; host: HostAdvisoryPolicy; project: SupervisorPolicy; at: string };
+import { validateRolloutPin, type RolloutPin } from './supervisor-rollout.mts';
+export type AdvisoryRegistration = { holdId: string; host: HostAdvisoryPolicy; project: SupervisorPolicy; at: string; rollout?: RolloutPin };
 const { validateDiagnostic, parseDiagnosis, diagnosisBasis } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
 
 const { observeEvent, eventIdFor } = await import(existsSync(new URL('./execution-events.mts', import.meta.url)) ? './execution-events.mts' : '../../board/execution-events.mts');
@@ -87,7 +88,8 @@ const same = (a: unknown, b: unknown) => supervisorHash(a) === supervisorHash(b)
 function resources(x: any): void { object(x, ['tokens','cost']); demand(count(x.tokens) && count(x.cost), 'finite integer token/cost units required'); }
 function owner(x: any): void { object(x, ['pid','start']); demand(Number.isSafeInteger(x.pid) && x.pid > 0 && text(x.start), 'PID/start identity required'); }
 function validateAdvisoryRegistration(p: AdvisoryRegistration): void {
-  object(p, ['holdId','host','project','at']); validateHostAdvisoryPolicy(p.host);
+  object(p, ['holdId','host','project','at',...(p.rollout === undefined ? [] : ['rollout'])]); validateHostAdvisoryPolicy(p.host);
+  if (p.rollout !== undefined) { validateRolloutPin(p.rollout); demand(p.rollout.expiresAt > p.at, 'expired registered rollout'); }
   object(p.project, ['enabled','limits']); object(p.project.limits, ['maxTokens','maxCostUsd','maxCalls','diagnosis','review']);
   for (const role of ['diagnosis','review'] as const) object(p.project.limits![role], ['maxTokens','maxCostUsd','maxCalls','timeoutSeconds']);
   const zero = { tokens: 0, cost: 0, calls: 0 };
@@ -192,7 +194,8 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
       demand(p && r && key === supervisorHash(g.invocationId) && g.incidentId === r.incidentId && g.fence === r.fence
         && same(g.project, s.project) && s.incidents[g.incidentId].facts.scope.kind === 'ticket'
         && s.incidents[g.incidentId].facts.scope.ticket === g.ticket && s.incidents[g.incidentId].facts.runId === g.runId
-        && g.policy === hostAdvisoryPolicyIdentity(p.host) && g.holdId === p.holdId && g.deadline === r.deadline
+        && g.policy === hostAdvisoryPolicyIdentity(p.host) && g.rollout === p.rollout?.identity
+        && (!p.rollout || g.deadline <= p.rollout.expiresAt) && g.holdId === p.holdId && g.deadline === r.deadline
         && same(g.reserved, r.reserved) && !same(g.owner, r.owner) && time(w.at) && w.at >= r.at && w.at < r.deadline, 'foreign worker grant');
     }
     for (const [key, a] of entries(s.advisory.sends)) {

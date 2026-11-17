@@ -46,10 +46,17 @@ and failing backend, and actual source-bin routing for invalid/no-run requests.
 are cheap units/local control boundaries, not installed transport or paid-provider
 proof. The public copied-install journey belongs to its dedicated acceptance task;
 this suite does not duplicate the host/SDK matrix. No real auth file/key retrieval,
-service mutation or paid call occurs. New public acquisition remains held without
-independent quiescence evidence; component facades cannot establish that authority.
-No new runtime module/import asset or dependency archive is introduced: handler
-imports use already inventoried host and structured tracker-source modules.
+service mutation or paid call occurs. New public acquisition remains held without a
+valid private operator rollout record; component facades cannot establish public authority.
+`cli/test/supervisor-rollout.test.mts` covers strict schema/project/runtime/time permutations,
+full-timeout window refusal and one disposable filesystem boundary (canonical private
+permissions/UID, links, special files, bounded fatal UTF-8, replacement and expiry).
+The existing normal-producer host fixture now uses the default public record reader with a
+**synthetic disposable operator assertion**, reaches the same network-denied SDK boundary,
+proves renewal does not change basis/resend/reset charges, and invalidates late output when
+the record changes. This is not an installed quiescence or model-quality claim and does not
+duplicate the public copied-install journey. The new `supervisor-rollout.mts` module is in
+the complete runtime inventory/flat copy; no dependency archive or client stack is added.
 
 ## Documentation fixture checks
 

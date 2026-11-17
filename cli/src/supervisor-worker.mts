@@ -306,7 +306,8 @@ async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: Su
     const worker = handle.process.evidence.worker;
     const grant = diagnosisGrant({version:1,project,ticket:(a.snapshot.scope as {ticket:number}).ticket,runId:a.facts.runId,attemptId:data.attemptId,
       incidentId,basis,invocationId:o.invocationId,fence:o.fence,holdId:data.policy.holdId,runtime:data.runtime,dependencies:data.dependencies,
-      profile:ADVISORY_PROFILE_ID,policy:hostAdvisoryPolicyIdentity(data.policy.host),owner:{pid:worker.pid,start:worker.start},deadline,reserved:b.reservation});
+      profile:ADVISORY_PROFILE_ID,policy:hostAdvisoryPolicyIdentity(data.policy.host),
+      ...(data.policy.rollout ? {rollout:data.policy.rollout.identity} : {}),owner:{pid:worker.pid,start:worker.start},deadline,reserved:b.reservation});
     s = readSupervisor(o.stateDir,project);
     commit({kind:'register-advisory-worker',id:`${o.invocationId}:register`,at:new Date().toISOString(),reservationId:o.invocationId,fence:o.fence,owner,grant});
     const observation = await fresh();

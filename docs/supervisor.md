@@ -224,9 +224,17 @@ deferred. Existing general workflow support for both configured families remains
 unchanged; an unsupported diagnosis family must refuse, never switch to OpenAI.
 The public command now composes the existing prepared host; the
 [operator contract](factory-cli.md#explicit-advisory-diagnosis) specifies strict parsing,
-redacted version-1 output, exits and owned signal cancellation. It does not supply
-independent older-runtime/unmanaged-work quiescence evidence, so NEW paid public
-acquisition is held before any exclusion/pins. Exact cached reuse remains legitimate
+redacted version-1 output, exits and owned signal cancellation. NEW paid public
+acquisition is held before exclusion/pins unless the host reads a strict private version-1
+[operator rollout attestation](factory-cli.md#operator-rollout-attestation), bound to the
+canonical project/structured tracker and actual host/selected runtime and dependency IDs.
+This is expiring human attestation, not automated proof of older-runtime/unmanaged-work
+quiescence. Actual compatibility/custody/claim checks remain mandatory. The full configured
+timeout must fit its window; fresh record change/expiry blocks authorization or usable
+publication. Registered policy and immutable grant pin the control identity separately from
+host spending policy. The record never enters diagnosis basis; renewal alone cannot resend,
+reset history or replenish allowance. The CLI never writes it or exposes an injection flag.
+Exact cached reuse remains legitimate
 without new auth/spend. `OPENAI_API_KEY` is only a bounded environment handoff, never
 a credential discovery or token probe. Missing auth and unsupported family hold before
 new acquisition. No installed public journey, live activation or rollout is claimed.
