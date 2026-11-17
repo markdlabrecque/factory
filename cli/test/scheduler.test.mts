@@ -9,7 +9,7 @@ import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { supervisorWakeups } from '../src/supervisor-schedule.mts';
 import type { SupervisorHost, SupervisorWakeResult } from '../src/supervisor-schedule.mts';
-import type { DiagnosisBoundary } from '../src/supervisor-worker.mts';
+import type { ComponentDiagnosisBoundary as DiagnosisBoundary } from '../src/supervisor-worker.mts';
 import type { ReviewBoundary } from '../src/supervisor-review.mts';
 import { readSupervisor, commitSupervisor } from '../src/supervisor-state.mts';
 import { reviewFixture, AT } from './supervisor-fixture.mts';

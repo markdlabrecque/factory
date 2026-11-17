@@ -168,6 +168,36 @@ conservative bound and limits. Extend this same suite, not a duplicate boundary 
 It enters the unchanged four-shard inventory automatically; the independent
 browser lifecycle gate remains mandatory.
 
+## Owned advisory local process boundary
+
+```sh
+node --test cli/test/supervisor-process.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Pure evidence permutations own exact PID/start/session/group and schema refusal.
+One disposable process integration owns normal completion, original-endpoint
+termination, absolute child-owned deadline and **actual controller process death**,
+with an IPC-ready real descendant inheriting the group. It executes unchanged
+inventoried/copied factory, guard, runner, T02 request gate and T03 raw/scalar
+publication. A test-only preload supplies the existing provider fixture's synthetic
+terminal HTTP/SSE and non-secret auth; all real native socket/HTTP/TLS transport is
+permanently denied. It also adds an inherited observation pipe and filesystem/IPC
+barriers. No production bypass flag or second SDK scenario matrix is introduced.
+The extra pipe is only an exit barrier: a separate kernel whole-group absence
+observation is required for cleanup. A still-present orphan zombie group remains
+held, with explicit Linux zombie evidence, not inferred absent from leader/pipe
+loss. No sleeps, polling/retries or timing tolerances establish outcomes. The
+three-second deadline is an actual bound, not an elapsed-time assertion.
+
+Linux actual process behavior is exercised; Darwin uses a bounded capability probe
+and explicitly holds unverifiable numeric session evidence, with no positive Darwin
+run claimed. Runtime tests verify imports and exact copied bytes for all four new
+assets. Legacy injected diagnosis/scheduler tests remain component evidence, not
+provider/host enforcement. No admission, runtime lease release, final settlement,
+refund/replay, installed host, live remote acceptance or paid activation is proven.
+The unchanged four shards, 180-second deadline/concurrency/coverage and separate
+bounded browser lifecycle gate remain mandatory.
+
 ## Raw advisory usage receipts
 
 ```sh

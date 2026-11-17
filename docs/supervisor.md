@@ -15,7 +15,8 @@ notification belongs to this MVP. Project-wide incidents without a saved run are
 deferred. Existing general workflow support for both configured families remains
 unchanged; an unsupported diagnosis family must refuse, never switch to OpenAI.
 These are approved implementation boundaries, **not shipped command capability**.
-There is not yet a public diagnosis command or supported paid adapter.
+There is not yet a public diagnosis command or installed paid adapter. The owned
+source-only boundary below is not public host composition.
 
 The [OpenAI boundary investigation](research/supervisor-openai-boundary.md) records
 primary provider documentation and the exact inspected Pi/Pi-AI 1.5.2 artifacts.
@@ -34,8 +35,8 @@ insufficient budgets must hold. This is serializer/gate/raw-event evidence with
 synthetic eligibility and HTTP/SSE, **not** durable authorization, a shipped
 `DiagnosisBoundary`, remote acceptance, actual usage or host/installed acceptance.
 
-The next bounded implementation must harden the **existing Pi/OpenAI path** and
-supply its trusted worker boundary: bind the exact serialized request to finite
+The owned source implementation below hardens the **existing Pi/OpenAI path**
+and supplies its trusted worker boundary to: bind the exact serialized request to finite
 conservative all-in reservations and known worst-case pricing, admit at most one
 generation request, capture authoritative terminal usage separately from model
 text, and enforce owned deadline/cleanup independently of the Factory controller.
@@ -108,9 +109,89 @@ prompt/dependency mutation refusal before authorization. Actual provider
 acceptance, billing and useful advice remain untested. Raw parsed terminal evidence
 is captured before normalized counters but is not durable usage settlement;
 ambiguous/oversized terminal evidence carries an explicit problem flag.
-No watchdog, cleanup receipt, complete `DiagnosisBoundary`, trusted host factory,
-public command or paid activation is supplied by this source adapter alone;
-T03/T04 and subsequent composition remain required. Paid launch remains held.
+This request module alone supplies no watchdog or settlement. The owned source
+boundary below composes this gate with durable usage and local lifecycle evidence;
+public host/admission composition and paid activation remain absent.
+
+## Owned short-lived advisory process boundary
+
+`createOpenAIDiagnosisBoundary` in `supervisor-openai.mts` is the trusted **source**
+factory for fixed `openai/gpt-6.1-terra`/high. It must itself be loaded from the exact
+validated complete selected flat runtime. It exposes no executable, environment,
+model, tool, session, fallback or HTTP selector. The factory does not read auth,
+settings or project configuration: a trusted caller must explicitly supply Standard
+API auth at handoff. No public CLI/host wiring or shared admission is supplied.
+
+The asynchronous `start` phase creates a private empty cwd/HOME and a detached
+minimal Node `supervisor-guard.mjs` session/group anchor, which spawns the actual
+`supervisor-runner.mts`. Only PATH/HOME/LANG and Node IPC configuration reach the
+worker. The guard arms the absolute (at most ten-minute) deadline **before** spawning
+or waiting for readiness, handoff, imports or SDK work. It performs no filesystem,
+provider or ps work, and bounds stdout/stderr forwarding (configured output, 8 KiB
+stderr). Controller IPC disconnect, deadline, overflow, worker completion or explicit
+termination causes the still-live anchor to SIGKILL **its own group**. Normal
+completion first drains bounded output; descendant-held pipes cannot extend the
+deadline. Guard stream/internal errors also self-signal the group. This is local
+containment, not proof of remote cancellation. No parent/reopen path kills a raw
+PID/group number. No graceful signal grace period depends on controller survival.
+
+After worker readiness, the parent obtains exact controller/anchor/worker
+PID/start/group/session observations and durably records their association with
+project/tracker, invocation/fence, selected runtime/dependencies and deadline.
+The guard must be its own session/group leader; worker group/session must match,
+and controller must be outside that group. Only then is a handle returned. The
+caller registers the immutable grant for this exact worker in the existing journal,
+then explicitly hands it off. Both parent and worker validate the private process
+record against that grant. The worker waits without a request until handoff;
+`requestAdvisory` still consumes the **sole** journal permission at final transport,
+under the same stop lock, never from a callback returning true. Exceptions after
+send publish unknown evidence where possible. T03 atomically persists selected raw
+and scalar usage before worker completion; output text remains untrusted advice.
+
+Process records and immutable cleanup observations live beneath
+`<host-state>/supervisor/process/<project-hash>/<invocation-hash>/` as private 0600
+files in owner-only 0700 directories with validated lock paths. Canonical host state
+must be outside the project; later host composition must establish all agent mount
+exclusions. Short independent filesystem locks use the shared scoped synchronous
+writer and strict fsync, without nested journal locks or redundant ancestor syncing.
+Reopen is bounded, strict and synchronizes evidence; linked/hardlinked, foreign,
+changed, oversized, unsafe or missing records hold rather than being repaired.
+
+`terminate` uses only the original owned IPC endpoint and is idempotent. Anchor
+exit/pipe close is **not** group cleanup proof: after the close barrier, an independent
+kernel signal-zero observation must yield ESRCH for the entire group before a
+strict association-hashed cleanup receipt is published. An alive/reused/unknown
+group (including retained orphan zombies) is held, never signalled by the parent.
+Reopen can observe absence and publish the matching evidence or remain held; it
+cannot reconstruct permission, kill a successor, or infer no-send from absence.
+`usage` reopens the T03 journal-bound receipt idempotently; absent/invalid accounting
+is null, not zero. These APIs never finish a reservation, release exclusion/runtime
+ownership, refund a charge, replay a request or publish a usable diagnosis.
+
+Linux probes use `/proc` start/group/session identity. Darwin uses a **bounded**
+one-second `/bin/ps` capability/identity probe outside the guard and refuses unless
+it obtains an exact numeric group/session and matching detached anchor. Darwin ps
+variants exposing a session pointer rather than a verifiable session ID are
+explicitly unsupported/held by this adapter, not silently accepted; Darwin positive
+lifecycle evidence has not been run here. Factory's general Darwin support is not
+changed. Unsupported platforms or lifecycle probes refuse before handoff/send.
+A guard deadline still bounds a worker blocked in legacy Darwin owner lookup.
+
+`DiagnosisBoundary` now names this ready/register/handoff source contract. The old
+print-mode `diagnoseProject` injection is explicitly `ComponentDiagnosisBoundary`:
+its booleans are not provider enforcement, and it cannot consume/settle a new
+advisory reservation through legacy finish. Complete facts, real exclusion,
+installed trusted host construction and final advisory settlement remain later work.
+
+One disposable process integration uses unchanged copied production assets and
+actual journal, archive loader, SDK, raw/scalar filesystem receipts, session/group
+signals and controller death. A **test-only preload** installs synthetic non-secret
+HTTP/SSE below that code, permanently denies native outbound transport and adds an
+inherited observation pipe plus an IPC-ready real descendant. Completion,
+termination, deadline and actual controller loss share this one boundary; the pipe
+is only a barrier, with independent whole-group checks afterward. Retained zombies
+are explicitly held, not counted absent. Provider acceptance/billing, semantic
+advice, actual admission and installed host authority are not demonstrated.
 
 ## Raw provider usage and private receipts
 
@@ -361,7 +442,7 @@ node --test board/supervisor.test.mts board/execution-events.test.mts cli/test/s
 
 `model-policy.mts` fixes `supervisor` to Mid and `gateReview` to Large in the configured family, with Pi/high thinking and no exact-model/provider overrides, fallback or automatic escalation. Independent review is separately budgeted, not a diagnosis escalation. Model policy identity is version 2; old analysis/proof must be refreshed normally.
 
-`supervisor-policy.mts:supervisorCallHold` is a pure necessary paid-call preflight. It refuses disabled/unregistered, stopped, unknown global admission, missing/invalid finite caps, unknown pricing/accounting, invalid worst-case reservations, exhausted project/role totals and active-decision/incident bounds. Observe may receive bounded **diagnosis proposals only**; review still requires act. Observe never grants action/reviewer admission. Inputs are host facts, not agent claims. Usage totals include settled usage **and all outstanding reservations**, with no implicit period or automatic reset. A successful preflight is not admission, proof or action authority. The downstream journal/admission owner must atomically check/reserve project and global budgets/capacity under a fence before spawn, enforce provider token/output and time ceilings, settle known usage, and hold new calls on any accounting failure. The preflight does not write state; the durable journal below provides the host-owned atomic storage boundary. The explicit diagnosis worker below connects configured preflight to the atomic journal reservation and a required trusted host process/accounting boundary. No shipped Pi adapter currently demonstrates provider-enforceable all-in ceilings; absent that capability paid launch remains held, rather than treating process termination or byte limits as a token/cost guarantee.
+`supervisor-policy.mts:supervisorCallHold` is a pure necessary paid-call preflight. It refuses disabled/unregistered, stopped, unknown global admission, missing/invalid finite caps, unknown pricing/accounting, invalid worst-case reservations, exhausted project/role totals and active-decision/incident bounds. Observe may receive bounded **diagnosis proposals only**; review still requires act. Observe never grants action/reviewer admission. Inputs are host facts, not agent claims. Usage totals include settled usage **and all outstanding reservations**, with no implicit period or automatic reset. A successful preflight is not admission, proof or action authority. The downstream journal/admission owner must atomically check/reserve project and global budgets/capacity under a fence before spawn, enforce provider token/output and time ceilings, settle known usage, and hold new calls on any accounting failure. The preflight does not write state; the durable journal below provides the host-owned atomic storage boundary. The explicit diagnosis worker below connects configured preflight to the atomic journal reservation and a required trusted host process/accounting boundary. The separate owned OpenAI source boundary above supplies the actual gate/receipt/process contract; this legacy worker injection does not use it. Public paid launch remains held until trusted host composition and admission exist, rather than treating process termination or byte limits as a token/cost guarantee.
 
 `context.mts` freezes supervisor/review additive instructions and their hashes alongside normalized policy and complete selected-runtime identity. Common then role inputs remain contained, additive guidelines; they cannot replace Factory constraints or original source bytes. See [frozen inputs](execution-context.md#supervisor-and-independent-review-inputs). No future worker/prompt asset is referenced until it exists; new actual assets enter the single complete inventory in the change that introduces them. Overrides must be complete and reviewed, never mixed with installed helpers.
 

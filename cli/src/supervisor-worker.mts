@@ -18,11 +18,11 @@ const { modelForRole } = await import(flat ? './model-policy.mts' : '../../orche
 const { piAnalysisArgs } = await import(flat ? './models.mts' : '../../orchestrator/models.mts');
 const { ownerOf, writeDurable } = await import(flat ? './admission.mts' : '../../board/admission.mts');
 
-/** A trusted host adapter must actually enforce ALL input/output/provider token and cost ceilings, even if the
- * controller dies, and account usage. Pi stdout byte/time bounds alone are NOT that capability. No built-in
- * adapter is claimed: absent pricing/enforcement holds before reservation/spawn. Tests supply offline stubs.
- * The adapter may only launch the supplied fresh Pi invocation, never substitute a provider/model or tools. */
-export type DiagnosisBoundary = {
+/** Real source boundary uses explicit ready/registration/handoff, not the legacy Pi print callback. Public host composition is separate. */
+export type DiagnosisBoundary = import('./supervisor-openai.mts').OpenAIDiagnosisBoundary;
+/** Legacy injection is component-only. Its booleans and Pi print arguments do not establish provider enforcement
+ * or authorize an advisory send. The owned boundary cannot enter this legacy settlement path. */
+export type ComponentDiagnosisBoundary = {
   model: string; reservation: Resources; pricingKnown: boolean; accountingKnown: boolean; enforceable: boolean;
   start(command: 'pi', argv: string[], options: { cwd: string; detached: true; input: string; deadline: string; maxOutputBytes: number; reservation: Resources }): ChildProcess;
   terminate(child: ChildProcess): Promise<boolean>; // exact owned process group, bounded termination + confirmed absence
@@ -35,7 +35,7 @@ export type DiagnosisAuthorization = {
   shared: Resources; capacity: number;
 };
 export type WorkerOptions = {
-  stateDir: string; current(): DiagnosisAuthorization; boundary?: DiagnosisBoundary;
+  stateDir: string; current(): DiagnosisAuthorization; boundary?: ComponentDiagnosisBoundary;
   signal?: AbortSignal; now?: () => number; invocationId: string; fence: string;
   /** Explicit provider-extension path, not a credential. No provider discovery or fallback. */
   subscriptionExtension?: string;
