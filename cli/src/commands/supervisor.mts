@@ -8,7 +8,7 @@ import { readSupervisorFacts } from '../supervisor-facts-host.mts';
 import { safeExcerpt, safeReference } from '../supervisor-facts.mts';
 import { supervisorHash } from '../../../orchestrator/supervisor-contract.mts';
 import type { Diagnostic, DiagnosisDecision } from '../../../orchestrator/supervisor.mts';
-import { readAdmission, admissionFile, ownerState } from '../../../board/admission.mts';
+import { readAdmission, admissionFile, ownerState, admissionConflict } from '../../../board/admission.mts';
 import { loadTomlConfig } from '../../../orchestrator/project-config.mts';
 import type { SupervisorPolicy } from '../../../orchestrator/supervisor-policy.mts';
 import { realpathSync, lstatSync } from 'node:fs';
@@ -200,7 +200,7 @@ export function retainedAdmission(stateDir: string, project: SupervisorState['pr
     const stat=lstatSync(admissionFile(stateDir));
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2*1024*1024) throw Error('Unsafe admission observation');
     const state = readAdmission(stateDir);
-    const holds = Object.values(state.supervisorHolds).filter(h => supervisorHash(h.project) === supervisorHash(project)).sort((a,b)=>a.id.localeCompare(b.id));
+    const holds = Object.values(state.supervisorHolds).filter(h => admissionConflict(h.project,project)).sort((a,b)=>a.id.localeCompare(b.id));
     return { state:'observed', total:holds.length, holds:holds.slice(offset,offset+SUPERVISOR_PAGE_SIZE).map(h => ({ id:safeExcerpt(h.id), invocationId:safeExcerpt(h.invocationId),
       owner:{pid:h.owner.pid,start:safeExcerpt(h.owner.start)}, ownership:ownerState(h.owner), pending:h.pending.length, settled:h.settled.length,
       meaning:'Retained project exclusion, not finished even if its process is dead. Exact settlement required.' })),

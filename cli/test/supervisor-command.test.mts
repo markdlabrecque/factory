@@ -128,6 +128,20 @@ test('passive admission reports orphan exclusions before any journal and does no
     assert.equal(pages.reduce((n,p)=>n+p.holds.length,0),260);
     assert.equal(pages[0].after,132);assert.equal(pages[0].holds[0].ownership,'dead');
     assert.equal(readFileSync(file,'utf8'),before);assert.equal(existsSync(supervisorFile(dir)),false);
+    const aliases = [
+      ['other-checkout',{...project,root:`${project.root}-other`}],
+      ['older-tracker',{...project,tracker:{...project.tracker,project:'different/tracker'}}],
+      ['namespace-alias',{...project,root:`${project.root}-alias`,tracker:{...project.tracker,host:'other.example',project:project.tracker.project.replaceAll('/','_')}}],
+      ['unrelated',{...project,root:`${project.root}-unrelated`,tracker:{...project.tracker,project:'unrelated/repository'}}],
+    ] as const;
+    for (const [id,identity] of aliases) state.supervisorHolds[id]={id,project:identity,owner:{pid:2147483647,start:'unknown'},invocationId:id,fence:'fence',pending:[],settled:[]};
+    writeFileSync(file,JSON.stringify(state));const aliasedBytes=readFileSync(file,'utf8');
+    const aliasedPages=[0,128,256].map(offset=>retainedAdmission(dir,project,offset));
+    assert.deepEqual(aliasedPages.map(p=>p.total),[263,263,263]);
+    const ids=new Set(aliasedPages.flatMap(p=>p.holds.map(h=>h.id)));
+    for (const id of ['other-checkout','older-tracker','namespace-alias']) assert(ids.has(id),`${id} is an actual admission conflict`);
+    assert(!ids.has('unrelated'));assert.equal(ids.size,263);
+    assert.equal(readFileSync(file,'utf8'),aliasedBytes,'conflict visibility never prunes or rewrites admission');
     writeFileSync(file,'corrupt');assert.equal(retainedAdmission(dir,project).state,'unknown');assert.equal(readFileSync(file,'utf8'),'corrupt');
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
