@@ -63,7 +63,12 @@ if (process.argv[2] === '--controller') {
       await once(process,'message'); process.exit(0); // Actual controller death, not a simulated provider or terminate callback.
     }
     if (scenario === 'terminate') { await once(process,'message'); await handle.terminate(); }
-    else await closed;
+    else if (scenario === 'guard-loss') {
+      await once(process,'message');
+      // TEST ONLY: kill the original native child handle, never a reconstructed PID/group.
+      if (!handle.process.child.kill('SIGKILL')) throw Error('Owned native guard termination failed');
+      await closed;
+    } else await closed;
     const cleanup = await handle.terminate(), again = await handle.terminate(), usage = handle.usage();
     const journal = readSupervisor(stateDir,snapshot.project);
     process.send!({kind:'result',cleanup,again,usage,output,charge:journal.charged.diagnosis,sends:Object.keys(journal.advisory!.sends).length},()=>process.disconnect());

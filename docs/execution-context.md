@@ -134,7 +134,10 @@ process association precedes journal registration and grant handoff. The actual
 T02 final transport gate remains the sole send permission and T03 publishes durable
 raw/scalar usage. Whole-group ESRCH observation, not anchor exit or pipe closure,
 is required for a private cleanup receipt; live/reused/unknown groups are never
-raw-killed on reopen. Missing evidence holds ownership and full charge.
+raw-killed on reopen. The worker also exits on anchor IPC disconnect and retains
+its own same-grant deadline; unexpected anchor loss is not permission for network
+work to wait indefinitely. This fallback is not a group cleanup receipt. Missing
+evidence holds ownership and full charge.
 
 These APIs do not acquire shared admission or runtime-store leases, construct
 complete current facts, settle advisory reservations, release exclusion, publish

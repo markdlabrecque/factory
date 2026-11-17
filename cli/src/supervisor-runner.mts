@@ -1,4 +1,4 @@
-// Fresh tool-free provider worker. Wait for parent registration/grant handoff; final send authority remains the journal gate.
+// Fresh tool-free provider worker: registered handoff, anchor-loss exit and same-grant deadline. Final send authority remains the journal gate.
 import { requestAdvisory } from './supervisor-openai-request.mts';
 import { captureProviderEvidence, persistProviderUsage } from './supervisor-openai-usage.mts';
 import { validateDiagnosisGrant } from './supervisor-advisory-contract.mts';
@@ -6,11 +6,16 @@ import { readSupervisor } from './supervisor-state.mts';
 import { readOwnedProcess } from './supervisor-process.mts';
 import { existsSync } from 'node:fs';
 const { supervisorHash } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
-if (!process.send) throw Error('Advisory held: owned IPC required');
+if (!process.send || !process.connected) throw Error('Advisory held: owned IPC required');
+// A lost anchor must not leave a worker waiting on network input. No reconstructed group is signalled.
+process.once('disconnect', () => process.exit(1));
 process.once('message', async (m: any) => {
   try {
     if (m?.kind !== 'handoff') throw Error('Advisory held: explicit handoff required');
     const o = m.request, g = validateDiagnosisGrant(o.grant);
+    const remaining = Date.parse(g.deadline) - Date.now();
+    if (remaining <= 0 || remaining > 600_000) throw Error('Advisory held: bounded worker deadline required');
+    setTimeout(() => process.exit(1), remaining); // Same immutable deadline also survives unexpected anchor loss.
     readOwnedProcess(o.stateDir,g);
     let result: any;
     try { result = await requestAdvisory(o); }

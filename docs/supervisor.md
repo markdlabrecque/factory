@@ -134,6 +134,10 @@ completion first drains bounded output; descendant-held pipes cannot extend the
 deadline. Guard stream/internal errors also self-signal the group. This is local
 containment, not proof of remote cancellation. No parent/reopen path kills a raw
 PID/group number. No graceful signal grace period depends on controller survival.
+The worker independently exits on anchor IPC disconnect and arms the **same immutable
+grant deadline** before provider work, so an unexpectedly lost anchor does not leave
+it waiting indefinitely on network input. That fallback signals no reconstructed
+group and establishes no cleanup/accounting proof.
 
 After worker readiness, the parent obtains exact controller/anchor/worker
 PID/start/group/session observations and durably records their association with
@@ -188,9 +192,12 @@ actual journal, archive loader, SDK, raw/scalar filesystem receipts, session/gro
 signals and controller death. A **test-only preload** installs synthetic non-secret
 HTTP/SSE below that code, permanently denies native outbound transport and adds an
 inherited observation pipe plus an IPC-ready real descendant. Completion,
-termination, deadline and actual controller loss share this one boundary; the pipe
-is only a barrier, with independent whole-group checks afterward. Retained zombies
-are explicitly held, not counted absent. Provider acceptance/billing, semantic
+termination, deadline, actual controller loss and original-native-handle guard loss
+share this one boundary. Test-only tracing records the real self-group signal
+attempt/error; neither that signal nor the inherited pipe establishes cleanup.
+Independent whole-group checks remain required. A task may still show running
+kernel-exit work before zombie/reaping state after closing descriptors; present or
+unknown groups remain held, not counted absent. Provider acceptance/billing, semantic
 advice, actual admission and installed host authority are not demonstrated.
 
 ## Raw provider usage and private receipts

@@ -179,8 +179,10 @@ node --test cli/test/supervisor-process.test.mts cli/test/runtime-bundle.test.mt
 
 Pure evidence permutations own exact PID/start/session/group and schema refusal.
 One disposable process integration owns normal completion, original-endpoint
-termination, absolute child-owned deadline and **actual controller process death**,
-with an IPC-ready real descendant inheriting the group. It executes unchanged
+termination, absolute child-owned deadline, **actual controller process death**
+and original-native-handle guard loss, with an IPC-ready real descendant inheriting
+the group. Worker IPC disconnect and its same-grant secondary deadline bound work
+if the anchor disappears unexpectedly. It executes unchanged
 inventoried/copied factory, guard, runner, T02 request gate and T03 raw/scalar
 publication. A test-only preload supplies the existing provider fixture's synthetic
 terminal HTTP/SSE and non-secret auth; all real native socket/HTTP/TLS transport is
@@ -188,10 +190,12 @@ permanently denied. It also adds an inherited observation pipe and filesystem/IP
 barriers. Filesystem barrier JSON is closed in a private temporary file and atomically
 renamed before the named watcher event; file creation alone is not a completed
 message. No production bypass flag or second SDK scenario matrix is introduced.
-The extra pipe is only an exit barrier: a separate kernel whole-group absence
-observation is required for cleanup. A still-present orphan zombie group remains
-held, with explicit Linux zombie evidence, not inferred absent from leader/pipe
-loss. No sleeps, polling/retries or timing tolerances establish outcomes. The
+The extra pipe is only an exit/observation barrier: test-only tracing records the
+actual native self-group SIGKILL attempt/error without interfering with signalling.
+That accepted signal is not cleanup proof. A separate kernel whole-group ESRCH
+observation is required; a still-present group remains held. Closed descriptors do
+not imply a particular instantaneous `/proc` state: an exiting task may still show
+R before Z/reaping. No cleanup is inferred from leader/pipe loss or a prior sample. No sleeps, polling/retries or timing tolerances establish outcomes. The
 three-second deadline is an actual bound, not an elapsed-time assertion.
 
 Linux actual process behavior is exercised; Darwin uses a bounded capability probe

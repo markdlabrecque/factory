@@ -40,11 +40,11 @@ test('exact isolated process evidence refuses leader-only, shared-group, missing
 test('one owned copied process integration: normal receipt, explicit terminate, child deadline, actual controller death and inherited descendant cleanup', async t=>{
   const root=mkdtempSync(join(tmpdir(),'factory-process-')); t.after(()=>rmSync(root,{recursive:true,force:true}));
   const bundle=prepareRuntimeBundle({sourceRoot:fileURLToPath(new URL('../../',import.meta.url)),runtimeStore:join(root,'runtime'),install:installPackages});
-  for(const scenario of ['complete','terminate','deadline','controller-loss','pre-handoff-loss']) {
+  for(const scenario of ['complete','terminate','deadline','controller-loss','pre-handoff-loss','guard-loss']) {
     const dir=join(root,scenario); mkdirSync(dir);
     const child=spawn(process.execPath,[fileURLToPath(new URL('./supervisor-process-fixture.mts',import.meta.url)),'--controller',dir,bundle.directory,scenario],
       {stdio:['ignore','pipe','pipe','ipc'],env:{PATH:'/usr/bin:/bin',HOME:'/nonexistent',LANG:'C'}});
-    let stderr=''; child.stderr!.on('data',b=>{stderr+=b.toString();}); child.stdout!.resume();
+    let stderr='', observations=''; child.stderr!.on('data',b=>{stderr+=b.toString();}); child.stdout!.on('data',b=>{observations+=b.toString();});
     const closed=once(child,'close'), first=(await once(child,'message'))[0] as any;
     if(process.platform==='darwin' && first.kind==='error') {
       assert.match(first.error,/Advisory held: (?:Darwin process\/session probe unavailable|unsupported Darwin process\/session evidence|not an isolated anchored group)/);
@@ -55,7 +55,7 @@ test('one owned copied process integration: normal receipt, explicit terminate, 
     assert.equal(first.kind,'inflight',JSON.stringify(first)+stderr);
     assert.deepEqual(readOwnedProcess(first.stateDir,first.grant),first.evidence);
     if(!['complete','pre-handoff-loss'].includes(scenario)) assert.ok(first.descendant>0,'real descendant ready before lifecycle event');
-    if(['terminate','controller-loss','pre-handoff-loss'].includes(scenario)) child.send({continue:true});
+    if(['terminate','controller-loss','pre-handoff-loss','guard-loss'].includes(scenario)) child.send({continue:true});
     if(!['controller-loss','pre-handoff-loss'].includes(scenario)) {
       const result=(await once(child,'message'))[0] as any;
       assert.equal(result.kind,'result',JSON.stringify(result)+stderr);
@@ -67,6 +67,9 @@ test('one owned copied process integration: normal receipt, explicit terminate, 
     const [code]=await closed; assert.equal(code,0,stderr);
     if(scenario==='pre-handoff-loss') assert.equal(Object.keys(readSupervisor(first.stateDir,first.grant.project).advisory!.sends).length,0,'controller loss before registration/handoff cannot send');
     // Extra TEST-ONLY inherited pipe supplies an exit barrier, NOT cleanup proof. Observe the entire group independently.
+    const signals=observations.trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
+    if(scenario!=='guard-loss') assert.ok(signals.some(s=>s.kind==='anchor-self-kill' && s.pid===first.evidence.guard.pid),'real anchor requests its own group kill');
+    assert.equal(signals.some(s=>s.kind==='anchor-kill-error'),false,'native group signal must not fail');
     const absent=groupAbsent(first.evidence.guard.group);
     t.diagnostic(`${scenario}: entire group ${absent ? 'observed absent' : 'present/unknown; ownership held'}`);
     const reopened=confirmOwnedCleanup(first.stateDir,first.grant);
@@ -84,12 +87,10 @@ test('one owned copied process integration: normal receipt, explicit terminate, 
       unlinkSync(file); writeFileSync(file,original,{mode:0o600});
       assert.equal(confirmOwnedCleanup(first.stateDir,first.grant),true,'valid immutable evidence reopens; no repair occurs in the reader');
     }
-    if(!absent && process.platform==='linux') {
-      // Linux may retain killed orphan zombies until its reaper runs. No sleeps/retries or fabricated group absence.
-      for(const pid of [first.evidence.guard.pid,first.evidence.worker.pid,first.descendant].filter(Boolean)) {
-        try { const stat=readFileSync(`/proc/${pid}/stat`,'utf8'); assert.equal(stat.slice(stat.lastIndexOf(')')+2).split(' ')[0],'Z'); }
-        catch(e) { if((e as NodeJS.ErrnoException).code!=='ENOENT') throw e; }
-      }
-    }
+    // A successful native kill and closed descriptors do NOT establish a particular /proc exit state.
+    // The task may still be finishing kernel exit work (R) or awaiting reaping (Z). Only ESRCH is cleanup proof.
+    const retained=readSupervisor(first.stateDir,first.grant.project);
+    assert.deepEqual(retained.charged.diagnosis,advisoryReservation());
+    assert.equal(Object.values(retained.reservations).some(r=>r.state==='finished'),false,'unknown cleanup never settles or releases');
   }
 });
