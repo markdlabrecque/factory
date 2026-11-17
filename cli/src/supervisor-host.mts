@@ -1,5 +1,5 @@
-// Source-only non-CLI host preparation/invocation and read-only restart inspection. Rebuilds genuine controls and
-// complete originals under exact ownership; invokes the existing worker. No activation, advice execution or automatic release.
+// Source-only non-CLI host: read-only exact reuse precedes paid ownership; genuine current controls/originals feed
+// the existing owned worker. Original terminal receipts permit exact idempotent release, never activation or advice execution.
 import { existsSync, realpathSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -14,7 +14,7 @@ import { readRegistry } from './project-registry.mts';
 import { schedulingState } from './scheduling-observation.mts';
 import { readHostAdvisoryPolicy, advisoryLimitHold } from './supervisor-host-policy.mts';
 import { createSupervisorRuntime } from './supervisor-runtime.mts';
-import { canonicalAdmissionProject, claimSupervisorHold, checkSupervisorHold } from './supervisor-admission.mts';
+import { canonicalAdmissionProject, claimSupervisorHold, checkSupervisorHold, releaseSupervisorHold } from './supervisor-admission.mts';
 import { collectSupervisorInput, readSupervisorOriginal } from './supervisor-input.mts';
 import type { HoldKey } from './supervisor-admission.mts';
 const flat = existsSync(new URL('./supervisor-contract.mts', import.meta.url));
@@ -40,7 +40,7 @@ export type SupervisorHostOptions = {
   /** Explicit owner rollout prerequisite, NOT an installed-provider capability or a replacement for raw custody. */
   rollout: { olderRuntimesQuiesced: true; unmanagedWorkQuiesced: true };
 };
-/** Acquire exact exclusion before any paid reservation. Failure after acquisition intentionally retains ownership.
+/** Rebuild before cache reuse; acquire exact exclusion/pins only before a NEW paid reservation. Failure after acquisition retains ownership.
  * Returned current() always rebuilds originals before cache comparison, outside every admission/journal/runtime lock.
  * Explicit invoke delegates to the owned branch of the existing worker; no CLI/activation or automatic release. */
 export async function prepareSupervisorHost(o: SupervisorHostOptions) {
@@ -64,9 +64,16 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   // Resolve the complete selected runtime without importing arbitrary selected code. Runtime creation below pins it.
   const { resolveWorkflow } = await import(flat ? './workflow.mts' : '../../orchestrator/workflow.mts');
   const workflow = resolveWorkflow(project.root,p.runtimeDescriptor,undefined,p.state);
-  const hold = claimSupervisorHold(p.state,{ project,invocationId:o.invocationId,runtimeRoot:workflow.root,
-    savedRun:{key:runKey,executionId:saved.executionId},rollout:o.rollout });
-  const runtime = await createSupervisorRuntime({paths:p,projectRoot:project.root,stateDir:p.state,invocationId:o.invocationId,fence:hold.fence});
+  // Read-only collection/reuse precedes paid ownership: a cache hit creates no hold or pin.
+  const fence = randomUUID();
+  let hold: ReturnType<typeof claimSupervisorHold> | undefined, released = false;
+  const runtime = await createSupervisorRuntime({paths:p,projectRoot:project.root,stateDir:p.state,invocationId:o.invocationId,fence,deferLease:true});
+  const acquire = async () => {
+    if (hold) throw Error('Supervisor host held: invocation already attempted paid acquisition');
+    hold = claimSupervisorHold(p.state,{project,invocationId:o.invocationId,fence,runtimeRoot:workflow.root,
+      savedRun:{key:runKey,executionId:saved.executionId},rollout:o.rollout});
+    runtime.acquire();
+  };
   const selectedTracker = runtime.context.config.TRACKER;
   if (runtime.context.projectRoot !== project.root || supervisorHash({kind:selectedTracker.kind,host:selectedTracker.gitlabHost ?? selectedTracker.host!,project:selectedTracker.project}) !== supervisorHash(project.tracker))
     throw Error('Supervisor host held: selected project/tracker changed');
@@ -77,17 +84,17 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     runtime.assertCurrent(); runtime.context.assertCurrent({strictOriginals:true});
     const controls = await assertControls();
     const host = readHostAdvisoryPolicy(p.config,[project.root,runtime.context.runtimeRoot]);
-    if (!checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed');
+    if (hold && !released && !checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed');
     // Unique collection timestamp only names the private freeze; it never changes the material basis.
     const collectionOutput = join(output,randomUUID());
     mkdirSync(collectionOutput,{mode:0o700});
     const input = collectSupervisorInput({context:runtime.context,registry:p.projects,ticket:o.ticket,
-      observedAt:new Date().toISOString(),output:collectionOutput,tracker:o.tracker,expectedOwnHold:hold});
+      observedAt:new Date().toISOString(),output:collectionOutput,tracker:o.tracker,expectedOwnHold:released ? undefined : hold});
     if (input.snapshot.material.runId !== saved.executionId) throw Error('Supervisor host held: saved execution changed');
     const state = readSupervisor(p.state,project), policy = runtime.context.config.supervisor;
     const all = readSupervisorProjects(p.state);
     const own = state.reservations[supervisorHash(o.invocationId)];
-    if (own && (own.id !== hold.invocationId || own.fence !== hold.fence || own.owner.pid !== hold.owner.pid || own.owner.start !== hold.owner.start))
+    if (own && (!hold || own.id !== hold.invocationId || own.fence !== hold.fence || own.owner.pid !== hold.owner.pid || own.owner.start !== hold.owner.start))
       throw Error('Supervisor host held: foreign own reservation');
     // NEW-call preflight subtracts only this exact already-reserved active call, then adds it back. No refund/reset;
     // cumulative totals remain inclusive everywhere durable, and other active/ambiguous work still excludes it.
@@ -103,7 +110,7 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
       incidentCalls:Object.values(state.reservations).filter(r=>r.kind==='diagnosis' && state.incidents[r.incidentId]?.facts.runId===saved.executionId).length - (ownActive ? 1 : 0),
       ...controls,mode});
     runtime.assertCurrent(); runtime.context.assertCurrent({strictOriginals:true});
-    if (!checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed during collection');
+    if (hold && !released && !checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed during collection');
     return {input,controls,host,policy,mode,preflightHold:reason ?? null};
   };
   // Return no send permission, no auth value and no implicit cleanup on failure. The exact IDs remain inspectable.
@@ -114,16 +121,41 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     return {snapshot:{...c.input.snapshot,mode:c.mode},facts:c.input.facts,family:runtime.context.config.AGENT.family,
       policy:c.policy,registered:c.controls.registered,globalAllowed:c.controls.global==='on',paused:c.controls.projectControl!=='enabled',
       outsideAdmissionLocks:true,shared:{tokens:c.host.policy.cumulative.tokens,cost:c.host.policy.cumulative.cost},capacity:c.host.policy.capacity,
-      advisory:{policy:{holdId:hold.id,host:c.host.policy,project:c.policy,at:registrationAt!},controls:c.controls,
+      advisory:{policy:{holdId:hold?.id ?? 'unacquired',host:c.host.policy,project:c.policy,at:registrationAt!},controls:c.controls,
         runtime:runtime.identity.selected,dependencies:runtime.identity.dependencies,attemptId:saved.recovery?.id ?? null,preflightHold:c.preflightHold}};
   };
-  return Object.freeze({project,hold:structuredClone(hold),runtime,current,initial,
+  return Object.freeze({project,get hold() { return hold ? structuredClone(hold) : undefined; },runtime,current,initial,
     /** Explicit source API only. No credential discovery, scheduling, review, recovery or release. */
-    invoke: (apiKey: string, signal?: AbortSignal) => {
+    invoke: async (apiKey: string, signal?: AbortSignal) => {
       registrationAt = new Date().toISOString();
-      return diagnoseProject({stateDir:p.state,current:authorization,boundary:runtime.boundary,
-        invocationId:o.invocationId,fence:hold.fence,apiKey,signal});
+      const result = await diagnoseProject({stateDir:p.state,current:authorization,boundary:runtime.boundary,
+        invocationId:o.invocationId,fence,apiKey,signal,beforeReserve:acquire});
+      if (hold && readSupervisor(p.state,project).advisory?.settlements?.[supervisorHash(o.invocationId)]) {
+        try {
+          await runtime.release();
+          const closure = releaseSupervisorHold(p.state,hold);
+          released = closure.released;
+          return {...result,closure};
+        } catch (e) { return {...result,closure:{released:false,reason:`Original terminal evidence held: ${String(e)}`}}; }
+      }
+      return result;
     }});
+}
+
+/** Explicit restart closure from ORIGINAL identities only. No acquisition, resend, grant repair or refund.
+ * The runtime release verifies original usage/process/cleanup and fresh ESRCH before its exact CAS.
+ * Admission closure follows outside that lock and cannot remove a foreign successor. */
+export async function reconcileSupervisorHost(paths: Paths, hold: HoldKey, lease: import('./runtime-ownership.mts').AdvisoryRuntimeLease) {
+  const inspection = inspectSupervisorHost(readSupervisor(paths.state,hold.project),hold);
+  if (inspection.state !== 'settled') return {released:false,reason:inspection.nextAction};
+  const b = lease.binding;
+  if (b.stateDir !== paths.state || b.invocationId !== hold.invocationId || b.fence !== hold.fence
+    || supervisorHash(b.project) !== supervisorHash(hold.project))
+    return {released:false,reason:'Foreign original runtime binding; preserve ownership and investigate'};
+  const { releaseAdvisoryRuntimeLease } = await import('./runtime-ownership.mts');
+  try { await releaseAdvisoryRuntimeLease(paths,lease); }
+  catch (e) { return {released:false,reason:`Original runtime/terminal evidence held: ${String(e)}`}; }
+  return releaseSupervisorHold(paths.state,hold);
 }
 
 export type HostCutpoint = 'exclusion-only' | 'reserved' | 'registered' | 'authorized' | 'settled' | 'inconsistent';

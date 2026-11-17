@@ -1,5 +1,5 @@
 // Explicit short-lived diagnosis orchestration outside scheduler/admission locks. Owned prepared-host work reserves,
-// registers the actual child and requires fresh final-send IPC; raw evidence closes only to local HUMAN in this stage.
+// registers the actual child and requires fresh final-send IPC; branded raw-evidence settlement retains typed advice or an atomic human stop.
 // Legacy component proposal fixtures remain separate. No scheduler, reviewer, repair, tracker, edit or delivery effects.
 import { existsSync, readFileSync, mkdirSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
@@ -45,6 +45,8 @@ export type WorkerOptions = {
   /** Explicit handoff-only secret, never discovered or journaled. */
   apiKey?: string;
   signal?: AbortSignal; now?: () => number; invocationId: string; fence: string;
+  /** Genuine host delays acquisition until after exact cache reuse. Called once before any reserve attempt. */
+  beforeReserve?: () => Promise<void>;
   /** Explicit provider-extension path, not a credential. No provider discovery or fallback. */
   subscriptionExtension?: string;
   timer?: (callback: () => void, ms: number) => () => void;
@@ -95,7 +97,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
   const stamp = (suffix: string) => `${o.invocationId}:${suffix}`;
   try {
     if (!same(a.facts.scope, a.snapshot.scope) || a.facts.runId !== a.snapshot.material.runId) return held('Incident/snapshot scope mismatch');
-    commit({ id: stamp('observe'), at: iso(), kind: 'observe', facts: a.facts, snapshotHash: supervisorHash(a.snapshot), reason: 'Bounded project diagnosis' });
+    commit({ id: stamp(`observe:${supervisorHash(a.snapshot)}`), at: iso(), kind: 'observe', facts: a.facts, snapshotHash: supervisorHash(a.snapshot), reason: 'Bounded project diagnosis' });
     const m = s.incidents[incidentId];
     if (m.superseded || m.denied || m.incident.state === 'human-required' || supervisorHumanHold(s) || supervisorRevisionHold(s)) return held('Retained human/denial/supersession holds diagnosis');
     // Known unchanged decisions (especially waits) do not spend another call after restart.
@@ -133,8 +135,14 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     }
     if (o.signal?.aborted) return held('Diagnosis cancelled before reservation');
     const b = o.boundary, model = modelForRole(a.family, 'supervisor').model;
-    if (b && 'kind' in b && b.kind === 'owned-openai')
+    if (b && 'kind' in b && b.kind === 'owned-openai') {
+      if (a.advisory?.preflightHold) return held(a.advisory.preflightHold);
+      await o.beforeReserve?.();
+      a = structuredClone(await current());
+      if (hostHold(a) || diagnosisBasis(a.snapshot) !== basisHash) return held('Authorization/material changed during paid acquisition; exact ownership retained');
+      s = readSupervisor(o.stateDir,project);
       return await ownedDiagnosis(o, a, s, owner, b, current);
+    }
     if (!b || b.model !== model || b.enforceable !== true || !resources(b.reservation)) return held('Provider-enforceable all-in token/cost ceilings for fixed Mid are unavailable; paid work held');
     const limits = a.policy.limits;
     const preflight = supervisorCallHold(a.policy, 'diagnosis', { registered: a.registered, mode: a.snapshot.mode, globalAllowed: a.globalAllowed,
@@ -237,8 +245,8 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
   } catch (e) { return held(String(e)); }
 }
 
-/** Owned branch of the same worker, after exact reuse/human/denial checks. This stage only closes to T05 local HUMAN.
- * It never represents valid-looking raw output as usable advice, nor releases admission/runtime ownership. */
+/** Owned branch of the same worker, after exact reuse/human/denial checks and delayed paid acquisition.
+ * The genuine journal producer validates actual output and receipts; no component boolean settles this branch. */
 async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: SupervisorState, owner: Owner,
   b: DiagnosisBoundary, current: () => Promise<DiagnosisAuthorization>): Promise<DiagnosisResult> {
   const data = a.advisory, project = a.snapshot.project, basis = diagnosisBasis(a.snapshot), incidentId = incidentIdentity(project,a.facts);
@@ -286,13 +294,16 @@ async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: Su
     const confirmed = await handle.terminate();
     // Retain raw local output even if the final rebuild or durable closure fails. No made-up diagnostic/advice certificate.
     writeDurable(join(dir,'raw-output.json'),JSON.stringify({grantId:grant.id,inputRef,stdout:capped(output,DIAGNOSIS_OUTPUT_BYTES),stderr:capped(errors,8192),confirmed}) + '\n');
-    // Rebuild outside every lock again before publication. Even stale output may close only as local HUMAN, never advice.
-    let reason = 'Owned provider output retained; usable advice publication is not implemented in this stage';
-    try { await fresh(); } catch (e) { reason = String(e); }
+    // Rebuild outside every lock before the journal's atomic terminal publication. Stale output may close only to HUMAN.
+    let publication: Awaited<ReturnType<typeof fresh>> | {refused:string};
+    try { publication = await fresh(); } catch (e) { publication = {refused:String(e)}; }
     if (!confirmed || handle.usage() === null) return held('Unknown owned cleanup/accounting; full charge, exclusion and runtime pins retained');
     s = readSupervisor(o.stateDir,project);
-    s = await settleAdvisory(o.stateDir,project,s.revision,o.invocationId);
-    return {state:'human-required',reason,diagnosticId:grant.id};
+    s = await settleAdvisory(o.stateDir,project,s.revision,o.invocationId,publication);
+    const diagnostic = Object.values(s.diagnostics ?? {}).find(d => d.reservationId === o.invocationId);
+    if (s.advisory?.settlements?.[supervisorHash(o.invocationId)]?.disposition === 'retained-advice' && diagnostic?.decision)
+      return {state:'proposed',decision:diagnostic.decision,diagnosticId:diagnostic.id};
+    return {state:'human-required',reason:diagnostic?.reason ?? 'Inspect retained terminal evidence',diagnosticId:diagnostic?.id ?? grant.id};
   } catch (e) {
     if (handle) await handle.terminate();
     return held(String(e));

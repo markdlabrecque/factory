@@ -482,39 +482,41 @@ console.log('sha256:'+'a'.repeat(64));
         // The only synthetic surfaces are the existing SDK/platform/tracker boundaries; no provider call is made.
         mkdirSync(p.config,{recursive:true,mode:0o700}); chmodSync(p.config,0o700); chmodSync(state,0o700);
         writeFileSync(p.projects,JSON.stringify({version:1,projects:[{name:'fixture',root,schedule:{enabled:true,branch:'main',since:new Date().toISOString()}}]}));
-        writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:10}}),{mode:0o600});
+        writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:1}}),{mode:0o600});
         const backend = new FakeSchedule(p); backend.enabled=true; backend.timer='active';
-        let human = 'Complete current human instructions';
+        const humanPath=join(fake,'current-human.txt');
+        writeFileSync(humanPath,'Complete current human instructions');
         const source = structuredContextSource(project.tracker,({args}) => {
           if (args[1]==='graphql') return JSON.stringify({data:{repository:{issue:{parent:null}}}});
           if (args[1].includes('/comments?')) return '[]';
-          return JSON.stringify({number:7,title:'Fix login',body:human});
+          return JSON.stringify({number:7,title:'Fix login',body:readFileSync(humanPath,'utf8')});
         });
         const hp={...p,state,runtimeDescriptor:runtime.env.FACTORY_RUNTIME_DESCRIPTOR!,runtimes:dirname(runtime.directory),data:dirname(dirname(runtime.directory))};
         const { prepareSupervisorHost } = await import(pathToFileURL(join(runtime.directory,'supervisor-host.mts')).href);
         const prepared=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:options.invocationId,backend,tracker:source,rollout:options.rollout});
-        assert(checkSupervisorHold(state,prepared.hold));
+        assert.equal(prepared.hold,undefined,'read-only preparation does not strand ownership before exact cache reuse');
+        assert.equal(prepared.runtime.lease(),undefined);
         assert.equal(prepared.initial.preflightHold,null);
-        assert.equal(inspectSupervisorHost(readSupervisor(state,project),prepared.hold).state,'exclusion-only');
         const rebuilt=await prepared.current();
         assert.equal(rebuilt.input.basis,prepared.initial.input.basis,'rebuilding originals does not recursively include its own freezes or observations');
-        human += '\nNew material human instruction';
+        writeFileSync(humanPath,readFileSync(humanPath,'utf8')+'\nNew material human instruction');
         const changed=await prepared.current();
         assert.notEqual(changed.input.basis,rebuilt.input.basis,'new current human original changes the material basis');
-        assert(checkSupervisorHold(state,prepared.hold),'new material never clears exact exclusion');
+        assert.equal(prepared.hold,undefined,'read-only preparation has not acquired exclusion');
         const diagnosticFile=join(run.evidenceDir,'no-commit.json'), diagnosticBytes=readFileSync(diagnosticFile,'utf8');
         writeFileSync(diagnosticFile,JSON.stringify({...JSON.parse(diagnosticBytes),executionId:'foreign-execution'}));
         await assert.rejects(prepared.current(),/no-commit original belongs to an unknown\/stale execution/);
         writeFileSync(diagnosticFile,diagnosticBytes);
         backend.enabled=false;
         await assert.rejects(prepared.current(),/global=off/,'fresh existing controls narrow even an already prepared host');
-        assert(checkSupervisorHold(state,prepared.hold),'control change never erases acquired exclusion or invents no-send release');
+        assert.equal(prepared.hold,undefined,'control failure does not acquire ownership');
         assert.equal(readFileSync(runFile,'utf8'),rawRun,'host preparation preserves the exact raw saved record');
         // Extend this SAME genuine normal producer through the owned worker and pinned SDK. Reuse T04's
         // network-denied SSE preload; no fabricated grant/terminal receipt and no model-semantics claim.
         backend.enabled=true;
         const preloadConfig=join(fake,'advisory-preload.json'), barrier=join(fake,'advisory-network.json');
-        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier}));
+        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier,
+          diagnosisInput:join(state,'supervisor',supervisorHash(project.root),supervisorHash(options.invocationId),'input.json')}));
         const preload=new URL('../cli/test/supervisor-process-preload.mts',import.meta.url); preload.searchParams.set('config',preloadConfig);
         const originalSpawn=cp.spawn;
         cp.spawn=((command: any,args: any[],opts: any)=> {
@@ -527,15 +529,48 @@ console.log('sha256:'+'a'.repeat(64));
         let diagnosis;
         try { diagnosis=await prepared.invoke('sk-synthetic-offline-not-a-secret'); }
         finally { cp.spawn=originalSpawn; syncBuiltinESMExports(); }
-        assert.equal(diagnosis.state,'human-required',JSON.stringify(diagnosis));
+        assert.equal(diagnosis.state,'proposed',JSON.stringify(diagnosis));
         assert(existsSync(barrier),'the actual SDK reached only the network-denied synthetic SSE transport');
         const terminal=readSupervisor(state,project), key=supervisorHash(options.invocationId);
-        assert.equal(terminal.advisory?.settlements?.[key]?.disposition,'local-human-required');
+        assert.equal(terminal.advisory?.settlements?.[key]?.disposition,'retained-advice');
         assert.equal(terminal.reservations[key].state,'finished');
         assert(terminal.reservations[key].actual!.tokens>0);
         assert.equal(Object.keys(terminal.advisory!.sends).length,1);
         assert.equal(inspectSupervisorHost(terminal,prepared.hold).state,'settled');
-        assert(checkSupervisorHold(state,prepared.hold),'this stage deliberately retains exact exclusion/runtime until stage 3 release');
+        assert(!checkSupervisorHold(state,prepared.hold!),'known terminal evidence permits exact exclusion release');
+        const { reconcileSupervisorHost } = await import(pathToFileURL(join(runtime.directory,'supervisor-host.mts')).href);
+        assert.equal((await reconcileSupervisorHost(hp,prepared.hold!,prepared.runtime.lease()!)).released,true,'original receipts make restart closure idempotent');
+        const sameHost=await prepared.invoke('sk-synthetic-offline-not-a-secret');
+        assert.equal(sameHost.state,'reused',JSON.stringify(sameHost));
+        const again=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'cached-advice',backend,tracker:source,rollout:options.rollout});
+        assert(again.initial.preflightHold,'host maxCalls=1 is already spent');
+        const reused=await again.invoke('sk-synthetic-offline-not-a-secret');
+        assert.equal(reused.state,'reused',JSON.stringify(reused));
+        assert.equal(again.hold,undefined,'cache reuse creates no unreleasable exclusion');
+        assert.equal(again.runtime.lease(),undefined,'cache reuse creates no paid pin');
+        assert.deepEqual(readSupervisor(state,project).charged,terminal.charged);
+        assert.equal(Object.keys(readSupervisor(state,project).advisory!.sends).length,1,'unchanged basis performs zero extra sends');
+        // Same owned boundary, one final-publication source mutation. No parallel provider matrix.
+        const hostFile=join(p.config,'supervisor.json'), larger=JSON.parse(readFileSync(hostFile,'utf8'));
+        larger.cumulative.calls=2;writeFileSync(hostFile,JSON.stringify(larger),{mode:0o600});
+        writeFileSync(humanPath,readFileSync(humanPath,'utf8')+'\nAuthoritative successor instruction before new bounded call');
+        const late=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'final-stale',backend,tracker:source,rollout:options.rollout});
+        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier:join(fake,'late-network.json'),changeOriginal:humanPath,
+          diagnosisInput:join(state,'supervisor',supervisorHash(project.root),supervisorHash('final-stale'),'input.json')}));
+        cp.spawn=((command:any,args:any[],opts:any)=> {
+          if(String(args[0]).endsWith('supervisor-guard.mjs')) {args=['--import',preload.href,...args];opts={...opts,stdio:[...opts.stdio,'ignore']};}
+          return originalSpawn(command,args,opts);
+        }) as any;syncBuiltinESMExports();
+        let stale;
+        try {stale=await late.invoke('sk-synthetic-offline-not-a-secret');}
+        finally {cp.spawn=originalSpawn;syncBuiltinESMExports();}
+        assert.equal(stale.state,'human-required',JSON.stringify(stale));
+        const final=readSupervisor(state,project), lateKey=supervisorHash('final-stale');
+        assert.equal(final.advisory!.settlements![lateKey].disposition,'local-human-required');
+        assert(Object.values(final.humans).some(h=>h.proposalId===stale.diagnosticId),'stale owned output has a durable actionable human request');
+        assert.equal(Object.values(final.diagnostics!).find(d=>d.reservationId==='final-stale')!.decision,null);
+        assert.equal(final.charged.diagnosis.tokens,terminal.charged.diagnosis.tokens*2,'stale usage retains both full reservations');
+        assert(!checkSupervisorHold(state,late.hold!),'known stale terminal receipts release only exact exclusion');
         assert.equal(readFileSync(runFile,'utf8'),rawRun,'owned diagnosis never rewrites actual saved run custody');
       }
       if (scenario === 'no-commit-stale') {

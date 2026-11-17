@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
-import type { ProjectIdentity, Scope, Incident, Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
+import type { Snapshot, ProjectIdentity, Scope, Incident, Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
 const { ownerState, withAdmissionLock } = await import(existsSync(new URL('./admission.mts', import.meta.url)) ? './admission.mts' : '../../board/admission.mts');
 const { supervisorHash, validateProject, validateScope, validateIncident, validateProposal, validateIndependentReview, validateIntent, validateHumanRequest } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 
@@ -13,14 +13,14 @@ import { validateDiagnosisGrant, validateSendAuthorization, ADVISORY_PROFILE_ID,
 import type { DiagnosisGrant, SendAuthorization, ProviderUsageReceipt } from './supervisor-advisory-contract.mts';
 import { validateProviderUsageReceipt } from './supervisor-advisory-contract.mts';
 export type AdvisorySettlement = { grantId: string; holdId: string; invocationId: string; fence: string;
-  authorization: string; usage: ProviderUsageReceipt; process: string; cleanup: string; at: string; disposition: 'local-human-required' };
+  authorization: string; usage: ProviderUsageReceipt; process: string; cleanup: string; at: string; disposition: 'local-human-required' | 'retained-advice'; diagnosticId?: string };
 const settlementEvents = new WeakMap<object, { stateDir: string; project: string; revision: number }>();
 import { validateHostAdvisoryPolicy, hostAdvisoryPolicyIdentity, advisoryLimitHold } from './supervisor-host-policy.mts';
 import type { HostAdvisoryPolicy } from './supervisor-host-policy.mts';
 import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts';
 export type AdvisoryControls = { registered: boolean; global: 'on' | 'off' | 'unknown'; projectControl: 'enabled' | 'paused' | 'unknown' };
 export type AdvisoryRegistration = { holdId: string; host: HostAdvisoryPolicy; project: SupervisorPolicy; at: string };
-const { validateDiagnostic } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
+const { validateDiagnostic, parseDiagnosis, diagnosisBasis } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
 
 const { observeEvent, eventIdFor } = await import(existsSync(new URL('./execution-events.mts', import.meta.url)) ? './execution-events.mts' : '../../board/execution-events.mts');
 
@@ -69,7 +69,7 @@ export type Event = { id: string; at: string } & (
   | { kind: 'register-advisory-worker'; reservationId: string; fence: string; owner: Owner; grant: DiagnosisGrant }
   | { kind: 'authorize-advisory-send'; grantId: string; reservationId: string; fence: string; worker: Owner; payload: string;
       policy: AdvisoryRegistration; controls: AdvisoryControls }
-  | { kind: 'settle-advisory'; reservationId: string; settlement: AdvisorySettlement }
+  | { kind: 'settle-advisory'; reservationId: string; settlement: AdvisorySettlement; diagnostic?: Diagnostic; request?: HumanRequest }
   | { kind: 'finish'; reservationId: string; fence: string; owner: Owner; actual: Resources }
   | { kind: 'diagnosis'; diagnostic: Diagnostic; owner: Owner; actual: Resources | null; processConfirmed: boolean; request: HumanRequest | null }
   | { kind: 'reconcile-worker'; reservationId: string }
@@ -143,7 +143,13 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
     validateDiagnostic(d); const r = s.reservations[supervisorHash(d.reservationId)];
     demand(id === d.id && r?.kind === 'diagnosis' && r.incidentId === d.incidentId && r.fence === d.fence, 'foreign diagnostic');
     if (d.outcome !== 'proposed' || d.decision?.action.kind === 'escalate') demand(s.humans[d.incidentId] && s.incidents[d.incidentId].incident.state === 'human-required', 'lost diagnosis human stop');
-    if (d.decision?.action.kind === 'gate-change') demand(s.proposals[d.decision.action.proposal.id] && same(s.proposals[d.decision.action.proposal.id], d.decision.action.proposal), 'lost exact diagnosis proposal');
+    const advisory = s.advisory?.settlements?.[supervisorHash(d.reservationId)];
+    if (advisory?.diagnosticId) {
+      const g = s.advisory!.workers[supervisorHash(d.reservationId)].grant;
+      demand(advisory.diagnosticId === d.id && d.basisHash === g.basis && d.startedAt === r.at
+        && d.completedAt === advisory.at, 'foreign retained advisory diagnostic');
+    }
+    if (!advisory && d.decision?.action.kind === 'gate-change') demand(s.proposals[d.decision.action.proposal.id] && same(s.proposals[d.decision.action.proposal.id], d.decision.action.proposal), 'lost exact diagnosis proposal');
   }
   for (const [id, h] of entries(s.humans)) { validateHumanRequest(h); demand(id === h.incidentId && s.incidents[id] && same(h.project, project), 'foreign human request'); }
   for (const [id, c] of entries(s.reviewCompletions ?? {})) {
@@ -194,14 +200,16 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
     }
   }
   for (const [key, v] of entries(s.advisory?.settlements ?? {})) {
-    object(v, ['grantId','holdId','invocationId','fence','authorization','usage','process','cleanup','at','disposition']);
+    object(v, ['grantId','holdId','invocationId','fence','authorization','usage','process','cleanup','at','disposition',...(Object.hasOwn(v,'diagnosticId') ? ['diagnosticId'] : [])]);
+    if (v.diagnosticId) demand(hash(v.diagnosticId) && s.diagnostics?.[v.diagnosticId], 'missing terminal diagnostic');
     const g = s.advisory!.workers[key]?.grant, a = s.advisory!.sends[key], r = s.reservations[key];
     demand(g && a && r && key === supervisorHash(v.invocationId) && v.grantId === g.id && v.holdId === g.holdId
       && v.invocationId === g.invocationId && v.fence === g.fence && v.authorization === a.receipt
-      && hash(v.process) && hash(v.cleanup) && time(v.at) && v.at >= a.at && v.disposition === 'local-human-required', 'foreign settlement');
+      && hash(v.process) && hash(v.cleanup) && time(v.at) && v.at >= a.at && ['local-human-required','retained-advice'].includes(v.disposition), 'foreign settlement');
     validateProviderUsageReceipt(v.usage, g, a);
     demand(v.usage.state === 'known' && r.state === 'finished' && same(r.actual, v.usage.resources)
-      && s.incidents[r.incidentId].incident.state === 'human-required', 'settlement lost closure/accounting/human hold');
+      && (v.disposition === 'local-human-required' ? s.incidents[r.incidentId].incident.state === 'human-required'
+        : Object.values(s.diagnostics ?? {}).some(d => d.id === v.diagnosticId && d.reservationId === r.id && d.outcome === 'proposed' && d.decision)),  'settlement lost closure/accounting/disposition');
   }
   demand(Object.values<any>(s.reservations).filter(r => r.state === 'active').length <= 1, 'multiple project decisions');
   object(s.charged, ['diagnosis','review']); resources(s.charged.diagnosis); resources(s.charged.review);
@@ -350,10 +358,29 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
     case 'settle-advisory': {
       const key = supervisorHash(event.reservationId), r = s.reservations[key], v = event.settlement;
       demand(r && r.state !== 'finished' && !s.advisory?.settlements?.[key] && v.at === event.at, 'stale advisory settlement');
-      s.advisory!.settlements ??= {}; s.advisory!.settlements[key] = structuredClone(v);
-      r.actual = structuredClone(v.usage.resources); r.state = 'finished';
-      // Local terminal disposition only: no deliverable legacy HumanRequest or usable advice.
-      s.incidents[r.incidentId].incident.state = 'human-required'; break;
+      const terminal = structuredClone(v), m = s.incidents[r.incidentId];
+      let d = event.diagnostic ? structuredClone(validateDiagnostic(event.diagnostic)) : undefined;
+      if (d) {
+        demand(d.reservationId === r.id && d.fence === r.fence && d.incidentId === r.incidentId && d.completedAt === event.at
+          && d.basisHash === s.advisory!.workers[key].grant.basis && d.startedAt === r.at,
+          'foreign terminal diagnostic');
+        const usable = d.outcome === 'proposed' && event.at < r.deadline && s.control?.mode !== 'stopped'
+          && !m.superseded && !m.denied && m.incident.state !== 'human-required' && !supervisorHumanHold(s) && !supervisorRevisionHold(s);
+        if (!usable && d.outcome === 'proposed') {
+          const {id, ...body} = d;
+          Object.assign(body,{outcome:'stale',decision:null,reason:'Current journal stop/human/denial/material fence refused usable publication'});
+          d = validateDiagnostic({id:supervisorHash(body),...body});
+        }
+        terminal.disposition = d.outcome === 'proposed' && d.decision?.action.kind !== 'escalate' ? 'retained-advice' : 'local-human-required';
+        terminal.diagnosticId = d.id;
+        s.diagnostics ??= {}; s.diagnostics[d.id] = d;
+      }
+      if (terminal.disposition === 'local-human-required') {
+        if (event.request && d) putHuman({...event.request,proposalId:d.id});
+        else m.incident.state = 'human-required';
+      }
+      s.advisory!.settlements ??= {}; s.advisory!.settlements[key] = terminal;
+      r.actual = structuredClone(v.usage.resources); r.state = 'finished'; break;
     }
     case 'finish': {
       const r = owned(event.reservationId, event.fence, event.owner); resources(event.actual);
@@ -524,10 +551,10 @@ export function authorizeAdvisorySend(stateDir: string, project: ProjectIdentity
   return structuredClone(after.advisory!.sends[key]);
 }
 /** Source-only final closure. Imports and immutable evidence I/O are OUTSIDE the journal lock.
- * CAS rechecks the exact grant/send; this creates no advice, delivery request, refund or new permission.
+ * CAS rechecks grant/send and final journal fences. Typed retained advice/human requests grant no execution, refund or permission.
  * Missing usage, unregistered/no-send and uncertain cleanup remain held. Reopen only observes closure. */
 export async function settleAdvisory(stateDir: string, project: ProjectIdentity, expectedRevision: number,
-  invocationId: string): Promise<SupervisorState> {
+  invocationId: string, publication?: { snapshot: Snapshot; policy: AdvisoryRegistration; controls: AdvisoryControls } | { refused: string }): Promise<SupervisorState> {
   const before = readSupervisor(stateDir,project), key = supervisorHash(invocationId);
   demand(before.revision === expectedRevision, 'revision CAS failed');
   if (before.advisory?.settlements?.[key]) return before;
@@ -541,7 +568,37 @@ export async function settleAdvisory(stateDir: string, project: ProjectIdentity,
   if (usage.state !== 'known') throw Error('Supervisor state held: usage unknown');
   const process = readOwnedProcess(stateDir,g!), cleanup = readOwnedCleanup(stateDir,g!);
   const at = new Date().toISOString();
-  const event: Event = { kind: 'settle-advisory', id: `advisory-settlement:${g!.id}`, at, reservationId: invocationId,
+  let diagnostic: Diagnostic | undefined, request: HumanRequest | undefined;
+  if (publication) {
+    const { readSupervisorOriginal } = await import('./supervisor-input.mts');
+    const { validateSnapshot } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
+    const dir = join(stateDir,'supervisor',supervisorHash(project.root),supervisorHash(invocationId)), inputRef = join(dir,'input.json');
+    const frozen = JSON.parse(readSupervisorOriginal(inputRef)), snapshot = validateSnapshot(frozen.snapshot);
+    demand(diagnosisBasis(snapshot) === g.basis && frozen.basis === g.basis && frozen.incidentId === g.incidentId
+      && supervisorHash(snapshot.project) === supervisorHash(project), 'frozen input/grant mismatch');
+    const raw = JSON.parse(readSupervisorOriginal(join(dir,'raw-output.json')));
+    demand(raw.grantId === g.id && raw.inputRef === inputRef && typeof raw.stdout === 'string' && typeof raw.stderr === 'string', 'foreign owned output');
+    let outcome: Diagnostic['outcome'] = 'malformed', reason = 'Unusable bounded provider output', decision: Diagnostic['decision'] = null;
+    try {
+      demand(!('refused' in publication), 'refused' in publication ? publication.refused : 'publication refused');
+      if ('refused' in publication) throw Error(publication.refused);
+      demand(diagnosisBasis(publication.snapshot) === g.basis && same(publication.policy,before.advisory!.policies[key])
+        && publication.controls.registered && publication.controls.global === 'on' && publication.controls.projectControl === 'enabled', 'publication source/policy/controls changed');
+      demand(at < g.deadline, 'late output');
+      decision = parseDiagnosis(raw.stdout,snapshot,g.incidentId);
+      // Advice is retained only; no proposal/review/action authority is created here.
+      if (decision.action.kind === 'gate-change') demand(Date.parse(decision.action.proposal.change.expiresAt) > Date.parse(at), 'expired gate advice');
+      outcome = 'proposed'; reason = decision.rationale;
+    } catch (e) { reason = String(e).slice(0,4000); decision = null; outcome = 'refused' in publication ? 'stale' : 'malformed'; }
+    const body = {reservationId:invocationId,incidentId:g.incidentId,basisHash:g.basis,snapshotHash:supervisorHash(snapshot),fence:g.fence,
+      startedAt:before.reservations[key].at,completedAt:at,inputRef,outcome,reason,stdout:raw.stdout,stderr:raw.stderr,decision};
+    diagnostic = validateDiagnostic({id:supervisorHash(body),...body});
+    request = {version:1,id:`${invocationId}:human`,project,scope:snapshot.scope,incidentId:g.incidentId,proposalId:diagnostic.id,
+      reason:'authority-uncertain',question:`Inspect retained non-executing diagnosis: ${reason}`.slice(0,4000),
+      nextAction:'Inspect original input, raw output and terminal receipts; decide the next authorized step. No reset, automatic retry or execution is authorized.',
+      evidence:[inputRef,join(dir,'raw-output.json')],stop:'required',delivery:{state:'pending',attempts:0}};
+  }
+  const event: Event = { kind: 'settle-advisory', id: `advisory-settlement:${g!.id}`, at, reservationId: invocationId, ...(diagnostic ? {diagnostic,request} : {}),
     settlement: { grantId:g!.id, holdId:g!.holdId, invocationId, fence:g!.fence, authorization:a!.receipt,
       usage:structuredClone(usage.receipt), process:supervisorHash(process), cleanup:supervisorHash(cleanup), at,
       disposition:'local-human-required' } };
@@ -560,8 +617,11 @@ export function supervisorObservation(after: SupervisorState, event: Event): Pro
     const incidentId = e.incidentId ?? e.proposal?.incidentId ?? e.request?.incidentId ?? e.diagnostic?.incidentId ?? reservation?.incidentId ?? intent?.incidentId
       ?? (e.facts ? incidentIdentity(project, e.facts) : undefined);
     const scope = incidentId ? after.incidents[incidentId]?.incident.scope : undefined;
-    const proposalId = e.proposal?.id ?? e.review?.proposalId ?? e.request?.proposalId ?? e.proposalId ?? diagnosisProposal?.id ?? intent?.proposalId;
-    const outcome = e.kind === 'notify-ack' ? 'notified' : e.kind === 'resolve-human' ? 'resolved'
+    const proposalId = (e.kind === 'settle-advisory' ? after.advisory?.settlements?.[supervisorHash(e.reservationId)]?.diagnosticId : undefined)
+      ?? e.proposal?.id ?? e.review?.proposalId ?? e.request?.proposalId ?? e.proposalId ?? diagnosisProposal?.id ?? intent?.proposalId;
+    const settled = e.kind === 'settle-advisory' ? after.advisory?.settlements?.[supervisorHash(e.reservationId)] : undefined;
+    const outcome = settled ? settled.disposition === 'retained-advice' ? 'observed' : 'pending'
+      : e.kind === 'notify-ack' ? 'notified' : e.kind === 'resolve-human' ? 'resolved'
       : e.review?.disposition === 'deny' || e.diagnostic && e.diagnostic.outcome !== 'proposed' ? 'refused'
       : e.kind === 'human' || e.request || e.kind === 'notify-attempt' ? 'pending'
       : e.review?.disposition === 'approve' ? 'approved'
@@ -571,5 +631,5 @@ export function supervisorObservation(after: SupervisorState, event: Event): Pro
       eventKind: 'supervisor-observed', to: event.kind, reasonCode: 'unspecified', origin: 'reconciliation',
       supervisor: { projectId: supervisorHash(project), ...(incidentId ? { incidentId } : {}), ...(proposalId ? { proposalId } : {}), ...(e.review ? { reviewId: supervisorHash(e.review.id) } : {}),
         hostOutcomeId: supervisorHash(event.id), outcome, ...(reservation ? { role: reservation.kind } : {}),
-        usage: ['finish','diagnosis','review-complete'].includes(e.kind) ? reservation?.actual ?? null : null, intervention: e.kind === 'resolve-human' } };
+        usage: ['finish','diagnosis','review-complete','settle-advisory'].includes(e.kind) ? reservation?.actual ?? null : null, intervention: e.kind === 'resolve-human' } };
 }

@@ -24,12 +24,15 @@ using the pinned owned boundary. Pins transfer to the actual ready child before
 grant registration/handoff. Final-send IPC rebuilds current controls, policy,
 complete basis, exact hold and runtime, then the child uses the same journal-lock
 authorization as stop. A second asynchronous rebuild precedes local terminal closure.
-Only known raw usage and confirmed owned cleanup can produce local HUMAN in this
-stage; raw output is retained, not published as usable advice. Prepared-host final
-observations cannot be replaced by static controls; legacy direct component
-fixtures are not host authority. Usable advice, safe release composition and receipt
-reconciliation remain unfinished. Do not interpret this API as activation, mount
-isolation, confirmed no-send or the completed advisory journey.
+Known raw usage and fresh owned whole-group cleanup permit branded atomic terminal
+publication: typed non-executing advice bound to actual output/frozen input/grant,
+or a durable actionable HumanRequest. Current journal stop/human/denial/material
+fences refuse usable late output. Exact cache reuse precedes paid hold/pin acquisition,
+so exhausted new-call budgets do not strand cached advice. Original terminal receipts
+permit exact runtime/admission release and idempotent restart reconciliation; unknown
+or successor ownership remains held without resend/refund. Prepared-host observations
+cannot be replaced by static controls; legacy component fixtures are not authority.
+This is not activation, mount isolation or a confirmed remote cancellation claim.
 
 ## Protected advisory runtime selection
 
@@ -293,8 +296,9 @@ This is source exclusion, not public advisory finalization. A separate source-on
 `settleAdvisory` journal primitive validates actual registered grant/authorization,
 immutable known T03 usage and exact T04 whole-group cleanup outside locks, then uses
 a private one-use frozen event and journal CAS to retain a finished reservation,
-full reserved charge and local-human-required terminal receipt. No legacy pending
-notification or usable advice is produced. Exact release reads validated durable
+full reserved charge and a terminal receipt. Owned-host publication also validates
+actual bounded output/frozen input and atomically retains typed advice or a pending
+local HumanRequest; no notification is sent. Exact release reads validated durable
 closure before taking the admission lock and rechecks the full current hold identity;
 replay cannot resend or clear a successor. Strict old journal readers refuse the new
 settlements field; three-field old advisory records remain explicitly readable.

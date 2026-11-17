@@ -8,7 +8,7 @@ import { paths } from '../src/paths.mts';
 import { FakeSchedule } from '../src/platform/fake.mts';
 import { readSupervisorHostControls, inspectSupervisorHost, prepareSupervisorHost } from '../src/supervisor-host.mts';
 import { emptySupervisor, incidentIdentity, transitionSupervisor } from '../src/supervisor-state.mts';
-import { ADVISORY_PROFILE_ID, advisoryReservation, diagnosisGrant } from '../src/supervisor-advisory-contract.mts';
+import { ADVISORY_PROFILE, ADVISORY_PROFILE_ID, advisoryReservation, diagnosisGrant } from '../src/supervisor-advisory-contract.mts';
 import { hostAdvisoryPolicyIdentity } from '../src/supervisor-host-policy.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 const project = {root:'/fixture/project',tracker:{kind:'github' as const,host:'github.com',project:'owner/repo'}};
@@ -33,6 +33,37 @@ function fixture() {
   const authorized=apply(registered,{id:'send',at,kind:'authorize-advisory-send',reservationId:hold.invocationId,fence:hold.fence,worker,grantId:grant.id,payload:h,policy:registration,controls});
   return {observed,reserved,registered,authorized};
 }
+test('terminal publication is atomic with final journal fences and never refunds the reservation',()=>{
+  const {authorized} = fixture(), key=supervisorHash(hold.invocationId), g=authorized.advisory!.workers[key].grant,
+    a=authorized.advisory!.sends[key], incidentId=g.incidentId;
+  const ub={version:1,grantId:g.id,authorization:a.receipt,invocationId:g.invocationId,fence:g.fence,profile:g.profile,price:ADVISORY_PROFILE.price,
+    rawHash:h,requestId:'req_unit',responseId:'resp_unit',terminalStatus:'completed',serviceTier:'default',cachePolicy:'explicit-unmarked',
+    state:'known',reason:'complete',usage:{input:25,cacheRead:0,cacheWrite:0,output:10,reasoning:0,total:35},resources:{tokens:35,cost:220},costKind:'derived-upper-micro-usd'};
+  const decision={version:1,incidentId,basisHash:h,classification:'expectation',rationale:'Typed synthetic wait',alternatives:['Inspect originals'],action:{kind:'wait',expectation:'Human instruction'}};
+  const db={reservationId:g.invocationId,incidentId,basisHash:h,snapshotHash:h,fence:g.fence,startedAt:at,completedAt:at,inputRef:'/host/input.json',outcome:'proposed',reason:'Typed synthetic wait',stdout:'{}',stderr:'',decision};
+  const event:any={kind:'settle-advisory',id:'terminal',at,reservationId:g.invocationId,
+    settlement:{grantId:g.id,holdId:g.holdId,invocationId:g.invocationId,fence:g.fence,authorization:a.receipt,usage:{id:supervisorHash(ub),...ub},process:h,cleanup:h,at,disposition:'local-human-required'},
+    diagnostic:{id:supervisorHash(db),...db},request:{version:1,id:'human',project,scope:{kind:'ticket',ticket:7},incidentId,proposalId:supervisorHash(db),reason:'authority-uncertain',question:'What next?',nextAction:'Inspect original evidence; no automatic execution',evidence:['/host/input.json'],stop:'required',delivery:{state:'pending',attempts:0}}};
+  for(const fence of ['none','stop','denial','superseded','late','malformed']) {
+    const state=structuredClone(authorized), e=structuredClone(event);
+    if(fence==='stop') state.control={mode:'stopped',actor:'human',at,pilot:false};
+    if(fence==='denial') {state.incidents[incidentId].denied=true;state.incidents[incidentId].incident.state='human-required';}
+    if(fence==='superseded') state.incidents[incidentId].superseded=true;
+    if(fence==='late') {e.at=g.deadline;e.settlement.at=e.at;e.diagnostic.completedAt=e.at;}
+    if(fence==='malformed') Object.assign(e.diagnostic,{outcome:'malformed',decision:null,reason:'Invalid typed output'});
+    const {id,...body}=e.diagnostic;e.diagnostic.id=supervisorHash(body);
+    const after=transitionSupervisor(state,e,{ownerState:()=> 'alive'});
+    assert.equal(after.advisory!.settlements![key].disposition,fence==='none'?'retained-advice':'local-human-required',fence);
+    assert.equal(after.reservations[key].state,'finished');
+    assert.deepEqual(after.charged,state.charged,'full reserved charge retained');
+    if(fence!=='none') {
+      assert.equal(Object.values(after.humans).length,1,'human request and accounting commit together');
+      assert.equal(Object.values(after.diagnostics!)[0].decision,null,'no fake proposed output');
+    }
+    assert.deepEqual(transitionSupervisor(after,e,{ownerState:()=> 'unknown'}),after,'event replay cannot resend or recharge');
+  }
+});
+
 test('every host control read uses existing backend state and current registry opt-in without mutation',async t=>{
   const home=mkdtempSync(join(tmpdir(),'factory-host-controls-'));t.after(()=>rmSync(home,{recursive:true,force:true}));
   const p=paths(home), root=join(home,'project');mkdirSync(root);mkdirSync(p.config,{recursive:true,mode:0o700});

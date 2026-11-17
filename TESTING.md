@@ -169,6 +169,18 @@ against an actually claimed successor. Fabricated commit events and corrupted re
 bindings fail closed. Other lifecycle cases retain unknown usage/exclusion. Cheap raw
 filesystem permutations cover live parked/terminal records, dangling claims, starting
 handoffs and unresolved recovery payloads regardless of stage or controller death.
+The SAME `verification-entrypoint-sandbox.test.mts` actual normal-custody/copied
+runtime fixture additionally reaches owned host/worker/SDK, validates a synthetic
+typed wait against its real frozen input and retains it, then proves unchanged reuse
+with maxCalls=1 spent makes zero extra sends/charges/holds/pins. Original receipt
+reconciliation is idempotent. A second bounded call mutates the original human input
+after authorization and proves final publication retains a durable human request,
+not stale usable advice; both full reservations remain charged. Cheap host units own
+final stop/denial/supersession/deadline/malformed publication permutations. Existing
+T01/T04 units and IPC fixtures own both stop/authorization orderings and controller
+loss, rather than another transport matrix. Synthetic JSON establishes typed
+validation only, not model quality. Parent release gates still require all four
+bounded shards, separate browser lifecycle and independent review.
 No-send finalization and installed public host authority are not proved. Runtime
 pinning is separately covered by `cli/test/supervisor-runtime.test.mts`: cheap
 selection/source/dependency/override/dead-owner permutations and one reuse of the

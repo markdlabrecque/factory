@@ -30,7 +30,7 @@ export function assertAdvisoryRuntimeSource(root: string) {
 }
 /** Explicit trusted host API; no project/environment callback can assert an installed boundary.
  * The caller still owes actual rollout isolation/control prerequisites before any public composition. */
-export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: string; stateDir: string; invocationId: string; fence: string }) {
+export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: string; stateDir: string; invocationId: string; fence: string; deferLease?: boolean }) {
   o = structuredClone(o);
   const projectRoot = realpathSync(o.projectRoot), stateDir = realpathSync(o.stateDir);
   if (projectRoot !== o.projectRoot || stateDir !== o.stateDir || !o.invocationId || !o.fence) throw Error('Advisory held: canonical explicit invocation required');
@@ -44,9 +44,12 @@ export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: st
   await verifyPinnedProvider(workflow.root);
   const pins = [{root:hostRoot,id:host.id,dependencies:host.dependencies}];
   if (workflow.root !== hostRoot) pins.push({root:workflow.root,id:selected.id,dependencies:selected.dependencies});
-  let lease = acquireAdvisoryRuntimeLease(o.paths,host.id,{stateDir,project,invocationId:o.invocationId,fence:o.fence,profile:ADVISORY_PROFILE_ID,pins});
+  const binding = {stateDir,project,invocationId:o.invocationId,fence:o.fence,profile:ADVISORY_PROFILE_ID,pins};
+  let lease = o.deferLease ? undefined : acquireAdvisoryRuntimeLease(o.paths,host.id,binding);
+  const acquire = () => { if (!lease) lease = acquireAdvisoryRuntimeLease(o.paths,host.id,binding); };
+  let released = false;
   const assertCurrent = () => {
-    assertAdvisoryRuntimeLease(o.paths,lease);
+    if (lease && !released) assertAdvisoryRuntimeLease(o.paths,lease);
     const now = resolveWorkflow(projectRoot,o.paths.runtimeDescriptor,undefined,stateDir);
     if (now.root !== workflow.root || now.id !== selected.id || now.manifest.dependencies !== selected.dependencies
       || now.env.FACTORY_HOST_RUNTIME_ROOT !== hostRoot || now.env.FACTORY_HOST_RUNTIME_ID !== host.id
@@ -63,6 +66,7 @@ export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: st
   const boundary: OpenAIDiagnosisBoundary = Object.freeze({kind:owned.kind,model:owned.model,reservation:owned.reservation,
     async start(input) {
       if (started || input.invocationId !== o.invocationId || input.fence !== o.fence || JSON.stringify(input.project) !== JSON.stringify(project)) throw Error('Advisory held: pinned invocation mismatch or already started');
+      if (!lease) throw Error('Advisory held: paid invocation has not acquired runtime ownership');
       started = true; assertCurrent(); context.assertCurrent({strictOriginals:true});
       const handle = await owned.start(input);
       // Pins exist before start. A failed/uncertain transfer retains them, even after child cleanup.
@@ -74,6 +78,6 @@ export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: st
       }};
     }});
   return Object.freeze({context,boundary,identity:Object.freeze({host:host.id,hostDependencies:host.dependencies,selected:selected.id,dependencies:selected.dependencies,profile:ADVISORY_PROFILE_ID}),
-    lease:() => structuredClone(lease), assertCurrent,
-    release:() => releaseAdvisoryRuntimeLease(o.paths,lease)});
+    lease:() => structuredClone(lease), assertCurrent, acquire,
+    release:async () => { if (!lease) throw Error('Advisory held: no runtime lease'); await releaseAdvisoryRuntimeLease(o.paths,lease); released = true; }});
 }

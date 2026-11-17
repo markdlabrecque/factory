@@ -281,13 +281,22 @@ export async function releaseAdvisoryRuntimeLease(p: Paths, expected: AdvisoryRu
   const g = s.advisory?.workers[key]?.grant, a = s.advisory?.sends[key], terminal = s.advisory?.settlements?.[key];
   if (!g || !a || !terminal || !expected.process || b.profile !== ADVISORY_PROFILE_ID || g.profile !== b.profile
     || g.invocationId !== b.invocationId || g.fence !== b.fence || terminal.grantId !== g.id || terminal.fence !== b.fence
-    || terminal.disposition !== 'local-human-required' || terminal.authorization !== a.receipt
+    || !['local-human-required','retained-advice'].includes(terminal.disposition) || terminal.authorization !== a.receipt
     || g.owner.pid !== expected.owner.pid || g.owner.start !== expected.owner.start) throw Error('Protected runtime settlement held');
   const evidence = readOwnedProcess(b.stateDir,g), cleanup = readOwnedCleanup(b.stateDir,g), usage = readProviderUsage(b.stateDir,g,a);
   if (supervisorHash(evidence) !== supervisorHash(expected.process) || terminal.process !== supervisorHash(evidence)
     || terminal.cleanup !== supervisorHash(cleanup) || usage.state !== 'known' || supervisorHash(terminal.usage) !== supervisorHash(usage.receipt)) throw Error('Protected runtime evidence held');
   withRuntimeLock(p, () => {
     assertRuntimeStore(p);
+    if (!existsSync(leasePath(p,expected.token))) {
+      // Idempotence is not successor authority. Refuse even observational closure across new ownership.
+      for (const name of readdirSync(leaseDir(p)).filter(n => n.endsWith('.json'))) {
+        const other = JSON.parse(readFileSync(join(leaseDir(p),name),'utf8'));
+        if (other.version === 2 && (other.binding?.project?.root === b.project.root
+          || JSON.stringify(other.binding?.project?.tracker) === JSON.stringify(b.project.tracker))) throw Error('Protected runtime successor mismatch');
+      }
+      return;
+    }
     if (JSON.stringify(readAdvisoryLease(p,expected.token)) !== JSON.stringify(expected)) throw Error('Protected runtime successor mismatch');
     rmSync(leasePath(p,expected.token));
   });
