@@ -1,4 +1,4 @@
-// Explicit project/runtime boundary. Freeze selected settings and scoped additive inputs; changed corrections/candidates require fresh analysis and proof.
+// Explicit project/runtime boundary. Bound and freeze project settings/additive inputs; strict original freshness rejects aliases, and changed corrections require fresh proof.
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -67,7 +67,7 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     const gateSource = gateTools.gateInstructionSource;
     if (input.gate && (input.gate.options.current().input.snapshot.project.root !== projectRoot || input.gate.options.stateDir !== (env.SANDCASTLE_STATE_DIR ?? resolve(env.HOME!,'.local/state/factory')))) throw Error('Gate consumer project/state mismatch');
     const correction = input.gate ? gateSource!(input.gate) : undefined;
-    const readAdditive = () => Object.freeze(Object.fromEntries(roles.map(role => [role, loadInstructions(projectRoot, config.instructions, role, input.gate ? gateSource!(input.gate) : undefined)])) as Record<typeof roles[number], FrozenAdditive>);
+    const readAdditive = (options: { strictOriginals?: boolean } = {}) => Object.freeze(Object.fromEntries(roles.map(role => [role, loadInstructions(projectRoot, config.instructions, role, input.gate ? gateSource!(input.gate) : undefined, options)])) as Record<typeof roles[number], FrozenAdditive>);
     const additive = readAdditive();
     const additiveHashes = () => Object.fromEntries(roles.map(role => [role, additive[role].hashes]));
     if (!env.SANDCASTLE_STATE_DIR && (!env.HOME || !isAbsolute(env.HOME))) throw Error('An absolute shared state directory or HOME is required');
@@ -90,16 +90,16 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
         if (hold) throw Error(hold);
         if (input.gate) gateSource(input.gate);
       },
-      assertCurrent: () => {
+      assertCurrent: (options: { strictOriginals?: boolean } = {}) => {
         canonical(projectRoot, 'FACTORY_PROJECT_ROOT');
         requireProjectLayout(projectRoot);
         checkSavedLayout();
         canonical(assetRoot, 'Project asset root');
         resolveCheckoutPath(projectRoot, '.factory/factory.toml', 'file');
         const now = validateRuntimeBundle(runtimeRoot);
-        const currentAdditive = readAdditive();
+        const currentAdditive = readAdditive(options);
         if (input.gate && hash(gateSource!(input.gate).identity) !== hash(correction!.identity)) throw Error('Gate candidate/scope changed; fresh analysis/verification required');
-        if (now.id !== manifest.id || now.dependencies !== manifest.dependencies || hash(normalizedSettings(loadTomlConfig(assetRoot))) !== hash(safetySettings) || hash(Object.fromEntries(roles.map(role => [role, currentAdditive[role].hashes]))) !== hash(additiveHashes()))
+        if (now.id !== manifest.id || now.dependencies !== manifest.dependencies || hash(normalizedSettings(loadTomlConfig(assetRoot, options))) !== hash(safetySettings) || hash(Object.fromEntries(roles.map(role => [role, currentAdditive[role].hashes]))) !== hash(additiveHashes()))
           throw Error('Runtime, settings or prompt inputs changed; fresh analysis/verification required');
       },
       tsx: codePath('node_modules/tsx/dist/cli.mjs'),

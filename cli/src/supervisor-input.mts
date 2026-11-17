@@ -141,7 +141,7 @@ export function collectSupervisorInput(o: SupervisorInputOptions): { snapshot: S
   if (!Number.isSafeInteger(o.ticket) || o.ticket <= 0) return hold('one explicit positive ticket is required');
   if (c.config.workflow.mode !== 'factory') return hold('complete project workflow override collection is unsupported; no fallback');
   if (supervisorHash(o.tracker.identity) !== supervisorHash(project.tracker)) return hold('tracker identity differs from selected project');
-  requireProjectLayout(root); c.assertCurrent();
+  requireProjectLayout(root); c.assertCurrent({strictOriginals:true});
   for (const mount of [root,c.runtimeRoot]) if (inside(mount,state) || inside(mount,o.output)) return hold('private originals/state overlap project or selected runtime mounts');
   for (const dir of [state,o.output]) {
     const st = lstatSync(dir);
@@ -253,7 +253,7 @@ export function collectSupervisorInput(o: SupervisorInputOptions): { snapshot: S
     projectGuidelines:sources.filter(s => s.role === 'guidelines').map(s => s.locator),factoryConstraints:sources.filter(s => s.role === 'factory-rules').map(s => s.locator) });
   const facts: Facts = { scope:snapshot.scope,runId:run.executionId,requirements:collected.input.hash,
     gate:supervisorHash(sources.filter(s => s.role === 'gate')),failure:supervisorHash(sources.filter(s => s.role === 'failure')) };
-  c.assertCurrent();
+  c.assertCurrent({strictOriginals:true});
   for (const path of absent) { try { lstatSync(path); return hold(`new failure original appeared: ${path}`); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; } }
   for (const [path,text] of reads) if (readSupervisorOriginal(path) !== text) return hold(`material changed during collection: ${path}`);
   if (git('rev-parse','--verify',`${run.branch}^{commit}`) !== tip || git('rev-parse','--verify',`${run.base}^{commit}`) !== baseSha || supervisorHash(ownership()) !== supervisorHash(owner)

@@ -25,7 +25,12 @@ const at = '2026-11-17T12:00:00.000Z';
 test('complete current saved execution freezes originals without modifying checkout or tracker', { timeout: 120000 }, async t => {
   const f = readinessFixture(t); mkdirSync(f.p.state,{recursive:true,mode:0o700}); chmodSync(f.p.state,0o700);
   const output = join(f.home,'originals'); mkdirSync(output,{mode:0o700});
-  const c = await loadExecutionContext({env:f.runtime.env,cwd:f.root,moduleRoot:f.runtime.directory});
+  const configFile=join(f.root,'.factory','factory.toml'), commonFile=join(f.root,'common.md');
+  writeFileSync(configFile,readFileSync(configFile,'utf8')+'\n[instructions]\ncommon = ["common.md"]\n');
+  writeFileSync(commonFile,'Complete common guidance');
+  const configBytes=readFileSync(configFile), commonBytes=readFileSync(commonFile);
+  const loadContext=()=>loadExecutionContext({env:f.runtime.env,cwd:f.root,moduleRoot:f.runtime.directory});
+  const c = await loadContext();
   let human = 'Original human instruction', changed = false, second = false, duringCollection: (()=>void) | undefined; const requests: string[][] = [];
   const source = structuredContextSource({kind:'github',host:'github.com',project:'owner/repo'}, ({args},budget) => {
     assert(budget.timeoutMs > 0 && budget.maxBytes > 0); requests.push(args);
@@ -69,9 +74,14 @@ test('complete current saved execution freezes originals without modifying check
   // Saved-layout validation must not open unrelated aliases/special files (nor alias receipts).
   const unrelated=join(f.p.state,'unrelated.json'), sentinel=join(f.home,'safe-sentinel.json'); writeFileSync(sentinel,'{"safe":"synthetic sentinel"}');
   const originalOpen=fs.openSync, originalRead=fs.readFileSync, opened: string[]=[], unrestricted: string[]=[];
-  let substituteFIFO=false;
+  let substituteFIFO=false, substituteOriginal: string | undefined;
   fs.openSync=((path: any,...args: any[])=>{
     opened.push(String(path));
+    if (substituteOriginal && String(path)===substituteOriginal) {
+      const target=substituteOriginal; substituteOriginal=undefined;
+      assert.equal(args[0] & (fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW),fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
+      unlinkSync(target); execFileSync('mkfifo',[target],{timeout:1500});
+    }
     if (substituteFIFO && String(path)===unrelated) {
       substituteFIFO=false;
       assert.equal(args[0] & (fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW),fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
@@ -82,6 +92,30 @@ test('complete current saved execution freezes originals without modifying check
   fs.readFileSync=((path: any,...args: any[])=>{unrestricted.push(String(path)); return (originalRead as any)(path,...args);}) as typeof fs.readFileSync;
   syncBuiltinESMExports();
   try {
+    // Exercise inherited validation itself, before any later collector-safe reread.
+    for (const [file, bytes] of [[commonFile,commonBytes],[configFile,configBytes]] as const) {
+      writeFileSync(file,'x'.repeat(262145)); unrestricted.length=0;
+      assert.throws(()=>c.assertCurrent({strictOriginals:true}),/oversized/);
+      assert.throws(()=>collectSupervisorInput(options),/oversized/);
+      await assert.rejects(loadContext(),/oversized/,'initial context loading uses the same bounded readers');
+      assert(!unrestricted.includes(file),'oversized original never reaches unrestricted read');
+      writeFileSync(file,bytes);
+      const aliasTarget=join(f.root,file===commonFile?'other.md':'other.toml'); writeFileSync(aliasTarget,bytes);
+      unlinkSync(file); symlinkSync(aliasTarget,file); opened.length=0; unrestricted.length=0;
+      if (file===commonFile) (await loadContext()).assertCurrent(); // Ordinary contained Markdown aliases remain supported.
+      opened.length=0; unrestricted.length=0;
+      assert.throws(()=>c.assertCurrent({strictOriginals:true}),/aliased|Unsafe|unsafe/);
+      assert.throws(()=>collectSupervisorInput(options),/aliased|Unsafe|unsafe/);
+      assert(![...opened,...unrestricted].some(p=>p===file || p===aliasTarget),'aliased originals never opened in strict validation');
+      unlinkSync(file); unlinkSync(aliasTarget); writeFileSync(file,bytes);
+      substituteOriginal=file; unrestricted.length=0;
+      assert.throws(()=>c.assertCurrent({strictOriginals:true}),/oversized|unsafe/i,'check/open FIFO substitution is descriptor-rejected without blocking');
+      assert.equal(substituteOriginal,undefined); assert(!unrestricted.includes(file));
+      unlinkSync(file); writeFileSync(file,bytes);
+      substituteOriginal=file;
+      assert.throws(()=>collectSupervisorInput(options),/oversized|unsafe/i);
+      assert.equal(substituteOriginal,undefined); unlinkSync(file); writeFileSync(file,bytes);
+    }
     symlinkSync(sentinel,unrelated);
     assert.throws(()=>collectSupervisorInput(options),/Unsafe saved layout/); assert(![...opened,...unrestricted].some(p=>p===sentinel || p===unrelated),'symlink target and alias never opened by bounded or legacy reader');
     unlinkSync(unrelated); execFileSync('mkfifo',[unrelated],{timeout:1500}); opened.length=0;

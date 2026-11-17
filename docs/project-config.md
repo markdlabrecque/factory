@@ -43,6 +43,25 @@ Credentials remain in `.factory/.env` / the agent's existing auth store. Prompts
 script bodies, Dockerfiles, the machine registry (`projects.json`) and scheduler
 files stay separate. Never put secrets in TOML.
 
+### Local input bounds
+
+All configuration readers cap `factory.toml` at 256 KiB before allocation/parsing.
+Configuration and instruction readers use canonical regular-file descriptors with
+NOFOLLOW/NONBLOCK, identity and stability checks; special files and substituted
+FIFOs cannot supply bytes or block a read. Invalid UTF-8 and NUL text refuse.
+Across all `[instructions]` lists at most 128 configured paths are permitted
+(including duplicates). Each instruction original and scoped correction is at most
+256 KiB; each role's deduplicated common-plus-role text, including separators, is
+at most 1 MiB. These bounds apply during initial context loading and freshness
+validation, before any supervisor collection budget. Overflow refuses without
+truncation. The six role snapshots therefore have a finite 6 MiB combined text
+ceiling, even when common guidance is repeated across roles.
+
+Ordinary instruction loading still resolves and deduplicates aliases contained
+within the checkout. Supervisor collection requests strict original validation:
+configured aliases are refused even when their targets are contained and unchanged.
+See [execution context](execution-context.md#code-and-project-paths).
+
 ## Version 2 schema
 
 `version = 2` is required. Required tables/fields are marked **required**. Defaults

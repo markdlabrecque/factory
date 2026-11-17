@@ -4,7 +4,7 @@ import { constants, closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdi
 import { dirname, join, resolve } from "node:path";
 import { projectLayoutPaths } from './project-layout.mts';
 
-// Saved-layout JSON and receipts use bounded canonical regular-file reads, before project filtering.
+// Shared bounded canonical regular-file reads protect project config/instructions and saved-layout JSON/receipts before project filtering.
 // Receipt read errors never masquerade as an absent receipt; only ENOENT permits legacy adoption.
 // #150: preserve the host-recorded implementation baseline with ownership identity.
 // Ownership receipts (slice four, #75): what Factory itself created for a ticket, written before it creates anything, so
@@ -49,24 +49,28 @@ export const canonicalWorktree = (root: string, branch: string) => join(projectL
 /** Bounded canonical regular-file read for saved layout authority, including unrelated records and receipts.
  * Reject special files before opening; NOFOLLOW/NONBLOCK and descriptor checks also close substitution races. */
 export function readLayoutRecord(file: string): string {
-  const max = 8 * 1024 * 1024;
-  if (resolve(file) !== file || realpathSync(file) !== file || !lstatSync(file).isFile())
-    throw Error(`Unsafe saved layout record: ${file}`);
+  return readBoundedText(file, 8 * 1024 * 1024, 'saved layout record');
+}
+/** Shared project-original reader: canonical regular files only, bounded before allocation and descriptor checked. */
+export function readBoundedText(file: string, max: number, label: string): string {
+  const initial = lstatSync(file);
+  if (resolve(file) !== file || realpathSync(file) !== file || !initial.isFile())
+    throw Error(`Unsafe ${label}: ${file}`);
   const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd), named = lstatSync(file);
-    if (!before.isFile() || before.size > max || before.ino !== named.ino || before.dev !== named.dev)
-      throw Error(`Unsafe/oversized saved layout record: ${file}`);
+    if (!before.isFile() || !named.isFile() || before.size > max || before.ino !== initial.ino || before.dev !== initial.dev || before.ino !== named.ino || before.dev !== named.dev || realpathSync(file) !== file)
+      throw Error(`Unsafe/oversized ${label}: ${file}`);
     const bytes = Buffer.alloc(before.size + 1); let n = 0, count = 0;
     while ((count = readSync(fd, bytes, n, bytes.length - n, null)) > 0) {
-      n += count; if (n > before.size) throw Error(`Saved layout record grew while reading: ${file}`);
+      n += count; if (n > before.size) throw Error(`${label} grew while reading: ${file}`);
     }
     const after = fstatSync(fd), current = lstatSync(file);
     if (n !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs
       || current.ino !== before.ino || current.dev !== before.dev || realpathSync(file) !== file)
-      throw Error(`Saved layout record changed while reading: ${file}`);
+      throw Error(`${label} changed while reading: ${file}`);
     const text = bytes.subarray(0,n).toString('utf8');
-    if (!Buffer.from(text).equals(bytes.subarray(0,n)) || text.includes('\0')) throw Error(`Invalid saved layout text: ${file}`);
+    if (!Buffer.from(text).equals(bytes.subarray(0,n)) || text.includes('\0')) throw Error(`Invalid ${label} text: ${file}`);
     return text;
   } finally { closeSync(fd); }
 }

@@ -76,6 +76,15 @@ and all selected-project ownership receipts with canonical, stable regular-file
 reads bounded to 8 MiB each. Aliases and special files refuse before opening;
 NOFOLLOW/NONBLOCK and descriptor checks prevent a replacement FIFO from blocking.
 Receipt validation uses the same bounded bytes, not a second unrestricted read.
+Initial context loading and `assertCurrent` also bound every project config and
+instruction read through the same canonical regular-file descriptor primitive:
+256 KiB per file, 128 configured instruction paths total, and 1 MiB composed text
+per role (six roles), including separators. Invalid text and unstable reads refuse.
+Ordinary contained instruction aliases remain supported; supervisor collection
+calls `assertCurrent({strictOriginals:true})` at both freshness checks to reject
+aliases before any inherited instruction read. NOFOLLOW/NONBLOCK and descriptor
+checks apply here too, not merely in the collector's later original reads.
+Selected immutable runtime manifest/template validation remains unchanged.
 Malformed unrelated JSON remains under its normal schema reader's authority.
 `codePath` and `projectPath` reject lexical traversal between these roots. Existing old-layout run/ownership paths are never rewritten into `.factory` authority. Exact saved-container settlement may proceed while a layout hold blocks new launches; that maintenance does not authorize repair or adopt a branch. Already-running processes keep their immutable selected runtime, even after a new descriptor is published.
 

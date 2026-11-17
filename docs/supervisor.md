@@ -67,6 +67,13 @@ reads to **all** top-level state JSON before project filtering, and to ownership
 receipts (8 MiB per record). Aliases and special files refuse before opening;
 NOFOLLOW/NONBLOCK plus descriptor/stability checks protect the subsequent open,
 including FIFO substitution, with no second unbounded receipt read.
+Both mandatory context freshness checks request strict project-original validation,
+so inherited config/instruction reads cannot first open an aliased, oversized or
+substituted special file before the collector's own safe reader. All shared config
+and instruction readers (including initial context loading) enforce 256 KiB per
+file, at most 128 configured instruction paths and 1 MiB composed text per role
+across the six fixed roles. Ordinary contained Markdown aliases remain supported
+outside strict collection. See [local input bounds](project-config.md#local-input-bounds).
 Each direct Git child has a 1.5-second deadline/output bound and disables
 optional index locks, fsmonitor and hooks; no diff/textconv, fetch or write command
 is used. The bounded tracker transport remains `commandContextSource`; injected
