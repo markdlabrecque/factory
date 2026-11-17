@@ -159,7 +159,12 @@ its store is evidence, **not a second permission store**. The private lock
 subdirectory is validated before use too; a linked lock path cannot write into a
 project. Shared durable directory creation synchronizes the containing chain,
 including visible directories left by an earlier failed attempt; folder-sync
-errors propagate rather than reporting best-effort durability. Reopen synchronizes
+errors propagate rather than reporting best-effort durability. The same synchronous
+lock scope supplies a path-restricted writer for its already-synced store directories:
+journal/receipt writes do not repeatedly resync the whole ancestor chain. Every
+file and post-replacement directory still synchronizes; changed directory identity,
+I/O failure, an escaped destination or an expired scope refuses. No cross-call
+filesystem cache or caller-provided durability boolean is involved. Reopen synchronizes
 validated existing evidence before returning known resources. Existing identical data
 is idempotent; conflicting/corrupt/linked/foreign/unsafe records are never repaired
 or replaced. Missing/corrupt private state yields null `providerResources`, not

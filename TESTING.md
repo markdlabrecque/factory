@@ -182,7 +182,8 @@ No retention-specific provider field is invented: explicit raw write=0 requires
 no retention breakdown; absent write count and any positive write are unknown.
 One private temporary filesystem/journal boundary owns atomic raw+scalar retention,
 reopen/idempotence, conflicting/corrupt records, permissions, hard/symlinks
-(including the lock-directory path) and unchanged reservations/charges. Cheap
+(including the lock-directory path), path-restricted/revoked prepared-writer scope,
+changed directory identity and unchanged reservations/charges. Cheap
 filesystem fault injection proves ancestor-sync refusal before publication and
 directory-sync failure after rename: visible bytes do not yield durable success
 or known resources while synchronization fails. This is not a power-loss experiment.

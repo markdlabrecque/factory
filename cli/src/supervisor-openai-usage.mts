@@ -6,7 +6,7 @@ import { ADVISORY_PROFILE, validateDiagnosisGrant, validateSendAuthorization, va
 import type { DiagnosisGrant, SendAuthorization, ProviderUsageReceipt, ProviderUsage } from './supervisor-advisory-contract.mts';
 import { readSupervisor, readSupervisorProjects } from './supervisor-state.mts';
 const flat = existsSync(new URL('./admission.mts', import.meta.url));
-const { withAdmissionLock, writeDurable, syncDirectory } = await import(flat ? './admission.mts' : '../../board/admission.mts');
+const { withAdmissionLock, syncDirectory } = await import(flat ? './admission.mts' : '../../board/admission.mts');
 const { supervisorHash } = await import(flat ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 export const PROVIDER_EVIDENCE_BYTES = 65_536;
 export type RawProviderEvidence = { version: 1; grantId: string | null; authorization: string | null; response: any;
@@ -135,14 +135,14 @@ export function persistProviderUsage(stateDir: string, g: DiagnosisGrant, a: Sen
   journalBinding(stateDir,g,a); const { dir, file } = location(stateDir,g,true), receipt = providerUsage(g,a,raw);
   const record = { version: 1, grantId: g.id, authorization: a.receipt, raw, receipt }, text = JSON.stringify(record) + '\n';
   advisoryDemand(Buffer.byteLength(text) <= PROVIDER_EVIDENCE_BYTES + 16384, 'provider record too large');
-  return withAdmissionLock(dir, () => {
+  return withAdmissionLock(dir, write => {
     let present = false;
     try { lstatSync(file); present = true; } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
     if (present) {
       const previous = reopen(file,g,a);
       advisoryDemand(supervisorHash(previous) === supervisorHash(record), 'existing provider record differs; no replacement'); return { file, receipt: previous.receipt as ProviderUsageReceipt };
     }
-    writeDurable(file,text); const stored = reopen(file,g,a); return { file, receipt: stored.receipt as ProviderUsageReceipt };
+    write(file,text); const stored = reopen(file,g,a); return { file, receipt: stored.receipt as ProviderUsageReceipt };
   }, -1);
 }
 /** Missing/corrupt/foreign state is unknown, never a known zero. Reading never creates, repairs, authorizes or settles anything. */

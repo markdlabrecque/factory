@@ -10,7 +10,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { providerUsage, captureProviderEvidence, persistProviderUsage, readProviderUsage, providerResources } from '../src/supervisor-openai-usage.mts';
 import { validateProviderUsageReceipt } from '../src/supervisor-advisory-contract.mts';
 import { commitSupervisor, authorizeAdvisorySend, readSupervisor } from '../src/supervisor-state.mts';
-import { ownerOf } from '../../board/admission.mts';
+import { ownerOf, withAdmissionLock } from '../../board/admission.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 import { usageFixture } from './supervisor-usage-fixture.mts';
 test('raw explicit counters, not normalized Pi defaults, establish known conservative derived resources', () => {
@@ -97,6 +97,14 @@ test('one atomic private raw/scalar publication reopens idempotently, rejects co
     const {file,receipt}=persistProviderUsage(stateDir,g,a,f.raw), original=readFileSync(file,'utf8');
     assert.equal(receipt.state,'known'); assert.equal(lstatSync(file).mode&0o777,0o600); assert.deepEqual(providerResources(stateDir,g,a),{tokens:35,cost:220});
     assert.deepEqual(persistProviderUsage(stateDir,g,a,f.raw).receipt,receipt); assert.equal(readFileSync(file,'utf8'),original);
+    let retainedWriter:any;
+    withAdmissionLock(dirname(file),write=>{
+      retainedWriter=write; assert.throws(()=>write(join(projectRoot,'outside'),original),/lock scope/);
+      const changed=join(dirname(file),'namespace-change'); mkdirSync(changed,{mode:0o700});
+      assert.throws(()=>write(file,original),/lock scope/,'prepared writer rejects a changed namespace'); rmSync(changed,{recursive:true});
+    });
+    assert.throws(()=>retainedWriter(file,original),/lock scope/,'writer lease ends with the synchronous lock');
+    assert.equal(readFileSync(file,'utf8'),original); assert.deepEqual(readdirSync(projectRoot),[]);
     const lockDir=join(dirname(file),'admission'); rmSync(lockDir,{recursive:true}); symlinkSync(projectRoot,lockDir,'dir');
     assert.throws(()=>persistProviderUsage(stateDir,g,a,f.raw),/lock directory/); assert.deepEqual(readdirSync(projectRoot),[],'unsafe lock path writes nothing into project');
     rmSync(lockDir); mkdirSync(lockDir,{mode:0o700});

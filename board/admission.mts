@@ -155,7 +155,10 @@ export function durableDirectory(directory: string): void {
 }
 /** Write `text` atomically and durably: synced directory creation, 0600 temp, fsync, rename, strict folder fsync. */
 export function writeDurable(file: string, text: string): void {
-  durableDirectory(dirname(file));
+  durableDirectory(dirname(file)); writePrepared(file, text);
+}
+/** Internal only: the containing directory chain was synced by this same synchronous lock scope. */
+function writePrepared(file: string, text: string): void {
   const tmp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
@@ -195,13 +198,14 @@ function flushObservations(): void {
   const pending = observations; observations = [];
   for (const fn of pending) { try { fn(); } catch { observationFailure(); } }
 }
-export function withAdmissionLock<T>(stateDir: string, fn: () => T, waitMs = 10_000): T {
+export type DurableWriter = (file: string, text: string) => void;
+export function withAdmissionLock<T>(stateDir: string, fn: (write: DurableWriter) => T, waitMs = 10_000): T {
   const dir = admissionDir(stateDir);
   durableDirectory(dir);
   const lock = join(dir, "lock");
   const me = ownerOf(process.pid);
   const tmp = join(dir, `lock.${process.pid}.${randomUUID().slice(0, 8)}`);
-  writeDurable(tmp, JSON.stringify(me));
+  writePrepared(tmp, JSON.stringify(me));
   const deadline = Date.now() + waitMs;
   try {
     for (;;) {
@@ -245,9 +249,22 @@ export function withAdmissionLock<T>(stateDir: string, fn: () => T, waitMs = 10_
     rmSync(tmp, { force: true });
   }
   admissionDepth++;
+  let active = true;
   try {
-    return fn();
+    const stamp = (path: string) => { const st = statSync(path, { bigint: true });
+      if (!st.isDirectory()) throw Error('Durable writer directory identity is unknown'); return `${st.dev}:${st.ino}:${st.ctimeNs}`; };
+    const directories = new Map([resolve(stateDir), resolve(dir)].map(path => [path, stamp(path)]));
+    const write: DurableWriter = (file, text) => {
+      const destination = resolve(file), parent = dirname(destination);
+      if (!active || !directories.has(parent) || directories.get(parent) !== stamp(parent)) throw Error('Durable writer is outside its active owned lock scope');
+      // No repeated ancestor fsync is needed: this lock already synced that exact containing chain.
+      // Every write still fsyncs its new file and the containing directory after atomic replacement.
+      try { writePrepared(destination, text); directories.set(parent, stamp(parent)); }
+      catch (e) { active = false; throw e; }
+    };
+    return fn(write);
   } finally {
+    active = false;
     try { rmSync(lock, { force: true }); }
     finally { admissionDepth--; flushObservations(); }
   }
