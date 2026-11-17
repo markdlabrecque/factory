@@ -17,6 +17,11 @@ unchanged; an unsupported diagnosis family must refuse, never switch to OpenAI.
 These are approved implementation boundaries, **not shipped command capability**.
 There is not yet a public diagnosis command or supported paid adapter.
 
+The [end-to-end delivery plan](design/supervisor-advisory-e2e.md) maps this approved
+slice to proposed ticket-sized work, dependencies and a proof matrix, with a
+separate gated roadmap for the broader autonomous supervisor. It is a plan, not
+activation authority or evidence that the proposed interfaces are shipped.
+
 The [OpenAI boundary investigation](research/supervisor-openai-boundary.md) records
 primary provider documentation and the exact inspected Pi/Pi-AI 1.5.2 artifacts.
 It positively identifies the policy's fixed Mid `openai/gpt-6.1-terra`; model
