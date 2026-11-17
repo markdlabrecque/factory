@@ -1,5 +1,5 @@
 // Cheap identity units and one disposable admission/filesystem boundary with an IPC-coordinated real process race.
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
@@ -14,6 +14,20 @@ import { prepareRuntimeBundle } from '../src/runtime-bundle.mts';
 import { installPackages as install } from './runtime-fixture.mts';
 
 const project = (root: string, name = 'owner/repo') => ({ root, tracker: { kind: 'github' as const, host: 'github.com', project: name } });
+
+// Reuse one IPC/real-lock boundary for each contender; both owners stay live until assertions finish.
+async function race(t: TestContext, messages: object[], inspect: (results: any[]) => void) {
+  const children = messages.map(() => fork(new URL('./supervisor-admission-race.fixture.mts', import.meta.url), [], { stdio: ['ignore','pipe','pipe','ipc'] }));
+  t.after(() => children.forEach(child => { if (child.connected) child.send({ exit: true }); }));
+  const exits = children.map(child => once(child, 'exit'));
+  await Promise.all(children.map(child => once(child, 'message')));
+  const outcomes = children.map(child => once(child, 'message'));
+  children.forEach((child, i) => child.send(messages[i]));
+  const results = (await Promise.all(outcomes)).map(([value]) => value as any);
+  try { inspect(results); }
+  finally { children.forEach(child => child.send({ exit: true })); await Promise.all(exits); }
+  return results;
+}
 test('schema migration refuses optional-exclusion bypass, missing v2 collections and unknown versions', () => {
   const v1 = { version: 1, claims: {}, generations: { saved: 12 }, recovery: { saved: { admitted: 3, pending: [], candidates: { ['b'.repeat(64)]: 'saved-attempt' } } } };
   const migrated = migrateAdmission(v1);
@@ -22,14 +36,23 @@ test('schema migration refuses optional-exclusion bypass, missing v2 collections
     assert.throws(() => migrateAdmission(invalid), /Unsupported admission/);
 });
 
-test('canonical root and tracker namespace collisions do not depend on display names or tracker host', () => {
-  assert(admissionConflict(project('/a'), project('/b')));
-  assert(admissionConflict(project('/a'), project('/a', 'different/repo')));
-  assert(admissionConflict(project('/a', 'owner/repo'), { ...project('/b', 'owner_repo'), tracker: { kind: 'gitlab', host: 'elsewhere.test', project: 'owner_repo' } }));
-  assert(!admissionConflict(project('/a'), project('/b', 'other/repo')));
+test('entrypoint exclusion identity is symmetric across root, namespace, tracker and host permutations', () => {
+  for (const root of ['/a', '/b']) {
+    for (const tracker of ['owner/repo', 'owner_repo', 'other/repo']) {
+      for (const kind of ['github', 'gitlab'] as const) {
+        for (const host of ['github.com', 'elsewhere.test']) {
+          const normal = project('/a');
+          const diagnosis = { root, tracker: { kind, host, project: tracker } };
+          const conflict = root === '/a' || tracker !== 'other/repo';
+          assert.equal(admissionConflict(normal, diagnosis), conflict);
+          assert.equal(admissionConflict(diagnosis, normal), conflict, 'claim ordering cannot change namespace exclusion');
+        }
+      }
+    }
+  }
 });
 
-test('durable schema, v1 compatibility, full mediation, exact fences and one real interprocess claim race', async t => {
+test('durable schema, v1 compatibility, full mediation, exact fences and shared interprocess entrypoint races', async t => {
   const root = mkdtempSync(join(tmpdir(), 'factory-admission-v2-')); t.after(() => rmSync(root, { recursive: true, force: true }));
   const dir = join(root, 'state'), checkout = join(root, 'checkout'); mkdirSync(join(dir, 'admission'), { recursive: true }); mkdirSync(checkout);
   const alias = join(root, 'alias'); symlinkSync(checkout, alias);
@@ -78,19 +101,14 @@ test('durable schema, v1 compatibility, full mediation, exact fences and one rea
   }
 
   // Both real children are ready before either receives go. Admission's actual interprocess lock picks one winner.
-  const children = [0, 1].map(() => fork(new URL('./supervisor-admission-race.fixture.mts', import.meta.url), [], { stdio: ['ignore','pipe','pipe','ipc'] }));
-  t.after(() => children.forEach(child => { if (child.connected) child.send({ exit: true }); }));
-  const exits = children.map(child => once(child, 'exit'));
-  await Promise.all(children.map(child => once(child, 'message')));
-  const outcomes = children.map(child => once(child, 'message'));
-  children.forEach((child, i) => child.send({ dir, options: { ...options, invocationId: `race-${i}` } }));
-  const results = (await Promise.all(outcomes)).map(([value]) => value as any);
-  assert.equal(results.filter(r => r.hold).length, 1); assert.equal(results.filter(r => r.error).length, 1);
+  const results = await race(t, [0, 1].map(i => ({ dir, options: { ...options, invocationId: `race-${i}` } })), results => {
+    assert.equal(results.filter(r => r.hold).length, 1); assert.equal(results.filter(r => r.error).length, 1);
+    const hold = results.find(r => r.hold).hold;
+    assert(checkSupervisorHold(dir, hold));
+    assert.equal(releaseSupervisorHold(dir, hold).released, false, 'live owner with absent authorization is not release evidence');
+    const before = readAdmission(dir); assert.deepEqual(before.generations, {}); assert.deepEqual(before.recovery, {}); assert.deepEqual(before.claims, {});
+  });
   const hold = results.find(r => r.hold).hold;
-  assert(checkSupervisorHold(dir, hold));
-  assert.equal(releaseSupervisorHold(dir, hold).released, false, 'live owner with absent authorization is not release evidence');
-  const before = readAdmission(dir); assert.deepEqual(before.generations, {}); assert.deepEqual(before.recovery, {}); assert.deepEqual(before.claims, {});
-  children.forEach(child => child.send({ exit: true })); await Promise.all(exits);
   // Real owner death does not prune the hold, even on an unrelated committed normal-store transaction.
   withAdmission(dir, tx => {
     for (const kind of ['normal', 'delivery'] as const) tx.state.claims[`other--${kind}`] = { token: kind, project: 'other', iid: kind, kind, owner: hold.owner, at: 'saved' };
@@ -110,11 +128,21 @@ test('durable schema, v1 compatibility, full mediation, exact fences and one rea
   withAdmission(dir, tx => { tx.state.supervisorHolds[hold.id] = successor; tx.commit(); });
   assert.equal(releaseSupervisorHold(dir, hold).released, false); assert(checkSupervisorHold(dir, successor));
   assert.equal(releaseSupervisorHold(dir, successor).released, false, 'a pending reference is not final settlement');
+  const refusalBytes = readFileSync(file, 'utf8');
   for (const kind of ['normal','recovery','delivery'] as const) {
-    assert.equal(claimRun({ dir, iid: '8', project: 'owner/repo', pid: process.pid, cap: 4, kind, attempt: 'repair' }).ok, false);
+    for (const tracker of ['owner/repo', 'owner_repo']) {
+      const refused = claimRun({ dir, iid: '8', project: tracker, pid: process.pid, cap: 4, kind, attempt: 'repair',
+        also: () => assert.fail(`${kind}: exclusion must precede admission callback/effect`) });
+      assert.equal(refused.ok, false);
+      if (!refused.ok) assert.match(refused.reason, /held by supervisor/);
+      assert.equal(readFileSync(file, 'utf8'), refusalBytes, `${kind}: exact stored ownership/charges/generations unchanged`);
+    }
   }
   assert.equal(claimDelivery({ dir, iid: '8', project: 'owner_repo', pid: process.pid, cap: 4 }).ok, false);
-  assert.throws(() => claimManagedEntry(dir, project(checkout, 'renamed/repo')), /held by supervisor/);
+  for (const identity of [project(checkout, 'renamed/repo'), project(alias), project(root, 'owner_repo')]) {
+    assert.throws(() => claimManagedEntry(dir, identity), /held by supervisor/);
+    assert.equal(readFileSync(file, 'utf8'), refusalBytes);
+  }
   setProject('owner/repo'); t.after(() => { setProject(''); holdClaim(undefined); });
   assert.throws(() => adoptClaim('8', dir), /held by supervisor/);
   assert(checkSupervisorHold(dir, successor));
@@ -127,4 +155,32 @@ test('durable schema, v1 compatibility, full mediation, exact fences and one rea
   writeFileSync(join(manualDir, 'owner_repo--10.json'), 'null');
   assert.throws(() => adoptClaim('10', manualDir, 1), /ownership is unknown/);
   assert.equal(readFileSync(admissionFile(manualDir), 'utf8'), manualBytes);
+
+  // Same real filesystem/process race as diagnosis-vs-diagnosis, not a second E2E stack.
+  // Never force release an unsettled winner: each case has its own disposable shared store.
+  for (const mode of ['normal', 'manual', 'dispatch', 'recovery', 'delivery']) {
+    const raceDir = join(root, `race-${mode}`);
+    await race(t, [
+      { dir: raceDir, options: { ...options, invocationId: `diagnosis-vs-${mode}` } },
+      { dir: raceDir, options, mode },
+    ], results => {
+      assert.equal(results.filter(r => r.error).length, 1, `${mode}: exactly one refusal`);
+      const state = readAdmission(raceDir);
+      const diagnosisWon = !!results[0].hold;
+      assert.equal(Object.keys(state.supervisorHolds).length, diagnosisWon ? 1 : 0, mode);
+      assert.deepEqual(state.recovery, {}, `${mode}: no repair charge or candidate consumption`);
+      if (diagnosisWon) {
+        assert.match(results[1].error, /held by supervisor/, mode);
+        assert.deepEqual(state.claims, {}, `${mode}: no implementation/delivery ownership after refusal`);
+        assert.deepEqual(state.entries, {}, `${mode}: no effecting entry after refusal`);
+        assert.deepEqual(state.generations, {}, `${mode}: no execution progress after refusal`);
+      } else {
+        assert.match(results[0].error, /not quiescent/, mode);
+        const entryOnly = ['dispatch', 'recovery', 'delivery'].includes(mode);
+        assert.equal(Object.keys(state.entries).length, entryOnly ? 1 : 0, mode);
+        assert.equal(Object.keys(state.claims).length, entryOnly ? 0 : 1, mode);
+        assert.equal(state.generations['owner/repo'] ?? 0, mode === 'normal' || mode === 'manual' ? 1 : 0, mode);
+      }
+    });
+  }
 });
