@@ -164,6 +164,30 @@ conservative bound and limits. Extend this same suite, not a duplicate boundary 
 It enters the unchanged four-shard inventory automatically; the independent
 browser lifecycle gate remains mandatory.
 
+## Raw advisory usage receipts
+
+```sh
+node --test cli/test/supervisor-openai-usage.test.mts cli/test/runtime-bundle.test.mts cli/test/documentation*.test.mts
+```
+
+Cheap units own missing/explicit-zero/inconsistent/unsafe and over-reservation
+counter cases, reasoning inclusion, service/cache variants, wrong association,
+stream truncation and completed/incomplete/failed status, normalized-Pi-counter
+exclusion, conservative derived integer charge and strict scalar receipt identity.
+No retention-specific provider field is invented: explicit raw write=0 requires
+no retention breakdown; absent write count and any positive write are unknown.
+One private temporary filesystem/journal boundary owns atomic raw+scalar retention,
+reopen/idempotence, conflicting/corrupt records, permissions, hard/symlinks
+(including the lock-directory path) and unchanged reservations/charges. Cheap
+filesystem fault injection proves ancestor-sync refusal before publication and
+directory-sync failure after rename: visible bytes do not yield durable success
+or known resources while synchronization fails. This is not a power-loss experiment. An IPC-only registered local child supplies real
+PID/start identity; all provider metadata/control/exclusion data is synthetic.
+There are no network/provider calls or duplicated transport permutations. Copied
+bundle assertions import the inventoried helper unchanged. Later owned cleanup,
+final journal settlement/exclusion release and installed-host activation are not
+claimed by these tests. Full mandatory shards and separate lifecycle remain gates.
+
 ## Independent gate review and managed escalation
 
 ```sh

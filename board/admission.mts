@@ -1,11 +1,12 @@
 // Persisted writers may defer observational callbacks until every admission critical section has exited.
 // Admission reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent.
+// Directory creation/replacement is strictly synced; unsupported or failed durability never returns successful publication.
 // Optional advisory candidate identities are consumed with the SAME recovery claim/charge, never a second scheduler.
 // #153: short-lived delivery ownership uses normal PID/start fencing and advances project activity without repair charges.
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 // The admission record (slice four, #75): the one durable source of run claims, shared by every project in a run-state
 // folder. `<stateDir>/admission/state.json` (folder 0700, file 0600, version 1) holds:
@@ -142,9 +143,19 @@ export function readAdmission(stateDir: string): AdmissionState {
   return d;
 }
 
-/** Write `text` to `file` atomically and durably: temp file (mode 0600), fsync, rename, fsync of the folder. */
+/** A successful return establishes directory durability; unsupported filesystems fail closed, not best effort. */
+export function syncDirectory(directory: string): void {
+  const fd = openSync(directory, 'r');
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+/** Sync the containing chain too: existing visible directories may be left by an earlier failed publication. */
+export function durableDirectory(directory: string): void {
+  let current = resolve(directory); mkdirSync(current, { recursive: true, mode: 0o700 });
+  for (;;) { syncDirectory(current); const parent = dirname(current); if (current === parent) break; current = parent; }
+}
+/** Write `text` atomically and durably: synced directory creation, 0600 temp, fsync, rename, strict folder fsync. */
 export function writeDurable(file: string, text: string): void {
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  durableDirectory(dirname(file));
   const tmp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
@@ -162,12 +173,7 @@ export function writeDurable(file: string, text: string): void {
     rmSync(tmp, { force: true });
     throw e;
   }
-  try {
-    const dfd = openSync(dirname(file), "r");
-    try { fsyncSync(dfd); } finally { closeSync(dfd); }
-  } catch {
-    /* some platforms cannot fsync a folder; the rename is still atomic */
-  }
+  syncDirectory(dirname(file));
 }
 
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -191,7 +197,7 @@ function flushObservations(): void {
 }
 export function withAdmissionLock<T>(stateDir: string, fn: () => T, waitMs = 10_000): T {
   const dir = admissionDir(stateDir);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  durableDirectory(dir);
   const lock = join(dir, "lock");
   const me = ownerOf(process.pid);
   const tmp = join(dir, `lock.${process.pid}.${randomUUID().slice(0, 8)}`);

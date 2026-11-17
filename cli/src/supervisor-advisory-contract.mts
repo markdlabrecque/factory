@@ -58,6 +58,34 @@ export function validateDiagnosisGrant(g: any): DiagnosisGrant {
     && advisoryTime(g.deadline) && supervisorHash(g.reserved) === supervisorHash(advisoryReservation()), 'unsupported or incomplete grant');
   const { id, ...body } = g; advisoryDemand(id === supervisorHash(body), 'grant identity mismatch'); return g;
 }
+export type ProviderUsage = { input: number; cacheRead: number; cacheWrite: number; output: number; reasoning: number; total: number };
+export type ProviderUsageReceipt = { version: 1; id: string; grantId: string; authorization: string; invocationId: string; fence: string; profile: string; price: string; rawHash: string;
+  requestId: string | null; responseId: string | null; terminalStatus: 'completed' | 'incomplete' | 'failed' | null;
+  serviceTier: 'default' | null; cachePolicy: 'explicit-unmarked' | null;
+  state: 'known' | 'unknown'; reason: 'complete' | 'identity' | 'terminal' | 'policy' | 'counters' | 'bounds' | 'evidence';
+  usage: ProviderUsage | null; resources: { tokens: number; cost: number } | null; costKind: 'derived-upper-micro-usd' | null };
+export function validateProviderUsageReceipt(r: any, g: DiagnosisGrant, a: SendAuthorization): ProviderUsageReceipt {
+  validateSendAuthorization(a, g);
+  advisoryRecord(r, ['version','id','grantId','authorization','invocationId','fence','profile','price','rawHash','requestId','responseId','terminalStatus','serviceTier','cachePolicy','state','reason','usage','resources','costKind']);
+  advisoryDemand(r.version === 1 && r.grantId === g.id && r.authorization === a.receipt && r.invocationId === g.invocationId && r.fence === g.fence && r.profile === g.profile && r.price === ADVISORY_PROFILE.price
+    && advisoryHash(r.rawHash) && (r.requestId === null || typeof r.requestId === 'string' && /^req_[A-Za-z0-9_-]{1,180}$/.test(r.requestId))
+    && (r.responseId === null || typeof r.responseId === 'string' && /^resp_[A-Za-z0-9_-]{1,180}$/.test(r.responseId))
+    && [null,'completed','incomplete','failed'].includes(r.terminalStatus), 'foreign provider receipt');
+  if (r.state === 'known') {
+    advisoryRecord(r.usage, ['input','cacheRead','cacheWrite','output','reasoning','total']); advisoryRecord(r.resources, ['tokens','cost']);
+    advisoryDemand(r.reason === 'complete' && r.serviceTier === 'default' && r.cachePolicy === 'explicit-unmarked' && r.requestId !== null && r.responseId !== null && ['completed','incomplete'].includes(r.terminalStatus)
+      && Object.values(r.usage).every(advisoryCount) && r.usage.input > 0 && r.usage.input <= ADVISORY_PROFILE.input
+      && r.usage.cacheRead <= r.usage.input && r.usage.cacheWrite === 0 && r.usage.reasoning <= r.usage.output && r.usage.output <= ADVISORY_PROFILE.output
+      && Number.isSafeInteger(r.usage.input + r.usage.output) && r.usage.total === r.usage.input + r.usage.output
+      && r.resources.tokens === r.usage.total && advisoryCount(r.resources.cost) && r.resources.cost <= g.reserved.cost
+      && r.costKind === 'derived-upper-micro-usd', 'invalid known provider receipt');
+    const p = ADVISORY_PROFILE, numerator = BigInt(r.usage.input) * BigInt(p.inputMicroNumerator) + BigInt(r.usage.output) * BigInt(p.outputMicroNumerator);
+    advisoryDemand(r.resources.cost === Number((numerator + BigInt(p.denominator - 1)) / BigInt(p.denominator)), 'derived provider charge mismatch');
+  } else advisoryDemand(r.state === 'unknown' && ['identity','terminal','policy','counters','bounds','evidence'].includes(r.reason)
+    && r.usage === null && r.resources === null && r.costKind === null && r.serviceTier === null && r.cachePolicy === null, 'unknown usage cannot imply zero');
+  const { id, ...body } = r; advisoryDemand(id === supervisorHash(body), 'provider receipt identity mismatch'); return r;
+}
+
 export type SendAuthorization = { version: 1; grantId: string; invocationId: string; fence: string; worker: Owner;
   profile: string; payload: string; at: string; receipt: string };
 export function validateSendAuthorization(a: any, g: DiagnosisGrant): SendAuthorization {

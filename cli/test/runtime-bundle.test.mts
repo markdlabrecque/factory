@@ -52,6 +52,10 @@ test('complete inventory, deterministic identity, private install and validation
   assert.equal(typeof hostPolicy.readHostAdvisoryPolicy, 'function');
   const request = await import(pathToFileURL(join(a.directory, 'supervisor-openai-request.mts')).href);
   assert.equal(typeof request.requestAdvisory, 'function');
+  const usage = await import(pathToFileURL(join(a.directory, 'supervisor-openai-usage.mts')).href);
+  assert.equal(typeof usage.providerUsage, 'function'); assert.equal(typeof usage.persistProviderUsage, 'function');
+  assert.equal(typeof usage.providerResources, 'function');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-openai-usage.mts')), readFileSync(join(f.source, 'cli/src/supervisor-openai-usage.mts')), 'usage ships unchanged');
   const provider = JSON.parse(readFileSync(join(a.directory, 'supervisor-provider/package-lock.json'), 'utf8'));
   assert.equal(provider.packages['node_modules/@earendil-works/pi-ai'].version, '1.5.2');
   assert.equal(provider.packages['node_modules/openai'].version, '7.19.0');

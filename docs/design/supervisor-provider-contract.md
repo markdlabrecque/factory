@@ -154,10 +154,18 @@ model, status, service tier, input total and cache-read/write/retention breakdow
 output/reasoning/total tokens, plus exact invocation/profile/price identity.
 Terminal status and valid diagnosis text are separate. `onProviderStreamEvent`
 exposes fields before Pi defaults absent counters to zero or computes catalogue
-cost. Missing or inconsistent counters, identity, service/cache detail, terminal
-stream or durable write means **unknown**, full charge/exclusion retained.
-T03 owns validation, bounded private retention and exact derived cost; this spike
-only demonstrates the actual SDK surface, not durable settlement.
+cost. Missing or inconsistent counters, identity, required service/cache detail, terminal
+stream or durable write means **unknown**, full charge/exclusion retained. The
+supported SDK exposes cached/write totals, not retention-specific write details:
+this no-write profile accepts explicit raw write=0 without inventing a retention
+field; absent write total or positive write is unknown. Any optional retention
+breakdown must agree with zero. The source
+[usage receipt helper](../supervisor.md#raw-provider-usage-and-private-receipts)
+now validates and privately retains selected original metadata plus a strict
+scalar receipt. Its exact derived upper charge uses conservative profile rates,
+not measured account dollars; normalized Pi counters/cost are never evidence.
+This provider-request suite still does not establish owned cleanup or final
+journal/exclusion settlement.
 
 ## Executable proof and limits
 

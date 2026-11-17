@@ -126,6 +126,26 @@ operator work; source tests do not claim delivery, paid-call enforcement or bene
 The [Board supervisor view](supervisor.md#board-observation-and-outcome-costs) reads
 these observations only and never triggers delivery, review, repair or resolution.
 
+### Raw advisory accounting is not telemetry or invoice reconciliation
+
+The source [provider receipt helper](supervisor.md#raw-provider-usage-and-private-receipts)
+retains bounded selected raw terminal metadata plus a validated scalar receipt in
+private host state. It does not itself emit telemetry, finish a reservation or
+release exclusion. Telemetry must never read a normalized/default-zero Pi counter
+as known usage, use missing/corrupt receipts as zero, or authorize work from a
+receipt/event. Known token totals come from complete matching raw provider
+counters; reasoning is included in output, not counted twice.
+
+The fixed advisory profile's micro-USD result is explicitly a **conservative derived
+upper charge**, not measured account dollars or provider-invoice reconciliation.
+It uses the versioned worst-allowed profile prices with exact upward integer
+rounding. Full reservations/call charges remain monotonic even when known tokens
+or derived cost are smaller. Missing identity/terminal/service/cache/counter or
+persistence evidence stays unknown. Scalar receipts contain identity hashes/IDs,
+status, numeric counters and price provenance, not prompts, originals, model
+output/hidden reasoning, API keys, auth headers or raw error prose. The original
+provider metadata is private evidence, not a new telemetry producer or authority.
+
 ## Publication and lock order
 
 Files live at `<state>/telemetry/<streamKey>/<12-digit-sequence>-<eventId>.json`, below rather than beside the Board's run JSON files. The state root follows `SANDCASTLE_STATE_DIR`, otherwise the caller's normal state root. New directories use mode 0700 and files mode 0600.
