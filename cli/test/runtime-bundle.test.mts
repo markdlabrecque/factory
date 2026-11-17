@@ -40,6 +40,9 @@ test('complete inventory, deterministic identity, private install and validation
   assert(!existsSync(join(a.directory, 'config.mts')));
   const layout = await import(pathToFileURL(join(a.directory, 'project-layout.mts')).href);
   assert.equal(layout.projectLayoutPaths('/fixture-project').assets, '/fixture-project/.factory');
+  const input = await import(pathToFileURL(join(a.directory, 'supervisor-input.mts')).href);
+  assert.equal(typeof input.collectSupervisorInput, 'function');
+  assert.deepEqual(readFileSync(join(a.directory,'supervisor-input.mts')),readFileSync(join(f.source,'cli/src/supervisor-input.mts')));
   const facts = await import(pathToFileURL(join(a.directory, 'supervisor-facts.mts')).href);
   assert.equal(facts.safeExcerpt('token=private'), '[REDACTED]');
   assert.equal(facts.observed('fixture', 'saved', '2026-11-16T00:00:00.000Z', []).status, 'known');

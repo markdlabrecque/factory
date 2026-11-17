@@ -111,6 +111,10 @@ export function readAttemptRecord(file: string): { ok: true; record: AttemptReco
   } catch {
     return { ok: false, reason: existsSync(file) ? `attempt record ${file} is not valid JSON` : `attempt record ${file} is missing` };
   }
+  return decodeAttemptRecord(d, file);
+}
+/** Pure decoder shared by bounded original collectors; no second unbounded file read is required. */
+export function decodeAttemptRecord(d: any, file = 'saved attempt'): { ok: true; record: AttemptRecord } | { ok: false; reason: string } {
   const ok = d?.version === 1 && typeof d.id === "string" && ID.test(d.id) && Number.isInteger(d.seq) && d.seq > 0
     && [d.project, d.iid, d.branch, d.base, d.startSha, d.worktree, d.container, d.evidence, d.gitDir, d.createdAt, d.updatedAt].every(str)
     && (d.executionId === undefined || str(d.executionId))

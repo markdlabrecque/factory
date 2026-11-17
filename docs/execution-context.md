@@ -6,6 +6,27 @@ bundle contains the workflow, Board helpers, TOML parser, Factory templates and
 private locked dependencies. A project does not supply individual executable or
 template overrides to this workflow.
 
+## Explicit saved-run diagnosis collector
+
+The source-only `cli/src/supervisor-input.mts` collector consumes an already selected
+`ExecutionContext`, checks current selection before and after collection, and
+requires one explicit ticket in a uniquely registered canonical checkout. It
+reuses the selected config/instruction/template/runtime identities without
+credential discovery, user auth/settings reads or project executable imports.
+Complete project-mode overrides currently hold as unsupported by this collector;
+standard Factory source is never substituted for an override.
+
+Its frozen `originals.json` contains the complete snapshot, incident facts, current
+frozen ticket input and exact material `bindings`. The snapshot policy digest binds
+those original run/attempt/receipt/config/saved-input bytes, normalized settings,
+current base SHA and ownership along with Factory model policy; runtime/dependency,
+baseline/tip and current ticket hashes remain explicit snapshot material. Originals
+are read with bounded stable no-alias reads and written 0600 in a new 0700 host
+directory outside project/runtime mounts. Neither a selected context nor a fixture
+runtime proves actual installed mount or cleanup authority. Refer to the
+[complete input contract](supervisor.md#complete-saved-run-input-collection) for
+source roles, authoritative decisions, cache stability and refusal conditions.
+
 ## Launcher contract
 
 A trusted launcher selects a prepared runtime once and supplies:

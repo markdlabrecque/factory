@@ -4,6 +4,61 @@ This is the authoritative reference for the project supervisor feature. The impl
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
+## Complete saved-run input collection
+
+`cli/src/supervisor-input.mts` exports `collectSupervisorInput` (also named
+`completeSnapshot`) for an explicit positive ticket, a selected validated execution
+context and a uniquely registered canonical checkout. This is source-only host
+composition, not a public diagnosis command, admission capability or provider call.
+It never refreshes/reconciles a run, settles ownership, changes Git/tracker state,
+launches a reviewer, acquires a hold or grants quiescence authority.
+
+The collector requires exact saved execution/baseline/ownership and, when present,
+finished recovery-attempt identity plus matching saved ticket-input originals.
+Legacy/missing identities, managed entries, retained claims and pending recovery
+keep collection held. It binds the current local branch/base commit objects,
+selected runtime/dependency IDs, normalized settings, complete current ticket hash,
+model policy and admission generation **and ownership collections**. The material
+`policy` digest also binds the privately frozen `bindings` record (exact run,
+attempt, receipt, config, saved input, normalized settings, current base SHA and
+ownership). This preserves the existing snapshot schema while making every one
+of these inputs independently recomputable. Changing ownership without advancing
+a normal generation still invalidates/holds; supervisor holds and its own journal
+publication do not recursively change the basis. This exclusion is not permission
+to ignore any hold at admission/send time.
+
+All eight source roles are represented. Child/immediate-parent and ordered human
+comments include every page and two complete stability-checked passes under one
+30-second collection deadline. Configured Markdown guidelines remain separate
+from Factory prompt/model-policy constraints. Gate rules/config and named saved
+failure originals are preserved, including referenced command-output artifacts.
+Absent parent/comments/decisions and absent additive guidelines are explicitly
+not-applicable; missing required originals, oversized text or relevant image/video
+originals hold with an actionable explanation rather than truncation. Complete
+project workflow overrides currently hold; no Factory fallback is invented.
+
+`prior-decisions` is the relevant ticket/project authoritative set at the collection
+cutoff: validated independent-review records/provenance and their exact frozen
+input references, plus audited local human resolutions. Applicable human policy
+already supplied in ticket/configured instruction originals is not duplicated.
+Decision members retain their original JSON bytes and stable references, sorted
+by locator/content. The mutable journal, revisions, counters, charges, observations,
+diagnostic output and summaries are not originals in this role. Rebuilding this
+set precedes any worker cache comparison. New material human/review decisions
+change the basis without clearing denials, human holds or cumulative budgets.
+Bounded `DiagnosisMemory` remains supplemental only.
+
+Original reads reject aliases, special files, invalid text, oversized or unstable
+bytes. Each direct Git child has a 1.5-second deadline/output bound and disables
+optional index locks, fsmonitor and hooks; no diff/textconv, fetch or write command
+is used. The bounded tracker transport remains `commandContextSource`; injected
+transports must honor its supplied budgets. The collector writes only a new
+0700 directory/0600 `originals.json` under an already private, canonical host
+output directory outside checkout and selected-runtime mounts. It rechecks current
+material, decision set, ownership and refs before freezing. Selected-context
+validation remains mandatory; fixture packages are not installed-host authority.
+See [input tests](../TESTING.md#complete-saved-run-input-boundary).
+
 ## Advisory MVP scope and OpenAI build gate
 
 The owner approved a smaller first release: **explicit operator-requested advisory

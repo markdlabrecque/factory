@@ -118,7 +118,17 @@ export function projectSupervisorFacts(input: FactInputs) {
 /** Explicit agent-context path only: host-owned exhaustive ticket/parent/comments collector, never a status read.
  * No persisted writes and no tracker mutations. Original bytes remain separate from display excerpts. */
 export function collectSupervisorTicketInput(source: TicketContextSource, ticket: number) {
-  const input = freezeTicketInput(source, ticket);
+  const started = Date.now();
+  // One whole-collection deadline spans both exhaustive passes, not a fresh timeout for every page/pass.
+  const bounded: TicketContextSource = { identity: source.identity,
+    ticket: (iid,b) => source.ticket(iid, budget(b)), parentOf: (iid,b) => source.parentOf(iid,budget(b)), notes: (iid,page,b) => source.notes(iid,page,budget(b)) };
+  function budget(b: { timeoutMs: number; maxBytes: number }) {
+    const left = 30_000 - (Date.now() - started);
+    if (left <= 0) throw Error('Complete original collection deadline exceeded');
+    return { ...b, timeoutMs: Math.min(left,b.timeoutMs) };
+  }
+  const input = freezeTicketInput(bounded, ticket), check = freezeTicketInput(bounded, ticket);
+  if (input.hash !== check.hash || supervisorHash({child:input.context.child,parent:input.context.parent}) !== supervisorHash({child:check.context.child,parent:check.context.parent})) throw Error('Ticket-input hold: child/parent/comment pages changed during complete collection. Recollect stable original pages before diagnosis.');
   const { child, parent } = input.context;
   const make = (role: Source['role'], locator: string, text: string, status: Source['status'] = 'complete'): Source => ({ role, locator, text, status, sha256: sourceHash(text) });
   const human = [child, ...(parent ? [parent] : [])].flatMap(t => t.notes.filter(n => !n.system));

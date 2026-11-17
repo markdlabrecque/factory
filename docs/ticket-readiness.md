@@ -36,6 +36,25 @@ Host-known recovery holds occur before a new attempt is admitted or charged, inc
 
 If a normal implementer makes zero commits, inspect its execution-scoped no-commit artifact and saved work before deciding whether to relaunch. Factory's commit count, clean/dirty/unknown Git observation and push-not-attempted state are observed facts. Quoted final assistant text is an agent claim. If capture is unavailable, cause is unknown; a log reference is not an inferred explanation. A claim of "already complete" never substitutes for independent verification or exact-SHA delivery. Readiness adds no stopped-run retry policy and does not disable the separate opt-in recovery policy.
 
+## Saved-run supervisor input is a separate read-only boundary
+
+`collectSupervisorInput` in `cli/src/supervisor-input.mts` uses the exhaustive
+`collectSupervisorTicketInput` / `freezeTicketInput` path, not status excerpts.
+Supervisor collection makes two full child/parent/comment-page passes within one
+30-second deadline and refuses changed original bytes, hierarchy or pagination.
+The saved execution's original context/rendered hashes are checked separately
+from the current tracker input: changed human material changes the diagnosis basis,
+not permission to retry. Missing saved execution/attempt identity, legacy admission,
+missing/oversized originals or unsupported complete workflow overrides hold without
+refresh, reconciliation, Git/tracker writes or fabricated readiness.
+
+This path deliberately uses its own bounded read-only Git helper (1.5 seconds per
+child, optional locks/fsmonitor/hooks disabled), not the legacy unbounded workspace
+Git reader. A whole-fixture deadline remains required. Private frozen originals,
+settings/runtime/ownership bindings and authoritative prior decisions are described
+in [the supervisor contract](supervisor.md#complete-saved-run-input-collection).
+No collector observation establishes installed mounts, cleanup or launch authority.
+
 ## Structured ticket context
 
 `orchestrator/ticket-context.mts` owns collection, content identity and rendering of tracker task input. It is import-safe and does not load project configuration, invoke a tracker, save reports or launch an agent on import. Complete transport is not a judgment that a plan is adequate. There is no keyword classifier.
