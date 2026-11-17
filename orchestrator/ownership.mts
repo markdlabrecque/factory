@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
+import { constants, closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { projectLayoutPaths } from './project-layout.mts';
 
+// Saved-layout JSON and receipts use bounded canonical regular-file reads, before project filtering.
 // Receipt read errors never masquerade as an absent receipt; only ENOENT permits legacy adoption.
 // #150: preserve the host-recorded implementation baseline with ownership identity.
 // Ownership receipts (slice four, #75): what Factory itself created for a ticket, written before it creates anything, so
@@ -45,6 +46,30 @@ export const projectId = (root: string, t: TrackerIdentity) =>
 export const receiptFile = (stateDir: string, id: string, iid: string) => join(stateDir, "ownership", id, `${iid}.json`);
 /** Sandcastle's worktree for `branch`: <root>/.factory/worktrees/<branch with / as ->. */
 export const canonicalWorktree = (root: string, branch: string) => join(projectLayoutPaths(real(root)).worktrees, branch.replaceAll("/", "-"));
+/** Bounded canonical regular-file read for saved layout authority, including unrelated records and receipts.
+ * Reject special files before opening; NOFOLLOW/NONBLOCK and descriptor checks also close substitution races. */
+export function readLayoutRecord(file: string): string {
+  const max = 8 * 1024 * 1024;
+  if (resolve(file) !== file || realpathSync(file) !== file || !lstatSync(file).isFile())
+    throw Error(`Unsafe saved layout record: ${file}`);
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = fstatSync(fd), named = lstatSync(file);
+    if (!before.isFile() || before.size > max || before.ino !== named.ino || before.dev !== named.dev)
+      throw Error(`Unsafe/oversized saved layout record: ${file}`);
+    const bytes = Buffer.alloc(before.size + 1); let n = 0, count = 0;
+    while ((count = readSync(fd, bytes, n, bytes.length - n, null)) > 0) {
+      n += count; if (n > before.size) throw Error(`Saved layout record grew while reading: ${file}`);
+    }
+    const after = fstatSync(fd), current = lstatSync(file);
+    if (n !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs
+      || current.ino !== before.ino || current.dev !== before.dev || realpathSync(file) !== file)
+      throw Error(`Saved layout record changed while reading: ${file}`);
+    const text = bytes.subarray(0,n).toString('utf8');
+    if (!Buffer.from(text).equals(bytes.subarray(0,n)) || text.includes('\0')) throw Error(`Invalid saved layout text: ${file}`);
+    return text;
+  } finally { closeSync(fd); }
+}
 /** Reject explicit cross-layout saved authority before starting new work. Never rewrites historical records. */
 export function assertProjectRecordLayout(state: string, root: string, tracker: TrackerIdentity): void {
   const layout = projectLayoutPaths(real(root));
@@ -57,7 +82,8 @@ export function assertProjectRecordLayout(state: string, root: string, tracker: 
   }
   for (const name of names.filter(n => n.endsWith('.json'))) {
     let record: any;
-    try { record = JSON.parse(readFileSync(join(state, name), 'utf8')); } catch { continue; } // Normal record readers retain schema/error authority.
+    const raw = readLayoutRecord(join(state, name)); // Safety applies BEFORE project filtering, even for unrelated JSON.
+    try { record = JSON.parse(raw); } catch { continue; } // Normal record readers retain schema authority.
     if (record.project !== tracker.project || typeof record.iid !== 'string') continue;
     if (record.evidenceDir !== undefined && typeof record.evidenceDir !== 'string')
       throw new Error('Saved run has unknown evidence identity; preserve it without adoption');
@@ -88,7 +114,7 @@ const str = (x: unknown) => typeof x === "string" && x.length > 0;
 export function readReceipt(file: string): Receipt | null {
   let d: any;
   try {
-    d = JSON.parse(readFileSync(file, "utf8"));
+    d = JSON.parse(readLayoutRecord(file));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw new Error(`Ownership receipt ${file} is not valid JSON; Factory will not overwrite it.`);

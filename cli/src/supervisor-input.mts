@@ -3,6 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { constants, openSync, closeSync, fstatSync, lstatSync, readSync, realpathSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { existsSync } from 'node:fs';
+import type { AdmissionState } from '../../board/admission.mts';
+import type { HoldKey } from './supervisor-admission.mts';
+import type { AttemptRecord } from '../../orchestrator/recovery.mts';
 import type { ExecutionContext } from '../../orchestrator/context.mts';
 import type { Source, Snapshot, ProjectIdentity } from '../../orchestrator/supervisor-contract.mts';
 import type { TicketContextSource } from '../../orchestrator/ticket-context.mts';
@@ -16,7 +19,7 @@ const { diagnosisBasis } = await import(flat ? './supervisor.mts' : '../../orche
 const { requireProjectLayout } = await import(flat ? './project-layout.mts' : '../../orchestrator/project-layout.mts');
 const { keyFor, admissionConflict, migrateAdmission } = await import(flat ? './admission.mts' : '../../board/admission.mts');
 const { projectId, receiptFile, canonicalWorktree } = await import(flat ? './ownership.mts' : '../../orchestrator/ownership.mts');
-const { decodeAttemptRecord } = await import(flat ? './recovery.mts' : '../../orchestrator/recovery.mts');
+const { decodeAttemptRecord, attemptEvidence, attemptGitDir } = await import(flat ? './recovery.mts' : '../../orchestrator/recovery.mts');
 const { validateReport } = await import(flat ? './verification.mts' : '../../orchestrator/verification.mts');
 const { normalizedSettings } = await import(flat ? './context.mts' : '../../orchestrator/context.mts');
 const { MODEL_POLICY, MODEL_POLICY_ID, AGENT_POLICY } = await import(flat ? './model-policy.mts' : '../../orchestrator/model-policy.mts');
@@ -100,16 +103,39 @@ export function supervisorDecisionSources(raw: string | null, project: ProjectId
   return selected.length ? selected.sort((a,b) => a.id.localeCompare(b.id) || a.text.localeCompare(b.text))
     .map(s => original('prior-decisions', `supervisor:${s.id}`, s.text)) : [original('prior-decisions','supervisor:authoritative-decisions','','not-applicable')];
 }
+/** Immutable admission projection: only an explicitly expected exact own hold may be excluded.
+ * No admission transaction, dead-owner pruning, capacity assertion or permission is performed. */
+export function supervisorInputOwnership(admission: AdmissionState, project: ProjectIdentity, expected?: HoldKey) {
+  const generation = admission.generations[project.tracker.project];
+  if (!Number.isSafeInteger(generation)) return hold('missing definitive admission generation');
+  const conflicts = (p: ProjectIdentity) => admissionConflict({ ...p, root: realpathSync(p.root) },project);
+  if (expected) {
+    const actual = admission.supervisorHolds[expected.id];
+    const identity = (h: HoldKey) => ({ id:h.id, project:h.project, invocationId:h.invocationId, fence:h.fence, owner:h.owner });
+    if (!actual || !expected.owner.start || supervisorHash(expected.project) !== supervisorHash(project)
+      || supervisorHash(identity(actual)) !== supervisorHash(identity(expected))) return hold('expected own supervisor hold missing/mismatched');
+  }
+  const foreign = Object.values(admission.supervisorHolds).filter(h => h.id !== expected?.id && conflicts(h.project));
+  if (foreign.length) return hold('conflicting foreign supervisor hold retains project ownership');
+  const entries = Object.values(admission.entries).filter(e => conflicts(e.project));
+  const claims = Object.values(admission.claims).filter(e => keyFor('',e.project) === keyFor('',project.tracker.project));
+  const recovery = admission.recovery[project.tracker.project] ?? null;
+  if (entries.length || claims.length || recovery?.pending.length) return hold('managed entry/claim/unsettled recovery retains project ownership');
+  return { generation, entries, claims, recovery };
+}
 export type SupervisorInputOptions = {
   context: ExecutionContext; registry: string; ticket: number; observedAt: string;
   /** Host destination only, outside checkout AND selected runtime/agent mounts. Must already be private. */
   output: string;
   /** Exhaustive read-only adapter; production callers use commandContextSource's bounded transport. */
   tracker: TicketContextSource;
+  /** Exact host-held identity, revalidated on both immutable admission reads. Absent means no own exclusion. */
+  expectedOwnHold?: HoldKey;
 };
 /** Rebuild BEFORE comparing a cache. No cached snapshot, summaries, quiescence booleans or arbitrary file lists accepted. */
 export function collectSupervisorInput(o: SupervisorInputOptions): { snapshot: Snapshot; facts: Facts; basis: string; directory: string } {
   const c = o.context, root = c.projectRoot, state = c.sharedState;
+  const expectedOwnHold = o.expectedOwnHold ? structuredClone(o.expectedOwnHold) : undefined;
   const tracker = c.config.TRACKER;
   const project: ProjectIdentity = { root, tracker: { kind: tracker.kind, host: tracker.gitlabHost ?? tracker.host!, project: tracker.project } };
   if (!Number.isSafeInteger(o.ticket) || o.ticket <= 0) return hold('one explicit positive ticket is required');
@@ -131,13 +157,15 @@ export function collectSupervisorInput(o: SupervisorInputOptions): { snapshot: S
   if (!['stopped','waiting','done'].includes(run.stage) || run.starting) return hold('saved run is not parked/terminal; collection grants no quiescence authority');
   const attemptId = run.recovery ? run.recovery.id : null;
   if (run.recovery && !segment(attemptId) || (run.ticketInput?.attemptId ?? null) !== attemptId) return hold('missing/mismatched exact saved attempt identity');
-  let attemptRaw: string | null = null;
+  let attemptRaw: string | null = null, attempt: AttemptRecord | null = null;
   if (attemptId) {
     attemptRaw = read(join(state,'recovery','attempts',`${attemptId}.json`));
     const decoded = decodeAttemptRecord(JSON.parse(attemptRaw));
     if (!decoded.ok) return hold(decoded.reason);
-    const a = decoded.record;
-    if (a.id !== attemptId || a.seq !== run.recovery.attempt || a.executionId !== run.executionId || a.iid !== run.iid || a.project !== tracker.project || a.branch !== run.branch || a.implementationBaseSha !== run.implementationBaseSha || a.phase !== 'finished') return hold('saved attempt identity/cleanup is incomplete');
+    const a = decoded.record; attempt = a;
+    if (a.id !== attemptId || a.seq !== run.recovery.attempt || a.executionId !== run.executionId || a.iid !== run.iid || a.project !== tracker.project || a.branch !== run.branch || a.base !== run.base || a.implementationBaseSha !== run.implementationBaseSha || a.phase !== 'finished'
+      || a.worktree !== canonicalWorktree(root,run.branch) || a.gitDir !== attemptGitDir(root,a.id)
+      || a.evidence !== attemptEvidence(root,run.iid,a.id) || a.previousEvidence !== run.evidenceDir) return hold('saved attempt identity/cleanup/evidence relationship is incomplete');
   }
   const receiptRaw = read(receiptFile(state,projectId(root,project.tracker),run.iid)), receipt = JSON.parse(receiptRaw);
   const worktree = canonicalWorktree(root,run.branch);
@@ -146,14 +174,7 @@ export function collectSupervisorInput(o: SupervisorInputOptions): { snapshot: S
   const ownership = () => {
     const raw = readSupervisorOriginal(admissionPath), parsed = JSON.parse(raw);
     if (parsed.version !== 2) return hold('legacy admission cannot establish definitive managed ownership');
-    const admission = migrateAdmission(parsed), generation = admission.generations[tracker.project];
-    if (!Number.isSafeInteger(generation)) return hold('missing definitive admission generation');
-    // Own advisory holds/publication are excluded from the basis, but never from host admission checks.
-    const entries = Object.values(admission.entries).filter(e => admissionConflict(e.project,project));
-    const claims = Object.values(admission.claims).filter(e => keyFor('',e.project) === keyFor('',tracker.project));
-    const recovery = admission.recovery[tracker.project] ?? null;
-    if (entries.length || claims.length || recovery?.pending.length) return hold('managed entry/claim/unsettled recovery retains project ownership');
-    return { generation, entries, claims, recovery };
+    return supervisorInputOwnership(migrateAdmission(parsed),project,expectedOwnHold);
   };
   const owner = ownership();
   const git = (...args: string[]) => supervisorInputGit(root,args);
@@ -182,8 +203,10 @@ export function collectSupervisorInput(o: SupervisorInputOptions): { snapshot: S
   sources.push(original('failure',runFile,runRaw));
   if (attemptRaw) sources.push(original('failure',`saved-attempt:${attemptId}`,attemptRaw));
   // Exact named evidence, never a status excerpt. An interrupted pre-verifier run may legitimately have no report.
-  const evidence = run.evidenceDir;
-  if (!evidence || !inside(join(root,'.factory','evidence'),evidence)) return hold('saved evidence location missing/unsupported');
+  const evidence = attempt ? attempt.evidence : run.evidenceDir;
+  if (!evidence || resolve(evidence) !== evidence || !inside(join(root,'.factory','evidence'),evidence)
+    || !run.evidenceDir || resolve(run.evidenceDir) !== run.evidenceDir || !inside(join(root,'.factory','evidence'),run.evidenceDir)) return hold('saved evidence location missing/unsupported');
+  // A finished recovery's current originals are authoritative; older implementation evidence is never substituted.
   let failures = 0; const absent: string[] = [];
   for (const name of ['verification.json','verdict.md','blocked.json']) {
     const file = join(evidence,name);

@@ -23,15 +23,28 @@ model policy and admission generation **and ownership collections**. The materia
 attempt, receipt, config, saved input, normalized settings, current base SHA and
 ownership). This preserves the existing snapshot schema while making every one
 of these inputs independently recomputable. Changing ownership without advancing
-a normal generation still invalidates/holds; supervisor holds and its own journal
-publication do not recursively change the basis. This exclusion is not permission
-to ignore any hold at admission/send time.
+a normal generation still invalidates/holds. The optional `expectedOwnHold` names
+the exact host-held ID/project/invocation/fence/process-start identity. Both
+immutable admission reads must match it; a missing or replaced own hold refuses
+collection. Only that exact own hold and non-authoritative journal publication
+are excluded from the basis, so preclaim collection and exact-own-hold collection
+remain stable. Every conflicting foreign hold refuses, including pending children,
+canonical-root aliases and admission namespace collisions, without requiring a
+generation change. Unrelated project holds do not enter the material basis. This
+read-only check never prunes owners or transacts admission and establishes neither
+global capacity nor permission at admission/send time.
 
 All eight source roles are represented. Child/immediate-parent and ordered human
 comments include every page and two complete stability-checked passes under one
 30-second collection deadline. Configured Markdown guidelines remain separate
 from Factory prompt/model-policy constraints. Gate rules/config and named saved
 failure originals are preserved, including referenced command-output artifacts.
+For a finished recovery, the validated attempt's canonical ticket/attempt-scoped
+`evidence` supplies the current verdict/report/blocked originals, not the earlier
+implementation's `run.evidenceDir`. The attempt must match the saved run/base,
+worktree, Git directory and previous-evidence relationship. Missing current
+originals hold even if an older implementation verdict exists; changing the current
+failure changes the basis.
 Absent parent/comments/decisions and absent additive guidelines are explicitly
 not-applicable; missing required originals, oversized text or relevant image/video
 originals hold with an actionable explanation rather than truncation. Complete
@@ -49,7 +62,12 @@ change the basis without clearing denials, human holds or cumulative budgets.
 Bounded `DiagnosisMemory` remains supplemental only.
 
 Original reads reject aliases, special files, invalid text, oversized or unstable
-bytes. Each direct Git child has a 1.5-second deadline/output bound and disables
+bytes. Selected-context saved-layout checks apply bounded canonical regular-file
+reads to **all** top-level state JSON before project filtering, and to ownership
+receipts (8 MiB per record). Aliases and special files refuse before opening;
+NOFOLLOW/NONBLOCK plus descriptor/stability checks protect the subsequent open,
+including FIFO substitution, with no second unbounded receipt read.
+Each direct Git child has a 1.5-second deadline/output bound and disables
 optional index locks, fsmonitor and hooks; no diff/textconv, fetch or write command
 is used. The bounded tracker transport remains `commandContextSource`; injected
 transports must honor its supplied budgets. The collector writes only a new
