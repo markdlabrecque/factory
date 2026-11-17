@@ -156,11 +156,11 @@ worker owners, incident/evidence hashes, proposals, host refusal, human requests
 notification receipts, reviews, configured and cumulative budgets, retained execution
 observations, confirmed merge progress and next observation. Review approval is not
 execution, verifier PASS or completion; notification delivery is not approval.
-Original prompts and raw model stdout/stderr are excluded. Proposals include redacted bounded before/after display excerpts and the exact retained proposal ID; these excerpts are not complete original review context.
+Original prompts, hidden reasoning, raw model stdout/stderr, full gate patches and follow-up draft bodies are excluded. Proposals include exact retained proposal IDs, category/path and bounded rationale/alternatives/risks, not before/after code. `diagnostics` include diagnostic/invocation/run identity, basis/snapshot references and the same bounded non-authorizing recommendation as diagnose: rationale, alternatives and typed wait/observe/request-repair/gate-change/follow-up-draft/escalate next steps. No recommendation routes to the legacy action broker, creates a ticket or grants execution authority; future execution still requires all original gates.
 Display text/references are bounded/redacted; inspect originals separately under the
 host-user trust boundary. No tracker refresh/write, model, review, repair, service
 probe, reconciliation, charge, report publication or journal creation occurs on read.
-An absent journal displays observe and empty supervisor history, not an error.
+An absent journal displays observe with explicit `journal.state: none`, not finished work or an error. Passive admission inspection independently reports paged exclusion owners and complete totals, including orphan holds before a journal exists. Dead/unknown owners never release holds; missing/corrupt admission is unknown, not zero. Reservation accounting distinguishes reserved resources, nullable actual usage, provider-usage-derived versus legacy-component-reported provenance, and unknown usage. Units are tokens and micro-USD derived charge, never provider invoice dollars or refunds. No known usage is `null`, not zero.
 Corrupt/foreign state refuses with a secret-safe actionable error; it is never repaired.
 
 Mode/stop record an OS-user audit in the host journal only. Observe fences new review

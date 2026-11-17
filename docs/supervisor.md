@@ -727,7 +727,7 @@ observation-only JSON envelope. Mode defaults to observe without creating a jour
 The envelope separates owners, incident/evidence basis, proposals, host refusal,
 human request/delivery, reviewer decision/provenance, configured/cumulative budgets,
 execution observations, host-confirmed merge progress and the next observation.
-It never copies frozen source/prompt/output bodies. Proposal display includes redacted bounded before/after excerpts, the exact proposal ID, alternatives and risks; display text cannot substitute for retained original review input. Retained display
+It never copies frozen source/prompt/output bodies, full gate patches or follow-up draft bodies. Proposal display includes the exact proposal ID, category/path, alternatives and risks, not before/after code. `diagnostics` and diagnose results share one bounded recommendation contract: classification, rationale, alternatives and a typed next step for wait, observe, request-repair, gate-change, follow-up-draft and escalate. Diagnostic/invocation/run IDs, basis/snapshot hashes and safe original-input references bind the display to retained evidence. Advice is not current authority or automatically usable; any future execution requires all original gates and fresh material/ownership checks. Retained display
 collections have deterministic 128-entry pages (`--offset`), with unresolved holds
 and unsettled ownership first and explicit total/before/after counts. Aggregate human
 hold/pending-worker state is never page-limited. Compare revisions across pages;
@@ -775,9 +775,7 @@ or an operational pilot. Scoped input application and outside-lock lifecycle tra
 
 `board/supervisor.mts` is a passive sanitized adapter over the existing version-1
 CLI status projection, not another policy engine. The server supplies the host CLI
-reader for registered roots only; browsers cannot supply paths. A missing/corrupt
-journal, revision-zero absent project or unavailable CLI is UNKNOWN. No journal is
-created by inspection. Standalone copies without the CLI intentionally show unknown.
+reader for registered roots only; browsers cannot supply paths. A legitimate revision-zero absent project is explicitly `journal.state: none`, not a completed diagnosis. Corrupt journals or an unavailable CLI are UNKNOWN, never empty/green. The independent passive `admission` read shows project exclusion totals and paged owners even before any journal is written; missing/corrupt admission remains unknown. Dead/unknown owners do not release exclusions. No lock, pruning, migration write, lease renewal or journal creation occurs on inspection. Standalone copies without the CLI intentionally show unknown.
 The adapter ships in the selected inventory as `supervisor-view.mts` (distinct from
 the existing diagnosis `supervisor.mts`) and in standalone Board copies.
 
@@ -786,8 +784,8 @@ no-store on success and error, and uses the same deterministic 128-entry pages a
 omission counts as CLI inspection. Safety indexes remain untruncated. Aggregate
 holds, charges and interventions are not limited to the selected page; compare
 revisions when navigating. The small accessible Board section shows mode and why
-work waits, HUMAN DECISION NEEDED and exact question/next action. Expand the plain
-text status page to inspect proposal ID and redacted before/after/risks, review
+work waits, HUMAN DECISION NEEDED and exact question/next action, retained rationale/alternatives/typed next step, diagnostic/run/basis references, exclusion and stop-pending totals. Expand the plain
+text status page to inspect proposal ID/category/risks, review
 outcome/host completion, evidence references, budgets/accounting and confirmed merge
 progress. Excerpts are explicitly not the exact originals; inspect retained originals
 locally before a decision. Neither model text nor arbitrary references become HTML,
@@ -810,7 +808,7 @@ Notes do not change requirement fingerprints or reset diagnosis/recovery budgets
 successful journal transitions outside their lock, using the existing execution-event
 store/export. Journal status supplies cumulative charged ceilings, separately summed
 known actual usage and explicit unknown-accounting reservation counts per diagnosis/
-review role, plus exact audited local-resolution intervention counts. Missing state
+review role, plus exact audited local-resolution intervention counts. Per-reservation accounting labels `provider-usage-derived`, `legacy-component-reported` or `unknown`; component reports never prove a provider invoice. Units are tokens and micro-USD derived charge, not invoice dollars or refunds. Missing actual usage is null, never zero; a role with no known usage has `knownUsage: null`. Missing state
 never becomes zero. Refused outcomes and observed incident-to-confirmed-merge elapsed
 time are observational, not a second truth store or action authority. Missing history,
 unknown merge timestamps and project-wide incidents have unknown elapsed time;

@@ -27,19 +27,21 @@ export interface FactInputs {
 }
 /** Only bounded display text. Never use redacted text as complete review input. */
 export function safeExcerpt(text: string, limit = FACT_LIMITS.excerpt): string {
-  return text.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|SECRET)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/gi, '[REDACTED]')
+  return text.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/-----BEGIN [^-]*(?:PRIVATE KEY|SECRET)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/gi, '[REDACTED]')
     .replace(/\b(?:https?:\/\/)[^\s<>"']+/gi, value => safeReference(value) ?? '[REDACTED URL]')
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|AKIA[A-Z0-9]{16})\b/g, '[REDACTED]')
     .replace(/\b(?:authorization|password|passwd|secret|token|api[_-]?key)\s*[:=]\s*[^\n]+/gi, '[REDACTED]')
-    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').slice(0, Math.max(0, Math.min(limit, FACT_LIMITS.excerpt)));
+    .replace(/(?:~\/|op:\/\/)[^\s<>"'`]+|(?:\/?[\w.-]+\/)*(?:\.ssh|\.env(?:\.[\w.-]+)?|[\w.-]*(?:credentials?|secrets?)[\w.-]*)(?:\/[^\s<>"'`]+)?/gi, '[REDACTED PATH]')
+    .replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, ' ').slice(0, Math.max(0, Math.min(limit, FACT_LIMITS.excerpt)));
 }
 /** References are opaque locators, never followed by projection. Drop URL credentials/query/fragment. */
 export function safeReference(value: string | undefined): string | null {
   if (!value || value.length > 2048 || /[\x00-\x20\x7f]/.test(value) || /(?:gh[pousr]_|github_pat_|sk-|AKIA[A-Z0-9]{16}|(?:password|token|api[_-]?key)=)/i.test(value)) return null;
   if (/^https?:/i.test(value)) {
-    try { const u = new URL(value); if (u.protocol !== 'https:') return null; u.username = ''; u.password = ''; u.search = ''; u.hash = ''; return u.href; } catch { return null; }
+    try { const u = new URL(value); if (u.protocol !== 'https:' || /(?:secret|credential|\.env|\.ssh|op:)/i.test(u.pathname)) return null; u.username = ''; u.password = ''; u.search = ''; u.hash = ''; return u.href; } catch { return null; }
   }
-  return /^(?:\/|[A-Za-z0-9_.-])/.test(value) && !value.includes('://') && !/(?:secret|\.env|credential|op:)/i.test(value) ? value.slice(0, 1024) : null;
+  return !/[<>"'`\u202a-\u202e\u2066-\u2069]/.test(value) && /^(?:\/|[A-Za-z0-9_.-])/.test(value) && !value.includes('://') && !/(?:secret|\.env|\.ssh|credential|op:)/i.test(value) ? value.slice(0, 1024) : null;
 }
 export function observed<T>(source: string, kind: 'live' | 'saved', observedAt: string, value: T): Observation<T> {
   if (!Number.isFinite(Date.parse(observedAt))) throw Error('Invalid source time');

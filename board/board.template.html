@@ -1321,6 +1321,17 @@
       else {
         section.appendChild(el('p', null, 'Mode: ' + s.mode + ' · revision ' + s.revision + (s.hostDecision.humanRequired ? ' · HUMAN DECISION NEEDED' : ' · no retained human hold')));
         section.appendChild(el('p', null, s.hostDecision.refusal));
+        section.appendChild(el('p', null, 'Journal: ' + (s.journal ? s.journal.state : 'unknown') + ' · project exclusions: ' + (s.admission && s.admission.total !== null ? s.admission.total : 'UNKNOWN') + ' · stop/cleanup pending: ' + s.cancellation.pendingTotal));
+        (s.diagnostics || []).forEach(function (d) {
+          section.appendChild(el('h4', null, 'Retained advice — NOT execution authority · ' + d.outcome));
+          section.appendChild(el('p', null, 'Diagnostic ' + d.id + ' · run ' + (d.runId || 'UNKNOWN') + ' · basis ' + d.basisHash));
+          if (d.recommendation) {
+            section.appendChild(el('p', null, d.recommendation.rationale));
+            section.appendChild(el('p', null, 'Alternatives: ' + d.recommendation.alternatives.join(' | ')));
+            section.appendChild(el('p', null, 'Typed next step: ' + JSON.stringify(d.recommendation.nextStep)));
+          } else section.appendChild(el('p', null, d.reason));
+          section.appendChild(el('p', null, 'Resources (tokens / micro-USD): reserved ' + JSON.stringify(d.accounting.reserved) + ' · actual ' + (d.accounting.actual === null ? 'UNKNOWN' : JSON.stringify(d.accounting.actual)) + ' · ' + d.accounting.provenance + '; derived charge, NOT provider invoice/refund.'));
+        });
         s.incidents.forEach(function (i) { section.appendChild(el('p', null, i.id + ': ' + i.state + ' — ' + i.reason)); });
         s.humanRequests.forEach(function (h) {
           section.appendChild(el('h4', null, h.resolution ? 'Resolved locally (not approval)' : 'HUMAN DECISION NEEDED'));
@@ -1348,7 +1359,7 @@
       fetch('/api/supervisor?offset=' + offset, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw Error('unknown'); return r.json(); }).then(function (d) {
         if (d.version !== 1 || d.authority !== 'observation-only' || !Array.isArray(d.projects)) throw Error('unknown');
         paintSupervisor(board.refs.supervisorBody, d);
-        next.disabled = !d.projects.some(function (p) { return p.status && Object.values(p.status.pagination.collections).concat(p.outcomes ? Object.values(p.outcomes.pagination.collections) : []).some(function (c) { return c.after > 0; }); });
+        next.disabled = !d.projects.some(function (p) { return p.status && Object.values(p.status.pagination.collections).concat(p.status.admission && p.status.admission.after ? [p.status.admission] : []).concat(p.outcomes ? Object.values(p.outcomes.pagination.collections) : []).some(function (c) { return c.after > 0; }); });
       }).catch(function () { board.refs.supervisorBody.replaceChildren(el('p', null, 'UNKNOWN: supervisor observation failed; no repair attempted.')); next.disabled = true; })
         .finally(function () { busy = false; previous.disabled = offset === 0; });
     }
