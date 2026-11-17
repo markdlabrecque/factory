@@ -1,4 +1,5 @@
-// Execute normal readiness/setup/verifier gates with real Git and fixture-owned agent/Docker/tracker boundaries.
+// Execute normal readiness/setup/verifier gates and optionally hand genuine closed custody to public-CLI journeys.
+// Uses real Git and fixture-owned agent/Docker/tracker boundaries.
 // No Docker daemon, credentials, browser installation, tracker or service manager is used.
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +33,7 @@ import { readPayloadCustody, payloadRunClosed } from './payload-custody.mts';
 import { readAdmission } from '../board/admission.mts';
 
 
-export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false) {
+export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false, publicJourney?: (context: any) => Promise<void>) {
     const home = mkdtempSync(join(tmpdir(), 'verification-entry-'));
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const root = join(home, 'site'), origin = join(home, 'origin.git'), p = paths(home), state = copied ? p.state : join(home, 'state'), fake = join(home, 'fake'), bin = join(home, 'bin');
@@ -205,6 +206,12 @@ const ticket =`).replace("const out = (v)", `if (changed) {
  if (scenario === 'excluded') ticket.labels.push({name:'needs-human'});
 }
 const out = (v)`).replace('parent: null,', "parent: changed && scenario === 'parent' ? {number:9} : null,").replace('out([[]]);', "out([[...(changed && scenario === 'comment' ? [{body:'Human added requirements',system:false}] : [])]]);"), { mode: 0o755 });
+    if (publicJourney) {
+      const gh = join(bin,'gh');
+      writeFileSync(gh,readFileSync(gh,'utf8').replace('const [a, b] = args;', `const [a, b] = args;
+if (!((a === 'label' || a === 'issue' || a === 'pr') && ['list','view','checks'].includes(b) || a === 'api' && !args.some(v => ['POST','PUT','PATCH','DELETE'].includes(v)))) process.exit(90);
+`));
+    }
     writeFileSync(join(bin, 'docker'), `#!${process.execPath}
 import * as fs from 'node:fs'; import * as path from 'node:path';
 import { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, 'fixtures/capability-docker.mjs'))};
@@ -465,6 +472,10 @@ console.log('sha256:'+'a'.repeat(64));
         assert.deepEqual([...custody.payloads.values()], [{container:'fixture-container',absent:true}]);
         assert.deepEqual(readAdmission(state).entries, {}, 'only sealed actual normal scope releases its managed entry');
         const project = {root,tracker:{kind:'github' as const,host:'github.com',project:'owner/repo'}};
+        if (publicJourney) {
+          await publicJourney({home,root,p,state,fake,bin,runtime,run,rawRun,project,git});
+          return;
+        }
         const options = {project,invocationId:'actual-normal-producer',runtimeRoot:runtime.directory,
           savedRun:{key:'owner_repo--7',executionId:run.executionId},rollout:{olderRuntimesQuiesced:true as const,unmanagedWorkQuiesced:true as const}};
         const bytes = '{"stage":"stopped"}';

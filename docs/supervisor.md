@@ -4,6 +4,45 @@ This is the authoritative reference for the project supervisor feature. The impl
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
+## Offline public copied-install evidence
+
+`cli/test/supervisor-acceptance.test.mts` has exactly two public-CLI wiring
+journeys. Run and optionally retain their evidence with the command in
+[Testing: public copied-install journeys](../TESTING.md#public-copied-install-advisory-journeys).
+Both start with the shared normal entrypoint producer's real saved execution and
+sealed payload custody, then invoke a private copied `cli/bin/factory.mts` against
+its private selected flat runtime. The actual host/platform readers, complete
+original collector, journal/admission, worker, owned process guard, four pinned
+provider archives and SDK serializer execute unchanged. Original repository
+production imports are denied after test instrumentation loads, including an
+explicit negative probe per public process. No test-only supervisor, authorization
+capability, runtime fallback or public bypass flag supplies permission.
+
+The known-usage journey retains bounded rationale, alternatives and a typed wait
+through fresh public status/explain and the production Board projection. Fresh
+unchanged diagnosis reuses the exact basis/diagnostic and authoritative prior set;
+it adds no request, charge, exclusion or runtime pin. The stop journey commits
+public stop after the actual send pipe barrier: new authorization is blocked but
+already authorized work remains honestly pending. Unknown terminal usage produces
+a genuine durable local human request. The controller is killed at an IPC barrier
+only **after the real parent-directory fsync**, before CLI return. Restart preserves
+full charge/exclusion/pins and refuses both replacement diagnosis and conflicting
+managed manual work. This does not pretend a visible rename alone is durable, or
+that stop unsends an owned request. Existing process/order units separately prove
+controller loss while the payload remains live and both stop/authorization orders.
+
+Service/tracker read responses, bounded SSE/usage, normal sandbox/agent behavior
+and the private user-approved expiring operator rollout assertion are synthetic.
+The assertion uses the default production record reader, but establishes no
+installed quiescence. Native outbound is denied; read-only program stubs record
+calls and reject writes/forbidden programs; only synthetic environment auth is
+passed. Optional evidence records actual argv/public JSON, request trace,
+journal/originals, custody/process ownership, manifest IDs, retained pins and exact
+work/index/ref preservation before fixture teardown. Test-only instrumentation is
+not installed production code and needs no runtime inventory entry. These cases
+prove local offline wiring only: not remote enforcement, actual billing, model
+semantics, installed activation, independent review success or a completed pilot.
+
 ## Protected runtime ownership before public composition
 
 `createSupervisorRuntime` in `cli/src/supervisor-runtime.mts` is the trusted
