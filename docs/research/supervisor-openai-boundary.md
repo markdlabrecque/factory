@@ -2,6 +2,20 @@
 
 Research date: 2026-11-17 UTC. Scope: owner-approved, explicit advisory diagnosis for one named ticket and its saved run; OpenAI only. This is research, not activation approval, implementation, or a replacement for the authoritative supervisor contract.
 
+## Follow-up: executable constrained-path investigation
+
+The [constrained provider contract](../design/supervisor-provider-contract.md)
+selects the supported direct Pi-AI OpenAI Responses SDK surface and records its
+actual pinned-artifact offline request trace. The published serializer/catalogue
+hashes match this investigation. Its direct payload hook fails closed before
+transmission; the extension runner's superficially similar hook does not. It uses
+a conservative provider-context admission bound, not a byte/token estimate.
+This does **not** retrofit the unchanged print invocation or ship a paid boundary:
+journal authorization, durable settlement, lifecycle ownership and real host
+composition remain required. Fixture eligibility and HTTP/SSE are synthetic;
+remote acceptance, billing and paid evaluation remain untested/unauthorized.
+The findings below describe the original unchanged-print investigation.
+
 ## Finding
 
 **The fixed model is supported in the inspected current packaged Pi catalogue and documented by OpenAI. The existing Factory Pi print invocation does not, however, demonstrate the `DiagnosisBoundary` required for paid diagnosis. Keep that boundary held.** The blocker is not model existence, and neither switching providers nor building a second provider stack is justified.
