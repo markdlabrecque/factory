@@ -45,6 +45,6 @@ if (process.argv[1]?.endsWith('supervisor-runner.mts')) {
     const text = frozen ? JSON.stringify({version:1,incidentId:frozen.incidentId,basisHash:frozen.basis,
       classification:'expectation',rationale:'Synthetic typed wait; no model quality assertion',alternatives:['Inspect the retained originals'],
       action:{kind:'wait',expectation:'Await a human material instruction'}}) : offlineText;
-    return new Response(providerTextStream(text), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
+    return new Response(providerTextStream(text, {missingUsage:config.missingUsage === true}), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
   };
 }

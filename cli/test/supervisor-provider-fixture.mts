@@ -36,12 +36,14 @@ export const providerTerminal = () => ({ type: 'response.completed', response: {
     cache_write_tokens_details: { ttl_30m_tokens: 0, ttl_12h_tokens: 0 } }, output_tokens: 10,
     output_tokens_details: { reasoning_tokens: 8 }, total_tokens: 35 } } });
 export const offlineText = 'a'.repeat(16_384); // Synthetic model output only; never useful advice or measured usage.
-export function providerTextStream(text = '{}') {
+export function providerTextStream(text = '{}', options: {missingUsage?: boolean} = {}) {
+  const terminal: any = providerTerminal();
+  if (options.missingUsage) delete terminal.response.usage;
   const item = { type: 'message', id: 'msg_offline', role: 'assistant', status: 'completed',
     content: [{ type: 'output_text', text, annotations: [] }] };
   return sse({ type: 'response.output_item.added', output_index: 0, item: { ...item, content: [] } })
     + sse({ type: 'response.output_text.delta', output_index: 0, item_id: item.id, content_index: 0, delta: text })
-    + sse({ type: 'response.output_item.done', output_index: 0, item }) + sse(providerTerminal());
+    + sse({ type: 'response.output_item.done', output_index: 0, item }) + sse(terminal);
 }
 const host = { version: 1 as const, enabled: true as const, profile: ADVISORY_PROFILE_ID, capacity: 1 as const,
   cumulative: { tokens: 10_000_000, cost: 100_000_000, calls: 10 } };

@@ -103,6 +103,14 @@ final transition enforces current journal stop/human/denial/supersession/deadlin
 fences; no fake proposed decision is recorded for refused output. Full reserved
 charge remains spent. Advice never creates execution or independent-review authority.
 
+Handled unknown cleanup/accounting or interrupted owned work records a durable,
+invocation/fence-bound diagnostic and actionable local HumanRequest through the
+existing conservative diagnosis transition: null actual usage, unconfirmed cleanup,
+and an ambiguous reservation. This is not a terminal settlement. The full charge,
+exclusion and runtime pins remain; reopen cannot launch a replacement send or
+promote absent receipts into cleanup authority. A controller that disappears before
+publication still leaves inspectable held ownership rather than fabricated completion.
+
 Preparation/reuse is read-only: exact exclusion and runtime pins are acquired only
 after the existing worker's exact cache comparison and new-call preflight. Thus an
 unchanged retained wait remains reusable with host maxCalls=1 already spent, without

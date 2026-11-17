@@ -89,15 +89,14 @@ are not provider capability evidence.
 
 The SAME producer fixture now invokes the copied host's existing worker, actual
 owned process and pinned SDK using T04's network-denied synthetic SSE preload,
-then checks genuine raw accounting/cleanup and durable local HUMAN settlement.
+then checks genuine raw accounting/cleanup, retained non-executing advice and durable local HUMAN settlement. A missing-terminal-usage variant proves a durable actionable human request survives reopen while the reservation remains ambiguous, fully charged and excluded with its runtime pins retained.
 The existing T04 process fixture adds deterministic last-send observation barriers:
 stop-before-auth, changed source and actual controller disconnect all leave no
 send and retain full charge/ownership. Existing journal units own both stop/auth
 orderings; no duplicate provider matrix was added. Worker units cover asynchronous
 observations while retaining synchronous component fixtures.
 
-This is **not** completed terminal advice composition: usable-advice settlement,
-composed safe release, receipt reconciliation and final acceptance remain outstanding.
+Terminal advice composition, exact receipt-based release/reconciliation and spent-budget cache reuse are exercised through the copied host. Handled unknown accounting/cleanup records an unsettled human outcome, never a successful settlement or release. Complete mandatory and hosted acceptance remain separate gates.
 No paid/live probe or model semantics is claimed.
 The unchanged 15-second direct-child, 120-second test, four 180-second shard and
 concurrency-four limits still apply; complete mandatory/release gates are separate.

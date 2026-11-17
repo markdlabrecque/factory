@@ -8,9 +8,11 @@ template overrides to this workflow.
 
 ## Host preparation and current originals
 
-The source-only `prepareSupervisorHost` API in `cli/src/supervisor-host.mts` claims
-exact custody-backed admission exclusion before creating the protected runtime
-context. Its asynchronous `current()` rereads the existing scheduler backend and
+The source-only `prepareSupervisorHost` API in `cli/src/supervisor-host.mts` creates
+a validated read-only runtime context and rebuilds current originals before exact
+cache comparison. A new paid call then acquires custody-backed exclusion and
+runtime pins before reservation; cached reuse acquires neither. Its asynchronous
+`current()` rereads the existing scheduler backend and
 registry opt-in, validates private host policy and exact hold ownership, and
 rebuilds the complete saved-run originals outside locks. Each private collection
 gets its own host-only destination; generated freezes and observations do not

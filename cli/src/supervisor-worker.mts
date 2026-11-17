@@ -267,6 +267,25 @@ async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: Su
   let handle: Awaited<ReturnType<DiagnosisBoundary['start']>> | undefined, output = Buffer.alloc(0), errors = Buffer.alloc(0);
   let cancelled = false;
   const abort = () => { cancelled = true; if (handle) void handle.terminate(); };
+  // Uncertainty is an unsettled human outcome, never a successful receipt-backed closure.
+  // The existing diagnosis transition explicitly permits only null usage/false cleanup for advisory ambiguity.
+  const uncertain = (reason: string): DiagnosisResult => {
+    const completedAt = new Date().toISOString();
+    const body = {reservationId:o.invocationId,incidentId,basisHash:basis,snapshotHash:supervisorHash(a.snapshot),fence:o.fence,
+      startedAt:at,completedAt,inputRef,outcome:'process-failed' as const,reason:reason.slice(0,4000),
+      stdout:capped(output,DIAGNOSIS_OUTPUT_BYTES),stderr:capped(errors,8192),decision:null};
+    const diagnostic: Diagnostic = {id:supervisorHash(body),...body}; validateDiagnostic(diagnostic);
+    writeDurable(join(dir,'uncertain-result.json'),JSON.stringify(diagnostic)+'\n');
+    s = readSupervisor(o.stateDir,project);
+    const retained = Object.values(s.diagnostics ?? {}).find(d => d.reservationId === o.invocationId);
+    if (retained && s.humans[incidentId]) return {state:'human-required',reason:retained.reason,diagnosticId:retained.id};
+    const request: HumanRequest = {version:1,id:`${o.invocationId}:uncertain-human`,project,scope:a.snapshot.scope,incidentId,
+      proposalId:diagnostic.id,reason:'authority-uncertain',question:`Owned diagnosis ${o.invocationId} has unresolved cleanup or accounting. Inspect its original evidence.`,
+      nextAction:'Confirm exact owned process-group absence and immutable provider usage before receipt reconciliation. Do not retry, reset charges, release exclusion/pins or infer no-send from missing records.',
+      evidence:[inputRef,join(dir,'uncertain-result.json')],stop:'required',delivery:{state:'pending',attempts:0}};
+    commit({kind:'diagnosis',id:`${o.invocationId}:uncertain`,at:completedAt,diagnostic,owner,actual:null,processConfirmed:false,request});
+    return {state:'human-required',reason:diagnostic.reason,diagnosticId:diagnostic.id};
+  };
   o.signal?.addEventListener('abort',abort,{once:true});
   const fresh = async () => {
     const f = await current(), d = f.advisory;
@@ -297,7 +316,7 @@ async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: Su
     // Rebuild outside every lock before the journal's atomic terminal publication. Stale output may close only to HUMAN.
     let publication: Awaited<ReturnType<typeof fresh>> | {refused:string};
     try { publication = await fresh(); } catch (e) { publication = {refused:String(e)}; }
-    if (!confirmed || handle.usage() === null) return held('Unknown owned cleanup/accounting; full charge, exclusion and runtime pins retained');
+    if (!confirmed || handle.usage() === null) return uncertain('Unknown owned cleanup/accounting; full charge, exclusion and runtime pins retained');
     s = readSupervisor(o.stateDir,project);
     s = await settleAdvisory(o.stateDir,project,s.revision,o.invocationId,publication);
     const diagnostic = Object.values(s.diagnostics ?? {}).find(d => d.reservationId === o.invocationId);
@@ -305,7 +324,7 @@ async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: Su
       return {state:'proposed',decision:diagnostic.decision,diagnosticId:diagnostic.id};
     return {state:'human-required',reason:diagnostic?.reason ?? 'Inspect retained terminal evidence',diagnosticId:diagnostic?.id ?? grant.id};
   } catch (e) {
-    if (handle) await handle.terminate();
-    return held(String(e));
+    if (handle) { try { await handle.terminate(); } catch { /* Unknown cleanup remains unsettled and retained. */ } }
+    return uncertain(`Owned diagnosis interrupted: ${String(e)}`);
   } finally { o.signal?.removeEventListener('abort',abort); }
 }

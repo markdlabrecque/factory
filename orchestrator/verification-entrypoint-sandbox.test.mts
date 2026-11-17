@@ -7,6 +7,7 @@ for (const scenario of ['custody-create-error','custody-registration-error']) {
 }
 
 test('actual flat normal producer saves exact payload closure and only that saved run permits exclusion', t => normalEntrypointFixture(t, 'no-commit-custody', 'openai'));
+test('actual owned host missing terminal usage retains a durable human request, charge, exclusion and pins', t => normalEntrypointFixture(t, 'no-commit-custody-unknown-usage', 'openai'));
 
 test('actual flat main, dispatch and shell bootstrap refuse a real supervisor hold before tracker, provider or readiness work', t => normalEntrypointFixture(t, 'supervisor-held', 'openai'));
 

@@ -63,7 +63,7 @@ export const pi = (model, options) => {
   return Object.defineProperty({model, thinking: options.thinking}, 'sessionRoot', {value:options.sessionStorage?.hostSessionsDir});
 };
 export async function createSandbox(o) {
-  if (scenario === 'no-commit-custody') {
+  if (scenario.startsWith('no-commit-custody')) {
     const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
     const run = JSON.parse(readFileSync(join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json')));
     const c = readPayloadCustody(process.env.SANDCASTLE_STATE_DIR,run.payloadCustody);
@@ -104,7 +104,7 @@ export async function createSandbox(o) {
           while (!readFileSyncBarrier()) await new Promise(resolve => setTimeout(resolve, 10));
         }
         if (scenario.startsWith('no-commit')) {
-          if (scenario === 'no-commit-custody') {
+          if (scenario.startsWith('no-commit-custody')) {
             const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
             const run = JSON.parse(readFileSync(join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json')));
             const c = readPayloadCustody(process.env.SANDCASTLE_STATE_DIR,run.payloadCustody);
@@ -171,7 +171,7 @@ export async function createSandbox(o) {
     }
     const config = join(root, '.factory/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "openai"', `family = "${family}"`));
-    if (scenario === 'no-commit-custody') writeFileSync(config,readFileSync(config,'utf8') + `
+    if (scenario.startsWith('no-commit-custody')) writeFileSync(config,readFileSync(config,'utf8') + `
 [supervisor]
 enabled = true
 max_tokens = 10000000
@@ -460,7 +460,7 @@ console.log('sha256:'+'a'.repeat(64));
       const custody = readPayloadCustody(state, run.payloadCustody);
       assert.equal(custody.sealed, !['no-commit-cleanup-error','no-commit-unconfirmed-cleanup'].includes(scenario));
       if (!custody.sealed) assert.equal(Object.keys(readAdmission(state).entries).length,1,'uncertain close retains entry despite process exit');
-      if (scenario === 'no-commit-custody') {
+      if (scenario.startsWith('no-commit-custody')) {
         assert.equal(readFileSync(join(fake,'custody-before-create'),'utf8'),'pending');
         assert.deepEqual([...custody.payloads.values()], [{container:'fixture-container',absent:true}]);
         assert.deepEqual(readAdmission(state).entries, {}, 'only sealed actual normal scope releases its managed entry');
@@ -515,7 +515,7 @@ console.log('sha256:'+'a'.repeat(64));
         // network-denied SSE preload; no fabricated grant/terminal receipt and no model-semantics claim.
         backend.enabled=true;
         const preloadConfig=join(fake,'advisory-preload.json'), barrier=join(fake,'advisory-network.json');
-        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier,
+        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier,missingUsage:scenario === 'no-commit-custody-unknown-usage',
           diagnosisInput:join(state,'supervisor',supervisorHash(project.root),supervisorHash(options.invocationId),'input.json')}));
         const preload=new URL('../cli/test/supervisor-process-preload.mts',import.meta.url); preload.searchParams.set('config',preloadConfig);
         const originalSpawn=cp.spawn;
@@ -529,6 +529,26 @@ console.log('sha256:'+'a'.repeat(64));
         let diagnosis;
         try { diagnosis=await prepared.invoke('sk-synthetic-offline-not-a-secret'); }
         finally { cp.spawn=originalSpawn; syncBuiltinESMExports(); }
+        if (scenario === 'no-commit-custody-unknown-usage') {
+          assert.equal(diagnosis.state,'human-required',JSON.stringify(diagnosis));
+          const reopened = readSupervisor(state,project), key = supervisorHash(options.invocationId);
+          assert.equal(reopened.reservations[key].state,'ambiguous');
+          assert.equal(reopened.reservations[key].actual,null);
+          assert.equal(reopened.advisory?.settlements?.[key],undefined,'uncertainty is not successful settlement');
+          assert.equal(Object.keys(reopened.advisory!.sends).length,1);
+          assert.match(reopened.humans[reopened.reservations[key].incidentId].nextAction,/Do not retry, reset charges/);
+          assert.equal(reopened.humans[reopened.reservations[key].incidentId].delivery.attempts,0);
+          assert.equal(checkSupervisorHold(state,prepared.hold!),true,'unknown usage retains exclusion');
+          const pin = prepared.runtime.lease()!;
+          assert(existsSync(join(hp.runtimes,'.leases',`${pin.token}.json`)),'unknown usage retains runtime pins');
+          prepared.runtime.assertCurrent();
+          assert.deepEqual(reopened.charged.diagnosis,reopened.reservations[key].reserved,'the full reservation remains charged');
+          const again = await prepared.invoke('sk-synthetic-offline-not-a-secret');
+          assert.equal(again.state,'held','durable human stop refuses replacement send');
+          assert.deepEqual(readSupervisor(state,project).charged,reopened.charged);
+          assert.equal(Object.keys(readSupervisor(state,project).advisory!.sends).length,1);
+          return;
+        }
         assert.equal(diagnosis.state,'proposed',JSON.stringify(diagnosis));
         assert(existsSync(barrier),'the actual SDK reached only the network-denied synthetic SSE transport');
         const terminal=readSupervisor(state,project), key=supervisorHash(options.invocationId);
