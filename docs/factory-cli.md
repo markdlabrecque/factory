@@ -59,7 +59,7 @@ Orphan entries and supervisor holds are retained, including dead owners. A canon
 root match **or** colliding tracker/run-state namespace conflicts; exact ownership
 checks bind root **and** structured tracker, invocation/fence and PID/start.
 
-These are source primitives, not a public diagnosis command. `settleAdvisory` can
+These are source primitives used by the explicit diagnosis command below, not execution authority. `settleAdvisory` can
 close an actual registered/authorized invocation only with revalidated immutable known
 provider usage and confirmed whole-group cleanup. Journal CAS atomically finishes the
 reservation and retains full reserved charge plus a local human-required disposition,
@@ -85,8 +85,51 @@ source admission API may exempt only one explicitly named current modern saved r
 with a complete source/runtime/claim-bound immutable normal custody seal; new
 attempts and recovery/delivery ownership cannot inherit it. It never deletes or
 filters other raw records, and active entries/claims still hold. This prerequisite
-adds no public host command or automatic cleanup/recovery. No real installation,
+adds no public quiescence-attestation command or automatic cleanup/recovery. No real installation,
 rollout, paid probe or pilot acceptance is implied by offline copied-runtime tests.
+
+## Explicit advisory diagnosis
+
+```sh
+factory supervisor diagnose <ticket> --project <name|path> [--json]
+```
+
+This explicit request selects exactly one registered canonical project and its current
+saved execution. Positive decimal ticket numbers only; no historical run, model,
+actor, capability, budget-reset or authentication flags. The actual command calls
+`prepareSupervisorHost` and its `invoke`/existing `diagnoseProject`; it does not
+create a second host or enable act. Observe permits explicit advisory diagnosis
+within existing controls; global off/unknown, never-opted-in/paused projects,
+stopped mode, unsupported/opaque complete overrides, missing originals/policy,
+and unresolved human/denial holds still refuse. Ordinary complete overrides are
+unchanged for non-advisory work.
+
+The supported API-key route accepts only an already supplied bounded non-secret-in-output
+`OPENAI_API_KEY` environment handoff. It never discovers credentials, reads auth
+files, resolves vault references or probes a token/model. Missing/invalid auth or
+unsupported family is held before new paid acquisition; exact retained reuse needs
+no new paid call or key. The private host/project cumulative ceilings, owned worker,
+one-use send gate, receipt settlement and exact cleanup/reconciliation are unchanged.
+
+**Current prerequisite:** new paid acquisition also requires independent older-runtime
+and unmanaged-work quiescence evidence. No trusted public source of that evidence is
+shipped yet. The CLI supplies no fabricated attestation, so it holds a new call before
+creating exclusion/pins. Source host callers with independently established prerequisites
+retain their existing explicit API. This command is not installed journey or pilot approval;
+no policy provisioning, scheduling, review, recovery, gate edit, delivery or notification occurs.
+Do not enable/mutate a project merely to get past a hold.
+
+Output is version-1 JSON (`--json` compact, otherwise pretty) with advice-only authority,
+`held|proposed|reused|human-required`, safe project/ticket/current-run identity,
+invocation/diagnostic/incident IDs where present, bounded reason/recommendation kind,
+reservation, known/unknown actual accounting, cumulative charges and safe local evidence
+references. No raw prompt, stdout/stderr, provider stream, reasoning or secret is printed.
+Advice grants no execution authority. Exits: 0 proposed/reused, 2 retained human-required,
+1 held/invalid/failed. Status/explain still exit 0 for successful observations of holds.
+SIGINT/SIGTERM request owned cancellation and await its bounded settlement, then exit
+130/143 respectively; they do not claim immediate termination. Pending/unknown accounting
+retains full charge and exclusion. Separate `stop` writes only its durable fence and
+reports pending cancellation, never kills a raw PID.
 
 ## Supervisor inspection and project controls
 
@@ -153,8 +196,8 @@ reset/refund command, automatic provisioning or policy upgrade. The config
 directory and policy file must be owner-only, outside all agent/project mounts;
 missing, unreadable, linked, malformed, unknown or insufficient policy holds.
 
-No public paid diagnosis command or host-policy provisioning/inspection command is
-shipped by this foundation. Existing status/explain remain passive journal
+The explicit diagnosis command above consumes this foundation; no host-policy
+provisioning/inspection command or public quiescence attestation is shipped. Existing status/explain remain passive journal
 observations, not validation of current host spending permission. The source host
 loader can inspect and validate policy without writing it; a later explicitly
 approved installation/configuration step must establish the private directory and

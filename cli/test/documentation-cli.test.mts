@@ -17,12 +17,13 @@ const docs = readFileSync(new URL('../../docs/factory-cli.md', import.meta.url),
 
 test('documented operator forms agree with CLI help and parser', t => {
   const {home: dir, p} = home(t); const root = repo(p, 'site'); const stub = systemctlStub(t, p);
-  const env = { ...process.env, ...stub.env, HOME: dir, FACTORY_HOME: dir };
-  const cli = (args: string[]) => spawnSync(process.execPath, [factoryBin, ...args], {cwd: root, env, encoding: 'utf8'});
+  const env = { ...process.env, ...stub.env, HOME: dir, FACTORY_HOME: dir, OPENAI_API_KEY:'synthetic-non-secret-key' };
+  const cli = (args: string[]) => spawnSync(process.execPath, [factoryBin, ...args], {cwd: root, env, encoding: 'utf8', timeout:15000});
   const help = cli(['--help']); assert.equal(help.status, 0, help.stderr);
   const forms = [
     'factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]',
     'factory run <ticket> [--project <name>]',
+    'factory supervisor diagnose <ticket> --project <name|path> [--json]',
     'factory schedule status [--project <name|path>] [--json]',
     'factory recovery status [--project <name|path>] [--json]',
   ];
@@ -30,6 +31,9 @@ test('documented operator forms agree with CLI help and parser', t => {
   assert.match(docs, /factory dispatch\s+one pass \(--dry-run, --max N, --whole-issues\)/);
   assert.match(docs, /factory run <ticket>/);
   for (const form of forms.slice(2)) assert.ok(docs.includes(form), form);
+  assert.ok(help.stdout.includes(forms[2]));
+  const held=cli(['supervisor','diagnose','7','--project',root,'--json']);
+  assert.equal(held.status,1,held.stderr);assert.equal(JSON.parse(held.stdout).state,'held');
   for (const [command, options] of [['dispatch',['--dry-run','--max','--whole-issues','--project']], ['run',['--project']], ['schedule',['--project','--json']], ['recovery',['--project','--json']]] as const) {
     const line = help.stdout.split('\n').find(l => l.startsWith(`factory ${command} `));
     assert.ok(line, command); for (const option of options) assert.ok(line.includes(option), `${command} ${option}`);

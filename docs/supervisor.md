@@ -1,6 +1,6 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, a source-only thin advisory host broker and exact scoped gate-input application**. The scheduler has a short hint hook and an explicit outside-lock source lifecycle transport, but no live action activation adapter, notification service or pilot rollout. The CLI supplies read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. The explicit gate applicator below publishes only one exact scoped verification-guidance input artifact; it never edits project files or branches. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation, broker, scoped application and lifecycle modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
+This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, a source-only thin advisory host broker and exact scoped gate-input application**. The scheduler has a short hint hook and an explicit outside-lock source lifecycle transport, but no live action activation adapter, notification service or pilot rollout. The CLI supplies explicit named-ticket advisory diagnosis through the existing trusted host, read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. New public paid acquisition remains held without independent rollout/quiescence evidence; no CLI flag fabricates it. The explicit gate applicator below publishes only one exact scoped verification-guidance input artifact; it never edits project files or branches. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation, broker, scoped application and lifecycle modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
@@ -42,14 +42,15 @@ lock, with a final exact-record CAS inside; no cross-store locks or provider wor
 are nested. Cleanup never signals reconstructed PIDs/groups or resets accounting.
 
 The [execution context reference](execution-context.md#protected-advisory-runtime-selection)
-describes the supported-copy boundary. T09 still owes actual public-host rollout,
+describes the supported-copy boundary. Actual public-host rollout still requires
 quiescence, mounts/resource isolation and control prerequisites. This module grants
 none of those authorities and creates no usable advice or notification.
 
-## Non-CLI owned advisory host
+## Explicit owned advisory host
 
 `cli/src/supervisor-host.mts` now exports `prepareSupervisorHost`. This is a
-source API for explicit owned advisory invocation, **not a public CLI or activation**. It
+trusted API for explicit owned advisory invocation, also used by
+`factory supervisor diagnose <ticket> --project <name|path> [--json]`, **not action activation**. It
 reads the existing service-manager `schedulingState` observation and strict project
 registry on every `current()` call. An unregistered/aliased checkout, missing
 project scheduling opt-in, pause, global off/unknown or unreadable host policy
@@ -75,7 +76,7 @@ from absence, refunds charges, repairs ownership or releases a successor. A
 settled projection does not replace original receipt validation/fresh ESRCH in the
 actual release APIs. No telemetry is fabricated by preparation/inspection.
 
-The prepared object's explicit source-only `invoke(apiKey, signal?)` delegates to
+The prepared object's explicit `invoke(apiKey, signal?)` delegates to
 `diagnoseProject`, not a parallel supervisor. It accepts an explicit handoff secret
 but never retrieves credentials. The existing worker preserves reuse before budgets,
 retained human/denial checks and cumulative reservation. Its owned branch freezes
@@ -221,9 +222,14 @@ independent review, gate correction, code delivery, scheduled diagnosis or track
 notification belongs to this MVP. Project-wide incidents without a saved run are
 deferred. Existing general workflow support for both configured families remains
 unchanged; an unsupported diagnosis family must refuse, never switch to OpenAI.
-These are approved implementation boundaries, **not shipped command capability**.
-There is not yet a public diagnosis command or installed paid adapter. The owned
-source-only boundary below is not public host composition.
+The public command now composes the existing prepared host; the
+[operator contract](factory-cli.md#explicit-advisory-diagnosis) specifies strict parsing,
+redacted version-1 output, exits and owned signal cancellation. It does not supply
+independent older-runtime/unmanaged-work quiescence evidence, so NEW paid public
+acquisition is held before any exclusion/pins. Exact cached reuse remains legitimate
+without new auth/spend. `OPENAI_API_KEY` is only a bounded environment handoff, never
+a credential discovery or token probe. Missing auth and unsupported family hold before
+new acquisition. No installed public journey, live activation or rollout is claimed.
 
 The [OpenAI boundary investigation](research/supervisor-openai-boundary.md) records
 primary provider documentation and the exact inspected Pi/Pi-AI 1.5.2 artifacts.

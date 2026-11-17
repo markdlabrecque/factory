@@ -137,6 +137,8 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     const b = o.boundary, model = modelForRole(a.family, 'supervisor').model;
     if (b && 'kind' in b && b.kind === 'owned-openai') {
       if (a.advisory?.preflightHold) return held(a.advisory.preflightHold);
+      // Exact cached reuse above needs no auth. Refuse an obviously impossible NEW call before exclusion/pins.
+      if (a.family !== 'openai' || !o.apiKey || o.apiKey.length > 16384 || /[\s\x00-\x1f\x7f]/.test(o.apiKey)) return held('Bounded explicit OpenAI API-key handoff required for a new diagnosis');
       await o.beforeReserve?.();
       a = structuredClone(await current());
       if (hostHold(a) || diagnosisBasis(a.snapshot) !== basisHash) return held('Authorization/material changed during paid acquisition; exact ownership retained');

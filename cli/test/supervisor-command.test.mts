@@ -1,5 +1,6 @@
-// One local CLI control boundary: disposable registry/TOML/journal, OS actor, no tracker or agent execution.
+// Local CLI controls and explicit diagnosis parser/projection/facade units; disposable state, no tracker/provider/agent execution.
 import { test } from 'node:test';
+import { EventEmitter } from 'node:events';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
@@ -12,11 +13,58 @@ import { factoryToml } from './config-fixture.mts';
 import { reviewFixture, AT } from './supervisor-fixture.mts';
 import { readSupervisor, commitSupervisor, supervisorFile } from '../src/supervisor-state.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
-import { supervisorCommand, parseSupervisorControl, supervisorActRefusal, supervisorProjection, SUPERVISOR_PAGE_SIZE } from '../src/commands/supervisor.mts';
+import { supervisorCommand, parseSupervisorControl, supervisorActRefusal, supervisorProjection, SUPERVISOR_PAGE_SIZE, parseSupervisorDiagnosis, supervisorDiagnose, supervisorDiagnosisProjection, withSupervisorCancellation } from '../src/commands/supervisor.mts';
 import { supervisorFixture } from './supervisor-fixture.mts';
 import { emptySupervisor } from '../src/supervisor-state.mts';
 import { existsSync } from 'node:fs';
+import { keyFor } from '../../board/board.mts';
 import { ownerOf } from '../../board/admission.mts';
+
+test('local signals abort only the owner and await its result before signal exit', async () => {
+  for (const [signal,code] of [['SIGINT',130],['SIGTERM',143]] as const) {
+    const signals=new EventEmitter();let settle!:(n:number)=>void,aborted=false,returned=false;
+    const running=withSupervisorCancellation(async owner=>{
+      owner.addEventListener('abort',()=>{aborted=true;});
+      return await new Promise<number>(resolve=>{settle=resolve;});
+    },signals as any).then(exit=>{returned=true;return exit;});
+    signals.emit(signal);assert.equal(aborted,true);assert.equal(returned,false);
+    settle(2);assert.equal(await running,code);
+    assert.equal(signals.listenerCount('SIGINT'),0);assert.equal(signals.listenerCount('SIGTERM'),0);
+  }
+});
+
+test('diagnosis accepts only an explicit ticket/project and projects no arbitrary worker output', () => {
+  assert.equal(parseSupervisorDiagnosis(['7'],{project:'registered',json:true}),7);
+  for (const args of [[],['0'],['01'],['#7'],['-1'],['1e2'],['9007199254740992'],['7','8']]) assert.throws(()=>parseSupervisorDiagnosis(args,{project:'registered'}));
+  for (const options of [{},{project:''},{project:'registered',pilot:true},{project:'registered',offset:'0'},{project:'registered',model:'arbitrary'},{project:'registered',actor:'operator'}]) assert.throws(()=>parseSupervisorDiagnosis(['7'],options));
+  const s=emptySupervisor(reviewFixture('/fixture/project').input.snapshot.project);
+  const view=supervisorDiagnosisProjection(s,7,'invocation',{state:'held',reason:'raw stdout prompt token=ghp_never_display'},'run-current');
+  assert.equal(view.runId,'run-current'); assert.equal(view.authority,'advice-only'); assert.equal(view.accounting.known,null);
+  assert.doesNotMatch(JSON.stringify(view),/raw stdout|ghp_never_display/);
+});
+
+test('diagnosis source handler uses genuine held host and component facade only for exit/output permutations', async () => {
+  const home=realpathSync(mkdtempSync(join(tmpdir(),'factory-supervisor-diagnose-'))),p=paths(home),root=join(home,'project');
+  try {
+    mkdirSync(join(root,'.factory'),{recursive:true});writeFileSync(join(root,'.factory/factory.toml'),factoryToml('owner/repo',{kind:'github'}));
+    assert.equal(spawnSync('git',['init','-q'],{cwd:root,timeout:15000}).status,0);addProject(p,root);
+    const output:string[]=[],backend={status:async()=>{throw Error('backend must not be called before no-run selection');}};
+    const services={backend,output:(text:string)=>output.push(text),apiKey:'synthetic-non-secret-key'};
+    assert.equal(await supervisorDiagnose(p,['7'],{project:root,json:true},services as any),1);
+    assert.match(JSON.parse(output.at(-1)!).reason,/saved execution/);assert.equal(existsSync(supervisorFile(p.state)),false);
+    mkdirSync(p.state,{recursive:true});writeFileSync(join(p.state,`${keyFor('7','owner/repo')}.json`),JSON.stringify({project:'owner/repo',iid:'7',stage:'failed',executionId:'current-execution'}));
+    let calls=0;
+    assert.equal(await supervisorDiagnose(p,['7'],{project:root,json:true},{...services,backend:{status:async()=>{calls++;throw Error('synthetic backend unavailable');}}} as any),1);
+    assert.equal(calls,1);assert.equal(existsSync(supervisorFile(p.state)),false);
+    for (const [state,code] of [['held',1],['human-required',2],['proposed',0],['reused',0]] as const) {
+      let invoked=false;
+      const prepare=async (options:any)=>{assert.equal(options.ticket,7);assert.equal(options.project.root,root);assert.equal(options.rollout,undefined);return {invoke:async(key:string,signal:AbortSignal)=>{invoked=true;assert.equal(key,'synthetic-non-secret-key');assert.equal(signal,abort.signal);return {state,reason:'raw provider stderr token=hidden',diagnosticId:'synthetic',decision:{action:{kind:'wait'}}};}};};
+      const abort=new AbortController();
+      assert.equal(await supervisorDiagnose(p,['7'],{project:root,json:true},{...services,prepare,signal:abort.signal} as any),code);
+      assert.equal(invoked,true);const view=JSON.parse(output.at(-1)!);assert.equal(view.state,state);assert.equal(view.runId,'current-execution');assert.doesNotMatch(output.at(-1)!,/provider stderr|token=hidden|synthetic-non-secret-key/);
+    }
+  } finally {rmSync(home,{recursive:true,force:true});}
+});
 
 test('display redacts nested identity and pages retained collections without hiding aggregate holds or changing storage', () => {
   const {input}=reviewFixture('/fixture/ghp_sensitive_checkout'),s=emptySupervisor(input.snapshot.project);
@@ -121,8 +169,10 @@ test('supervisor resolve requires explicit exact local command and records OS ac
     commit({id:'human',at:AT,kind:'human',request});
     const cli=fileURLToPath(new URL('../bin/factory.mts',import.meta.url));
     const argv=['supervisor','resolve','--project',root,'--incident',request.incidentId,'--request',request.id,'--proposal',request.proposalId,'--reason','Abandon unsafe correction','--abandon'];
-    const exec=(args:string[])=>spawnSync(process.execPath,[cli,...args],{cwd:root,env:{...process.env,FACTORY_HOME:home,SANDCASTLE_STATE_DIR:p.state,USER:'not-the-authenticated-actor'},encoding:'utf8'});
+    const exec=(args:string[])=>spawnSync(process.execPath,[cli,...args],{cwd:root,env:{...process.env,FACTORY_HOME:home,SANDCASTLE_STATE_DIR:p.state,OPENAI_API_KEY:'synthetic-non-secret-key',USER:'not-the-authenticated-actor'},encoding:'utf8',timeout:15000});
     const before=readFileSync(supervisorFile(p.state),'utf8');
+    for (const suffix of [['7'],['0','--project',root],['7','--project',root,'--pilot'],['7','--project',root,'--model','arbitrary']]) assert.equal(exec(['supervisor','diagnose',...suffix]).status,1);
+    const diagnosis=exec(['supervisor','diagnose','7','--project',root,'--json']);assert.equal(diagnosis.status,1,diagnosis.stderr);assert.equal(JSON.parse(diagnosis.stdout).state,'held');
     const inspected=exec(['supervisor','status','--json','--project',root]);assert.equal(inspected.status,0,inspected.stderr);assert.equal(JSON.parse(inspected.stdout).mode,'observe');
     assert.equal(exec(['supervisor','status','--abandon','--project',root]).status,1);
     assert.equal(exec(['supervisor','mode','act','--pilot','--confirm','--project',root]).status,1);
