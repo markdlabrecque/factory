@@ -49,6 +49,9 @@ test('complete inventory, deterministic identity, private install and validation
   const worker = await import(pathToFileURL(join(a.directory, 'supervisor-worker.mts')).href);
   assert.equal(typeof worker.diagnoseProject, 'function', 'complete selected worker imports without source-tree dependencies');
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-worker.mts')), readFileSync(join(f.source, 'cli/src/supervisor-worker.mts')), 'worker ships unchanged');
+  const broker = await import(pathToFileURL(join(a.directory, 'supervisor-broker.mts')).href);
+  assert.equal(typeof broker.brokerSupervisor, 'function');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-broker.mts')), readFileSync(join(f.source, 'cli/src/supervisor-policy.mts')));
   assert.deepEqual(layout.projectLayoutPolicy({ kind: 'fresh' }, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
   for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);

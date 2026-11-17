@@ -1,5 +1,6 @@
 // Persisted writers may defer observational callbacks until every admission critical section has exited.
 // Admission reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent.
+// Optional advisory candidate identities are consumed with the SAME recovery claim/charge, never a second scheduler.
 // #153: short-lived delivery ownership uses normal PID/start fencing and advances project activity without repair charges.
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -55,7 +56,7 @@ export interface AdmissionState {
   version: 1;
   claims: Record<string, AdmissionClaim>;
   generations: Record<string, number>;
-  recovery: Record<string, { admitted: number; pending: AdmittedAttempt[] }>;
+  recovery: Record<string, { admitted: number; pending: AdmittedAttempt[]; candidates?: Record<string, string> }>;
 }
 
 export const keyFor = (iid: string, proj?: string) => (proj ? `${proj.replace(/[^A-Za-z0-9._-]+/g, "_")}--${iid}` : iid);
@@ -134,6 +135,7 @@ export function readAdmission(stateDir: string): AdmissionState {
       && optStr(c.attempt) && (c.kind !== "recovery" || str(c.attempt)))
     && isObj(d.generations) && Object.values(d.generations).every((g) => Number.isInteger(g) && (g as number) >= 0)
     && isObj(d.recovery) && Object.values<any>(d.recovery).every((r) => isObj(r) && Number.isInteger(r.admitted) && r.admitted >= 0
+      && (r.candidates === undefined || isObj(r.candidates) && Object.entries(r.candidates).every(([id, attempt]) => /^[a-f0-9]{64}$/.test(id) && str(attempt)))
       && Array.isArray(r.pending) && r.pending.every((a: any) => isObj(a) && str(a.id) && str(a.iid) && str(a.root) && str(a.at)
         && optStr(a.branch) && optStr(a.log) && optStr(a.container) && optStr(a.record)));
   if (!ok) throw new Error(`Unsupported admission record: ${file}. Nothing is admitted until it is fixed; Factory will not overwrite it.`);

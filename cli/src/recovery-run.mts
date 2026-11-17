@@ -1,6 +1,7 @@
 // Recovery requires fresh host/filesystem, complete input matching preparation, and image readiness before admission.
 // Only typed read-only ticket refusals permit scanning. Environment holds stop the pass without spending attempts.
-// Settlement stays explicit; any preparation or admission failure stops the pass.
+// Settlement stays explicit; any preparation or admission failure stops the pass. Advisory candidates share this owner and charge.
+import type { RepairCandidate } from './supervisor-policy.mts';
 import { freezeTicketInput, TicketInputHold } from '../../orchestrator/ticket-input.mts';
 import { commandContextSource } from '../../orchestrator/ticket-context-source.mts';
 import type { TicketContextSource } from '../../orchestrator/ticket-context.mts';
@@ -222,6 +223,7 @@ export function inspectRecoveryCandidate(p:Paths,o:Common & {ticket:number;cap?:
 
 /** Start one prepared repair attempt on `ticket`, or say why not; see the file comment. */
 export async function launchRecovery(p: Paths, o: Common & { ticket: number; preparation?: Preparation; cap?: number; spawn?: Spawner; worktreeDir?: string; npx?: string;
+  candidate?: RepairCandidate;
   signal?: AbortSignal; mayLaunch?: () => Promise<boolean>; capabilities?: typeof checkImageCapabilities; contextSource?: TicketContextSource;
   /** Test hook: runs after the claim and charge are committed, before the charge is applied (a crash point). */
   afterCommit?: () => void }): Promise<Launch> {
@@ -230,7 +232,8 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   const docker = o.docker ?? realDocker;
   const stop = (code: string, reason: string, scope: 'ticket' | 'project' | 'environment' = 'project'): Launch => ({ ok: false, kind: 'project-stopped', admitted: false, code, reason, scope });
   if (!validPreparation(o.preparation) || o.preparation.state !== 'ready') return stop('stale', 'A validated recovery preparation is required; no attempt charged');
-  const allowed = async () => !o.signal?.aborted && (!o.mayLaunch || await o.mayLaunch()) && !o.signal?.aborted;
+  const candidateAllowed = () => !o.candidate || o.candidate.ticket === o.ticket && o.candidate.authorize();
+  const allowed = async () => !o.signal?.aborted && candidateAllowed() && (!o.mayLaunch || await o.mayLaunch()) && !o.signal?.aborted && candidateAllowed();
   let committed = false;
   let admissionStarted = false;
   let id: string | undefined;
@@ -260,6 +263,7 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   if (runs.some(r => r.project === o.tracker && inFlight(r))) return stop('project-active', 'project has a run in flight');
   const run = runs.find(r => r.project === o.tracker && r.iid === String(o.ticket));
   if (!run || run.stage !== 'stopped') return stop('candidate-changed', `#${o.ticket} has no stopped run record; recovery repairs only recorded work`);
+  if (o.candidate && o.candidate.runId !== run.executionId) return stop('candidate-changed', 'Advisory candidate does not own this exact execution');
   if (Object.values(admission.claims).some(c => c.project === o.tracker && claimLive(c))) return stop('project-claimed', 'project has a live claim');
   const copy = recoveryCopyProblem(p, o.root);
   if (copy) return stop('workflow-review', copy);
@@ -330,9 +334,9 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   const validated = target;
   admissionStarted = true;
   const claim = claimRecovery(p, { root: o.root, tracker: o.tracker, ticket: o.ticket, pid: process.pid, at, cap: o.cap, branch: target.branch, log, dir,
-    id, container, record, preparation:o.preparation, expected: run, generation, episode: state.episode?.id,
+    id, container, record, preparation:o.preparation, expected: run, generation, episode: state.episode?.id, candidateId: o.candidate?.id,
     validate: () => {
-      if (o.signal?.aborted) throw new Error('Scheduled recovery was cancelled before admission');
+      if (o.signal?.aborted || !candidateAllowed()) throw new Error('Scheduled recovery or advisory candidate was fenced before admission');
       const currentImage = readImageConfig(o.root);
       if (!currentImage.ok || currentImage.image !== image.image) throw new Error('Image configuration changed during readiness; not admitted');
       projectWorkflow(p, o.root, workflow.env);

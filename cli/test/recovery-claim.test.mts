@@ -309,6 +309,20 @@ test('concurrent prepared recovery claims admit and charge exactly once', async 
   assert.equal(outputs.filter(x=>x==='won').length,1);assert.equal(used(p,7),1);assert.equal(readRecovery(p,root).attempts.length,1);
 });
 
+test('consumed advisory identity survives restart and refuses another charge even after ownership release', t => {
+  const {p,dir,pid}=fixture(t); stopped(dir,'7',{branch:'7-fix'});
+  const preparation=preparedFixture({root,tracker:'proj',ticket:7,dir});
+  const candidateId='a'.repeat(64);
+  const options={root,dir,tracker:'proj',ticket:7,pid,at:at(10),id:ID(1),preparation,candidateId};
+  assert.ok(actualClaimRecovery(p,options).ok);
+  const saved=readAdmission(dir);
+  assert.equal(saved.recovery.proj.candidates?.[candidateId],ID(1));
+  withAdmission(dir,tx=>{ delete tx.state.claims[keyFor('7','proj')]; tx.commit(); });
+  assert.match(reason(actualClaimRecovery(p,{...options,id:ID(2)})),/already consumed/);
+  assert.equal(used(p,7),1); assert.equal(readRecovery(p,root).attempts.length,1);
+  assert.equal(readAdmission(dir).recovery.proj.admitted,1);
+});
+
 test('an owner that exited but was never reaped (a zombie) is dead, so a crashed repair can be settled (#64)', { skip: process.platform !== 'linux' && 'needs /proc' }, async t => {
   // Hold the child until the shell has exec'd sleep, which never reaps it. An immediate exit can be reaped by sh.
   const parent = spawn('sh', ['-c', `sh -c 'kill -STOP $$' & echo $!; exec sleep 5`], { stdio: ['ignore', 'pipe', 'ignore'] });

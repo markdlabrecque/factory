@@ -1,6 +1,7 @@
 // Scan stopped candidates once in numeric order; only a typed read-only ticket refusal permits continuation. Recheck
 // cancellation, generation, budget, review and run state for every candidate. Local follow-up observations refresh after
 // settlement and every launch/refusal. Only fresh successful-pass reports, never snapshots, can confirm/admit recovery.
+// Optional host supervisor advice narrows candidates inside this same scan; it never bypasses confirmation, preparation or admission.
 // Jam confirmation after normal dispatch (slice four self-recovery, #61). The scheduler's tick (commands/tick.mts) gives
 // every scheduled pass its own pass id and report file (FACTORY_PASS_ID, FACTORY_JAM_REPORT); the project's dispatcher
 // writes there what it saw after its normal work (orchestrator/dispatch.mts, graph.mts findJam): the jammed tickets, or
@@ -22,6 +23,7 @@
 // one is not counted.
 // Errors are logged and never fail the pass. The report file is the caller's to remove.
 import {join} from 'node:path';
+import type { BrokerOutcome, BrokerAdmissionOutcome, RepairCandidate } from './supervisor-policy.mts';
 import { requireProjectLayout } from '../../orchestrator/project-layout.mts';
 import {prepareRecovery} from './recovery-prepare.mts';
 import {mutateRecovery} from './recovery-state.mts';
@@ -58,6 +60,10 @@ export type AfterPassOptions = { root: string; tracker: string; name: string; pa
   mayLaunch: () => Promise<boolean>; log: (line: string) => void; now?: () => Date;
   signal?: AbortSignal; node?: string; path?: string; workflowEnv?: NodeJS.ProcessEnv;
   inspect?: typeof inspectRecoveryCandidate; prepare?: typeof prepareRecovery;
+  /** Optional host-only advice, evaluated inside the existing successful two-pass scan. Undefined preserves automation.
+   * record must durably retain host outcomes separately from model claims; failures hold, never authorize or retry. */
+  supervisor?: { select(ticket: number, runId: string | undefined): BrokerOutcome | undefined;
+    record(outcome: BrokerOutcome | BrokerAdmissionOutcome): void };
   settle?: typeof settleRecovery; pauseReason?: () => string | undefined;
   launch?: (...args: Parameters<typeof launchRecovery>) => ReturnType<typeof launchRecovery> | Awaited<ReturnType<typeof launchRecovery>> };
 
@@ -112,6 +118,14 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
         if(inspected.kind==='ticket-refused'){say(`#${target} ticket-refused ${inspected.code}: ${inspected.reason}`);continue;}
         return say(`project-stopped ${inspected.code}: #${target}: ${inspected.reason}`);
       }
+      let candidate: RepairCandidate | undefined;
+      const advice = o.supervisor?.select(target, current.executionId);
+      if (advice) {
+        o.supervisor!.record(advice.state === 'candidate' ? { candidateId: advice.candidate.id, state: 'held', reason: 'Advisory candidate awaiting existing preparation/admission' } : advice);
+        if (advice.state !== 'candidate') return say(`supervisor ${advice.state}; no supervisor repair admitted`);
+        candidate = advice.candidate;
+        if (candidate.ticket !== target || candidate.runId !== current.executionId || !candidate.authorize()) return say('supervisor candidate fenced or foreign; no attempt charged');
+      }
       const prepared=await (o.prepare??prepareRecovery)(p,{root:o.root,tracker:o.tracker,ticket:target,base:current.base??'',dir:o.dir,signal:o.signal,node:o.node,path:o.path,workflowEnv:o.workflowEnv});
       mutateRecovery(p,o.root,s=>{s.preparation={at:now(),ticket:target,state:prepared.state,code:prepared.code,reason:prepared.reason,scope:prepared.scope};return {write:true,value:undefined};});
       if(prepared.state!=='ready'){
@@ -120,7 +134,10 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
         return say(`jam on ${jam} confirmed; preparation ${prepared.code} (${prepared.scope} hold): ${prepared.reason}; no attempt charged`);
       }
       if(!(await o.mayLaunch()))return say(`jam on ${jam} confirmed; preparation complete but scheduled work was stopped; no attempt charged`);
-      const launched = await (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now(), preparation: prepared, mayLaunch: o.mayLaunch, signal: o.signal, node: o.node, path: o.path, workflowEnv: o.workflowEnv });
+      const launched = await (o.launch ?? launchRecovery)(p, { root: o.root, tracker: o.tracker, ticket: target, dir: o.dir, at: now(), preparation: prepared, candidate, mayLaunch: o.mayLaunch, signal: o.signal, node: o.node, path: o.path, workflowEnv: o.workflowEnv });
+      if (candidate) o.supervisor!.record({ candidateId: candidate.id,
+        state: launched.admitted ? 'admitted' : launched.kind === 'ticket-refused' ? 'refused' : 'held',
+        ...(launched.admitted ? { attemptId: launched.attempt.id } : {}), reason: launched.kind === 'started' ? 'Existing recovery admitted' : launched.reason });
       refreshFollowups(p, { ...o, at: now(), paused: o.pauseReason?.() });
       switch (launched.kind) {
         case 'ticket-refused':

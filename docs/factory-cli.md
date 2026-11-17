@@ -7,7 +7,13 @@ Live read-only scheduler authorization and delivery claims continue existing exa
 
 The [project supervisor authority contract](supervisor.md) documents the gate inventory,
 import-safe records and unresolved fresh-review/notification prerequisites. It does not
-introduce supervisor commands or enable action mode.
+introduce supervisor commands or enable action mode. The source-only [advisory repair broker](supervisor.md#thin-host-action-broker)
+can inject a candidate into the existing successful-pass/two-pass recovery scan; no production caller activates it.
+Disabled/observe/stopped supervisors leave existing automatic recovery unchanged. Advice never bypasses fresh preparation,
+current scheduler/project authorization, saved-run ownership, project exclusion or the existing atomic attempt charge.
+Waiting CI stays on existing delivery follow-through, without new repair/model budget. Failed CI can yield a human-approved
+follow-up draft or an otherwise eligible exact stopped-run repair, never authority from merely having an open PR.
+Missing escalation/activation capability remains held; no local record counts as delivered notification or human approval.
 
 Dispatch and recovery enforce [image and sandbox readiness](image-readiness.md) before agent work. Recovery awaits readiness before atomic claim-and-charge, reports environment holds without spending attempts, and rechecks scheduling eligibility after the probe. New supported projects use `.factory` throughout. Strict metadata inspection refuses any `.sandcastle` entry, mixed layouts, directory/config aliases and unknown inspection results before new project writes, tracker work, reports or launch/admission effects. Init may complete a safe existing `.factory` data/image-assets directory without config, preserving existing regular files and registering only after all writes succeed. Executable legacy remnants without TOML are still refused. Existing operations require validated TOML. The shared runtime contract is a breaking change. Project owners are responsible for reviewing their own configuration and custom code; Factory does not automatically migrate them.
 
