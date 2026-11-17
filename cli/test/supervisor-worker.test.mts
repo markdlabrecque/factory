@@ -105,6 +105,19 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
       const before = state.charged; const restart = await diagnoseProject(x.options()); assert.equal(restart.state, 'held'); assert.deepEqual(x.state().charged, before);
       assert.deepEqual(state.intents, {}); assert.deepEqual(state.reviews, {});
     }
+    const stopped = fixture('operator-stopped');
+    commitSupervisor(stopped.stateDir, stopped.a.snapshot.project, 0, {kind:'control',id:'stop',at:AT,mode:'stopped',actor:'uid:fixture',pilot:false});
+    assert.equal((await diagnoseProject(stopped.options())).state,'held'); assert.equal(stopped.spawned(),false);
+    const lateStop = fixture('operator-stop-in-flight');
+    lateStop.run(input => {
+      const s=lateStop.state();
+      commitSupervisor(lateStop.stateDir,s.project,s.revision,{kind:'control',id:'stop-active',at:AT,mode:'stopped',actor:'uid:fixture',pilot:false});
+      lateStop.complete(JSON.stringify(lateStop.wait(input)));
+    });
+    assert.equal((await diagnoseProject(lateStop.options())).state,'human-required');
+    assert.equal(Object.values(lateStop.state().diagnostics!)[0].decision,null); assert.equal(lateStop.state().charged.diagnosis.tokens,100);
+    assert.equal(Object.values(lateStop.state().reservations)[0].state,'finished'); // only the original worker's confirmed cleanup/accounting settles
+    assert.equal(Object.values(lateStop.state().humans)[0].stop,'required');
     const gate = fixture('gate');
     gate.a.snapshot.observedAt = '2026-11-17T11:59:00.000Z';
     commitSupervisor(gate.stateDir, gate.a.snapshot.project, 0, { kind: 'observe', id: 'prior-observation', at: AT, facts: gate.a.facts,

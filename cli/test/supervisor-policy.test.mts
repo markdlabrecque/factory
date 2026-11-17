@@ -33,6 +33,9 @@ test('repair is stable advisory identity only; current-time fence cannot authori
   f.facts.recovery!.followups = { '236': { state: 'pending', reason: 'observation', nextAction: 'prepare', changedAt: AT } };
   f.facts.snapshot.observedAt = new Date(clock + 1).toISOString();
   assert.ok(a.candidate.authorize(), 'successful preparation/follow-up publication and later observation do not revoke unchanged material authority');
+  f.facts.state.control = {mode:'stopped',actor:'uid:fixture',at:AT,pilot:false};
+  assert.equal(a.candidate.authorize(),false); assert.equal(f.decide().state,'held');
+  delete f.facts.state.control;
   f.facts.project = 'paused'; assert.equal(a.candidate.authorize(), false);
   f.facts.project = 'enabled'; f.facts.fence = 'replaced'; assert.equal(a.candidate.authorize(), false);
   const expired = brokerSupervisor(() => before, () => clock + 1000); assert.equal(expired.state, 'held');
@@ -41,6 +44,8 @@ for (const [name, mutate, expected] of [
   ['disabled', (f: BrokerFacts) => { f.enabled = false; }, 'held'],
   ['observe', (f: BrokerFacts) => { f.snapshot.mode = 'observe'; }, 'held'],
   ['stopped', (f: BrokerFacts) => { f.snapshot.mode = 'stopped'; }, 'held'],
+  ['durable observe', (f: BrokerFacts) => { f.state.control = {mode:'observe',actor:'uid:fixture',at:AT,pilot:false}; }, 'held'],
+  ['durable stopped', (f: BrokerFacts) => { f.state.control = {mode:'stopped',actor:'uid:fixture',at:AT,pilot:false}; }, 'held'],
   ['off', (f: BrokerFacts) => { f.global = 'off'; }, 'held'],
   ['unknown', (f: BrokerFacts) => { f.global = 'unknown'; }, 'held'],
   ['paused', (f: BrokerFacts) => { f.project = 'paused'; }, 'held'],

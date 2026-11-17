@@ -94,6 +94,30 @@ test('fresh review and durable denial/outbox boundary, failure retention, no sho
     assert.equal(resolved.incidents[h.incidentId].denied,true);assert.deepEqual(resolved.charged,stopped.charged);assert.equal((await reviewGateProposal(denied.options)).state,'human-required');assert.equal(denied.launches(),1);
   }finally{rmSync(home,{recursive:true,force:true});}
 });
+test('durable observe/stop fences stale-act review and notification callers without spending or POST', async () => {
+  const home=mkdtempSync(join(tmpdir(),'factory-review-controls-'));
+  try {
+    for (const mode of ['observe','stopped'] as const) {
+      const f=setup(home,mode);
+      f.commit({kind:'human',id:'pending-human',at:AT,request:{version:1,id:'pending',project:f.input.snapshot.project,scope:f.input.proposal.scope,incidentId:f.input.proposal.incidentId,proposalId:f.input.proposal.id,
+        reason:'authority-uncertain',question:'Inspect originals',evidence:['fixture:gate'],nextAction:'Resolve exact request',delivery:{state:'pending',attempts:0},stop:'required'}});
+      f.commit({kind:'control',id:'operator-control',at:AT,mode,actor:'uid:fixture',pilot:false});
+      const before=readFileSync(supervisorFile(f.stateDir),'utf8');
+      assert.equal((await reviewGateProposal(f.options)).state,'held');
+      assert.equal(f.deliver().state,'pending'); assert.equal(f.launches(),0); assert.equal(f.posts(),0);
+      assert.equal(readFileSync(supervisorFile(f.stateDir),'utf8'),before);
+      const fresh=setup(home,`${mode}-no-human`);
+      fresh.commit({kind:'control',id:'operator-control',at:AT,mode,actor:'uid:fixture',pilot:false});
+      assert.equal((await reviewGateProposal(fresh.options)).state,'held');assert.equal(fresh.launches(),0);
+      assert.deepEqual(fresh.state().charged.review,{tokens:0,cost:0});
+    }
+    const intentOnly=setup(home,'intent-not-authorization');
+    intentOnly.commit({kind:'control',id:'operator-act',at:AT,mode:'act',actor:'uid:fixture',pilot:true});
+    intentOnly.a.input.snapshot.mode='observe';
+    assert.equal((await reviewGateProposal(intentOnly.options)).state,'held');assert.equal(intentOnly.launches(),0);
+  } finally {rmSync(home,{recursive:true,force:true});}
+});
+
 test('review failure/authority/accounting matrices fail closed with bounded human stop',async()=>{
   const home=mkdtempSync(join(tmpdir(),'factory-review-matrix-'));
   try {

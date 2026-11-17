@@ -30,6 +30,60 @@ The same host-owned project gate precedes explicit complete overrides, including
 
 Recovery host checks run within the existing preparation/pre-charge flow and repeat after image readiness. Complete input must still match the existing preparation before charge, including parent planning comments. A failed source or changed hash publishes a ticket-input hold without replacing the preparation. Host-known failure charges no attempt. Capacity, activity-generation, ownership and admission-time local checks still apply; no budget is refunded or reset. After a container starts, existing charged-attempt and exact-container cleanup rules remain. Settlement and scheduled local maintenance run independently of the new-launch gate, including during project holds or pauses under the existing global-off/unknown/cancellation policy. Unconfirmed cleanup continues to hold ownership, and report state-write failures are reported directly.
 
+## Supervisor inspection and project controls
+
+```sh
+factory supervisor status --project <name-or-path> --json
+factory supervisor explain --project <name-or-path> --json
+factory supervisor mode observe --project <name-or-path>
+factory supervisor mode act --project <name-or-path> --pilot --confirm
+factory supervisor stop --project <name-or-path>
+```
+
+Project selection uses the existing registered name/path/current-checkout resolver.
+Status and explain emit the same stable version-1 JSON projection (`--json` selects
+compact output; otherwise pretty JSON). Retained supervisor collections are bounded
+to 128 entries per page, with deterministic key order and unresolved holds/unsettled
+owners first. `--offset <nonnegative-integer>` pages each collection; `pagination`
+reports total/before/after counts. Compare `revision` between pages; concurrent
+changes require restarting inspection. Global human-required and pending-owner totals
+are computed over all records, not just the page. The journal is never truncated. They read local records only: mode/operator,
+worker owners, incident/evidence hashes, proposals, host refusal, human requests and
+notification receipts, reviews, configured and cumulative budgets, retained execution
+observations, confirmed merge progress and next observation. Review approval is not
+execution, verifier PASS or completion; notification delivery is not approval.
+Original prompts, substitution bodies and raw model stdout/stderr are excluded.
+Display text/references are bounded/redacted; inspect originals separately under the
+host-user trust boundary. No tracker refresh/write, model, review, repair, service
+probe, reconciliation, charge, report publication or journal creation occurs on read.
+An absent journal displays observe and empty supervisor history, not an error.
+Corrupt/foreign state refuses with a secret-safe actionable error; it is never repaired.
+
+Mode/stop record an OS-user audit in the host journal only. Observe fences new review
+and supervisor actions, and stop fences new diagnosis too. Neither changes global
+scheduling, unpauses a project, cancels implementation runs, resets budgets, clears a
+denial/human hold or edits saved work. `act` needs explicit `--pilot --confirm`, enabled
+finite project/role budgets and actual supported workflow/authority/notification and
+global-budget/provider enforcement prerequisites. **The shipped CLI has no complete
+activation adapter and refuses act**, even with valid project limits and confirmation.
+No flag waives this refusal; offline injected services test the necessary control
+contract, not runtime activation. Future supported activation must supply real host
+prerequisites and still obtain current per-operation admission/proof.
+
+Stop commits its fence before attempting owned-worker cancellation. With no unsettled
+workers it exits 0. The committed workers accept cancellation through their host
+AbortSignal/owned-group termination boundary; there is no safe cross-process CLI
+cancellation handle in the shipped runtime. When a reservation is active/ambiguous,
+stop exits 1 with **cancellation pending**, retaining its charge and ownership rather
+than signalling an unverified PID or claiming a broad kill. A trusted injected host
+adapter can cancel only the exact diagnosis/review reservations. Pending already
+admitted operations are not rolled back; running workers recheck durable mode before
+spawn/output, and their bounded deadline/termination still applies. A mode change may
+leave completion CAS stale, retaining accounting/cleanup uncertainty for inspection.
+No automatic release/refund/retry follows. Do not interpret stop as implementation,
+container, tracker POST or admitted gate-operation cancellation. Resolve remains the
+exact separate command below, never a blanket approve/resume.
+
 ## Supervisor human-request resolution
 
 ```sh
@@ -55,7 +109,8 @@ original gates/work and cumulative charges remain retained. Abandonment permits 
 replacement. A revised exact hash requires a new material incident and fresh
 independent review; A→B→C resolution chains retain all history without resetting
 budgets. This command does not automatically resume a worker or clear the original
-denial. Supervisor status/mode/stop controls and scheduler wiring remain separate work.
+denial. The inspection/mode/stop controls above do not replace exact resolution;
+scheduler wiring remains separate work.
 
 The [source-only escalation contract](supervisor.md#durable-managed-comment-outbox)
 delivers one managed comment to the exact ticket or an explicitly configured

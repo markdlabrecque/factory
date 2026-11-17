@@ -1,5 +1,5 @@
 // Host-owned supervisor journal: atomic CAS transitions, retained incidents/denials and separately charged resources.
-// Retains diagnosis/review completion, host outbox receipts and exact local resolution audits; never applies gates or resets charges.
+// Retains operator fences, diagnosis/review completion, host outbox receipts and exact local resolution audits; never applies gates or resets charges.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
@@ -23,6 +23,7 @@ export type Reservation = {
 export type IntentMemory = { intent: Intent; owner: Owner; outcome: 'pending' | 'observed-applied' | 'observed-not-applied' | 'unknown'; evidence: string[] };
 export type SupervisorState = {
   version: 1; project: ProjectIdentity; revision: number;
+  control?: { mode: 'observe' | 'act' | 'stopped'; actor: string; at: string; pilot: boolean };
   incidents: Record<string, IncidentMemory>; proposals: Record<string, Proposal>; reviews: Record<string, IndependentReview>;
   intents: Record<string, IntentMemory>; humans: Record<string, HumanRequest>; reservations: Record<string, Reservation>;
   /** Absent only in pre-diagnosis version-1 journals. Added without discarding any old safety indexes. */
@@ -37,6 +38,7 @@ export type SupervisorState = {
 type Journal = { version: 1; projects: Record<string, SupervisorState> };
 export type Limits = { project: Resources; shared: Resources; capacity: number; reviewCalls: number; reviewTimeoutMs: number };
 export type Event = { id: string; at: string } & (
+  | { kind: 'control'; mode: 'observe' | 'act' | 'stopped'; actor: string; pilot: boolean }
   | { kind: 'observe'; facts: Facts; snapshotHash: string; reason: string }
   | { kind: 'proposal'; proposal: Proposal }
   | { kind: 'review'; review: IndependentReview; reservationId: string; fence: string; owner: Owner }
@@ -79,8 +81,13 @@ function entries(x: any): [string, any][] {
 }
 /** Strict read validation; no recovery/reset from unknown versions, foreign identities or malformed owners. */
 export function validateSupervisor(s: any, project: ProjectIdentity): SupervisorState {
-  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history', ...['diagnostics','deliveries','resolutions','reviewCompletions'].filter(k => Object.hasOwn(s, k))]);
+  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history', ...['control','diagnostics','deliveries','resolutions','reviewCompletions'].filter(k => Object.hasOwn(s, k))]);
   validateProject(s.project); demand(s.version === 1 && same(s.project, project) && count(s.revision), 'version/project/revision mismatch');
+  if (s.control) {
+    object(s.control, ['mode','actor','at','pilot']);
+    demand(['observe','act','stopped'].includes(s.control.mode) && text(s.control.actor) && time(s.control.at)
+      && typeof s.control.pilot === 'boolean' && (s.control.mode !== 'act' || s.control.pilot), 'invalid operator control');
+  }
   for (const [id, m] of entries(s.incidents)) {
     object(m, ['incident','facts','superseded','denied']); validateIncident(m.incident); facts(m.facts);
     demand(id === incidentIdentity(project, m.facts) && id === m.incident.id && same(m.incident.project, project) && same(m.incident.scope, m.facts.scope)
@@ -164,7 +171,8 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
   validateSupervisor(state, state.project); demand(text(event.id) && time(event.at), 'event identity/time required');
   const key = supervisorHash(event.id), digest = supervisorHash(event);
   if (state.events[key]) { demand(state.events[key] === digest, 'event id reused with different bytes'); return state; }
-  for (const projectState of [state, ...(environment.projects ?? [])]) {
+  // An observation/stop fence must remain writable even when an old worker's ownership is unknown.
+  for (const projectState of event.kind === 'control' ? [] : [state, ...(environment.projects ?? [])]) {
     for (const r of Object.values(projectState.reservations)) if (r.state === 'active') demand(environment.ownerState(r.owner) !== 'unknown', 'unknown worker owner holds journal');
     for (const m of Object.values(projectState.intents)) if (m.outcome === 'pending') demand(environment.ownerState(m.owner) !== 'unknown', 'unknown intent owner holds journal');
   }
@@ -186,6 +194,12 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
     m.incident.state = 'human-required';
   };
   switch (event.kind) {
+    case 'control': {
+      demand(['observe','act','stopped'].includes(event.mode) && text(event.actor) && typeof event.pilot === 'boolean', 'invalid control');
+      demand(event.mode !== 'act' || event.pilot, 'explicit one-project pilot required');
+      s.control = { mode: event.mode, actor: event.actor, at: event.at, pilot: event.pilot };
+      break;
+    }
     case 'observe': {
       const id = incidentIdentity(s.project, event.facts); demand(hash(event.snapshotHash) && text(event.reason), 'invalid observation');
       if (!s.incidents[id]) {
@@ -203,6 +217,7 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       break;
     }
     case 'reserve': {
+      demand(s.control?.mode !== 'stopped' && (event.reservation.kind !== 'review' || !s.control || s.control.mode === 'act'), 'operator mode fences new workers');
       const r = event.reservation; const m = current(r.incidentId); const l = event.limits;
       object(l, ['project','shared','capacity','reviewCalls','reviewTimeoutMs']); resources(l.project); resources(l.shared); resources(r.reserved); liveOwner(r.owner);
       demand(count(l.capacity) && l.capacity > 0 && count(l.reviewCalls) && l.reviewCalls > 0 && count(l.reviewTimeoutMs) && l.reviewTimeoutMs > 0, 'enforceable finite limits required');

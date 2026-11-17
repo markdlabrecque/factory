@@ -1,8 +1,60 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, and a source-only thin advisory host broker**. There is no scheduler wiring, action-mode switch, notification service, gate applicator or pilot rollout here. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation and broker modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
+This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, and a source-only thin advisory host broker**. There is no scheduler wiring, live action activation adapter, notification service, gate applicator or pilot rollout here. The CLI supplies read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation and broker modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
 
-A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. A future action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
+A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
+
+## Operator modes, inspection and held recovery
+
+[`factory supervisor status|explain|mode|stop`](factory-cli.md#supervisor-inspection-and-project-controls)
+extends the existing exact `resolve` command. Status/explain share a version-1,
+observation-only JSON envelope. Mode defaults to observe without creating a journal.
+The envelope separates owners, incident/evidence basis, proposals, host refusal,
+human request/delivery, reviewer decision/provenance, configured/cumulative budgets,
+execution observations, host-confirmed merge progress and the next observation.
+It never copies frozen source/prompt/substitution/output bodies. Retained display
+collections have deterministic 128-entry pages (`--offset`), with unresolved holds
+and unsettled ownership first and explicit total/before/after counts. Aggregate human
+hold/pending-worker state is never page-limited. Compare revisions across pages;
+no authoritative journal index is truncated. Redacted excerpts
+are display aids, not complete review context or authority. Read commands perform
+no model/review/repair/tracker/service mutation, settlement or refresh.
+
+The journal's optional version-1 `control` records OS actor, timestamp, mode and
+explicit pilot flag; older journals still validate without rewriting. Controls use
+the same short CAS/atomic journal boundary and preserve all original denials,
+resolutions, work, counters and charges. Unknown worker ownership does not prevent
+writing a conservative observe/stop fence. Mode changes never resolve human holds.
+`mode act --pilot --confirm` requires enabled finite project/role limits plus real
+host global limits/capacity, supported workflow/action authority, notification bridge
+authorization/target and enforceable all-in provider accounting. The shipped CLI
+cannot supply that complete capability and refuses activation with prerequisites;
+valid TOML or an injected offline test does not demonstrate it. There is no global
+schedule enablement, project unpause, provider fallback or proof waiver.
+
+Observe fences new reviews/actions; stop additionally fences diagnosis. Reservations
+check the durable fence under their journal lock, and workers re-read mode before
+spawn/acceptance/notification, independent of a stale caller snapshot. Stop can pass
+only exact retained diagnosis/review reservations to a trusted owned cancellation
+adapter, never implementation owners. **No shipped cross-process cancellation
+adapter is proven:** active/ambiguous reservations produce exit 1, cancellation
+pending, after the stop fence is committed. No raw PID kill or accounting release is
+attempted. Existing bounded workers still have their host AbortSignal/terminate
+boundary and deadline. Already admitted operations are not rolled back or broadly
+killed; an in-flight mode change can invalidate completion CAS, leaving its original
+charge/capacity and diagnostic sidecar for explicit authoritative reconciliation.
+A stop with no unsettled workers exits 0 without claiming any implementation kill.
+
+Recovery from denial remains exact OS-user `resolve`: abandon, or authorize one
+materially new successor hash that requires fresh diagnosis/review. Delivery receipts,
+mode changes, restart and tracker/model output cannot resume or turn reviewer approval
+into execution/completion. No budget reset or reviewer shopping is introduced.
+
+No new selected runtime asset is introduced: the command/host reader ship with the
+CLI tree, and the existing state/worker/review/escalation assets remain in the complete
+runtime inventory. Source-only unit and disposable CLI tests prove controls, not
+provider enforcement, live delivery, atomic gate application, scheduler integration
+or an operational pilot. Those prerequisites retain their separately owned scope.
 
 ## Configuration, model and paid-call foundation
 
@@ -101,8 +153,8 @@ This finding does not block source-only contracts, state, snapshot or configurat
 
 ## Durable supervisor state and accounting
 
-`cli/src/supervisor-state.mts` is a bookkeeping API, not a worker, mode switch,
-notification bridge, admission replacement or action authorizer. Nothing calls it
+`cli/src/supervisor-state.mts` persists bookkeeping and audited operator mode fences;
+it is not a worker, notification bridge, admission replacement or action authorizer. Nothing calls it
 from the scheduler or enables paid work. A persisted proposal, review or intent
 never authorizes a run, gate edit, proof, push, merge or recovery attempt. Existing
 run/receipt/proof/delivery/recovery stores and saved evidence are not modified.
@@ -219,7 +271,7 @@ The state foundation alone grants no notification/review authority. The separate
 explicit source-only review/outbox boundary below implements the approved comment
 and local-resolution contract. Provider-enforced paid ceilings and atomic
 contained/preimage/fenced application with new proof remain activation prerequisites. Defaults remain inert;
-there is no automatic supervisor loop or pilot opt-in. Explicit diagnosis is described below.
+there is no automatic supervisor loop or usable live pilot activation adapter. Explicit diagnosis is described below.
 
 ## Read-only work snapshots and progress
 

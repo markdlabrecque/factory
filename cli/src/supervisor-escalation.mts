@@ -1,4 +1,4 @@
-// Explicit host outbox delivery to one managed tracker comment. Stop precedes I/O; uncertain POST is never replayed.
+// Explicit host outbox delivery to one managed tracker comment. Durable operator mode fences I/O; uncertain POST is never replayed.
 // Local resolution is a separate audited host-user command, not a tracker/model capability or action approval.
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -31,7 +31,7 @@ export function deliverSupervisorRequest(o: {
   if (h.delivery.state === 'notified') return { state: 'notified' };
   const stamp = () => new Date((o.now ?? Date.now)()).toISOString();
   const auth = o.current();
-  if (auth.mode !== 'act' || auth.authorized !== true) return { state: 'pending', reason: 'Tracker notification not authorized in current mode' };
+  if (s.control && s.control.mode !== 'act' || auth.mode !== 'act' || auth.authorized !== true) return { state: 'pending', reason: 'Tracker notification not authorized in current mode' };
   const target = h.scope.kind === 'ticket' ? h.scope.ticket : auth.operatorIssue;
   if (!Number.isSafeInteger(target) || target! <= 0) return { state: 'pending', reason: 'Project-wide request requires explicit operator issue' };
   const adapter = o.adapter ?? trackerNotificationAdapter();
@@ -48,7 +48,8 @@ export function deliverSupervisorRequest(o: {
     } else {
       s = commitSupervisor(o.stateDir, o.project, s.revision, { id: `notify-attempt:${h.id}`, at: stamp(), kind: 'notify-attempt', incidentId: o.incidentId, requestId: h.id, target: target! });
       const fresh = o.current();
-      if (fresh.mode !== 'act' || fresh.authorized !== true || h.scope.kind === 'project' && fresh.operatorIssue !== target) return { state: 'pending', reason: 'Authorization changed; no POST' };
+      const control = readSupervisor(o.stateDir, o.project).control;
+      if (control && control.mode !== 'act' || fresh.mode !== 'act' || fresh.authorized !== true || h.scope.kind === 'project' && fresh.operatorIssue !== target) return { state: 'pending', reason: 'Authorization changed; no POST' };
       response = adapter.create(o.project, target!, `${marker}\n**Factory supervisor: human required; actions stopped**\n\n${h.question}\n\nIncident: ${h.incidentId}\nProposal: ${h.proposalId}\nReason: ${h.reason}\n\nOriginal evidence:\n${h.evidence.map(x => `- ${x}`).join('\n')}\n\nNext operator action: ${h.nextAction}\n\nDelivery is NOT approval. Only an explicit audited local operator resolution can permit a different exact proposal and new review. No budget reset, gate mutation or automatic resume.`);
     }
     if (!receiptValid(response, o.project, target!, marker)) return { state: 'pending', reason: 'Tracker response lacks exact comment receipt/marker' };
