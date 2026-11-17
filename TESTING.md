@@ -36,6 +36,38 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Source acceptance release pack
+
+The [acceptance matrix and operator-held runbook](docs/supervisor-acceptance.md) and
+[sanitized machine index](docs/supervisor-acceptance.json) pin the T12 baseline.
+Current candidate counts/checks/review/merge are recorded separately in its PR/epic
+ledger after execution; historical counts never satisfy current gates. No tests,
+fixtures or shard configuration are added by this documentation-only acceptance step.
+Use Node **24.20.0**, existing checked-in offline provider archives and GNU timeout;
+no package install, real provider, auth discovery, service or Docker is required:
+
+```sh
+FACTORY_270_EVIDENCE=/tmp/factory-271-evidence node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-*.test.mts orchestrator/supervisor*.test.mts board/supervisor.test.mts
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/documentation*.test.mts
+bash scripts/test-shard.sh 1 4
+bash scripts/test-shard.sh 2 4
+bash scripts/test-shard.sh 3 4
+bash scripts/test-shard.sh 4 4
+timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
+git diff --check
+```
+
+`FACTORY_270_EVIDENCE` is only a harness artifact-output variable, not a production
+capability/authorization flag. Keep its raw synthetic prompts/stdout/base64 originals
+local; export only the runbook's metadata allowlist, never headers, fake/real keys or
+hidden reasoning. Preserve the 15-second provider child, 120-second test, concurrency
+four and 180-second shard bounds, exact inventory and separate lifecycle gate. No
+browser E2E duplicates renderer/policy checks. No sleeps, retries or waivers: inspect
+shard timing/assignment and report infrastructure errors (including inode exhaustion)
+without deleting evidence. Independent safety review and all hosted checks on the
+actual final head, latest-base reconciliation and ordinary SHA-guarded merge remain
+parent release gates. No source gate establishes T14 paid permission or pilot success.
+
 ## Public copied-install advisory journeys
 
 ```sh

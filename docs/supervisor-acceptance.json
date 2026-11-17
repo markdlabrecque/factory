@@ -1,0 +1,997 @@
+{
+  "version": 1,
+  "scope": "T13 source acceptance metadata only; no operational authority",
+  "footprint": [
+    "docs/supervisor.md",
+    "docs/factory-cli.md",
+    "TESTING.md",
+    "docs/supervisor-acceptance.md",
+    "docs/supervisor-acceptance.json"
+  ],
+  "baseline": {
+    "merge": "7734ba95c8358b49db87733be8a2d477775d8549",
+    "reviewedHead": "f9ef921e74a60aa81fc8deb5b8bf0583b4910dbf",
+    "base": "158df745bb2e3b24892cd809c60f3df3c3f53823",
+    "hosted": "https://github.com/markdlabrecque/factory/actions/runs/44139063054",
+    "hostedResult": "six green (historical)",
+    "mandatoryPasses": [
+      295,
+      239,
+      346,
+      204
+    ],
+    "separateLifecyclePasses": 12,
+    "independentFocusedPasses": 10
+  },
+  "sourceMerges": [
+    {
+      "task": 258,
+      "pr": 272,
+      "mergeSha": "2346f7871a9831887368c3b97b889fd101118ca8",
+      "url": "https://github.com/markdlabrecque/factory/pull/272"
+    },
+    {
+      "task": 259,
+      "pr": 273,
+      "mergeSha": "9476af9356f62d15feac655b84ba34afbf58479c",
+      "url": "https://github.com/markdlabrecque/factory/pull/273"
+    },
+    {
+      "task": 260,
+      "pr": 274,
+      "mergeSha": "23afc8acf98808ac5260f45c92d0a95399d54bf9",
+      "url": "https://github.com/markdlabrecque/factory/pull/274"
+    },
+    {
+      "task": 261,
+      "pr": 275,
+      "mergeSha": "9557cb17a6624ad87efdc9f8582182e1bc92e879",
+      "url": "https://github.com/markdlabrecque/factory/pull/275"
+    },
+    {
+      "task": 262,
+      "pr": 276,
+      "mergeSha": "4278115d19bfa0928d1d4a7fb010b07353ea3b47",
+      "url": "https://github.com/markdlabrecque/factory/pull/276"
+    },
+    {
+      "task": 263,
+      "pr": 277,
+      "mergeSha": "f7f08ce393e8474ccdc373960e1c952507536873",
+      "url": "https://github.com/markdlabrecque/factory/pull/277"
+    },
+    {
+      "task": 264,
+      "pr": 278,
+      "mergeSha": "63db25b4693c19b1eba6fe39e1d7dc9af4156de2",
+      "url": "https://github.com/markdlabrecque/factory/pull/278"
+    },
+    {
+      "task": 265,
+      "pr": 279,
+      "mergeSha": "c2d0fd9d4ebb058aedce13fccb0916c244abaaf8",
+      "url": "https://github.com/markdlabrecque/factory/pull/279"
+    },
+    {
+      "task": 266,
+      "pr": 280,
+      "mergeSha": "2fd2a327aaeacabdf4c0f7240059f36ff091473c",
+      "url": "https://github.com/markdlabrecque/factory/pull/280"
+    },
+    {
+      "task": 267,
+      "pr": 281,
+      "mergeSha": "95840f8246d24b16e06066e1d003e63b44649f2d",
+      "url": "https://github.com/markdlabrecque/factory/pull/281"
+    },
+    {
+      "task": 268,
+      "pr": 282,
+      "mergeSha": "701a510e89f9e8d65ac299511696f29ef7919b61",
+      "url": "https://github.com/markdlabrecque/factory/pull/282"
+    },
+    {
+      "task": 269,
+      "pr": 283,
+      "mergeSha": "158df745bb2e3b24892cd809c60f3df3c3f53823",
+      "url": "https://github.com/markdlabrecque/factory/pull/283"
+    },
+    {
+      "task": 270,
+      "pr": 284,
+      "mergeSha": "7734ba95c8358b49db87733be8a2d477775d8549",
+      "url": "https://github.com/markdlabrecque/factory/pull/284"
+    }
+  ],
+  "provider": {
+    "contract": "docs/design/supervisor-provider-contract.md",
+    "research": "docs/research/supervisor-openai-boundary.md",
+    "price": "terra-standard-2026-11-17-v1",
+    "profile": "b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587",
+    "inputBound": 1050000,
+    "outputCap": 4096,
+    "reservedTokens": 1054096,
+    "reservedMicroUsd": 5808792,
+    "costIsInvoice": false,
+    "packages": [
+      {
+        "name": "openai",
+        "version": "7.19.0",
+        "archive": "openai-7.19.0.tgz",
+        "sha256": "597532dcb9051ee8aa5edadedb57b798b42add68cc5aec1d67e994d0cfad07f1"
+      },
+      {
+        "name": "partial-json",
+        "version": "0.1.7",
+        "archive": "partial-json-0.1.7.tgz",
+        "sha256": "30eafeed6fdc25fb2ca24f34c37796d9f98f0bf5e156452b98a2c356762f6322"
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.2",
+        "archive": "pi-ai-1.5.2.tgz",
+        "sha256": "d5715efa834c23bfdf10a042b49df4ee169cc99000bf16d7998fab2d533b45f8"
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "1.5.2",
+        "archive": "pi-telemetry-1.5.2.tgz",
+        "sha256": "0d29dbee830c74af7115035c7cb326c1e9da2f690a3f6f95620597092da9f9ee"
+      }
+    ]
+  },
+  "artifactRoot": "/tmp/factory-257-live",
+  "artifactAvailability": "local only; restore matching bytes or regenerate offline if unavailable; not remote attachments",
+  "artifacts": [
+    {
+      "path": "258-merge.json",
+      "sha256": "a2340db7746fa7b5a8f9df052586b0f3315c1f8167ef3f30636ac21e27117ef5",
+      "bytes": 152
+    },
+    {
+      "path": "259-merge.json",
+      "sha256": "572f0aaa4ae3a3b1836b981068609daae242f1b5762bbd5d0d0fd7a946fcb038",
+      "bytes": 160
+    },
+    {
+      "path": "260-index.json",
+      "sha256": "228505d80438cf51247140b9427241ec816ed553bd1d338cdc00ecf181b01fd6",
+      "bytes": 3371
+    },
+    {
+      "path": "260-merge.json",
+      "sha256": "fb369eff27784e888f2e313a5a06d1baad6e76d1bdec99bbdff6b25e6607e995",
+      "bytes": 162
+    },
+    {
+      "path": "260-transport-evidence.json",
+      "sha256": "b7c22e7ea007a2a2df52eb3b433f28314c9a75b8b7d9ab949ad3bc73cfc2cf62",
+      "bytes": 12525
+    },
+    {
+      "path": "261-index.json",
+      "sha256": "20394637dceff09b0b9e70dcd60df44d4c5b86e05b3d4fd88f8fcad4fa1d387a",
+      "bytes": 2200
+    },
+    {
+      "path": "261-merge.json",
+      "sha256": "30f6acd56e9a8c7f2e266a5732216343c0768e5a5270143d0e2ce7fb5795b199",
+      "bytes": 171
+    },
+    {
+      "path": "262-delivery.md",
+      "sha256": "6ffc82f3810f41763d8d3b0fb7c78f9a9bf2f6199fde556935fc35c52b41259b",
+      "bytes": 2110
+    },
+    {
+      "path": "262-index.md",
+      "sha256": "c46b9260f26d931a6f4408fac039c85d5853b50bef61181b51921b6913e0d513",
+      "bytes": 6351
+    },
+    {
+      "path": "262-merge.json",
+      "sha256": "6660f2a58f1c597a6fdac3ca38a44fa4217b25a40a383978a81b7652c7e9b2e9",
+      "bytes": 148
+    },
+    {
+      "path": "263-delivery.md",
+      "sha256": "b2cf268971f36ffd91942a89c1f00e2787f89652739e2ec833548ae61638a2c8",
+      "bytes": 2210
+    },
+    {
+      "path": "263-index.md",
+      "sha256": "09e0a516fd040cf18627ddfcbf20c31ff2ae56d5c23cafd2a27b64c3a1f673a7",
+      "bytes": 3388
+    },
+    {
+      "path": "263-merge.json",
+      "sha256": "8355ecfd0903a9107267bab4a042e117be6afbfa4b398b894b6eb853be41d16b",
+      "bytes": 160
+    },
+    {
+      "path": "264-delivery.md",
+      "sha256": "dfc88fc6b5c6a2f5e34b3e6707deb6e409367c833afaaf63700d2f155e2a655e",
+      "bytes": 1813
+    },
+    {
+      "path": "264-index.json",
+      "sha256": "86bf45d80b7aa11e9bde08c77643f73e2f8ae38a8f406c2a7bdda0619eabf3b1",
+      "bytes": 5626
+    },
+    {
+      "path": "264-merge.json",
+      "sha256": "48ea9b9b5d2a9b9e6253832b9984d5e268626eaae08b51a96997328a9727ce42",
+      "bytes": 157
+    },
+    {
+      "path": "265-delivery.md",
+      "sha256": "74675f31d76d359dba7e944d24173460aefed92492f8159c8901b0fd75475119",
+      "bytes": 1772
+    },
+    {
+      "path": "265-merge.json",
+      "sha256": "c8dc622d5b73650153869e224b17527b7172aa17eef88271e0afa09780cca237",
+      "bytes": 151
+    },
+    {
+      "path": "266-delivery.md",
+      "sha256": "c4990cc39c2a94245f805a398c1137f2151934e42866333407c1a57b568599f9",
+      "bytes": 1511
+    },
+    {
+      "path": "266-index.md",
+      "sha256": "1e1e5b09c96b8cce765ab0cc1652845c4263e2136ec8f9bdea4a4c3354dbe1dd",
+      "bytes": 3560
+    },
+    {
+      "path": "266-merge.json",
+      "sha256": "887eb5e72554c710109e01a57e33cf48d1baf20f561705a71cc172cc5689892f",
+      "bytes": 165
+    },
+    {
+      "path": "267-delivery.md",
+      "sha256": "389be2d5149cecc2422421ff7885eee070234c5cc505fc895a808020d77b2127",
+      "bytes": 2013
+    },
+    {
+      "path": "267-final-index.md",
+      "sha256": "4c507c9ce1ee45e1425b0f447a751d12143fb83911b800d15e5a6b557a576a7b",
+      "bytes": 4377
+    },
+    {
+      "path": "267-index.md",
+      "sha256": "86771257cdc4cbff7e0e938f716bb3ef40e634230175acdd85f7387954e4fd47",
+      "bytes": 2934
+    },
+    {
+      "path": "267-merge.json",
+      "sha256": "e5422828c337603b1a120cc998b54a58a9fce5cb88d9869a75b0e33ac2a0c7c2",
+      "bytes": 169
+    },
+    {
+      "path": "268-delivery.md",
+      "sha256": "bd9309dd7a21d0566c877cbf8e88da55f9decc2cfd5f8303d0e60868d014a1b6",
+      "bytes": 1676
+    },
+    {
+      "path": "268-gates.index",
+      "sha256": "e1fffe5b42c31171f68d6031d177b26d09e15b1e233842164a1763d885d1d979",
+      "bytes": 254
+    },
+    {
+      "path": "268-merge.json",
+      "sha256": "7e5b7d422e279c5ea349007ce31e11054e4e42152a87078b0d8a34e2f786954c",
+      "bytes": 170
+    },
+    {
+      "path": "268-rollout-gates.index",
+      "sha256": "ef34c292281c3c7bffd5666af904b42023acebcd5a8340f163864c75bad9158a",
+      "bytes": 72
+    },
+    {
+      "path": "268-rollout-index.md",
+      "sha256": "32236386fff2719f61960906883d1c354999ca14dd77d158315c83eca0c98a1d",
+      "bytes": 4856
+    },
+    {
+      "path": "269-delivery.md",
+      "sha256": "33e8724fd433e3e5586cc3ae8878d48834704037d2174cb1499c2ca9b2bd8351",
+      "bytes": 1566
+    },
+    {
+      "path": "269-merge.json",
+      "sha256": "89c7f85bc2d1c8a9128dfa3a88848384f45f2877037431c4fbe442c95cfecd9d",
+      "bytes": 168
+    },
+    {
+      "path": "270-delivery.md",
+      "sha256": "5150d7a14371f8c7a9eb7ad646ead0c6af839a42c6cb25ecd5990f4a1497a5c6",
+      "bytes": 1889
+    },
+    {
+      "path": "270-index.json",
+      "sha256": "32928e73f2936d6ca560864a442423af59e5fbeb73a4ea6172f39431316f58fc",
+      "bytes": 2030
+    },
+    {
+      "path": "270-merge.json",
+      "sha256": "fc61e9d2f323181adb1869b188b863d9238532df53e0ad2732980534822a351c",
+      "bytes": 171
+    },
+    {
+      "path": "270-artifacts/journey-a.json",
+      "sha256": "394bcfc6df881cf998af135ccbd91f8fe494399419ebaa6972f95502beb58042",
+      "bytes": 794001
+    },
+    {
+      "path": "270-artifacts/journey-b.json",
+      "sha256": "df90dfb72c0ef2c37ff05c753c3a0598d48b86be3ac6f22a9022353efd05d963",
+      "bytes": 640919
+    }
+  ],
+  "journeys": [
+    {
+      "id": "a",
+      "artifact": "270-artifacts/journey-a.json",
+      "platform": "linux (recorded process-start identities); Node 24.20.0 executable",
+      "runtimeId": "6f123be45e5393170bc681beb0e7dd6bdf9c587119ef706359b26895bfe18efe",
+      "dependencyId": "f0955b5f73aea5a0e2e2c36c322166579dc6fe6f786e57463f98f95bc9ecb2d9",
+      "identityScope": "disposable copied fixture only, not installed/shipping IDs",
+      "revision": 6,
+      "commands": [
+        {
+          "command": [
+            "supervisor",
+            "diagnose"
+          ],
+          "exit": 0,
+          "signal": null,
+          "state": "proposed",
+          "diagnosticId": "fcb432fbb775b514f1619343dfe3da49a80a86a871a5cb882aa2785ce22d3e41"
+        },
+        {
+          "command": [
+            "supervisor",
+            "status"
+          ],
+          "exit": 0,
+          "signal": null,
+          "revision": 5
+        },
+        {
+          "command": [
+            "supervisor",
+            "explain"
+          ],
+          "exit": 0,
+          "signal": null,
+          "revision": 5
+        },
+        {
+          "command": [
+            "supervisor",
+            "status"
+          ],
+          "exit": 0,
+          "signal": null,
+          "revision": 5
+        },
+        {
+          "command": [
+            "supervisor",
+            "diagnose"
+          ],
+          "exit": 0,
+          "signal": null,
+          "state": "reused",
+          "diagnosticId": "fcb432fbb775b514f1619343dfe3da49a80a86a871a5cb882aa2785ce22d3e41"
+        }
+      ],
+      "requestCount": 1,
+      "requestCountEvidence": "acceptance test count assertion; export retains captured request",
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "method": "POST",
+        "model": "gpt-6.1-terra",
+        "stream": true,
+        "store": false,
+        "max_output_tokens": 4096,
+        "service_tier": "default",
+        "truncation": "disabled",
+        "prompt_cache_options": {
+          "mode": "explicit"
+        },
+        "topLevelEffort": "medium",
+        "terminalConfigurationEffort": "high",
+        "bodyHash": "41b2b84dd324a472e5845de926b33fe95f744c6d1fcaaa26dce8185453df31f5",
+        "tools": false,
+        "continuation": false
+      },
+      "invocationId": "944dad6f-76ec-4b29-b196-7e42944c9bf4",
+      "grantId": "d32cf58fdcc4588ee67de10ed663b32dca51919dceb5ca7c0c7a5c9a8df50e49",
+      "basis": "0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50",
+      "profile": "b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587",
+      "policy": "c04a763b8dfb0f3c6a4331c48d960f38a98d273e5b1ba4545a0e6bd615f00b5f",
+      "sendReceipt": "da34d759f61e44d6e7b5158ca3eda89e8e3c7d8333180e97918c8971b3070d95",
+      "reserved": {
+        "tokens": 1054096,
+        "cost": 5808792
+      },
+      "actual": [
+        "copied public CLI/private runtime",
+        "host/collector/admission/journal",
+        "digest-verified SDK serialization",
+        "native process/IPC/fsync",
+        "work/index/refs/raw-run comparison",
+        "outbound and effect traps",
+        "fresh status/explain and Board projection"
+      ],
+      "cumulativeCharged": {
+        "diagnosis": {
+          "tokens": 1054096,
+          "cost": 5808792
+        },
+        "review": {
+          "tokens": 0,
+          "cost": 0
+        }
+      },
+      "reservationState": "finished",
+      "holdCount": 0,
+      "settlementReceipts": [
+        {
+          "authorization": "da34d759f61e44d6e7b5158ca3eda89e8e3c7d8333180e97918c8971b3070d95",
+          "usageId": "a8f04864ead65e954406b63f14c56541c64909784af9184594f7d50129ca33da",
+          "process": "7a146d8dcf20657cfe0a9e4740e7e538a1e629a2df10a2b8fb9d7a8294cd12d0",
+          "cleanup": "d2d52a68272540e0870112479bd595b7f88069c01fc558fe1362361ce3236647"
+        }
+      ],
+      "originalMetadata": [
+        {
+          "reference": "state/factory/supervisor/state.json",
+          "sha256": "5724577ea1cb12ca63a2b2b9da9237b9c96df0910e2bf6a851c7747e4f206c2c",
+          "bytes": 9345
+        },
+        {
+          "reference": "state/factory/supervisor/75488c217254fe6dd75bd040a01ce8717bd9a6931efa7cde44993d7f23b25c85/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/input.json",
+          "sha256": "e7e532ce2a13152cc22f18d02cda620c0738f3201ba87f682263857ff7635f34",
+          "bytes": 19560
+        },
+        {
+          "reference": "state/factory/supervisor/75488c217254fe6dd75bd040a01ce8717bd9a6931efa7cde44993d7f23b25c85/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/raw-output.json",
+          "sha256": "25feeb8533af59270f2bbd54c7d5db9189f53be70826c637b157a462ced17338",
+          "bytes": 761
+        },
+        {
+          "reference": "state/factory/supervisor/process/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/cleanup.json",
+          "sha256": "3fe4199e3857a8192a7834aa549997f409116e6c939323a3b87d9f4478c8fb66",
+          "bytes": 155
+        },
+        {
+          "reference": "state/factory/supervisor/process/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/process.json",
+          "sha256": "44903ef2783cf8ccf94306b901055774c0250f65ef8769e712276a22559ce610",
+          "bytes": 686
+        },
+        {
+          "reference": "state/factory/supervisor/usage/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/terminal.json",
+          "sha256": "e59b4fc834e75eca5a4aaeff306a26c2009358896cef72cf9c1d01365c810823",
+          "bytes": 1730
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/1dbc4ed6abd984e1243848cd78a2c799953aa9a3ed9036aa1254a1eb39f58a35/8d62a793-8a24-4273-b926-b0851b67c884/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-cc42d55911117e80ce3f6533feb8c4d907784abbee98d499666fb8f9cf6f50fb/originals.json",
+          "sha256": "c023c8f745eeab7f58db3f22bf4f12e9df8c9e641c849c879801f0bb5e7569c0",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/1dbc4ed6abd984e1243848cd78a2c799953aa9a3ed9036aa1254a1eb39f58a35/9b7fca8e-5882-4954-8609-c4957c26f057/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-3626a8cc6ea6feeb5bcfed7dda26f09c72f1c28f5c982fcacb599f8b226514e8/originals.json",
+          "sha256": "3df885434c68ba0720a85e1ff5fd3877ab8be10953541601613270b296a422da",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/04a8353b-5c21-48a7-8f51-043862dcf631/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-51b4188dfe28a545646ba4c1811b08a95e0443b6f55b023828f48ca151eca4f2/originals.json",
+          "sha256": "e6d82672786e91a23510448a510555b80d5d58916ee6cc9dfcfee0a39da42942",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/1b33302f-7eab-48aa-a99f-05e3b60cd964/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-617419153ad5e4dc6b4b68859b9d04b795d01249de5d4528b3a2406a714da4e3/originals.json",
+          "sha256": "003f98ede275abd9e9eaad3bff973c02fad27999ef69d356faddef4382819a15",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/231e8181-be9c-44f7-b6eb-269faf71b73a/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-9456c8aa5588d1bf42bc05e1dfc4217bdd088d8cdb275c4b8b9d89dfee589264/originals.json",
+          "sha256": "f42ef911f0e6bef99b3bdc8772e9c4e74c067d800a76016f506e8f0b5a255b97",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/2af5de09-ad4f-41e1-8e53-7f43d033631e/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-17e922ee5e608ebf6b27278a3d2ca0539afb842b90a5959bf8e974422af1e347/originals.json",
+          "sha256": "7392cf57a988cbc9a631d77709206727dd8cc46ed7f52ba1c16dae0f3d6faab3",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/3416d286-3792-4468-a845-e7461106f984/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-cf4696d8ac04a8149e4198fcd3606be089f328ba366afeea5206eccae6375575/originals.json",
+          "sha256": "34c79384122f8a91b90aa887797497f33e44943d20e3337c3a76efa63ae8160f",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/a677ed52-762d-4bdc-a395-20cf421a041b/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-4283c8ec0f453d210ce468db887218c7e8d8aca8fb6497e57efebfc824d229af/originals.json",
+          "sha256": "d9cc407d86e266b92894da4dc826e32b801b1b3232e8f0a95036035c5c517500",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/fb0fb2e8f23357a0cf87a09ed10e84739ba5f21d82c99aab0b6f3a1cf6f56c34/a9bb850677e65c2ad036e79fc701276115c794ce4b36bc73fd078d1d093635a2/b1cd44d1-ec16-48f9-924d-6a780ce20ddc/0265aedc45b7d6a34d82a71c9f7657c59b96bf2c49730bc52f07d8996bafde50-13adcea28911e25333ae6fadcb11b27dcd12ffd7298f4071cfcf8fcbb493c739/originals.json",
+          "sha256": "8eb49fabdfe6e05012776b3bfc8a041b971911ee4479281c8ff88e5732caebe5",
+          "bytes": 52446
+        }
+      ],
+      "preservationHashes": {
+        "status": "b44d3ce8ded0d59d22aff2c2e483613d037dd6ccba0adc9aa0e986ed5a551176",
+        "refs": "9b9e56afe90a5b72970a64eb57979905a384710acb8c6bbd0f53fc16cc6ce13a",
+        "index": "8789712209196fa4d66a62e4c49e3d75ed12cfa1ddd55e7f08ff6fcd34b43d95",
+        "worktrees": "0b92f747202bf7b97deda5893ed7a0d817fe70f075818520db195007496b5851",
+        "worktreeStatus": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "worktreeIndex": "25ece4a039dd2ad412af24ebd25d22954b901513d0823c50b2d5f54d56c62721",
+        "worktreeApp": "6db7d803e74f1ffa7d8f5adc0bf95b3e15bf4c8373fffadf546227cc6c6742cb",
+        "app": "fb6e280804b0e39f4440e500f5bd00a3f072e0ae4afdb483974a9418a7900477",
+        "staged": "5404d3c3374fd710dea42091cc2b0982e18d77b6f4ce1d4d53de1129cbef68ed",
+        "untracked": "e3b28822367d4f024f7c1f573a73eb71ef7c037b82c8cf8b5680a62eb8e2ca47",
+        "run": "8e6a462e18f4dbab54ed34fd66f8ffa4ca9e1d9958dfb8d739e2172e396b86fc"
+      },
+      "synthetic": [
+        "normal agent/sandbox/Docker",
+        "read-only tracker/service replies",
+        "environment auth (not exported)",
+        "private expiring human rollout assertion",
+        "HTTP/SSE/usage"
+      ],
+      "notRun": [
+        "remote provider acceptance",
+        "invoice/billing",
+        "model quality",
+        "installed quiescence",
+        "paid pilot"
+      ]
+    },
+    {
+      "id": "b",
+      "artifact": "270-artifacts/journey-b.json",
+      "platform": "linux (recorded process-start identities); Node 24.20.0 executable",
+      "runtimeId": "6f123be45e5393170bc681beb0e7dd6bdf9c587119ef706359b26895bfe18efe",
+      "dependencyId": "a8f0b99a275af3fc106e1834ee1a2a63e105a67651cc543de78f0147446cee91",
+      "identityScope": "disposable copied fixture only, not installed/shipping IDs",
+      "revision": 6,
+      "commands": [
+        {
+          "command": [
+            "supervisor",
+            "stop"
+          ],
+          "exit": 1,
+          "signal": null
+        },
+        {
+          "command": [
+            "supervisor",
+            "status"
+          ],
+          "exit": 0,
+          "signal": null,
+          "revision": 5
+        },
+        {
+          "command": [
+            "supervisor",
+            "diagnose"
+          ],
+          "exit": 1,
+          "signal": null,
+          "state": "held",
+          "diagnosticId": null
+        },
+        {
+          "command": [
+            "supervisor",
+            "diagnose"
+          ],
+          "exit": null,
+          "signal": "SIGKILL",
+          "barrier": "after real parent-directory fsync of human journal"
+        },
+        {
+          "command": [
+            "supervisor",
+            "status"
+          ],
+          "exit": 0,
+          "signal": null,
+          "revision": 6
+        },
+        {
+          "command": [
+            "supervisor",
+            "diagnose"
+          ],
+          "exit": 1,
+          "signal": null,
+          "state": "held",
+          "diagnosticId": null
+        },
+        {
+          "command": [
+            "run",
+            "7"
+          ],
+          "exit": 1,
+          "signal": null
+        }
+      ],
+      "requestCount": 1,
+      "requestCountEvidence": "acceptance test count assertion; export retains captured request",
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "method": "POST",
+        "model": "gpt-6.1-terra",
+        "stream": true,
+        "store": false,
+        "max_output_tokens": 4096,
+        "service_tier": "default",
+        "truncation": "disabled",
+        "prompt_cache_options": {
+          "mode": "explicit"
+        },
+        "topLevelEffort": "medium",
+        "terminalConfigurationEffort": "high",
+        "bodyHash": "3af5bc14865a23f90d3392f10dacad0ffce4e5bb59ee5a28f580d87685a8923a",
+        "tools": false,
+        "continuation": false
+      },
+      "invocationId": "3981489c-e530-4c4c-8b51-ffae340fd1f0",
+      "grantId": "e3e65b4142fb81634d36ab0167c03c45dcd8a683517e916b80496cfb68d1d3c5",
+      "basis": "bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5",
+      "profile": "b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587",
+      "policy": "c04a763b8dfb0f3c6a4331c48d960f38a98d273e5b1ba4545a0e6bd615f00b5f",
+      "sendReceipt": "3bf1385bec99ae9e53c5702201604804d85ec0fdc826ceff85f46f65ea8993e7",
+      "reserved": {
+        "tokens": 1054096,
+        "cost": 5808792
+      },
+      "actual": [
+        "copied public CLI/private runtime",
+        "host/collector/admission/journal",
+        "digest-verified SDK serialization",
+        "native process/IPC/fsync",
+        "work/index/refs/raw-run comparison",
+        "outbound and effect traps",
+        "fresh status/explain and Board projection"
+      ],
+      "cumulativeCharged": {
+        "diagnosis": {
+          "tokens": 1054096,
+          "cost": 5808792
+        },
+        "review": {
+          "tokens": 0,
+          "cost": 0
+        }
+      },
+      "reservationState": "ambiguous",
+      "holdCount": 1,
+      "settlementReceipts": [],
+      "originalMetadata": [
+        {
+          "reference": "state/factory/supervisor/state.json",
+          "sha256": "8ffd4d6ddee2584aa08964d0f5f4281ad41d6073aecc141254d0354cf3ef89dd",
+          "bytes": 8736
+        },
+        {
+          "reference": "state/factory/supervisor/admission/lock",
+          "sha256": "af6a0bef8b0808369bfa4a01cdae66bfa3c5c828c452f8ef58d3db7f92a7259b",
+          "bytes": 39
+        },
+        {
+          "reference": "state/factory/supervisor/8f93a169722a3811cfb8648e569621f2b518cdc3dc2e837c5bdb737236deb1b2/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/input.json",
+          "sha256": "7be1762598a1f64c54a2fb1b3e13903067f4bd227e361f9cf84d0c5d1ecab62d",
+          "bytes": 19560
+        },
+        {
+          "reference": "state/factory/supervisor/8f93a169722a3811cfb8648e569621f2b518cdc3dc2e837c5bdb737236deb1b2/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/raw-output.json",
+          "sha256": "f8bf8cd22e4a7af496610e219339b4defa13401cc39bbbd95ae968dae7d238de",
+          "bytes": 761
+        },
+        {
+          "reference": "state/factory/supervisor/8f93a169722a3811cfb8648e569621f2b518cdc3dc2e837c5bdb737236deb1b2/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/uncertain-result.json",
+          "sha256": "a71bc4d760b70eabb32aea8d2ef55c3be457697dc3a226680ac377ccf92d59d8",
+          "bytes": 1299
+        },
+        {
+          "reference": "state/factory/supervisor/process/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/cleanup.json",
+          "sha256": "1bc0f86a6751a6e76adfc983f77e219fa583722cb8b75b570467d2e9ab514cb6",
+          "bytes": 155
+        },
+        {
+          "reference": "state/factory/supervisor/process/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/process.json",
+          "sha256": "9fce403eae18b08a6ed334423fa5e0fe01b72d8e07d03fd3b108a07d58ac0d1d",
+          "bytes": 686
+        },
+        {
+          "reference": "state/factory/supervisor/usage/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/terminal.json",
+          "sha256": "18388bfbd8bfa32e0917cd4176e306afc44903cba0bc96559d53bd8bb31d02a9",
+          "bytes": 1350
+        },
+        {
+          "reference": "state/factory/supervisor/originals/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/58dc5fc4-681d-4286-b575-e9e21c072b9c/bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5-e08b55d6a8b6694f4852954af5073e1f7e041d1c69eab4ad95ae7d71daefc2d0/originals.json",
+          "sha256": "8bc708358ae74a0297bad6ec4efd32257fdd3ae6423619f4b680e69054ee5010",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/6dde2cf0-1f69-4d6f-9dbe-6e320de27bf2/bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5-e6a968c13491f9fce39852661d244de24c75a00c0696b91f762963a469442136/originals.json",
+          "sha256": "11cae4119577f0843df12ab5c43a2aa62ea9c23f0975d1ac7727f9cf1c69a998",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/9e206aaa-7696-497f-9851-a998ab4e5a87/bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5-4e377b3c533b7cc152e9f5ee0acea6a55d7c4ae0210f0dac31992eca2940b7f2/originals.json",
+          "sha256": "765663eef82913a55500ffa151e282511ba4d2fc65e3c45e1865356c15dd00a0",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/ac568770-2549-4a76-9594-cbba8bb4c3ea/bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5-ed4f30c5d4e194dd1fe933278e9287ba9a7b1abfc05355593bf7e7fa04697782/originals.json",
+          "sha256": "2266385e4a4a0a5cb292152de89f25e9242f3f87c8a7c4167772fb86d607aab2",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/b69ca206-c2ac-4f0d-8c48-9d68f37b9471/bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5-bc52fea098fee6e8e4f263954dc1c56d05d64804a5afd432c9bfe7915c29dfad/originals.json",
+          "sha256": "5e31e7fff1d9b5637cea9eb65a35f60e38a958c58b61588ecad0be2d1596ae6c",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/cb9aab80-88e7-43d5-be0c-fc8d44b1cff4/bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5-457863764e461a3973094347174041ac8806472367ffe5dfa12a75bcc6903fde/originals.json",
+          "sha256": "4c7f8b7896ab50dd77765ba467f2cd965dc3cb34343a2935807d9e8ade510fb0",
+          "bytes": 52446
+        },
+        {
+          "reference": "state/factory/supervisor/originals/ea6bf9002718c59dd371f1d02368bd505543bfc003e8a0c04c03ede49fe6d6fc/32c57470a7b184c41662b2d82064e8c17bef4ad0863e9f64201e9090fccd4893/d6bbb7c4-443c-472b-9533-b6a1c79597ad/bd65458d02d96c2a957920a3c966c09e4a10e9f0c732feec1db8be6239b458e5-5305418e540b63b0e41269b94cfc0aa1a4f71c003bf4ce0152232b85b1191991/originals.json",
+          "sha256": "f8aaff60f44bb9d2505e2e1cf519d1c759a1b7d81c5b3fa1def6a65d3c4c5349",
+          "bytes": 52446
+        }
+      ],
+      "preservationHashes": {
+        "status": "8679fd00e88cc486cccff57058c78b60c21b4bb9d33cd8ee95c6cab5832d1b89",
+        "refs": "6bf1aaecccf124751ccbce1591a217e48f6fca73c8c9801dc17521faf790be60",
+        "index": "75a09b5c4da1b8d862f5bf27f55e1a1d0af413043ce4bed672624db53920cbf3",
+        "worktrees": "f86774ad6489c3b83a6d23b1cf2b0aa772c523e82b1c41380fcd4f569a40e94d",
+        "worktreeStatus": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "worktreeIndex": "ff4840f3afdb7c461e5bc7b4e5c5cf1ad8cd3131dc8bbc2efdd45da2a7a0a8d9",
+        "worktreeApp": "6db7d803e74f1ffa7d8f5adc0bf95b3e15bf4c8373fffadf546227cc6c6742cb",
+        "app": "fb6e280804b0e39f4440e500f5bd00a3f072e0ae4afdb483974a9418a7900477",
+        "staged": "5404d3c3374fd710dea42091cc2b0982e18d77b6f4ce1d4d53de1129cbef68ed",
+        "untracked": "e3b28822367d4f024f7c1f573a73eb71ef7c037b82c8cf8b5680a62eb8e2ca47",
+        "run": "6d34eebbb765849d5b44aba268e7131124380df2c12ff48fd41ee2f1cf7121dd"
+      },
+      "synthetic": [
+        "normal agent/sandbox/Docker",
+        "read-only tracker/service replies",
+        "environment auth (not exported)",
+        "private expiring human rollout assertion",
+        "HTTP/SSE/usage"
+      ],
+      "notRun": [
+        "remote provider acceptance",
+        "invoice/billing",
+        "model quality",
+        "installed quiescence",
+        "paid pilot"
+      ]
+    }
+  ],
+  "matrix": [
+    {
+      "claim": "fixed-request",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "260-transport-evidence.json",
+        "270-artifacts/journey-a.json"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "finite-reservation",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "260-index.json"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "one-generation",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "260-transport-evidence.json"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "terminal-usage",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "261-index.json",
+        "270-artifacts/journey-a.json",
+        "270-artifacts/journey-b.json"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "controller-independent-bound",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "262-index.md"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "one-managed-owner",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "263-index.md",
+        "264-index.json"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "complete-fresh-originals",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "265-delivery.md"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "crash-safe-settlement",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "267-final-index.md"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "selected-identity",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "266-index.md"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "public-cli-board-stop",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "270-artifacts/journey-a.json",
+        "270-artifacts/journey-b.json"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "preservation-no-effects",
+      "status": "OFFLINE_ARTIFACT",
+      "artifacts": [
+        "264-index.json",
+        "270-artifacts/journey-a.json",
+        "270-artifacts/journey-b.json"
+      ],
+      "boundary": "actual local behavior with synthetic provider/operator/platform inputs; see human matrix"
+    },
+    {
+      "claim": "current-final-head-release",
+      "status": "BLOCKED",
+      "reason": "parent must finalize actual candidate SHA/base, independent safety review/findings, hosted URLs/checks, latest-develop reconciliation and authorized SHA-guarded merge in PR/epic ledger; no future head invented"
+    },
+    {
+      "claim": "T14-provider-and-useful-diagnosis",
+      "status": "NOT_RUN_BLOCKED",
+      "reason": "separate explicit paid operational approval and eligible host required; outside source epic scope"
+    }
+  ],
+  "candidate": {
+    "finalHead": null,
+    "mergeSha": null,
+    "independentReview": null,
+    "hostedChecks": null,
+    "epicClosure": "NOT_DECIDED: explicit source acceptance comparison required, never automatic all-child closure",
+    "localGateLogs": "271-focused.log, 271-docs.log, 271-shard-{1,2,3,4}.log, 271-lifecycle.log; final results retained separately, not baseline acceptance",
+    "localResults": [
+      {
+        "gate": "focused",
+        "command": "FACTORY_270_EVIDENCE=/tmp/factory-257-live/271-artifacts node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-*.test.mts orchestrator/supervisor*.test.mts board/supervisor.test.mts",
+        "passed": 115,
+        "failed": 0,
+        "log": "271-focused.log",
+        "sha256": "397fd5b7ecd7ec5d23008641a9336b6b671e4beb3889ebf0701f5d7668758d02",
+        "bytes": 15039,
+        "scope": "local working tree based on immutable T12 merge; no final-head/hosted/review claim"
+      },
+      {
+        "gate": "docs",
+        "command": "node --test --test-concurrency=4 --test-timeout=120000 cli/test/documentation*.test.mts",
+        "passed": 8,
+        "failed": 0,
+        "log": "271-docs.log",
+        "sha256": "65576eeb36be16f071c5cbb9bc02fe5ffcc3005298b6b582e20987366db8b79d",
+        "bytes": 870,
+        "scope": "local working tree based on immutable T12 merge; no final-head/hosted/review claim"
+      },
+      {
+        "gate": "shard-1",
+        "command": "bash scripts/test-shard.sh 1 4",
+        "passed": 295,
+        "failed": 0,
+        "log": "271-shard-1.log",
+        "sha256": "aa3ea6f3ee5f80574e4056818b5a41cc81bc57e47eb6724f2b0f62d1585781be",
+        "bytes": 83220,
+        "scope": "local working tree based on immutable T12 merge; no final-head/hosted/review claim"
+      },
+      {
+        "gate": "shard-2",
+        "command": "bash scripts/test-shard.sh 2 4",
+        "passed": 239,
+        "failed": 0,
+        "log": "271-shard-2.log",
+        "sha256": "e7377731a22b732302800d90985cd5ea0393ba67d3c4ef882e5dc27fecf40fae",
+        "bytes": 57156,
+        "scope": "local working tree based on immutable T12 merge; no final-head/hosted/review claim"
+      },
+      {
+        "gate": "shard-3",
+        "command": "bash scripts/test-shard.sh 3 4",
+        "passed": 346,
+        "failed": 0,
+        "log": "271-shard-3.log",
+        "sha256": "1536b84ed4c309b7df9e7cd170e171fbd1c093951755e206d1c63b65e3860d5b",
+        "bytes": 107583,
+        "scope": "local working tree based on immutable T12 merge; no final-head/hosted/review claim"
+      },
+      {
+        "gate": "shard-4",
+        "command": "bash scripts/test-shard.sh 4 4",
+        "passed": 204,
+        "failed": 0,
+        "log": "271-shard-4.log",
+        "sha256": "d736db30c455e64eafb1ec31f3ec908750b6729d3ecd668bbc0842f422775f56",
+        "bytes": 52789,
+        "scope": "local working tree based on immutable T12 merge; no final-head/hosted/review claim"
+      },
+      {
+        "gate": "lifecycle",
+        "command": "timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts",
+        "passed": 12,
+        "failed": 0,
+        "log": "271-lifecycle.log",
+        "sha256": "0b48a71e3753dac64845fc0b4e6b4e8650b8cc6f18de16afd732286f93e6ac3d",
+        "bytes": 1946,
+        "scope": "local working tree based on immutable T12 merge; no final-head/hosted/review claim"
+      }
+    ]
+  },
+  "excluded": [
+    "auth headers",
+    "fake or real keys",
+    "raw prompts/stdout/stderr",
+    "hidden/encrypted reasoning",
+    "base64 originals"
+  ],
+  "infrastructure": {
+    "tmpFreeInodesAtStart": 196466,
+    "evidenceDeletion": false
+  },
+  "historicalAudit255": "unmerged/red; not accepted or cherry-picked; obsolete component-only wording reconciled in human doc",
+  "reproduction": {
+    "node": "24.20.0",
+    "artifacts": "checked-in four digest-pinned archives; no package installation",
+    "commands": "TESTING.md#source-acceptance-release-pack",
+    "network": "fixture-denied; no live calls",
+    "limits": {
+      "providerChildSeconds": 15,
+      "testTimeoutSeconds": 120,
+      "shardDeadlineSeconds": 180,
+      "concurrency": 4
+    },
+    "rawHarnessExports": "local only; allowlist metadata before any attachment"
+  }
+}

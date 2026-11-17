@@ -4,6 +4,10 @@ This is the authoritative reference for the project supervisor feature. The impl
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
+The [source acceptance matrix, sanitized index and operator-held runbook](supervisor-acceptance.md)
+separate actual offline public wiring from synthetic transport and unrun operations.
+Final-head release gates remain parent-owned; no paid/installed acceptance follows from source merge.
+
 ## Offline public copied-install evidence
 
 `cli/test/supervisor-acceptance.test.mts` has exactly two public-CLI wiring
@@ -46,7 +50,7 @@ semantics, installed activation, independent review success or a completed pilot
 ## Protected runtime ownership before public composition
 
 `createSupervisorRuntime` in `cli/src/supervisor-runtime.mts` is the trusted
-source-only factory for the real `owned-openai` diagnosis boundary. It reuses
+runtime factory for the real `owned-openai` diagnosis boundary used by public diagnosis. It reuses
 workflow resolution, execution context, runtime manifests and the existing runtime
 ownership lock/store. It validates every selected source/artifact against the
 trusted factory's bytes **before** importing selected JavaScript, and calls the
@@ -56,7 +60,8 @@ self-regenerated manifests, TOML, model claims or callbacks do not establish tha
 closure. Exact complete byte-compatible overrides are accepted by this module;
 other overrides are explicitly unsupported here, without changing normal Factory's
 complete-override contract. The saved-run collector still independently holds all
-project overrides, and binary/public activation remains held.
+project overrides. Public advisory invocation uses this factory; action activation and
+operational rollout remain held pending their separate prerequisites.
 
 The factory pins both host and selected source/dependency IDs, their exact paths,
 project/invocation/fence and T00 profile before owned-child start. It returns a
@@ -74,7 +79,7 @@ pins on PID death. Actual T04 readiness transfers the exact child identity once;
 original full process evidence remains tied to the lease. Unknown cleanup,
 accounting, owner death, failed handoff and currently unsupported no-send closure
 retain ownership. Generic transfer/release and removal refuse protected leases.
-Only actual T05 durable `local-human-required` settlement plus matching original
+Only actual durable `local-human-required` or `retained-advice` settlement plus matching original
 known usage and fresh whole-group ESRCH permit exact-token/record release; full
 reservation charge is preserved. Imports/evidence reads occur outside the runtime
 lock, with a final exact-record CAS inside; no cross-store locks or provider work
@@ -88,7 +93,7 @@ none of those authorities and creates no usable advice or notification.
 ## Explicit owned advisory host
 
 `cli/src/supervisor-host.mts` now exports `prepareSupervisorHost`. This is a
-trusted API for explicit owned advisory invocation, also used by
+trusted API for explicit owned advisory invocation, used by
 `factory supervisor diagnose <ticket> --project <name|path> [--json]`, **not action activation**. It
 reads the existing service-manager `schedulingState` observation and strict project
 registry on every `current()` call. An unregistered/aliased checkout, missing
@@ -175,8 +180,9 @@ review and source acceptance/runbook/hosted delivery gates; no activation is imp
 
 `cli/src/supervisor-input.mts` exports `collectSupervisorInput` (also named
 `completeSnapshot`) for an explicit positive ticket, a selected validated execution
-context and a uniquely registered canonical checkout. This is source-only host
-composition, not a public diagnosis command, admission capability or provider call.
+context and a uniquely registered canonical checkout. This read-only collector is
+used by public diagnosis host composition; collection itself is not an admission
+capability or provider call.
 It never refreshes/reconciles a run, settles ownership, changes Git/tracker state,
 launches a reviewer, acquires a hold or grants quiescence authority.
 
@@ -276,7 +282,8 @@ reset history or replenish allowance. The CLI never writes it or exposes an inje
 Exact cached reuse remains legitimate
 without new auth/spend. `OPENAI_API_KEY` is only a bounded environment handoff, never
 a credential discovery or token probe. Missing auth and unsupported family hold before
-new acquisition. No installed public journey, live activation or rollout is claimed.
+new acquisition. The two disposable copied public CLI journeys prove offline wiring only; no real
+installation, live activation or rollout is claimed.
 
 The [OpenAI boundary investigation](research/supervisor-openai-boundary.md) records
 primary provider documentation and the exact inspected Pi/Pi-AI 1.5.2 artifacts.
@@ -291,9 +298,11 @@ The [constrained provider contract](design/supervisor-provider-contract.md) now
 selects the direct Pi-AI 1.5.2 Responses SDK and supplies an offline trace against
 unmodified pinned published artifacts. It justifies a conservative 1,054,096-token,
 5,808,792-micro-USD reservation with documented server admission/output premises;
-insufficient budgets must hold. This is serializer/gate/raw-event evidence with
-synthetic eligibility and HTTP/SSE, **not** durable authorization, a shipped
-`DiagnosisBoundary`, remote acceptance, actual usage or host/installed acceptance.
+insufficient budgets must hold. That provider-contract evidence establishes serializer/gate/raw-event behavior with
+synthetic eligibility and HTTP/SSE, not remote acceptance or actual provider usage.
+The shipped owned `DiagnosisBoundary`, durable authorization and public host chain
+are separately exercised by the copied CLI journeys above, not proved by the
+provider-contract fixture alone.
 
 The owned source implementation below hardens the **existing Pi/OpenAI path**
 and supplies its trusted worker boundary to: bind the exact serialized request to finite
@@ -307,15 +316,16 @@ hard limits cannot replace exact per-diagnosis bounds. The approved advisory sco
 permits focused existing-Pi boundary hardening, not an unrelated provider stack,
 provider/model fallback or a weaker spending guarantee.
 
-Only after that evidence exists can a real host connect complete saved-run input,
-current controls, atomic exclusive admission and the existing diagnosis/journal/
-projection APIs. A busy-state read or `admissionHold` assertion is not exclusion.
+The explicit public host now connects complete saved-run input, current controls,
+atomic exclusive admission and the existing diagnosis/journal/projection APIs. A busy-state read or `admissionHold` assertion is not exclusion.
 The source admission primitives now provide a durable hold respected by managed
 manual, dispatch, recovery and delivery entry/admission, without manufacturing an
-execution or recovery charge. Public host composition remains held; narrow source-only terminal closure/release is available
+execution or recovery charge. Public advisory composition uses these primitives;
+narrow receipt-backed terminal closure/release is available
 as described in [shared admission exclusion](#shared-admission-exclusion).
 Crash ordering must retain an uncertain hold; no model call occurs under a lock.
-Do not expose an effecting or paid CLI route before these prerequisites pass.
+The public advisory route refuses without these prerequisites; no effecting action
+route is enabled by advisory evidence.
 
 The broader contracts below remain retained for deferred autonomy. Their component
 source APIs do not mean those installed journeys pass acceptance. The advisory MVP
