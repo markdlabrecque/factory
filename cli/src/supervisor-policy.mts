@@ -1,5 +1,5 @@
 // Thin host broker for retained diagnosis advice: no model writes, scheduler, gate edits, tracker or delivery authority.
-// Repair candidates enter only afterPass's existing preparation/claim-and-charge path; injected current fences are rechecked there.
+// Repair candidates enter only afterPass's existing preparation/claim-and-charge path; current host and durable operator fences are rechecked there.
 import { existsSync } from 'node:fs';
 import type { Snapshot, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
 import type { RecoveryState } from './recovery-state.mts';
@@ -59,7 +59,7 @@ function decide(current: () => BrokerFacts, now: () => number): BrokerOutcome {
     const incident = s.incidents[d.incidentId];
     if (!incident || incident.superseded || Object.values(s.incidents).some(m => typeof m.denied !== 'boolean' || typeof m.superseded !== 'boolean' || m.denied || m.incident.state === 'human-required') || Object.keys(s.humans).length)
       return { state: 'held', reason: 'Durable human/denial/unknown incident hold' };
-    if (f.enabled !== true || f.registered !== true || f.snapshot.mode !== 'act' || f.global !== 'on' || f.project !== 'enabled')
+    if (s.control && s.control.mode !== 'act' || f.enabled !== true || f.registered !== true || f.snapshot.mode !== 'act' || f.global !== 'on' || f.project !== 'enabled')
       return { state: 'held', reason: 'Current mode/project/scheduler authorization holds supervisor effects' };
     if (!f.fence || !Number.isFinite(now()) || !Number.isFinite(Date.parse(f.expiresAt)) || Date.parse(f.expiresAt) <= now())
       return { state: 'held', reason: 'Current host fence expired or unknown' };
@@ -95,7 +95,7 @@ function decide(current: () => BrokerFacts, now: () => number): BrokerOutcome {
     try {
       const fresh = current();
       if (!Number.isFinite(now()) || fenceIdentity(fresh) !== identity || Date.parse(fresh.expiresAt) <= now()) return false;
-      return fresh.enabled && fresh.registered && fresh.snapshot.mode === 'act' && fresh.global === 'on' && fresh.project === 'enabled'
+      return (!fresh.state.control || fresh.state.control.mode === 'act') && fresh.enabled && fresh.registered && fresh.snapshot.mode === 'act' && fresh.global === 'on' && fresh.project === 'enabled'
         && fresh.activationAuthorized && fresh.escalationBridgeReady;
     } catch { return false; }
   } } };

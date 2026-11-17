@@ -1,5 +1,5 @@
 // Explicit short-lived diagnosis orchestration, outside scheduler/admission locks. Reserves the host journal before Pi,
-// retains frozen inputs/output and proposals only. No scheduler, reviewer, repair, tracker, edit or delivery effects.
+// retains frozen inputs/output and proposals only, rechecking durable operator mode. No scheduler, reviewer, repair, tracker, edit or delivery effects.
 import { existsSync, readFileSync, mkdirSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -65,11 +65,18 @@ function memory(s: SupervisorState): DiagnosisMemory[] {
 }
 /** No automatic caller/scheduler wiring. Host must invoke after releasing its admission/scheduler locks. */
 export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult> {
+  const current = () => {
+    const a = o.current(), control = readSupervisor(o.stateDir, a.snapshot.project).control;
+    // A persisted mode can narrow current host authorization, never upgrade it.
+    const mode = control?.mode === 'stopped' || a.snapshot.mode === 'stopped' ? 'stopped'
+      : control?.mode === 'observe' || a.snapshot.mode === 'observe' ? 'observe' : a.snapshot.mode;
+    return { ...a, snapshot: { ...a.snapshot, mode } };
+  };
   const now = o.now ?? Date.now, iso = () => new Date(now()).toISOString();
   const timer = o.timer ?? ((f, ms) => { const t = setTimeout(f, ms); return () => clearTimeout(t); });
   let a: DiagnosisAuthorization, s: SupervisorState, owner: Owner;
   try {
-    a = structuredClone(o.current()); const hold = hostHold(a); if (hold) return held(hold);
+    a = structuredClone(current()); const hold = hostHold(a); if (hold) return held(hold);
     const rel = relative(resolve(a.snapshot.project.root), resolve(o.stateDir));
     if (!rel || !rel.startsWith('..') && !rel.startsWith('/')) return held('Journal must be host-owned outside project/agent mounts');
     owner = ownerOf(process.pid); if (!owner.start) return held('Unknown controller PID/start identity');
@@ -142,7 +149,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     let child: ChildProcess | undefined, outcome: Diagnostic['outcome'] = 'process-failed', reason = 'Worker failed before launch';
     let stdout = '', stderr = '', confirmed = true, actual: Resources | null = null, decision: DiagnosisDecision | null = null;
     try {
-      const fresh = o.current(); const hold = hostHold(fresh);
+      const fresh = current(); const hold = hostHold(fresh);
       const { snapshot: freshSnapshot, ...freshAuth } = fresh, { snapshot: oldSnapshot, ...oldAuth } = a;
       if (hold || diagnosisBasis(freshSnapshot) !== basisHash || !same(freshAuth, oldAuth) || o.signal?.aborted) { outcome = 'cancelled'; reason = hold ?? 'Authorization changed before spawn'; }
       else {
@@ -184,7 +191,7 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     if (!confirmed || actual === null) { outcome = 'process-failed'; reason = 'Unknown process-group cleanup or final accounting; reservation/capacity retained'; }
     if (outcome === 'proposed') {
       try {
-        const fresh = o.current();
+        const fresh = current();
         if (o.signal?.aborted || hostHold(fresh) || diagnosisBasis(fresh.snapshot) !== basisHash || !same(fresh.facts, a.facts)
           || fresh.family !== a.family || !same(fresh.policy, a.policy) || !same(fresh.shared, a.shared) || fresh.capacity !== a.capacity)
           { outcome = 'stale'; reason = 'Current authorization/material basis changed; no proposal authority'; }

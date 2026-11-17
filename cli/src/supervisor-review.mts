@@ -1,5 +1,5 @@
 // Explicit exact-proposal independent review: fresh tool-free Pi process, host reservation/provenance and atomic human stop.
-// No scheduler, gate edit, verifier PASS, delivery approval, provider fallback or live default paid adapter.
+// Rechecks durable operator mode; no scheduler, gate edit, verifier PASS, delivery approval, provider fallback or live default paid adapter.
 import { existsSync, readFileSync, mkdirSync, openSync, fstatSync, closeSync, constants } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -51,10 +51,17 @@ function totals(s: SupervisorState, kind?: 'review') {
 }
 /** Explicit call only, outside admission locks. Even success is review admissibility, never application authority. */
 export async function reviewGateProposal(o: ReviewOptions): Promise<HostOutcome> {
+  const authorization = () => {
+    const a = o.current(), control = readSupervisor(o.stateDir, a.input.snapshot.project).control;
+    // Operator intent is necessary, never sufficient to widen current host mode.
+    const mode = control?.mode === 'stopped' || a.input.snapshot.mode === 'stopped' ? 'stopped'
+      : control?.mode === 'observe' || a.input.snapshot.mode === 'observe' ? 'observe' : a.input.snapshot.mode;
+    return { ...a, input: { ...a.input, snapshot: { ...a.input.snapshot, mode } } };
+  };
   const now = o.now ?? Date.now, iso = () => new Date(now()).toISOString();
   const timer = o.timer ?? ((f,ms) => { const t = setTimeout(f,ms); return () => clearTimeout(t); });
   try {
-    const a = structuredClone(o.current()), hold = hostHold(a); if (hold) return held(hold);
+    const a = structuredClone(authorization()), hold = hostHold(a); if (hold) return held(hold);
     const { input } = a, { proposal: p, snapshot } = input, project = snapshot.project;
     const rel = relative(resolve(project.root),resolve(o.stateDir));
     if (!rel || !rel.startsWith('..') && !rel.startsWith('/')) return held('Private host journal must be outside project/agent mounts');
@@ -63,7 +70,7 @@ export async function reviewGateProposal(o: ReviewOptions): Promise<HostOutcome>
     if (!s.proposals[p.id] || !same(s.proposals[p.id],p)) return held('Exact proposal must already be retained by host');
     const m = s.incidents[p.incidentId];
     const notify = () => deliverSupervisorRequest({ stateDir: o.stateDir, project, incidentId: p.incidentId, adapter: o.notifications,
-      current: () => { const fresh = o.current(); return { ...fresh.notification, mode: fresh.input.snapshot.mode }; }, now });
+      current: () => { const fresh = authorization(); return { ...fresh.notification, mode: fresh.input.snapshot.mode }; }, now });
     const existing = s.humans[p.incidentId];
     if (existing) { if (!s.resolutions?.[p.incidentId]) notify(); return { version: 1, state: 'human-required', reason: existing.reason, scope: existing.scope }; }
     if (m.superseded || m.denied || Object.entries(s.incidents).some(([id,x]) => (x.denied || x.incident.state === 'human-required') && !s.resolutions?.[id]
@@ -127,7 +134,7 @@ export async function reviewGateProposal(o: ReviewOptions): Promise<HostOutcome>
       reservation:{id:invocationId,incidentId:p.incidentId,kind:'review',owner,fence,at:startedAt,deadline,reserved:b.reservation,actual:null,state:'active',reviewId:null}}); } catch(e) { return escalate('authority-uncertain',`Reservation held: ${String(e)}`); }
     let child: ChildProcess|undefined, stdout='',stderr='',confirmed=true,reason='Authorization changed before spawn';
     let ok=false,actual:Resources|null=null;
-    const fresh = () => { const current=o.current(); return !hostHold(current) && same(current,a) && !o.signal?.aborted && now()<Date.parse(deadline); };
+    const fresh = () => { const current=authorization(); return !hostHold(current) && same(current,a) && !o.signal?.aborted && now()<Date.parse(deadline); };
     try {
       if (fresh()) {
         child=b.start('pi',argv,{cwd,detached:true,env:{PATH:process.env.PATH??'',HOME:cwd,PI_CODING_AGENT_DIR:cwd},input:prompt,deadline,maxOutputBytes:REVIEW_OUTPUT_BYTES,reservation:b.reservation});
@@ -165,6 +172,6 @@ export async function reviewGateProposal(o: ReviewOptions): Promise<HostOutcome>
     commit({id:stamp('complete'),at:review.completedAt,kind:'review-complete',review,reservationId:invocationId,fence,owner,actual,processConfirmed:confirmed,request:h,provenance:{inputRef,policy:identity.policy,proposer:a.proposer}});
     if(h){notify();return{version:1,state:'human-required',reason:h.reason,scope:h.scope};}
     if(!fresh())return held('Host authorization/material context changed after review publication; no usable approval');
-    return reviewOutcome(input,review,{now:iso(),currentInputHash:supervisorHash(o.current().input),invocationId,proposer:a.proposer,reviewer,model,denied:s.incidents[p.incidentId].denied});
+    return reviewOutcome(input,review,{now:iso(),currentInputHash:supervisorHash(authorization().input),invocationId,proposer:a.proposer,reviewer,model,denied:s.incidents[p.incidentId].denied});
   } catch(e){return held(String(e));}
 }

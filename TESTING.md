@@ -126,6 +126,25 @@ live models/trackers/credentials/services/installs or paid probes are used. Prov
 ceiling enforcement and live pilot remain unproved and disabled. All four commit
 shards and the separate lifecycle gate remain mandatory.
 
+## Supervisor operator inspection and controls
+
+```sh
+node --test cli/test/supervisor-command.test.mts cli/test/supervisor-worker.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Unit parser/finite-policy matrices and disposable journal fixtures prove versioned
+read-only default-observe JSON, no journal creation on inspection, bounded redacted
+display, explicit pilot confirmation, unsupported runtime activation refusal, exact
+reservation-only injected cancellation, pending cancellation without a shipped
+cross-process handle, and retained human holds/charges/work through mode/stop.
+The existing minimal real CLI resolution boundary also covers status routing and
+invalid flag/act refusal without writes; its exact resolution assertions remain.
+Worker boundary fixtures prove a durable stop prevents spawn and makes in-flight
+output nonauthoritative while only the original confirmed termination/accounting
+boundary can settle a charge. No live model/tracker/service, sleep, runtime probe,
+configuration outside disposable fixtures or paid adapter activation is tested.
+All four commit shards and the separate lifecycle gate remain mandatory.
+
 ## Runtime bundle preparation
 
 ```sh
