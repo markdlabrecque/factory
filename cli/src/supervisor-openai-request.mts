@@ -46,6 +46,19 @@ async function pinnedProvider(runtime: string, temporary: string) {
   return { stream, model };
 }
 
+/** Pure preconditions are independently testable without starting a provider process. Neither helper grants authority. */
+export function validateAdvisoryEnvironment(keys: readonly string[]) {
+  const allowed = new Set(['PATH','HOME','LANG','LC_ALL','LC_CTYPE','TZ','NODE_CHANNEL_FD','NODE_CHANNEL_SERIALIZATION_MODE']);
+  if (keys.some(k => !allowed.has(k))) throw Error('Advisory held: provider worker environment must be isolated');
+}
+export function validateAdvisoryInput(value: Snapshot, grant: DiagnosisGrant): Snapshot {
+  validateDiagnosisGrant(grant); const snapshot = validateSnapshot(value);
+  if (supervisorHash(snapshot.project) !== supervisorHash(grant.project) || snapshot.scope.kind !== 'ticket' || snapshot.scope.ticket !== grant.ticket
+    || snapshot.material.runId !== grant.runId || snapshot.material.runtime !== grant.runtime || snapshot.material.dependencies !== grant.dependencies
+    || diagnosisBasis(snapshot) !== grant.basis) throw Error('Advisory held: frozen complete input does not match grant');
+  return snapshot;
+}
+
 export type AdvisoryRequest = { runtimeRoot: string; stateDir: string; grant: DiagnosisGrant; policy: AdvisoryRegistration; controls: AdvisoryControls;
   snapshot: Snapshot; apiKey: string; signal?: AbortSignal;
   /** SDK-supported HTTP seam only: never an authorization callback. Production defaults to native fetch. */
@@ -56,19 +69,14 @@ export async function requestAdvisory(o: AdvisoryRequest) {
   // Detach all data before the first await. The only retained live reference is the intended abort/HTTP boundary.
   o = { ...o, grant: structuredClone(o.grant), snapshot: structuredClone(o.snapshot), policy: structuredClone(o.policy), controls: structuredClone(o.controls) };
   // Do not discover credentials/configuration from the environment or let SDK logging/proxies select another request context.
-  const environment = new Set(['PATH','HOME','LANG','LC_ALL','LC_CTYPE','TZ','NODE_CHANNEL_FD','NODE_CHANNEL_SERIALIZATION_MODE']);
-  if (Object.keys(process.env).some(k => !environment.has(k)))
-    throw Error('Advisory held: provider worker environment must be isolated');
+  validateAdvisoryEnvironment(Object.keys(process.env));
   const grant = validateDiagnosisGrant(o.grant), worker = ownerOf(process.pid);
   const manifest = validateRuntimeBundle(o.runtimeRoot);
   if (realpathSync(o.runtimeRoot) !== realpathSync(dirname(fileURLToPath(import.meta.url))) || manifest.id !== grant.runtime
     || manifest.dependencies !== grant.dependencies || worker.pid !== grant.owner.pid || worker.start !== grant.owner.start
     || typeof o.apiKey !== 'string' || !/^sk-[A-Za-z0-9_-]+$/.test(o.apiKey) || o.signal?.aborted)
     throw Error('Advisory held: selected bundle, explicit auth, exact registered worker and live request required');
-  const snapshot = validateSnapshot(o.snapshot);
-  if (supervisorHash(snapshot.project) !== supervisorHash(grant.project) || snapshot.scope.kind !== 'ticket' || snapshot.scope.ticket !== grant.ticket
-    || snapshot.material.runId !== grant.runId || snapshot.material.runtime !== grant.runtime || snapshot.material.dependencies !== grant.dependencies
-    || diagnosisBasis(snapshot) !== grant.basis) throw Error('Advisory held: frozen complete input does not match grant');
+  const snapshot = validateAdvisoryInput(o.snapshot, grant);
   const retained = readSupervisor(o.stateDir, grant.project), key = supervisorHash(grant.invocationId);
   if (retained.advisory?.workers[key]?.grant.id !== grant.id || retained.advisory?.sends[key])
     throw Error('Advisory held: unregistered or already consumed grant');

@@ -146,8 +146,12 @@ Synthetic non-secret auth, a clean child environment, disabled global fetch and
 native socket/HTTP/TLS paths, and the SDK-supported HTTP seam with no fallback keep
 all responses offline. Deterministic IPC barriers exercise stop-first zero-send
 and authorization-first in-flight stop; real 429/503 SDK error paths and context
-overflow yield one transmission without retries/compaction; repeated requests,
-changed input, inherited debug/TLS configuration and corrupt selected artifacts refuse.
+overflow yield one transmission without retries/compaction; repeated requests refuse.
+Pure precondition units own changed frozen input and inherited debug/TLS configuration
+refusal before provider startup; copied-bundle validation owns corrupt selected
+artifacts. These cases do not need repeated SDK/process bootstraps. The same nine
+transport scenarios retain the real SDK/request/journal boundaries and original
+15-second child limit, four-way file concurrency and 180-second shard deadlines.
 A fixture-side filesystem barrier mutates real copied prompt/dependency bytes after
 initial validation and input read; the final gate refuses with zero authorization
 and sends, without sleeps or a production callback/flag. Duplicate terminal events
@@ -181,8 +185,8 @@ reopen/idempotence, conflicting/corrupt records, permissions, hard/symlinks
 (including the lock-directory path) and unchanged reservations/charges. Cheap
 filesystem fault injection proves ancestor-sync refusal before publication and
 directory-sync failure after rename: visible bytes do not yield durable success
-or known resources while synchronization fails. This is not a power-loss experiment. An IPC-only registered local child supplies real
-PID/start identity; all provider metadata/control/exclusion data is synthetic.
+or known resources while synchronization fails. This is not a power-loss experiment.
+An IPC-only registered local child supplies real PID/start identity; all provider metadata/control/exclusion data is synthetic.
 There are no network/provider calls or duplicated transport permutations. Copied
 bundle assertions import the inventoried helper unchanged. Later owned cleanup,
 final journal settlement/exclusion release and installed-host activation are not

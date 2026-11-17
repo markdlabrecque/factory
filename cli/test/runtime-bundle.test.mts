@@ -85,6 +85,9 @@ test('complete inventory, deterministic identity, private install and validation
   for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md', 'gate-review.mts', 'prompt.gate-review.md']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
   }
+  const providerArchive=join(a.directory,'supervisor-provider/pi-ai-1.5.2.tgz'), originalArchive=readFileSync(providerArchive);
+  writeFileSync(providerArchive,'corrupt'); assert.throws(()=>validateRuntimeBundle(a.directory),'pre-entry provider artifact drift is a bundle-validation case');
+  writeFileSync(providerArchive,originalArchive); validateRuntimeBundle(a.directory);
   assert(!readFileSync(join(a.directory, 'main.mts'), 'utf8').includes('sandcastle-islandhealth'));
   assert(existsSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs')));
   writeFileSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs'), 'poison');
