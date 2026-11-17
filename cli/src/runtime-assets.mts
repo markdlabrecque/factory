@@ -16,6 +16,7 @@ export const RUNTIME_INVENTORY_VERSION = 1;
 export const RUNTIME_ASSETS: readonly RuntimeAsset[] = Object.freeze([
   ...FROM_ORCHESTRATOR.map(name => ({ source: `orchestrator/${name}`, destination: name })),
   ...FROM_BOARD.map(name => ({ source: `board/${name}`, destination: name })),
+  { source: 'board/supervisor.mts', destination: 'supervisor-view.mts' },
   // The flat runtime keeps the probe entrypoint and board store under distinct names.
   { source: 'board/readiness.mts', destination: 'readiness-store.mts' },
   ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts', 'supervisor-facts.mts', 'supervisor-state.mts', 'supervisor-worker.mts', 'supervisor-review.mts', 'supervisor-escalation.mts', 'supervisor-gate-apply.mts', 'sandcastle-patch.mts', 'sandcastle-patch.json'].map(name => ({ source: `cli/src/${name}`, destination: name })),

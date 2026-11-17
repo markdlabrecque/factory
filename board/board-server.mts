@@ -8,10 +8,12 @@ import { buildBoardData, buildReadinessData, buildEvidencePage, buildPage, readR
 import { executeRefresh } from "./refresh-worker.mts";
 import { ArchiveRefused, archiveTicket } from "./tickets.mts";
 import { startAction } from './execution-events.mts';
+import { buildSupervisorData } from './supervisor.mts';
 // Only an authenticated archive request records an explicit control, with actor identity unknown.
 
 // Always-on board: GET / renders the page from the shared state dir on every request.
-// GET /api/runs preserves its existing run snapshot. GET /api/readiness is a separate bounded stored projection.
+// GET /api/runs preserves its run snapshot. GET /api/readiness and /api/supervisor are separate passive projections.
+// Supervisor reads use the versioned CLI pages; success/error are no-store and never invoke controls or notification.
 // Neither endpoint accepts project paths or initiates probes. The page polls every 10s.
 // POST /api/projects/<project>/tickets/<iid>/archive requires x-factory: 1 and validates current history eligibility
 // under the admission lock. Only journal state changes; raw records and evidence remain accessible. Errors are JSON.
@@ -57,9 +59,31 @@ async function timerSnapshot() {
   }
 }
 
+// Host CLI is optional in standalone Board installs. Its status command is the only projection/policy source.
+async function readSupervisorStatus(root: string, offset: number) {
+  if (!existsSync(new URL('../cli/src/commands/supervisor.mts', import.meta.url))) throw Error('Host inspection unavailable');
+  const { supervisorCommand } = await import('../cli/src/commands/supervisor.mts');
+  const { paths } = await import('../cli/src/paths.mts');
+  let body = '';
+  await supervisorCommand(paths(), 'status', [], { project: root, json: true, offset: String(offset) }, { output: text => { body = text; } });
+  return JSON.parse(body);
+}
 export function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   try {
     const url = new URL(req.url || "/", "http://x");
+    if (url.pathname === '/api/supervisor') {
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+      res.setHeader('x-content-type-options', 'nosniff');
+      if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }); return void res.end('{"error":"GET required"}'); }
+      const offsets = url.searchParams.getAll('offset'), offset = offsets[0] ?? '0';
+      if (offsets.length > 1 || !/^(0|[1-9]\d*)$/.test(offset) || !Number.isSafeInteger(Number(offset)) || [...url.searchParams.keys()].some(k => k !== 'offset')) {
+        res.writeHead(400); return void res.end('{"error":"Only a nonnegative safe integer offset is supported; project paths and controls are not accepted"}');
+      }
+      void buildSupervisorData(stateDir(), Number(offset), { read: readSupervisorStatus }).then(body => { res.writeHead(200); res.end(JSON.stringify(body)); })
+        .catch(() => { res.writeHead(503); res.end('{"error":"Supervisor observation UNKNOWN; no repair attempted"}'); });
+      return;
+    }
     const archive = /^\/api\/projects\/([^/]+)\/tickets\/(\d+)\/archive$/.exec(url.pathname);
     if (archive) {
       res.setHeader("content-type", "application/json; charset=utf-8");

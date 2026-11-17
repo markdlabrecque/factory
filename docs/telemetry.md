@@ -1,6 +1,6 @@
 # Local execution observations
 
-Factory records local observations of execution transitions, recovery phases and a bounded set of explicit control requests. These files are not an admission ledger, ticket journal, proof store or scheduler history. Nothing reads telemetry to authorize work, renew a budget, accept a verdict or decide whether cleanup is required.
+Factory records local observations of execution transitions, recovery phases, supervisor journal outcomes and a bounded set of explicit control requests. These files are not an admission ledger, ticket journal, proof store or scheduler history. Nothing reads telemetry to authorize work, renew a budget, accept a verdict or decide whether cleanup is required.
 
 Project artifacts now use `.factory`; global Factory state and telemetry storage are unchanged. Layout refusal never translates historical event, run or ownership paths. Existing execution/runtime identities and exact-container settlement observations remain tied to their original records. A stored observation does not grant a new-layout launch permission.
 
@@ -48,8 +48,9 @@ Each event is one immutable JSON object.
 | `origin` | `runner`, `recovery`, `scheduler`, `reconciliation`, `cli` or `board` |
 | optional `operationId` | Correlates an explicit control request and result |
 | optional `action`, `result`, `actorIdentity` | Explicit-control metadata only |
+| optional `supervisor` | Bounded hashed attribution, outcome and nullable known usage for supervisor journal observations only |
 
-Event kinds are `execution-admitted`, `stage-changed`, `parked-reason-changed`, `recovery-admitted`, `recovery-phase-changed`, `recovery-settled`, `action-requested` and `action-result`.
+Event kinds are `execution-admitted`, `stage-changed`, `parked-reason-changed`, `recovery-admitted`, `recovery-phase-changed`, `recovery-settled`, `action-requested` and `action-result`, plus `supervisor-observed` described below.
 
 Reason codes are `dependency-unsatisfied`, `dependency-unknown`, `conflict`, `capacity`, `analysis-stale`, `environment-unready`, `verification-fail`, `verification-inconclusive`, `publication-failed`, `ci-pending`, `ci-failed`, `requirements-changed`, `ownership-unknown`, `operator-pause`, `budget-exhausted`, `process-exited`, `merged` and `unspecified`. Known structured queue codes are used directly. Exact delivery codes `checks-pending` and `checks-missing` map to `ci-pending`; `checks-failed` maps to `ci-failed`. Legacy notes, arbitrary error text and unstructured recovery reasons remain `unspecified`. The enum is not a claim that every old producer supplies structured reasons.
 
@@ -73,7 +74,57 @@ Explicit controls are limited to these entrypoints:
 
 A request and its result share an `operationId`. Result is `changed`, `no-op`, `refused` or `failed`. No result means unknown outcome, including a crash mid-command. Validation that cannot identify a target can fail before a request event. A failed comment/verdict delivery records `failed` with `publication-failed` even though its local journal entry remains saved. A successful local update/archive records the observed local result, not a claim about remote state. Schedule on refreshes global launch configuration. Global off reports no-op only when the existing manager query confirms it was already off and no tick/pass cancellation was needed. An unknown prior manager state is not asserted to have been off.
 
-Read-only commands, `ticket sync`, direct shared helper calls, scheduled/install helpers and automatic cleanup do not become explicit control events. HTTP method/header rejections are not archive requests. No dashboard, remote analytics, shell arguments, raw comments, prompts, logs, environment values, credentials, arbitrary exceptions or model-cost data are stored.
+Read-only commands, `ticket sync`, direct shared helper calls, scheduled/install helpers and automatic cleanup do not become explicit control events. HTTP method/header rejections are not archive requests. No dashboard, remote analytics, shell arguments, raw comments, prompts, logs, environment values, credentials, arbitrary exceptions are stored. Supervisor usage/cost records contain only validated integer accounting units, never pricing credentials or provider output.
+
+## Supervisor outcomes and cost attribution
+
+After a successful durable supervisor journal transition, `commitSupervisor` emits
+`supervisor-observed` outside the journal/admission lock. The event ID is stable
+across exact replay; a failed recorder never changes the authoritative outcome.
+There is no read-time backfill, second journal or telemetry-based authorization.
+The existing JSON/JSONL export, project/ticket filters, redaction/diagnostic contract
+and immutable retention apply. `project` remains the tracker project; the nested
+`supervisor.projectId` is a SHA-256 of the canonical host project identity, so separate
+checkouts do not silently combine their incident attribution. No checkout path is
+exported. `identityComplete` remains false without a bound execution ID.
+
+The nested `supervisor` allowlist contains `projectId`, optional `incidentId`,
+`proposalId`, `reviewId` and required `hostOutcomeId` hashes; closed `outcome`
+(`observed`, `pending`, `notified`, `resolved`, `refused`, `approved`, `unknown`),
+optional diagnosis/review `role`, nullable `usage: { tokens, cost }` (integer
+micro-USD cost) and `intervention` boolean. `to` identifies the journal transition
+kind. IDs correlate retained originals without exporting prompts, before/after
+bodies, model prose, raw evidence, receipts, exception strings or credentials.
+A null usage is UNKNOWN, never zero. Full reserved ceilings stay charged in the
+journal; known actual usage is separate, does not refund budgets, and is attributed
+only to completion events. Role/project totals are displayed from that same journal,
+not reconstructed from incomplete telemetry. Refused review/diagnosis outcomes
+retain host outcome IDs; an observed-not-applied intent is not invented as a refusal.
+
+`pending` is not delivery; `notified` requires the existing bridge's actual exact
+comment receipt; neither resolves a hold. `approved` is reviewer disposition only,
+not verifier PASS, applied action, execution, completion or confirmed progress.
+Interventions count explicit audited local host resolutions, not requests, agent
+notes, notifications or inferred human activity. Board outcome counts derived from
+events are explicitly **observed-only lower bounds**, with export diagnostics. The
+journal's exact retained-resolution count remains separate from observed counts.
+Incident timing and refused-outcome ID lists use deterministic 128-entry display
+pages with total/before/after omissions at the Board's offset; underlying events and
+aggregate intervention counts are never truncated by display paging.
+No event renews requirements, incident fingerprints or recovery/diagnosis budgets.
+
+`supervisorOutcomeMetrics` computes elapsed time only from a retained ticket-incident
+`observe` event to a later same-ticket **host-confirmed merge** supplied by the existing
+host facts projection. It does not infer progress from event activity, stage done,
+review approval, delivery receipt or model/verifier prose. No retained incident observation,
+missing authoritative merge/timestamp, project-wide scope or incomplete history leaves
+elapsed time null/unknown. Saved host facts remain observations, not fresh admission
+or delivery authority, and do not prove the supervisor caused progress. Observe-first
+baseline comparison and live one-project pilot activation remain future explicit
+operator work; source tests do not claim delivery, paid-call enforcement or benefit.
+
+The [Board supervisor view](supervisor.md#board-observation-and-outcome-costs) reads
+these observations only and never triggers delivery, review, repair or resolution.
 
 ## Publication and lock order
 

@@ -7,7 +7,7 @@ import { afterAdmission, observationFailure, ownerOf, ownerState, writeDurable }
 
 export const REASONS = ['dependency-unsatisfied', 'dependency-unknown', 'conflict', 'capacity', 'analysis-stale', 'environment-unready', 'verification-fail', 'verification-inconclusive', 'publication-failed', 'ci-pending', 'ci-failed', 'requirements-changed', 'ownership-unknown', 'operator-pause', 'budget-exhausted', 'process-exited', 'merged', 'unspecified'] as const;
 export type Reason = typeof REASONS[number];
-export const KINDS = ['execution-admitted', 'stage-changed', 'parked-reason-changed', 'recovery-admitted', 'recovery-phase-changed', 'recovery-settled', 'action-requested', 'action-result'] as const;
+export const KINDS = ['execution-admitted', 'stage-changed', 'parked-reason-changed', 'recovery-admitted', 'recovery-phase-changed', 'recovery-settled', 'action-requested', 'action-result', 'supervisor-observed'] as const;
 export type Kind = typeof KINDS[number];
 const STAGES = ['queued','waiting','setup','implementing','verifying','posting','pushing','ci','done','stopped'];
 const PHASES = ['claimed','setup','repairing','verifying','delivering','finished','cleanup-pending'];
@@ -16,11 +16,18 @@ export type Origin = 'runner' | 'recovery' | 'scheduler' | 'reconciliation' | 'c
 export const ACTIONS = ['retry', 'recovery-reset', 'recovery-review', 'schedule-on', 'schedule-off', 'update-apply', 'ticket-comment', 'ticket-verdict', 'ticket-archive', 'ticket-restore'] as const;
 export type Action = typeof ACTIONS[number];
 export type ActionResult = 'changed' | 'no-op' | 'refused' | 'failed';
+export interface SupervisorTelemetry {
+  projectId: string; incidentId?: string; proposalId?: string; reviewId?: string; hostOutcomeId: string;
+  outcome: 'observed' | 'pending' | 'notified' | 'resolved' | 'refused' | 'approved' | 'unknown';
+  role?: 'diagnosis' | 'review'; usage: { tokens: number; cost: number } | null;
+  intervention: boolean;
+}
 export interface ProducerEvent {
   eventId: string; observedAt: string; project: string; ticket?: string;
   executionId?: string; recoveryAttemptId?: string; identityComplete: boolean;
   eventKind: Kind; from?: string; to?: string; reasonCode: Reason; origin: Origin;
   operationId?: string; actorIdentity?: 'unknown'; action?: Action; result?: ActionResult;
+  supervisor?: SupervisorTelemetry;
 }
 export interface ExecutionEvent extends ProducerEvent { version: 1; streamKey: string; sequence: number; recordedAt: string }
 const id = (s: unknown): s is string => typeof s === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:/@+-]{0,255}$/.test(s);
@@ -33,6 +40,25 @@ export function validTime(s: unknown): s is string {
   const date = new Date(0); date.setUTCFullYear(y, month, 0);
   return month >= 1 && month <= 12 && day >= 1 && day <= date.getUTCDate() && h < 24 && min < 60 && sec < 60;
 }
+/** Observed-only attribution. Neither review approval nor model activity supplies confirmed progress. */
+export function supervisorOutcomeMetrics(events: ExecutionEvent[], progress: { ticket: number; kind: string; at: string | null; sha?: string | null }[], offset = 0) {
+  const observations = events.filter(e => e.eventKind === 'supervisor-observed' && e.supervisor);
+  const ids = [...new Set(observations.map(e => e.supervisor!.incidentId).filter((id): id is string => !!id))].sort();
+  const refused = observations.filter(e => e.supervisor!.outcome === 'refused').map(e => e.supervisor!.hostOutcomeId).sort();
+  const omissions = (total: number) => ({ total, before: Math.min(offset,total), after: Math.max(0,total-offset-128) });
+  return { coverage: 'observed-only', observedInterventions: observations.filter(e => e.supervisor!.intervention).length,
+    pagination: { offset, limit: 128, collections: { refusedActions: omissions(refused.length), incidents: omissions(ids.length) } },
+    refusedActions: refused.slice(offset,offset+128),
+    incidents: ids.slice(offset,offset+128).map(incidentId => {
+      const rows = observations.filter(e => e.supervisor!.incidentId === incidentId).sort((a,b) => a.observedAt.localeCompare(b.observedAt) || a.eventId.localeCompare(b.eventId));
+      const start = rows.find(e => e.to === 'observe' && e.ticket);
+      const confirmed = start && progress.filter(p => String(p.ticket) === start.ticket && p.kind === 'host-confirmed-merge' && p.at && validTime(p.at) && Date.parse(p.at) >= Date.parse(start.observedAt))
+        .sort((a,b) => a.at!.localeCompare(b.at!))[0];
+      return { incidentId, observedInterventions: rows.filter(e => e.supervisor!.intervention).length,
+        timeToConfirmedProgressMs: start && confirmed ? Date.parse(confirmed.at!) - Date.parse(start.observedAt) : null,
+        confirmedProgress: confirmed ?? null };
+    }), meaning: 'Observed events only; missing history is unknown. Delivery is not approval; approval is not verifier PASS, execution or progress. Time begins at first retained ticket incident observation, never agent activity.' };
+}
 export const eventIdFor = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 export const streamKey = (project: string, iid?: string) => createHash('sha256').update(JSON.stringify([project, iid ?? null])).digest('hex');
 function stable(x: any): any {
@@ -41,7 +67,7 @@ function stable(x: any): any {
   return x;
 }
 const canonical = (x: object): string => JSON.stringify(stable(x));
-const fields = ['eventId','observedAt','project','ticket','executionId','recoveryAttemptId','identityComplete','eventKind','from','to','reasonCode','origin','operationId','actorIdentity','action','result'];
+const fields = ['eventId','observedAt','project','ticket','executionId','recoveryAttemptId','identityComplete','eventKind','from','to','reasonCode','origin','operationId','actorIdentity','action','result','supervisor'];
 function producer(x: any): ProducerEvent {
   if (!x || typeof x !== 'object' || !id(x.eventId) || !id(x.project) || !validTime(x.observedAt)
     || x.ticket !== undefined && !ticket(x.ticket) || !KINDS.includes(x.eventKind) || !REASONS.includes(x.reasonCode)
@@ -60,6 +86,14 @@ function producer(x: any): ProducerEvent {
   if (action && (x.from !== undefined || x.to !== undefined || !id(x.operationId) || !ACTIONS.includes(x.action) || x.actorIdentity !== 'unknown'
     || (x.eventKind === 'action-result') !== (x.result !== undefined))) throw Error('Invalid telemetry action');
   if (!action && (x.action !== undefined || x.result !== undefined || x.actorIdentity !== undefined)) throw Error('Unexpected telemetry action fields');
+  if (x.eventKind === 'supervisor-observed') {
+    const s = x.supervisor;
+    if (!s || Object.keys(s).some(k => !['projectId','incidentId','proposalId','reviewId','hostOutcomeId','outcome','role','usage','intervention'].includes(k))
+      || !/^[a-f0-9]{64}$/.test(s.projectId) || !/^[a-f0-9]{64}$/.test(s.hostOutcomeId) || ['incidentId','proposalId','reviewId'].some(k => s[k] !== undefined && !/^[a-f0-9]{64}$/.test(s[k]))
+      || !['observed','pending','notified','resolved','refused','approved','unknown'].includes(s.outcome)
+      || s.role !== undefined && !['diagnosis','review'].includes(s.role) || typeof s.intervention !== 'boolean'
+      || s.usage !== null && (!s.usage || Object.keys(s.usage).sort().join() !== 'cost,tokens' || ![s.usage.tokens,s.usage.cost].every(n => Number.isSafeInteger(n) && n >= 0))) throw Error('Invalid supervisor telemetry');
+  } else if (x.supervisor !== undefined) throw Error('Unexpected supervisor telemetry');
   return Object.fromEntries(fields.filter(k => x[k] !== undefined).map(k => [k, x[k]])) as ProducerEvent;
 }
 function parseEvent(x: any, stream: string, name: string): ExecutionEvent {

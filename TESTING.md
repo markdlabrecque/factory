@@ -167,6 +167,24 @@ are injected; there are no sleeps. The new applicator ships in the complete runt
 inventory, including copied installs and complete overrides. These focused tests
 do not replace all four commit shards and the separate browser lifecycle gate.
 
+## Supervisor Board and outcome observations
+
+```sh
+node --test board/supervisor.test.mts board/execution-events.test.mts cli/test/supervisor-command.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Unit tests prove sanitized whole-envelope display, text-only incident rendering,
+retained 128-entry pages/aggregate holds, proposal identity, unknown accounting and
+outcome attribution. One in-memory production HTTP handler boundary uses disposable
+registry/config/journal and an injected tracker adapter: no-store on success/error,
+GET-only/path refusal, no journal creation or modification on read, pending uncertain
+POST, receipt reconciliation without repeat POST, and retained fingerprints/charges.
+The existing reviewer boundary additionally checks denial/usage/notification and
+explicit intervention telemetry without Board involvement. No listener, browser E2E,
+live tracker, paid model, service or credential is used by these added cases. Existing
+standalone copied-install fixtures include the new view asset. All four commit shards
+and the separate browser lifecycle gate remain mandatory.
+
 ## Runtime bundle preparation
 
 ```sh

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendEvent, exportEvents, observeRun, streamKey, validTime } from './execution-events.mts';
+import { appendEvent, exportEvents, observeRun, streamKey, validTime, supervisorOutcomeMetrics } from './execution-events.mts';
 import type { ProducerEvent } from './execution-events.mts';
 import { afterAdmission, ownerOf, withAdmission } from './admission.mts';
 import { claimRun, readRuns, writeRecord } from './board.mts';
@@ -160,6 +160,27 @@ test('invalid legacy observation metadata or diagnostic failure cannot change a 
   assert.doesNotThrow(() => writeRecord(d, 'owner_repo--1', { project: 'owner/repo', iid: '1', stage: 'waiting', updatedAt: at,
     queueReasons: 'malformed legacy data' } as any));
   assert.equal(JSON.parse(readFileSync(join(d, 'owner_repo--1.json'), 'utf8')).stage, 'waiting');
+});
+
+test('supervisor telemetry attributes bounded IDs and known/unknown usage, never approval/activity as progress', t => {
+  const d = fixture(t), hash = 'a'.repeat(64);
+  const event = payload({ eventKind: 'supervisor-observed', from: undefined, to: 'observe', supervisor: { projectId: hash, incidentId: hash, proposalId: hash, hostOutcomeId: hash, outcome: 'observed', usage: null, intervention: false } });
+  appendEvent(d,event);
+  appendEvent(d,payload({ eventKind: 'supervisor-observed', from: undefined, to: 'review-complete', supervisor: { projectId: hash, incidentId: hash, proposalId: hash, reviewId: hash, hostOutcomeId: hash, outcome: 'approved', role: 'review', usage: { tokens: 15, cost: 123 }, intervention: false } }));
+  appendEvent(d,payload({ eventKind: 'supervisor-observed', from: undefined, to: 'resolve-human', supervisor: { projectId: hash, incidentId: hash, hostOutcomeId: hash, outcome: 'resolved', usage: null, intervention: true } }));
+  const events = exportEvents(d).events;
+  assert.equal(events[0].supervisor!.usage,null);
+  assert.deepEqual(events[1].supervisor!.usage,{tokens:15,cost:123});
+  const metrics = supervisorOutcomeMetrics(events,[{ticket:1,kind:'agent-activity',at:'2026-01-01T00:01:00.000Z'}]);
+  assert.equal(metrics.observedInterventions,1); assert.equal(metrics.incidents[0].timeToConfirmedProgressMs,null);
+  const retained = Array.from({length:260},(_,i) => ({ ...events[0], supervisor: { ...events[0].supervisor!, incidentId:i.toString(16).padStart(64,'0'), outcome:'refused' as const } }));
+  assert.equal(supervisorOutcomeMetrics(retained,[]).incidents.length,128);
+  assert.equal(supervisorOutcomeMetrics(retained,[],128).pagination.collections.incidents.after,4);
+  assert.equal(supervisorOutcomeMetrics(retained,[],256).refusedActions.length,4);
+  assert.equal(supervisorOutcomeMetrics(events,[{ticket:2,kind:'host-confirmed-merge',at:'2026-01-01T00:01:00.000Z'}]).incidents[0].timeToConfirmedProgressMs,null);
+  assert.equal(supervisorOutcomeMetrics(events,[{ticket:1,kind:'host-confirmed-merge',at:'2026-01-01T00:01:00.000Z'}]).incidents[0].timeToConfirmedProgressMs,60000);
+  for (const usage of [{tokens:-1,cost:0},{tokens:0,cost:Infinity},{tokens:0,cost:0,secret:'no'}]) assert.throws(() => appendEvent(d,{...event,eventId:randomUUID(),supervisor:{...event.supervisor!,usage}}),/Invalid supervisor/);
+  assert.throws(() => appendEvent(d,{...event,eventId:randomUUID(),supervisor:{...event.supervisor!,proposalId:'token=secret'}}),/Invalid supervisor/);
 });
 
 test('recorder failure after normal admission leaves ownership, generation, stage and result unchanged', t => {

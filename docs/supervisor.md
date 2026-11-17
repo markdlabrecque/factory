@@ -12,7 +12,7 @@ observation-only JSON envelope. Mode defaults to observe without creating a jour
 The envelope separates owners, incident/evidence basis, proposals, host refusal,
 human request/delivery, reviewer decision/provenance, configured/cumulative budgets,
 execution observations, host-confirmed merge progress and the next observation.
-It never copies frozen source/prompt/substitution/output bodies. Retained display
+It never copies frozen source/prompt/output bodies. Proposal display includes redacted bounded before/after excerpts, the exact proposal ID, alternatives and risks; display text cannot substitute for retained original review input. Retained display
 collections have deterministic 128-entry pages (`--offset`), with unresolved holds
 and unsettled ownership first and explicit total/before/after counts. Aggregate human
 hold/pending-worker state is never page-limited. Compare revisions across pages;
@@ -50,11 +50,69 @@ materially new successor hash that requires fresh diagnosis/review. Delivery rec
 mode changes, restart and tracker/model output cannot resume or turn reviewer approval
 into execution/completion. No budget reset or reviewer shopping is introduced.
 
-The operator command introduces no new selected runtime asset: its command/host reader ship with the
-CLI tree, and the existing state/worker/review/escalation assets remain in the complete
-runtime inventory. Source-only unit and disposable CLI tests prove controls, not
+The command/host reader ship with the CLI tree; the Board adapter below joins the
+complete runtime inventory alongside existing state/worker/review/escalation and
+scoped application assets. Source-only unit and disposable CLI tests prove controls, not
 provider enforcement, live delivery, atomic gate application, scheduler integration
 or an operational pilot. Scoped input application is independently evidenced below; live capabilities and scheduler/pilot prerequisites retain their separate scope.
+
+## Board observation and outcome costs
+
+`board/supervisor.mts` is a passive sanitized adapter over the existing version-1
+CLI status projection, not another policy engine. The server supplies the host CLI
+reader for registered roots only; browsers cannot supply paths. A missing/corrupt
+journal, revision-zero absent project or unavailable CLI is UNKNOWN. No journal is
+created by inspection. Standalone copies without the CLI intentionally show unknown.
+The adapter ships in the selected inventory as `supervisor-view.mts` (distinct from
+the existing diagnosis `supervisor.mts`) and in standalone Board copies.
+
+[`GET /api/supervisor`](factory-cli.md#board-supervisor-observations) is GET-only,
+no-store on success and error, and uses the same deterministic 128-entry pages and
+omission counts as CLI inspection. Safety indexes remain untruncated. Aggregate
+holds, charges and interventions are not limited to the selected page; compare
+revisions when navigating. The small accessible Board section shows mode and why
+work waits, HUMAN DECISION NEEDED and exact question/next action. Expand the plain
+text status page to inspect proposal ID and redacted before/after/risks, review
+outcome/host completion, evidence references, budgets/accounting and confirmed merge
+progress. Excerpts are explicitly not the exact originals; inspect retained originals
+locally before a decision. Neither model text nor arbitrary references become HTML,
+file fetches or trusted links. Credentials, URL userinfo/query/fragment and absolute
+filesystem/credential references are removed across the whole envelope. No original
+file bodies are read for display; only the existing allowlisted status fields appear.
+
+Opening, paging or refreshing observations never launches diagnosis/review/repair,
+changes mode, resolves a hold, posts a notification or creates a journal. The existing
+review worker still commits denial and invokes the **same** durable host bridge
+without the Board. There is no second notifier or automatic delivery service: only
+an explicitly invoked host API with current act/notification authorization may use
+`deliverSupervisorRequest`. Exact ticket or explicitly configured same-project
+operator issue routing, one unchanged-incident managed comment, pending/stopped on
+failure, no repeat POST on reconciliation and actual API receipt semantics remain
+unchanged. Delivery is not approval; model/tracker comments cannot resume work.
+Notes do not change requirement fingerprints or reset diagnosis/recovery budgets.
+
+[Supervisor telemetry](telemetry.md#supervisor-outcomes-and-cost-attribution) follows
+successful journal transitions outside their lock, using the existing execution-event
+store/export. Journal status supplies cumulative charged ceilings, separately summed
+known actual usage and explicit unknown-accounting reservation counts per diagnosis/
+review role, plus exact audited local-resolution intervention counts. Missing state
+never becomes zero. Refused outcomes and observed incident-to-confirmed-merge elapsed
+time are observational, not a second truth store or action authority. Missing history,
+unknown merge timestamps and project-wide incidents have unknown elapsed time;
+agent activity, pending requests, delivery receipts, review approval and verifier
+claims alone never count as confirmed progress. Timing is first retained incident
+observation to a later saved host-confirmed merge, not proof of causal improvement.
+No baseline benefit, live notification, provider enforcement or pilot is demonstrated.
+All existing act refusal, durable stop/cancellation-pending, paid-call holds and
+separately authorized one-project pilot prerequisites remain unchanged.
+
+Focused offline evidence uses unit projection/redaction/text-rendering/attribution
+and one in-memory HTTP plus injected tracker boundary with disposable state, no
+listener, model, credential or live delivery:
+
+```sh
+node --test board/supervisor.test.mts board/execution-events.test.mts cli/test/supervisor-command.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
+```
 
 ## Configuration, model and paid-call foundation
 

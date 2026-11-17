@@ -23,7 +23,7 @@ NODE="$(command -v node)" || { echo "node not found on PATH" >&2; exit 1; }
 mkdir -p "$APP" "$(dirname "$PLIST")" "$HOME/.local/state/sandcastle"
 "$NODE" "$HERE/prepare-runtime.mts" "$HERE/.." "$HOME/.local/share/sandcastle-board-runtime"
 cp "$HERE/execution-events.mts" "$HERE/delivery.mts" "$HERE/board.mts" "$HERE/admission.mts" "$HERE/assessment.mts" "$HERE/journal.mts" "$HERE/tickets.mts" "$HERE/refresh-worker.mts" \
-  "$HERE/readiness.mts" "$HERE/readiness-view.mts" "$HERE/../orchestrator/readiness-schema.mts" \
+  "$HERE/supervisor.mts" "$HERE/readiness.mts" "$HERE/readiness-view.mts" "$HERE/../orchestrator/readiness-schema.mts" \
   "$HERE/board-server.mts" "$HERE/board.template.html" "$APP/"
 cp "$HERE/../orchestrator/project-config.mts" "$HERE/../orchestrator/model-policy.mts" "$HERE/../orchestrator/workflow.mts" "$APP/"
 # Explicit refresh actions need host probes too; keep the Board store's readiness.mts name distinct.

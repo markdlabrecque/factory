@@ -1,5 +1,5 @@
 // Host-owned supervisor journal: atomic CAS transitions, retained incidents/denials and separately charged resources.
-// Retains operator fences, diagnosis/review completion, host outbox receipts, exact local resolution and fenced application observations; never executes effects or resets charges.
+// Retains operator fences, completion, receipts, resolution audits and fenced application observations; emits redacted telemetry after commit, never executes effects or resets charges.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
@@ -8,7 +8,10 @@ const { ownerState, withAdmissionLock, writeDurable } = await import(existsSync(
 const { supervisorHash, validateProject, validateScope, validateIncident, validateProposal, validateIndependentReview, validateIntent, validateHumanRequest } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 
 import type { Diagnostic } from '../../orchestrator/supervisor.mts';
+import type { ProducerEvent } from '../../board/execution-events.mts';
 const { validateDiagnostic } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
+
+const { observeEvent, eventIdFor } = await import(existsSync(new URL('./execution-events.mts', import.meta.url)) ? './execution-events.mts' : '../../board/execution-events.mts');
 
 export const HISTORY_LIMIT = 100;
 export const DIAGNOSIS_TIMEOUT_MS = 600_000;
@@ -374,7 +377,7 @@ export function readSupervisor(stateDir: string, project: ProjectIdentity): Supe
  * stateDir MUST be host-owned, outside project/agent mounts, as for admission/recovery. No async effects inside locks. */
 export function commitSupervisor(stateDir: string, project: ProjectIdentity, expectedRevision: number, event: Event): SupervisorState {
   validateProject(project);
-  return withAdmissionLock(join(stateDir, 'supervisor'), () => {
+  const after = withAdmissionLock(join(stateDir, 'supervisor'), () => {
     const j = readJournal(stateDir), key = supervisorHash(project.root);
     const before = j.projects[key] ? validateSupervisor(j.projects[key], project) : emptySupervisor(project);
     demand(before.revision === expectedRevision, 'revision CAS failed');
@@ -382,4 +385,30 @@ export function commitSupervisor(stateDir: string, project: ProjectIdentity, exp
     if (after !== before) { j.projects[key] = after; writeDurable(supervisorFile(stateDir), JSON.stringify(j) + '\n'); }
     return after;
   }, -1);
+  // Best-effort observation is outside the authority lock. Replays share a stable event ID; telemetry cannot change the committed outcome.
+  try { observeEvent(stateDir, supervisorObservation(after, event)); }
+  catch { /* Telemetry failure never changes journal authority or a successful delivery receipt. */ }
+  return after;
+}
+/** Select scalar attribution from the committed state, never raw adapter usage or source text. */
+export function supervisorObservation(after: SupervisorState, event: Event): ProducerEvent {
+    const project = after.project, e = event as any;
+    const reservation = e.reservation ?? after.reservations[supervisorHash(e.reservationId ?? e.diagnostic?.reservationId ?? '')];
+    const intent = e.intent ?? (e.intentId ? after.intents[supervisorHash(e.intentId)]?.intent : undefined);
+    const diagnosisProposal = e.diagnostic?.decision?.action?.kind === 'gate-change' ? e.diagnostic.decision.action.proposal : undefined;
+    const incidentId = e.incidentId ?? e.proposal?.incidentId ?? e.request?.incidentId ?? e.diagnostic?.incidentId ?? reservation?.incidentId ?? intent?.incidentId
+      ?? (e.facts ? incidentIdentity(project, e.facts) : undefined);
+    const scope = incidentId ? after.incidents[incidentId]?.incident.scope : undefined;
+    const proposalId = e.proposal?.id ?? e.review?.proposalId ?? e.request?.proposalId ?? e.proposalId ?? diagnosisProposal?.id ?? intent?.proposalId;
+    const outcome = e.kind === 'notify-ack' ? 'notified' : e.kind === 'resolve-human' ? 'resolved'
+      : e.review?.disposition === 'deny' || e.diagnostic && e.diagnostic.outcome !== 'proposed' ? 'refused'
+      : e.kind === 'human' || e.request || e.kind === 'notify-attempt' ? 'pending'
+      : e.review?.disposition === 'approve' ? 'approved'
+      : e.outcome === 'unknown' || e.kind === 'reconcile-worker' ? 'unknown' : 'observed';
+    return { eventId: eventIdFor('supervisor', supervisorHash(project), event.id), observedAt: event.at,
+      project: project.tracker.project, ...(scope?.kind === 'ticket' ? { ticket: String(scope.ticket) } : {}), identityComplete: false,
+      eventKind: 'supervisor-observed', to: event.kind, reasonCode: 'unspecified', origin: 'reconciliation',
+      supervisor: { projectId: supervisorHash(project), ...(incidentId ? { incidentId } : {}), ...(proposalId ? { proposalId } : {}), ...(e.review ? { reviewId: supervisorHash(e.review.id) } : {}),
+        hostOutcomeId: supervisorHash(event.id), outcome, ...(reservation ? { role: reservation.kind } : {}),
+        usage: ['finish','diagnosis','review-complete'].includes(e.kind) ? reservation?.actual ?? null : null, intervention: e.kind === 'resolve-human' } };
 }

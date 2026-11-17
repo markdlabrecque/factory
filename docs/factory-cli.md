@@ -52,7 +52,7 @@ worker owners, incident/evidence hashes, proposals, host refusal, human requests
 notification receipts, reviews, configured and cumulative budgets, retained execution
 observations, confirmed merge progress and next observation. Review approval is not
 execution, verifier PASS or completion; notification delivery is not approval.
-Original prompts, substitution bodies and raw model stdout/stderr are excluded.
+Original prompts and raw model stdout/stderr are excluded. Proposals include redacted bounded before/after display excerpts and the exact retained proposal ID; these excerpts are not complete original review context.
 Display text/references are bounded/redacted; inspect originals separately under the
 host-user trust boundary. No tracker refresh/write, model, review, repair, service
 probe, reconciliation, charge, report publication or journal creation occurs on read.
@@ -122,6 +122,28 @@ reconciliation may find the exact marker but never blindly repeats POST. There i
 no installed notification service, live configuration or automatic delivery command
 introduced here. Provider-enforceable paid ceilings/accounting, gate application,
 fresh proof and live activation remain prerequisites; offline tests are not a pilot.
+
+## Board supervisor observations
+
+`GET /api/supervisor?offset=0` returns a version-1 `observation-only` envelope with
+`generatedAt`, `offset` and registered `projects`. A project has `name`, `state`
+(`known` or `unknown`), the same version-1 CLI `status` page, and observed-only
+`outcomes`/telemetry diagnostics when available. Only GET and a single nonnegative
+safe integer `offset` are accepted; paths, project selection and controls are not.
+Success, validation/method errors and observation failures are all `no-store`.
+Missing/corrupt journal or unavailable host CLI is **UNKNOWN**, not zero budget,
+healthy state or approval. Standalone Board copies without the CLI remain unknown.
+
+The HTTP Board adds a compact supervisor/incident section with explicit human
+questions/next actions, mode, holds and a plain-text expandable status page for
+proposal/review, safe evidence references, configured/charged/known-or-unknown usage,
+cancellation limitations and host-confirmed progress. Previous/next buttons page
+128 retained records per collection with explicit omissions; compare revisions.
+The page reads once on opening and on explicit observation refresh/page navigation;
+file snapshots/evidence pages do not request supervisor data. Nothing starts a model,
+review, repair, tracker delivery, mode change, resolution or journal on read. The
+Board is never admission authority. See [supervisor Board contract](supervisor.md#board-observation-and-outcome-costs)
+and [outcome telemetry](telemetry.md#supervisor-outcomes-and-cost-attribution).
 
 ## Board readiness
 

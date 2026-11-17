@@ -17,6 +17,7 @@ import { supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-
 import { diagnoseProject } from '../src/supervisor-worker.mts';
 import { modelForRole } from '../../orchestrator/model-policy.mts';
 import { reviewFixture, AT } from './supervisor-fixture.mts';
+import { exportEvents, supervisorOutcomeMetrics } from '../../board/execution-events.mts';
 function setup(home:string,name:string, mutate?: (a:ReturnType<typeof reviewFixture>['authorization'], input:ReturnType<typeof reviewFixture>['input'])=>void) {
   const {authorization,input}=reviewFixture(join(home,`project-${name}`)),stateDir=join(home,`state-${name}`);
   mutate?.(authorization,input);
@@ -62,6 +63,11 @@ test('fresh review and durable denial/outbox boundary, failure retention, no sho
     const denied=setup(home,'denied');denied.behavior(x=>denied.complete(JSON.stringify({...denied.decision(x),disposition:'deny',reason:'Proposed expectation would weaken required evidence'})));
     assert.equal((await reviewGateProposal(denied.options)).state,'human-required');const stopped=denied.state(),h=Object.values(stopped.humans)[0];
     assert.equal(h.delivery.state,'notified');assert.equal(stopped.incidents[h.incidentId].denied,true);assert.equal(denied.posts(),1);
+    const observed = exportEvents(denied.stateDir).events;
+    const completion = observed.find(e => e.to === 'review-complete')!;
+    assert.equal(completion.supervisor!.outcome,'refused'); assert.equal(completion.supervisor!.proposalId,denied.input.proposal.id);
+    assert.deepEqual(completion.supervisor!.usage,{tokens:20,cost:20}); assert.equal(completion.supervisor!.role,'review');
+    assert.equal(supervisorOutcomeMetrics(observed,[]).incidents[0].timeToConfirmedProgressMs,null);
     assert.deepEqual(stopped.intents,{});assert.deepEqual(stopped.proposals,{[denied.input.proposal.id]:denied.input.proposal});
     assert.equal((await reviewGateProposal(denied.options)).state,'human-required');assert.equal(denied.launches(),1);assert.equal(denied.posts(),1);assert.deepEqual(denied.state().charged,stopped.charged);
     // A response lost after the actual injected comment creation remains pending and can only reconcile the marker.
@@ -91,6 +97,7 @@ test('fresh review and durable denial/outbox boundary, failure retention, no sho
     // Explicit audited resolution cannot clear original denial or approve the denied proposal; no refunds.
     assert.throws(()=>resolveSupervisorRequest({stateDir:denied.stateDir,project:h.project,incidentId:h.incidentId,requestId:'foreign',proposalId:h.proposalId,actor:'uid:1:operator',reason:'Inspect originals',nextProposalId:null,now:()=>Date.parse(AT)}));
     const resolved=resolveSupervisorRequest({stateDir:denied.stateDir,project:h.project,incidentId:h.incidentId,requestId:h.id,proposalId:h.proposalId,actor:'uid:1:operator',reason:'Abandon unsafe proposal',nextProposalId:null,now:()=>Date.parse(AT)});
+    assert.equal(supervisorOutcomeMetrics(exportEvents(denied.stateDir).events,[]).observedInterventions,1);
     assert.equal(resolved.incidents[h.incidentId].denied,true);assert.deepEqual(resolved.charged,stopped.charged);assert.equal((await reviewGateProposal(denied.options)).state,'human-required');assert.equal(denied.launches(),1);
   }finally{rmSync(home,{recursive:true,force:true});}
 });
@@ -133,7 +140,10 @@ test('review failure/authority/accounting matrices fail closed with bounded huma
       const result=await reviewGateProposal({...f.options,signal:abort.signal});
       assert.notEqual(result.state,'review-approved',kind);
       if(!['observe','context'].includes(kind)) {assert.equal(result.state,'human-required',kind);assert.equal(Object.keys(f.state().humans).length,1);assert.equal(Object.values(f.state().humans)[0].stop,'required');}
-      if(['cleanup','accounting'].includes(kind))assert.equal(Object.values(f.state().reservations)[0].state,'ambiguous');
+      if(['cleanup','accounting'].includes(kind)) {
+        assert.equal(Object.values(f.state().reservations)[0].state,'ambiguous');
+        assert.equal(exportEvents(f.stateDir).events.find(e => e.to === 'review-complete')!.supervisor!.usage,null);
+      }
       if(['budget','primitive','model','pricing','context','observe'].includes(kind))assert.equal(f.launches(),0);
       if(kind==='notification-off')assert.equal(f.posts(),0);
       const prior=f.state().charged;await reviewGateProposal(f.options);assert.deepEqual(f.state().charged,prior,kind);assert.deepEqual(f.state().intents,{});
