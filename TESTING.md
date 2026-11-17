@@ -68,6 +68,26 @@ without deleting evidence. Independent safety review and all hosted checks on th
 actual final head, latest-base reconciliation and ordinary SHA-guarded merge remain
 parent release gates. No source gate establishes T14 paid permission or pilot success.
 
+## Login-backed advisory capability regression
+
+`cli/test/supervisor-openai-request.test.mts` reuses the network-denied provider
+fixture's `--login-serialization-spike` mode to load the actual digest-checked
+archived Pi serializer with a synthetic non-`sk-` credential shape. This is a
+local SDK integration test, not another transport stack or copied-install E2E.
+It proves the login branch omits the approved remote cap/cache fields, emits
+high reasoning without a configuration update, and is rejected by the production
+payload validator before any transmission. It never resolves auth or bypasses the
+production API-key precondition; the existing copied adapter/journal matrix owns
+those request/ownership guarantees. No real login, remote acceptance, usage,
+subscription invoice or operational success is implied. Run the focused suite:
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-openai-request.test.mts
+```
+
+The four mandatory shards, separate browser lifecycle and docs checks above remain
+unchanged. See the [blocked capability disposition](docs/research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17).
+
 ## Public copied-install advisory journeys
 
 ```sh

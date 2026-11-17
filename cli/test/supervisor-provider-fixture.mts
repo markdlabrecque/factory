@@ -3,7 +3,7 @@ import fs, { mkdtempSync, rmSync, mkdirSync, cpSync, writeFileSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { createHash } from 'node:crypto';
@@ -175,4 +175,48 @@ export async function runProviderSpike(selected?: string) {
       evidence: 'actual production gate/pinned serializer/copied artifacts/journal/registered child; synthetic HTTP/SSE, host controls and exclusion ID; no live provider/admission/settlement' };
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
+/** Capability probe only: the shipped serializer receives a synthetic non-sk string, never real auth.
+ * Use the same archived closure and final payload validator; no production credential check is bypassed. */
+export async function runLoginSerializationSpike() {
+  denyNetwork();
+  const root = mkdtempSync(join(tmpdir(), 'factory-login-serialization-'));
+  try {
+    const source = fileURLToPath(new URL('../src/supervisor-provider/', import.meta.url));
+    const manifest = JSON.parse(readFileSync(join(source, 'manifest.json'), 'utf8'));
+    for (const pkg of manifest.packages) {
+      const archive = join(source, pkg.archive);
+      assert.equal(createHash('sha256').update(readFileSync(archive)).digest('hex'), pkg.sha256);
+      const target = join(root, 'node_modules', pkg.name); mkdirSync(target, { recursive: true });
+      execFileSync('tar', ['-xzf', archive, '--strip-components=1', '-C', target],
+        { timeout: 5000, env: { PATH: '/usr/bin:/bin', LANG: 'C' }, stdio: 'pipe' });
+    }
+    const pi = join(root, 'node_modules/@earendil-works/pi-ai');
+    const { stream } = await import(pathToFileURL(join(pi, 'dist/api/openai-responses.js')).href);
+    const { OPENAI_MODELS } = await import(pathToFileURL(join(pi, 'dist/providers/openai.models.js')).href);
+    const { ADVISORY_PROFILE } = await import('../src/supervisor-advisory-contract.mts');
+    const { validateAdvisoryPayload } = await import('../src/supervisor-openai-request.mts');
+    assert.equal(createHash('sha256').update(readFileSync(join(pi, 'dist/api/openai-responses.js'))).digest('hex'), ADVISORY_PROFILE.serializer);
+    assert.equal(createHash('sha256').update(readFileSync(join(pi, 'dist/providers/data/openai.json'))).digest('hex'), ADVISORY_PROFILE.catalogue);
+    const model: any = Object.values(OPENAI_MODELS).find((m: any) => m.id === ADVISORY_PROFILE.model);
+    assert.equal(model.provider, 'openai'); assert.equal(model.api, 'openai-responses');
+    assert.equal(model.baseUrl, 'https://api.openai.com/v1');
+    const system = 'Synthetic offline system', user = 'Synthetic offline user';
+    let payload: any, transmissions = 0;
+    const result = await stream(model, { messages: [{ role: 'system', content: system, timestamp: 0 },
+      { role: 'user', content: user, timestamp: 0 }] }, {
+      apiKey: 'synthetic-chatgpt-not-a-token', env: {}, maxTokens: ADVISORY_PROFILE.output,
+      reasoningEffort: 'high', cacheRetention: 'none', serviceTier: 'default', maxRetries: 0,
+      fetch: async () => { transmissions++; throw Error('Offline login probe must never transmit'); },
+      onPayload(value: any) {
+        value.truncation = 'disabled'; payload = JSON.parse(JSON.stringify(value));
+        validateAdvisoryPayload(payload, system, user); return payload;
+      },
+    }).result();
+    assert.equal(transmissions, 0); assert.equal(result.stopReason, 'error');
+    assert.match(result.errorMessage, /unsupported serialized request/);
+    return { payload, transmissions, refusal: result.errorMessage,
+      evidence: 'exact archived Pi serializer and production payload validator; synthetic credential shape only; no auth, authorization or live provider' };
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
 if (process.argv[2] === '--offline-spike') console.log(JSON.stringify(await runProviderSpike(process.argv[3])));
+if (process.argv[2] === '--login-serialization-spike') console.log(JSON.stringify(await runLoginSerializationSpike()));

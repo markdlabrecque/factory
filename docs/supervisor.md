@@ -505,6 +505,16 @@ subscription token. The worker environment permits only `PATH`, `HOME`, `LANG`,
 including TLS-verification, provider/logging/proxy/Node overrides, holds without
 reading or hashing its value. The owned worker must not inherit user settings.
 
+The [Pi-login capability investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
+is **BLOCKED**, not a shipped authentication option: the pinned `openai` direct
+ChatGPT-login serializer omits `max_output_tokens` and explicit cache controls.
+An offline regression proves the existing payload gate refuses it before transport.
+Pi's supported bearer-export command does not repair those missing remote premises.
+No credentials were resolved; the API-key route, one-call reservation and all
+unknown-accounting/ownership holds remain unchanged. Login-backed evaluation needs
+upstream finite-bound support and reviewed route-specific accounting, not a token
+passed through the API-key field or an enlarged allowance.
+
 The complete selected public `openai-responses` import closure is shipped as
 hash-pinned, unmodified published archives under `supervisor-provider/`, with
 original manifests/licenses and an actual provenance `package.json`/`package-lock.json`.

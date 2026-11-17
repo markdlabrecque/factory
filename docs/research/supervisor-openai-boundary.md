@@ -16,6 +16,149 @@ composition remain required. Fixture eligibility and HTTP/SSE are synthetic;
 remote acceptance, billing and paid evaluation remain untested/unauthorized.
 The findings below describe the original unchanged-print investigation.
 
+## Pi-login capability disposition (ticket 286, 2026-11-17)
+
+**BLOCKED: the pinned OpenAI Sign in with ChatGPT route does not supply the
+approved 4,096-token remote generation bound or explicit cache policy.** No
+runtime auth integration is justified by the inspected source. The existing API-key
+route is unchanged; this finding is not working login support, operational
+acceptance or permission to close/unblock
+[ticket 286](https://github.com/markdlabrecque/factory/issues/286).
+
+### Reproducible source and offline evidence
+
+Investigated `develop` base `6588750668fcebe8addb9805b37a598dafc065fb`.
+The repository's `cli/src/supervisor-provider/pi-ai-1.5.2.tgz` has SHA-256
+`d5715efa834c23bfdf10a042b49df4ee169cc99000bf16d7998fab2d533b45f8`;
+its `package/dist/api/openai-responses.js` has SHA-256
+`c35b80b2eb7f84b0ea1d939784943038956aefec7b624ed7862ebe2fd9d40c4b`.
+These are the actual runtime archives, not an inferred upstream tag or global Pi
+fallback. The four-package reachable request closure remains unchanged and is
+listed in the [runtime manifest](../../cli/src/supervisor-provider/manifest.json).
+Auth modules present in the Pi archive are **not** thereby part of that reachable
+request closure or an authorized runtime authentication path.
+
+Source locations below are paths **inside this archive**, unless stated otherwise:
+
+- `dist/api/openai-responses.js`: `isChatGPTSignIn` recognizes a non-`sk-`
+  credential only for provider `openai` and base URL `https://api.openai.com/v1`.
+  `buildParams` deliberately omits `max_output_tokens`, `prompt_cache_options`
+  and `prompt_cache_retention` for that route; its comment says these fields are
+  rejected. `getConfigurationUpdateEffort` also avoids rejected configuration
+  updates. This is source evidence of Pi's supported behavior, not a live server
+  measurement or proof that no future provider primitive can exist.
+- `dist/auth/oauth/openai-chatgpt.js`: public-client OAuth targets resource
+  `https://api.openai.com/v1`, requires `chatgpt.tokens.use.direct`, derives a
+  bearer from `credential.access`, and subtracts a three-minute expiry margin.
+  Login/refresh exchange tokens at `auth.openai.com`; neither was executed.
+- `dist/auth/resolve.js`: explicit minimum validity can refresh a near-expiry
+  token, with a 15-second refresh timeout, persisting rotated credentials under
+  Pi's own store lock. Cancellation does not interrupt an already-started refresh
+  and persistence. This is not a pure, read-only token getter.
+- Public Pi coding-agent **1.5.2** installed source (not user configuration):
+  `dist/cli/auth-command.js`, `dist/cli/credential-print.js` and `dist/main.js`
+  expose `pi auth print-bearer-token --min-expiry 50m --provider openai`.
+  The command selects OAuth credentials, checks explicit minimum validity, and
+  may refresh; main uses a 15-second signal and disables model-network discovery.
+  `--no-refresh` belongs to `auth check`, not bearer export. These files were read
+  as source only. No Pi command, credential listing or auth store was executed/read.
+- `orchestrator/main.mts:openaiCredential` already invokes bearer export, then
+  tries API-key export. Its `spawnSync` has **no host-enforced child timeout**;
+  Pi's internal 15-second signal is not a parent process deadline. That ordinary
+  implementation mechanism does not establish bounded advisory auth or request
+  compatibility. Neither the missing host deadline nor its credential fallback
+  may be copied into an explicit bounded no-fallback advisory auth selector.
+
+The existing network-denied `supervisor-provider-fixture.mts` now has a
+`--login-serialization-spike` mode. It verifies the archived closure, imports the
+real pinned serializer, supplies a clearly synthetic non-secret non-`sk-` string
+and captures JSON in the actual supported `onPayload` hook. The production
+`validateAdvisoryPayload` rejects it there, before any transport or journal send
+authorization. It does **not** bypass the production API-key check or claim to
+exercise genuine host authentication. The existing copied adapter/API-key matrix
+continues to prove the journal/owned-process transport boundary separately.
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-openai-request.test.mts
+node cli/test/supervisor-provider-fixture.mts --login-serialization-spike
+```
+
+Actual synthetic login payload: `model: gpt-6.1-terra`; developer and user text;
+`stream: true`; `store: false`; `service_tier: default`;
+`reasoning: {effort: high, summary: auto}`;
+`include: [reasoning.encrypted_content]`; hook-added `truncation: disabled`.
+There is **no** output cap, cache field or configuration-update item.
+Outcome: `Advisory held: unsupported serialized request`, **zero transmissions**.
+This is offline serialization/refusal evidence, not remote acceptance or real usage.
+
+### Exact route matrix
+
+| Contract | Accepted API-key advisory path | Pi OpenAI / Sign in with ChatGPT candidate |
+| --- | --- | --- |
+| Identity | `openai/gpt-6.1-terra`, `openai-responses`, POST `https://api.openai.com/v1/responses` | Same pinned model/API/endpoint, not `openai-codex`; account entitlement untested |
+| Acquisition | Explicit host-supplied `sk-` key; no ambient discovery | Supported Pi bearer-export interface exists; not invoked or integrated; expiry/refresh/cleanup require bounded host design |
+| Thinking | Top-level medium plus terminal high configuration update | Top-level high, no configuration update; emission proved, remote acceptance not tested |
+| Complete input | Existing public Responses context admission premise with disabled truncation | Same hook can emit disabled truncation; login-specific server admission contract not independently established |
+| Generated output | Serialized `max_output_tokens: 4096`, provider API cap includes reasoning | Pi omits it even with `maxTokens: 4096`; no supported equivalent discovered |
+| Cache/service | Explicit unmarked cache mode and default service; raw response tier validated | Explicit cache mode omitted; default service emitted, not proof of login cache/rate policy |
+| One call/retry | Existing final gate, immutable grant and `maxRetries: 0`; SDK retry also zero | Same direct stream can disable retries; this cannot restore a missing remote bound; no auth child has been integrated |
+| Hooks | Awaited payload hook and final HTTP gate; raw terminal-event hook before normalization | Same hook surfaces; current payload fails before HTTP; reinserting rejected fields is not support |
+| Raw usage | Existing durable terminal evidence and strict known/unknown settlement | Shared stream code exposes terminal events if supplied; no login terminal evidence or completeness guarantee established |
+| Accounting | Reserve 1,054,096 tokens / 5,808,792 micro-USD under reviewed API exposure profile | Subscription resource use is not an API invoice; neither zero cost nor API-price equivalence is established |
+| Ownership | Existing host/process/journal/receipt pipeline | No new worker/auth ownership path shipped; current hold retained |
+
+### Primary-provider contracts and their limits
+
+The first-party [Responses create reference](https://developers.openai.com/api/reference/resources/responses/methods/create)
+provides the output cap, usage and service fields; the
+[reasoning guide](https://developers.openai.com/api/docs/guides/reasoning)
+explains that reasoning consumes output allowance. The
+[Terra reference](https://developers.openai.com/api/docs/models/gpt-6.1-terra),
+[prompt-caching guide](https://developers.openai.com/api/docs/guides/prompt-caching)
+and [pricing](https://developers.openai.com/api/docs/pricing)
+underpin the accepted API profile described below and in the constrained contract.
+These are not independent proof that the fields Pi deliberately removes are
+accepted under direct ChatGPT token sharing. No supported login-specific remote
+cap or replacement primitive was established by the anonymous primary-source
+investigation.
+
+Do not conflate that finding with Codex: OpenAI's
+[Codex authentication](https://developers.openai.com/codex/auth/) and
+[pricing](https://developers.openai.com/codex/pricing/) distinguish subscription
+access from API-key billing; API prices do not estimate included subscription
+tasks. First-party [Codex routing source](https://github.com/openai/codex/blob/84a93030e7399b25c694263f904963443a50f6e6/codex-rs/model-provider-info/src/lib.rs)
+uses `https://chatgpt.com/backend-api/codex` for its ChatGPT route.
+That is a **different route**, not evidence for Pi's direct OpenAI-token-sharing
+endpoint. Its capabilities or usage telemetry cannot discharge this ticket's
+requirements. The investigation found no primary contract connecting subscription
+token telemetry on the chosen direct route to the accepted API monetary profile.
+
+### Specific prerequisite and stop boundary
+
+Upstream Pi/provider support must establish a **server-accepted, caller-selected
+finite generation ceiling at or below the approved 4,096 tokens**, covering
+reasoning after all local processes die, for this exact model/direct-login route.
+It must also establish compatible input/cache/service and raw-usage semantics.
+A future supported Pi release would need explicit review and re-pinning, not a
+silent archive upgrade. For subscription accounting, the owner must review a
+route-specific policy distinguishing resource reservation, known raw token usage,
+conservative derived exposure and not-applicable/unknown invoice facts. That
+policy alone cannot supply the missing remote ceiling.
+
+Do not substitute the catalogue's 128,000 maximum output, enlarge reservations,
+reinsert fields Pi marks rejected, lower thinking, use a local timeout as a remote
+bound, set cost to zero, reset/refund an allowance or try credentials to find out.
+No API-key procurement or provider/model switch is requested. Runtime integration,
+installation and dependent live evaluation stop here. Preserve the genuine saved
+run and existing hold/history; any later implementation needs supported upstream
+evidence and any changed policy needs owner approval before operational work.
+
+No real auth acquisition, login, refresh, token export, credential-store access,
+generation, token count, installation, service/project/scheduler mutation or
+operational rerun occurred. Tests are synthetic; remote login acceptance, usage,
+cleanup and useful advice remain **NOT RUN**. Historical investigation statements
+below retain their original scope and dates.
+
 ## Finding
 
 **The fixed model is supported in the inspected current packaged Pi catalogue and documented by OpenAI. The existing Factory Pi print invocation does not, however, demonstrate the `DiagnosisBoundary` required for paid diagnosis. Keep that boundary held.** The blocker is not model existence, and neither switching providers nor building a second provider stack is justified.
