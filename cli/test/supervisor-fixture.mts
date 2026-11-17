@@ -1,7 +1,15 @@
-// Synthetic frozen diagnosis input shared by pure proposal and stubbed worker tests. Never reads local project context.
-import { sourceHash } from '../../orchestrator/supervisor-contract.mts';
-import type { Snapshot } from '../../orchestrator/supervisor-contract.mts';
+// Synthetic frozen original input shared by diagnosis and independent review tests. Never reads local project context.
+import { sourceHash, supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-contract.mts';
+import type { Snapshot, ReviewInput } from '../../orchestrator/supervisor-contract.mts';
 import type { DiagnosisAuthorization } from '../src/supervisor-worker.mts';
+import { incidentIdentity } from '../src/supervisor-state.mts';
+export function reviewFixture(root = '/fixture/project'): { authorization: DiagnosisAuthorization; input: ReviewInput } {
+  const authorization = supervisorFixture(root), snapshot = authorization.snapshot; snapshot.mode = 'act';
+  const body = { version: 1 as const, incidentId: incidentIdentity(snapshot.project, authorization.facts), snapshotHash: supervisorHash(snapshot), project: snapshot.project, scope: snapshot.scope,
+    change: { category: 'verification-command-substitution' as const, path: 'TESTING.md', before: 'old command', after: 'equivalent offline command', owner: { ticket: 236, runId: 'run-a' }, expiresAt: '2026-11-17T13:00:00.000Z' },
+    rationale: 'Equivalent evidence within project guidelines', alternatives: ['Repair original mechanism'], risks: ['Must retain independent verification'] };
+  return { authorization, input: { version: 1, snapshot, proposal: { ...body, id: proposalIdentity(body) } } };
+}
 export const AT = '2026-11-17T12:00:00.000Z';
 export const HASH = 'a'.repeat(64);
 export function supervisorFixture(root = '/fixture/project'): DiagnosisAuthorization {

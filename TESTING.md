@@ -63,9 +63,9 @@ One minimal process-boundary case passes the existing Pi argument builder's fixe
 Large-role argv and frozen stdin to local Node recorder children. It runs no Pi,
 SDK, paid model, tracker, Docker or credential operation. Separate processes and
 `--no-session` argv are not proof of live model behavior or an available notification
-API. The [supervisor contract](docs/supervisor.md) records the missing unattended
-host notification/stop bridge and reviewer worker prerequisites; these remain
-blocking for downstream action activation. The complete runtime fixtures include
+API. The [supervisor contract](docs/supervisor.md) records the separately explicit
+source-only reviewer/outbox implementation and remaining paid-runtime/application
+prerequisites; contract fixtures alone do not activate downstream action. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
 ## Supervisor durable state
@@ -103,6 +103,28 @@ No live Pi, provider enforcement, notification adapter, tracker, Docker, service
 credential, install or paid probe is exercised. An absent demonstrated provider
 ceiling/accounting adapter holds paid work; stub evidence does not supply it.
 All four commit shards and the separate lifecycle gate remain mandatory.
+
+## Independent gate review and managed escalation
+
+```sh
+node --test orchestrator/gate-review.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-command.test.mts cli/test/supervisor-state.test.mts cli/test/supervisor-worker.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Unit matrices prove complete original context, strict exact proposal/input/model/
+policy/reviewer binding and failure refusal. One minimal disposable process boundary
+uses fresh local Node recorder children with Pi's supplied fixed-Large argv, empty
+cwd/home and no inherited tools/transcript. Injected notification adapters prove
+stop-before-POST, exact ticket/configured project issue routing, successful receipt
+only, uncertain delivery retention, marker reconciliation without repeat POST,
+restart/dedup, no observe/unauthorized write and no gate/work/budget mutation.
+Offline command-construction fixtures exercise the actual `gh-axi`/`glab` API shape;
+the local resolution CLI boundary checks explicit exact IDs/confirmation and OS
+audit actor. Regression cases reject audit-only cached approval and changed retained
+originals, and exercise A→B→C exact audited resolution with fresh diagnosis/review,
+retained denials and cumulative charges. Clocks/owners are injected; no sleeps,
+live models/trackers/credentials/services/installs or paid probes are used. Provider
+ceiling enforcement and live pilot remain unproved and disabled. All four commit
+shards and the separate lifecycle gate remain mandatory.
 
 ## Runtime bundle preparation
 

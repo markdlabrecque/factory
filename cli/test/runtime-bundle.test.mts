@@ -50,7 +50,11 @@ test('complete inventory, deterministic identity, private install and validation
   assert.equal(typeof worker.diagnoseProject, 'function', 'complete selected worker imports without source-tree dependencies');
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-worker.mts')), readFileSync(join(f.source, 'cli/src/supervisor-worker.mts')), 'worker ships unchanged');
   assert.deepEqual(layout.projectLayoutPolicy({ kind: 'fresh' }, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
-  for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md']) {
+  const reviewer = await import(pathToFileURL(join(a.directory, 'supervisor-review.mts')).href);
+  assert.equal(typeof reviewer.reviewGateProposal, 'function');
+  const escalation = await import(pathToFileURL(join(a.directory, 'supervisor-escalation.mts')).href);
+  assert.equal(typeof escalation.deliverSupervisorRequest, 'function');
+  for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md', 'gate-review.mts', 'prompt.gate-review.md']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
   }
   assert(!readFileSync(join(a.directory, 'main.mts'), 'utf8').includes('sandcastle-islandhealth'));
