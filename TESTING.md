@@ -104,6 +104,32 @@ credential, install or paid probe is exercised. An absent demonstrated provider
 ceiling/accounting adapter holds paid work; stub evidence does not supply it.
 All four commit shards and the separate lifecycle gate remain mandatory.
 
+## Pinned advisory provider request spike
+
+```sh
+node --test cli/test/supervisor-openai-request.test.mts
+node cli/test/supervisor-provider-fixture.mts --offline-spike
+```
+
+One integration boundary uses unmodified published Pi-AI 1.5.2 / OpenAI 7.19.0
+artifacts from checked-in, hash-verified archives. Its child extracts only a
+disposable private module tree; no npm, registry, user configuration or package
+installation runs in tests. The manifest preserves original package identities
+and declared dependencies; the selected subpath needs only the archived reachable
+closure, not the unrelated provider SDKs declared by the full Pi-AI distribution.
+Synthetic non-secret auth, a clean child environment, disabled global fetch and
+native socket/HTTP/TLS paths, and an injected fetch with no network fallback keep
+all responses offline. The actual serializer's request fields, direct-hook refusal,
+shared one-shot transport fence and raw terminal event are exercised. This is not
+a fake Pi SDK or a fake production `DiagnosisBoundary`. Eligibility, HTTP/SSE,
+request IDs and usage are synthetic. Journal authorization, fault permutations,
+watchdog/accounting/host wiring, remote enforcement, billing and useful diagnosis
+are separate later gates. The [provider contract](docs/design/supervisor-provider-contract.md)
+records the conservative bound and evidence limits. Extend this same request suite
+for the production request adapter rather than creating another boundary matrix.
+It enters the unchanged four-shard inventory automatically; the independent
+browser lifecycle gate remains mandatory.
+
 ## Independent gate review and managed escalation
 
 ```sh

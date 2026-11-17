@@ -26,6 +26,13 @@ The current Factory print invocation does not install reservation-bound request
 limits, prevent all retry/compaction/cache-warming request paths, or retain raw
 terminal provider usage durably. An SDK retry setting alone proves none of those
 combined properties. Host/source versions and account access remain distinct.
+The [constrained provider contract](design/supervisor-provider-contract.md) now
+selects the direct Pi-AI 1.5.2 Responses SDK and supplies an offline trace against
+unmodified pinned published artifacts. It justifies a conservative 1,054,096-token,
+5,808,792-micro-USD reservation with documented server admission/output premises;
+insufficient budgets must hold. This is serializer/gate/raw-event evidence with
+synthetic eligibility and HTTP/SSE, **not** durable authorization, a shipped
+`DiagnosisBoundary`, remote acceptance, actual usage or host/installed acceptance.
 
 The next bounded implementation must harden the **existing Pi/OpenAI path** and
 supply its trusted worker boundary: bind the exact serialized request to finite

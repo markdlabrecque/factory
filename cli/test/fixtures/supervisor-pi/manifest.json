@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "scope": "offline public OpenAI Responses subpath fixture; not a complete installed Pi distribution",
+  "packages": [
+    {
+      "name": "openai",
+      "version": "7.19.0",
+      "archive": "openai-7.19.0.tgz",
+      "sha256": "597532dcb9051ee8aa5edadedb57b798b42add68cc5aec1d67e994d0cfad07f1",
+      "registry": "https://registry.npmjs.org/openai",
+      "license": "Apache-2.0",
+      "dependencies": {}
+    },
+    {
+      "name": "partial-json",
+      "version": "0.1.7",
+      "archive": "partial-json-0.1.7.tgz",
+      "sha256": "30eafeed6fdc25fb2ca24f34c37796d9f98f0bf5e156452b98a2c356762f6322",
+      "registry": "https://registry.npmjs.org/partial-json",
+      "license": "MIT",
+      "dependencies": {}
+    },
+    {
+      "name": "@earendil-works/pi-ai",
+      "version": "1.5.2",
+      "archive": "pi-ai-1.5.2.tgz",
+      "sha256": "d5715efa834c23bfdf10a042b49df4ee169cc99000bf16d7998fab2d533b45f8",
+      "registry": "https://registry.npmjs.org/@earendil-works/pi-ai",
+      "license": "MIT",
+      "dependencies": {
+        "@anthropic-ai/sdk": "0.129.0",
+        "@aws-sdk/client-bedrock-runtime": "3.1127.0",
+        "@earendil-works/pi-schema": "1.5.2",
+        "@earendil-works/pi-telemetry": "1.5.2",
+        "@google/genai": "2.21.0",
+        "@smithy/node-http-handler": "4.12.1",
+        "http-proxy-agent": "9.1.0",
+        "https-proxy-agent": "9.1.0",
+        "openai": "7.19.0",
+        "partial-json": "0.1.7"
+      }
+    },
+    {
+      "name": "@earendil-works/pi-telemetry",
+      "version": "1.5.2",
+      "archive": "pi-telemetry-1.5.2.tgz",
+      "sha256": "0d29dbee830c74af7115035c7cb326c1e9da2f690a3f6f95620597092da9f9ee",
+      "registry": "https://registry.npmjs.org/@earendil-works/pi-telemetry",
+      "license": "MIT",
+      "dependencies": {}
+    }
+  ]
+}
