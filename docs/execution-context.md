@@ -79,9 +79,46 @@ claim, exact-SHA CI and merge checks remain separate mandatory gates.
 
 The additive roles `supervisor` and `gateReview` use the same contained Markdown loader as existing roles: common files first, canonical deduplication, literal frozen text and hashes, no secret-path aliases. Their ordered hash maps and normalized supervisor policy participate in `identity`/`policyIdentity` and `assertCurrent`. Edits invalidate authority without rewriting the existing snapshot. These are additional guidelines, not replacement Factory prompts or constraints.
 
-This context supplies only runtime/config/instruction identity. It does not collect or synthesize a supervisor snapshot or review input. The explicit [diagnosis worker](supervisor.md#bounded-diagnosis-and-retained-memory) retains the original sources and separate guidelines/Factory constraints required by committed `supervisor-contract.mts`; summaries and additive hashes alone cannot replace them. Its prompt and pure parser ship with the complete runtime. No independent review worker or action authority is supplied by execution context.
+This context supplies only runtime/config/instruction identity. It does not collect or synthesize a supervisor snapshot or review input. The explicit [diagnosis worker](supervisor.md#bounded-diagnosis-and-retained-memory) retains the original sources and separate guidelines/Factory constraints required by committed `supervisor-contract.mts`; summaries and additive hashes alone cannot replace them. Its prompt and pure parser ship with the complete runtime. No independent review worker or action authority is supplied by execution context. The explicit scoped gate-input consumer below validates previously retained host authority; it cannot create an approval.
 
 `supervisor-policy.mts` and `supervisor-contract.mts` ship through the single complete runtime inventory, including copied fixture installs and explicit project overrides. Assembly, manifest regeneration, selection and override recovery review already consume that inventory; a missing/changed supervisor module cannot borrow installed code. Future modules/entrypoints/prompts must be added when their actual files land, then receive new complete manifest identity and renewed override review. No absent future asset names or mixed-runtime fallback are supported.
+
+### Exact scoped gate-input corrections
+
+The source-only [`applyReviewedGate`](supervisor.md#exact-scoped-verification-guidance-application)
+API publishes an intent-bound immutable host input artifact, not an edit to the
+checkout, worktree, config or installed runtime. Only a configured verification-only
+Markdown document can receive an exact full-preimage substitution; other roles,
+Factory constraints and arbitrary command execution are excluded. The private
+artifact is outside all project/agent mounts and is never a proof or verdict.
+
+A trusted host can explicitly call `loadExecutionContext({ gate })` with its exact
+application/ticket/run and current authorization provider. There is **no** TOML or
+environment bypass selector and no default CLI activation. The loader validates
+current pilot/act/fence/expiry, receipt/worktree, full runtime/settings, all actual
+reviewed instruction bytes and independent host review-completion provenance. It
+substitutes just that source in the existing verification loader. Every raw read
+is checked against its reviewed original hash; original files are not changed.
+
+The frozen identity additionally binds application/input/review, scope, fence,
+expiry, postimage and current candidate SHA. Candidate or material changes revoke
+the old context; material proposal/input changes also require new independent
+review. `assertScope` is enforced by real analysis, normal/recovery execution and
+existing-delivery authorization, so an unamended context cannot reuse old analysis
+or proof for that exact run. Another explicitly named ticket/run is unaffected.
+`analyse` accepts the explicit scoped context and run ID; `runVerifier` accepts its
+execution context and exact renewed manifest. The latter refuses stale candidate/
+policy/requirements analysis and requires a new evidence directory before the
+ordinary independent verifier runs. New host proof still requires immutable
+candidate, current context, confirmed cleanup and exact-SHA delivery gates. A gate
+approval never changes a historical FAIL/INCONCLUSIVE or supplies PASS/merge approval. `postAndDeliver` additionally checks the proof's frozen exact amendment/application/candidate and source hash against the host journal on every authorization, independently of the caller's current-context recheck. An old same-SHA PASS is refused even when paired with a valid amended context.
+
+These are explicit source APIs for trusted orchestration, not a scheduler transport
+or paid/live adapter. A caller unable to carry them safely through current execution
+contracts must retain work and use the committed human bridge; it must not mutate
+the host checkout or weaken Factory. Offline tests exercise their real consumer
+and proof APIs with fixture-owned process/sandbox boundaries. Live paid ceilings,
+activation and pilot prerequisites remain unchanged.
 
 ## Process ownership
 

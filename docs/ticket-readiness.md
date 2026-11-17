@@ -58,6 +58,39 @@ Before an analysis agent starts, the selected runtime must also pass its configu
 
 Execution evidence lives outside sandbox mounts at `<state>/ticket-inputs/<project-ticket-key>/<executionId>/`, with `<attemptId>/` for recovery. Read-only analysis uses `<state>/ticket-inputs/<project-ticket-key>/analysis/<uuid>/`. These files are not rewritten on subsequent tracker reads or retries. Agent evidence remains in its existing execution/attempt directory. A publication failure stops that invocation. The container receives rendered task data, not host tracker credentials or this host evidence directory.
 
+### Reviewed exact-scope gate corrections
+
+A [reviewed verification-guidance correction](supervisor.md#exact-scoped-verification-guidance-application)
+is not a readiness waiver. The explicit applicator publishes an intent-bound
+host-owned input artifact for one exact ticket/run, configured verification-only
+Markdown source and expiry. It never replaces checkout/worktree/config/runtime
+files, grants admission or runs a host command. Unknown/Factory-wide scope invokes
+the committed human-stop/outbox bridge, not a wider supported effect.
+
+Application and consumption require current operator/pilot act authorization,
+unchanged exact original review inputs and host review-completion provenance,
+actual guideline/runtime/settings bytes, canonical owned worktree/receipt/fence,
+complete preimage and allowed source semantics. Unknown/late owners, changed inputs,
+expired effects and ambiguous artifact publication hold. Dead-owner reconciliation
+only observes exact postimage, absent or partial artifact; it never repeats an edit.
+Dirty/index/saved work and other branches remain untouched.
+
+The explicit amended execution context binds the corrected input plus actual
+candidate SHA. The real analysis consumer emits a new policy/candidate-bound
+manifest; the independent verifier refuses stale analysis and uses a fresh evidence
+directory. Changing candidate or material context requires fresh analysis/proof;
+material proposal changes require fresh independent review. Existing normal/recovery
+and delivery authority reject unamended context for the affected ticket/run. An
+approval or notification is not verifier PASS, a rewrite of FAIL/INCONCLUSIVE, or
+merge authority. Historical evidence/proof remains retained. Scope/expiry do not
+authorize another run, remove ownership/cleanup gates or reset any budget.
+
+No CLI/environment selector, live action mode or pilot is enabled by this source
+API. A trusted host must explicitly carry the scoped context through ordinary
+analysis, independent verification and exact-SHA delivery. Inability to do so under
+current host contracts calls for bounded human escalation, not a checkout escape
+hatch. Offline fixture evidence does not prove paid-provider enforcement or activation.
+
 Analysis cache identities, execution manifests and requirement/proof freshness use the same included child/parent source hash. Relevant parent body or human planning-comment edits invalidate analysis and old delivery authority. Generated Factory notes remain excluded, so posting verification does not invalidate its own proof. Older child-only hashes are stale, not migrated or rewritten. Current eligibility, dependency, claim, branch/base/tip and exact-SHA gates still apply. Fresh source collection runs before verification, delivery and existing-delivery continuation, including adapter authorization after CI. Active prompts remain frozen while those checks see current tracker bytes. Remote tracker edits and merge cannot be made one atomic transaction.
 
 Complete project overrides retain their own internal prompt implementation. These standard workflow helpers do not impose a new custom-workflow protocol or prove that an arbitrary override adopts the frozen-input contract.

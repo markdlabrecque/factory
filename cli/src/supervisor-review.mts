@@ -49,6 +49,25 @@ function totals(s: SupervisorState, kind?: 'review') {
   const rs = Object.values(s.reservations).filter(r => !kind || r.kind === kind);
   return { tokens: rs.reduce((n,r) => n+r.reserved.tokens,0), costUsd: rs.reduce((n,r) => n+r.reserved.cost,0)/1_000_000, calls: rs.length };
 }
+/** Read-only cached approval validation, shared by exact application/consumption. Audit records alone never approve. */
+export function retainedReviewOutcome(stateDir: string,a: ReviewAuthorization,s: SupervisorState,at: string): HostOutcome {
+  try {
+    const {input}=a,p=input.proposal,snapshot=input.snapshot;
+    const previous=Object.values(s.reviews).find(r=>r.proposalId===p.id);
+    if(!previous)return held('Independent host review absent');
+    const completion=s.reviewCompletions?.[supervisorHash(previous.id)],reservation=s.reservations[supervisorHash(previous.invocationId)];
+    if(!completion||reservation?.state!=='finished'||reservation.actual===null||completion.policy!==snapshot.material.policy||completion.proposer!==a.proposer)
+      return held('Audit-only/unknown review completion cannot approve or relaunch');
+    const expected=join(stateDir,'supervisor',supervisorHash(snapshot.project.root),supervisorHash(previous.invocationId),'input.json');
+    if(completion.inputRef!==expected)return held('Retained review originals escaped host-owned location');
+    const fd=openSync(expected,constants.O_RDONLY|constants.O_NOFOLLOW);let retained:any;
+    try{const stat=fstatSync(fd);if(!stat.isFile()||stat.size>32*1024*1024)return held('Unknown/oversized retained review originals');retained=JSON.parse(readFileSync(fd,'utf8'));}finally{closeSync(fd);}
+    if(!same(validateReviewInput(retained.input),input)||retained.identity.invocationId!==previous.invocationId||retained.identity.reviewer!==previous.reviewer
+      ||retained.identity.model!==previous.model||retained.identity.policy!==completion.policy)return held('Retained review provenance/originals changed');
+    return reviewOutcome(input,previous,{now:at,currentInputHash:supervisorHash(input),invocationId:previous.invocationId,
+      proposer:a.proposer,reviewer:previous.reviewer,model:modelForRole(a.family,'gateReview').model,denied:s.incidents[p.incidentId].denied});
+  }catch(e){return held(String(e));}
+}
 /** Explicit call only, outside admission locks. Even success is review admissibility, never application authority. */
 export async function reviewGateProposal(o: ReviewOptions): Promise<HostOutcome> {
   const authorization = () => {
@@ -79,20 +98,7 @@ export async function reviewGateProposal(o: ReviewOptions): Promise<HostOutcome>
     // An explicit revision resolution is exact; abandonment cannot silently permit another formulation.
     if (supervisorRevisionHold(s,p.id)) return held('No exact local operator permission for revised proposal');
     const previous = Object.values(s.reviews).find(r => r.proposalId === p.id);
-    if (previous) {
-      const completion=s.reviewCompletions?.[supervisorHash(previous.id)];
-      const reservation=s.reservations[supervisorHash(previous.invocationId)];
-      if (!completion || reservation?.state !== 'finished' || reservation.actual === null || completion.policy !== snapshot.material.policy || completion.proposer !== a.proposer)
-        return held('Audit-only/unknown review completion cannot approve or relaunch');
-      const expected=join(o.stateDir,'supervisor',supervisorHash(project.root),supervisorHash(previous.invocationId),'input.json');
-      if(completion.inputRef!==expected)return held('Retained review originals escaped host-owned location');
-      const fd=openSync(expected,constants.O_RDONLY|constants.O_NOFOLLOW);let retained:any;
-      try{const stat=fstatSync(fd);if(!stat.isFile()||stat.size>32*1024*1024)return held('Unknown/oversized retained review originals');retained=JSON.parse(readFileSync(fd,'utf8'));}finally{closeSync(fd);}
-      if(!same(validateReviewInput(retained.input),input)||retained.identity.invocationId!==previous.invocationId||retained.identity.reviewer!==previous.reviewer
-        ||retained.identity.model!==previous.model||retained.identity.policy!==completion.policy)return held('Retained review provenance/originals changed');
-      return reviewOutcome(input,previous,{ now: iso(),currentInputHash: supervisorHash(input), invocationId: previous.invocationId,
-        proposer:a.proposer,reviewer:previous.reviewer,model:modelForRole(a.family,'gateReview').model,denied:m.denied });
-    }
+    if (previous) return retainedReviewOutcome(o.stateDir,a,s,iso());
     const invocationId = randomUUID(), reviewer = `gate-review:${randomUUID()}`, fence = randomUUID();
     const inputHash = supervisorHash(input), stamp = (kind: string) => `${invocationId}:${kind}`;
     const request = (reason: HumanRequest['reason'], question: string, evidence: string[]): HumanRequest => ({ version:1, id:`human:${p.incidentId}`,project,

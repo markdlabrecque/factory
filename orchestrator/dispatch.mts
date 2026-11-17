@@ -194,6 +194,7 @@ if (!dry && process.env.FACTORY_SCHEDULED === '1' && MERGE.auto) {
         finish: (run, token, checkpoint, note) => finishDelivery(stateDir(), PROJECT, run.iid, token, checkpoint, note),
         merge: tracker.mergeExistingDelivery,
         authorize: (run, deadline) => {
+          context.assertScope(Number(run.iid),run.executionId);
           context.assertCurrent();
           tracker.setDeliveryDeadline(deadline);
           const d = run.delivery!;

@@ -145,6 +145,28 @@ boundary can settle a charge. No live model/tracker/service, sleep, runtime prob
 configuration outside disposable fixtures or paid adapter activation is tested.
 All four commit shards and the separate lifecycle gate remain mandatory.
 
+## Exact scoped supervisor gate input application
+
+```sh
+node --test cli/test/supervisor-gate-apply.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts orchestrator/context.test.mts orchestrator/instructions.test.mts orchestrator/handoff.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Unit refusal matrices cover absent/legacy/denied/stale approval, material/proposal/
+project mismatch, paused/unknown/off authorization, fences, expiry and unsupported
+scope. One disposable Git/filesystem boundary uses an independent injected reviewer,
+the public applicator and actual configured verification-guidance consumer, real
+execution analysis through a fixture-owned Pi command, the normal separate verifier
+boundary and a real local Node evidence command. It proves new candidate-bound
+analysis and host proof, exact-SHA delivery contracts, retained FAIL/evidence,
+post-publication crash observation without another action, actual guideline/current
+authorization refusal and dirty/index/other-branch preservation. The correction is
+a private intent-first input artifact, never a checkout or saved-worktree rewrite.
+No arbitrary test policy, host shell executor, live tracker, paid model, Docker,
+installation, registry, credential or pilot is involved. Clocks/owners/processes
+are injected; there are no sleeps. The new applicator ships in the complete runtime
+inventory, including copied installs and complete overrides. These focused tests
+do not replace all four commit shards and the separate browser lifecycle gate.
+
 ## Runtime bundle preparation
 
 ```sh

@@ -55,6 +55,10 @@ test('complete inventory, deterministic identity, private install and validation
   assert.deepEqual(layout.projectLayoutPolicy({ kind: 'fresh' }, 'existing'), { allowed: false, reason: 'fresh-not-allowed' });
   const reviewer = await import(pathToFileURL(join(a.directory, 'supervisor-review.mts')).href);
   assert.equal(typeof reviewer.reviewGateProposal, 'function');
+  const applicator = await import(pathToFileURL(join(a.directory, 'supervisor-gate-apply.mts')).href);
+  assert.equal(typeof applicator.applyReviewedGate, 'function');
+  assert.equal(typeof applicator.gateScopeHold, 'function');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-gate-apply.mts')), readFileSync(join(f.source, 'cli/src/supervisor-gate-apply.mts')));
   const escalation = await import(pathToFileURL(join(a.directory, 'supervisor-escalation.mts')).href);
   assert.equal(typeof escalation.deliverSupervisorRequest, 'function');
   for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md', 'gate-review.mts', 'prompt.gate-review.md']) {

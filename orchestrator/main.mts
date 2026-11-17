@@ -253,6 +253,7 @@ if (recovering) {
   }
   sh("git", ["fetch", "origin", base]);
   if (!claimed?.executionId) fail('Legacy run has no execution identity; historical PASS cannot authorize recovery delivery.');
+  context.assertScope(Number(iid),claimed.executionId);
   const baseSha = claimed?.implementationBaseSha;
   if (!baseSha || spawnSync('git', ['cat-file', '-e', `${baseSha}^{commit}`]).status !== 0) fail('Missing recorded implementation baseline; preserve this branch for explicit human review or fresh verification with an established historical baseline.');
   currentIid = iid;
@@ -264,6 +265,7 @@ if (recovering) {
   mkdirSync(resolve(layout.helpers), { recursive: true });
   const evidenceBox = `/home/agent/evidence/${iid}`;
   const recheck = () => {
+    try {context.assertScope(Number(iid),claimed.executionId);} catch(e) {return (e as Error).message;}
     const hold = contextHold(context); if (hold) return hold;
     const now = withParent(tracker.ticket(Number(iid)));
     if (now.state === "closed") return `#${iid} is closed`;
@@ -369,6 +371,7 @@ try {
 }
 currentIid = iid;
 const executionId = claimToken ?? randomUUID();
+context.assertScope(Number(iid),executionId);
 // Recheck after claim adoption without silently substituting different prompt bytes.
 if (ticketHash().hash !== startVersion.hash) fail('Ticket-input changed during admission; retry collection before launch');
 saveTicketInput(inputEvidence(executionId), frozenInput);
@@ -467,6 +470,7 @@ const recheck = () => {
   } catch (e) { return (e as Error).message; }
   const record = readRuns().find(r => r.project === PROJECT && r.iid === iid);
   if (record?.executionId !== executionId || record.branch !== branch) return 'Execution identity changed';
+  try {context.assertScope(Number(iid),executionId);} catch(e) {return (e as Error).message;}
   if (record.claim !== claimToken || readAdmission(stateDir()).claims[keyFor(iid!, PROJECT)]?.token !== claimToken) return 'Expected launch claim is no longer held';
   return undefined;
 };

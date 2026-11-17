@@ -1,6 +1,6 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, and a source-only thin advisory host broker**. There is no scheduler wiring, live action activation adapter, notification service, gate applicator or pilot rollout here. The CLI supplies read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation and broker modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
+This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, a source-only thin advisory host broker and exact scoped gate-input application**. There is no scheduler wiring, live action activation adapter, notification service or pilot rollout here. The CLI supplies read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. The explicit gate applicator below publishes only one exact scoped verification-guidance input artifact; it never edits project files or branches. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation, broker and scoped application modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
@@ -50,11 +50,11 @@ materially new successor hash that requires fresh diagnosis/review. Delivery rec
 mode changes, restart and tracker/model output cannot resume or turn reviewer approval
 into execution/completion. No budget reset or reviewer shopping is introduced.
 
-No new selected runtime asset is introduced: the command/host reader ship with the
+The operator command introduces no new selected runtime asset: its command/host reader ship with the
 CLI tree, and the existing state/worker/review/escalation assets remain in the complete
 runtime inventory. Source-only unit and disposable CLI tests prove controls, not
 provider enforcement, live delivery, atomic gate application, scheduler integration
-or an operational pilot. Those prerequisites retain their separately owned scope.
+or an operational pilot. Scoped input application is independently evidenced below; live capabilities and scheduler/pilot prerequisites retain their separate scope.
 
 ## Configuration, model and paid-call foundation
 
@@ -66,7 +66,7 @@ or an operational pilot. Those prerequisites retain their separately owned scope
 
 `context.mts` freezes supervisor/review additive instructions and their hashes alongside normalized policy and complete selected-runtime identity. Common then role inputs remain contained, additive guidelines; they cannot replace Factory constraints or original source bytes. See [frozen inputs](execution-context.md#supervisor-and-independent-review-inputs). No future worker/prompt asset is referenced until it exists; new actual assets enter the single complete inventory in the change that introduces them. Overrides must be complete and reviewed, never mixed with installed helpers.
 
-**Activation remains blocked:** configured limits or an `act` observation cannot demonstrate provider-enforceable paid ceilings/accounting, authorize tracker notification, atomically apply a correction, produce fresh verification, or clear a durable denial. The owner-approved source-only bridge and fresh reviewer orchestration are implemented below; they do not activate a live adapter or pilot. No mode/restart/reviewer shopping removes denial; approval is never verifier PASS. The executable action set remains empty.
+**Activation remains blocked:** configured limits or an `act` observation cannot demonstrate provider-enforceable paid ceilings/accounting, authorize tracker notification, atomically apply a correction, produce fresh verification, or clear a durable denial. The owner-approved source-only bridge and fresh reviewer orchestration are implemented below; they do not activate a live adapter or pilot. No mode/restart/reviewer shopping removes denial; approval is never verifier PASS. The source-only executable set is restricted to the exact verification-guidance substitution below; no live action is enabled.
 
 ## Authority and gate inventory
 
@@ -94,7 +94,7 @@ The closed category list in `supervisor-contract.mts` is:
 2. `additive-instruction-correction`: an exact correction to project-owned additive guidance, consistent with the original owner decisions and Factory constraints. It cannot replace a Factory prompt, alter product requirements or reclassify a protected host policy as project guidance.
 3. `factory-policy`: a **classification for escalation only**, never a supported action.
 
-These are schema-supported proposal categories, **not currently executable gate changes**. The initial executable supervisor action set is empty. There is no generic bypass, permanent waiver, project-wide gate effect or unknown-category fallback. Path validation is lexical; future host application must enforce physical containment, ownership, current authorization, allowed target semantics and exact preimage. Structural validators cannot prove semantic equivalence or distinguish a disguised host-policy bypass; the independent reviewer and host must both reject it. Any unresolved authority question goes to a human, not an expanded supported set.
+These are schema-supported proposal categories, not blanket execution authority. `supervisor-gate-apply.mts` supports only a full-document exact substitution at a configured **verification-only** Markdown source, frozen as a host-owned ticket/run input artifact. It excludes common/other-role guidance, Factory/config/runtime files and changes to the checkout or saved branch. Both local categories use that same narrow consumer; broader additive corrections remain unsupported. There is no generic bypass, permanent waiver, project-wide gate effect or unknown-category fallback. Physical ownership, exact original bytes, current authorization, retained review provenance and fresh analysis/proof are enforced by the application/consumer boundaries below. Structural validation cannot establish semantic equivalence: the independent reviewer and host must reject disguised policy bypasses. Unresolved authority goes to the committed human bridge, never an expanded supported set.
 
 ## Public contracts and material identity
 
@@ -118,7 +118,7 @@ These are schema-supported proposal categories, **not currently executable gate 
 
 ### Invalidation, denial and resumption
 
-Any material change to child/parent/human context, guidelines, Factory policy, gate/failure evidence, exact diff, risks/alternatives, prior decisions, project/ticket, run/base/baseline/tip, runtime/dependencies/settings or admission generation invalidates the input hash. Observe/stop, off/pause, expired effect, superseding incident or lost ownership fences any later application even if a review was previously approved. A corrected gate requires new analysis/proof wherever its inputs changed; approval is never a verification PASS. Consumption/expiry must prevent reuse on unrelated tickets or subsequent runs. Atomic consumption is not implemented here.
+Any material change to child/parent/human context, guidelines, Factory policy, gate/failure evidence, exact diff, risks/alternatives, prior decisions, project/ticket, run/base/baseline/tip, runtime/dependencies/settings or admission generation invalidates the input hash. Observe/stop, off/pause, expired effect, superseding incident or lost ownership fences any later application even if a review was previously approved. A corrected gate requires new analysis/proof wherever its inputs changed; approval is never a verification PASS. Consumption/expiry prevent reuse on unrelated tickets or subsequent runs. The explicit scoped artifact and consumer below add one-shot publication plus observation-only reconciliation; they do not authorize a run or waive delivery.
 
 A denial latches the incident into human-required and requests `FlagAHuman` semantics. Never automatically launch another reviewer to override it. Changed inputs do not silently remove the denial. Operator resumption must be an authenticated, durable decision identifying actor, denied proposal/review, reason and permitted next action. It may abandon the proposal or authorize a revised proposal with a new fresh review; it cannot convert denial to approval, reuse old proof or waive Factory constraints. The exact local resolution command below records that audit without changing the original denial, approving a gate or resetting any charge.
 
@@ -147,7 +147,7 @@ The original investigation established these `HumanRequest` requirements. The ow
 3. Deliver to an explicitly operator-approved unattended channel with a stable request idempotency key. Record `notified` only after an actual adapter acknowledgement/receipt, channel and time. Notification errors remain pending and stopped; bounded redelivery must not restart work or spend agent/recovery budgets. Notification acceptance and human resolution are separate events.
 4. An authenticated operator resolves/resumes explicitly with retained audit and fresh gates. No automatic reviewer shopping, model escalation, Factory-wide edit, global rollout or authority renewal follows notification.
 
-**Owner decision and residual action prerequisites:** the owner approved a source-only durable idempotent tracker-comment outbox. Ticket requests target that exact issue; project requests require a configured operator issue. Successful API comment identity/URL acknowledges notification, never approval. Resolution is an explicit exact audited local host-user command. The implemented offline bridge/reviewer evidence below discharges those source-boundary prerequisites, not live delivery, provider enforcement, atomic gate application or fresh verification. No service, credential, installation, Factory-wide policy change or pilot is authorized. The executable gate-action set remains empty.
+**Owner decision and residual action prerequisites:** the owner approved a source-only durable idempotent tracker-comment outbox. Ticket requests target that exact issue; project requests require a configured operator issue. Successful API comment identity/URL acknowledges notification, never approval. Resolution is an explicit exact audited local host-user command. The implemented offline bridge/reviewer evidence below discharges those source-boundary prerequisites, not live delivery or provider enforcement. Scoped input application and fresh-analysis/verifier evidence are documented separately below. No service, credential, installation, Factory-wide policy change or pilot is authorized.
 
 This finding does not block source-only contracts, state, snapshot or configuration work that preserves observe-only/inert defaults. It **does** block dependent action activation. No live pilot, paid runtime probe, service/registry mutation, production access or secret retrieval was performed.
 
@@ -222,13 +222,13 @@ event IDs still reuse the stable incident. One pending `HumanRequest` is kept pe
 incident; rephrasing cannot replace it, notify it, resume it or request another
 reviewer. The state module accepts no invented notification receipt.
 
-Only **proposed/inert** shared `Intent` records may be inserted. Intent IDs cannot
+Only **proposed** shared `Intent` records may be inserted. A separately authorized applicator may complete its own exact live PID/start/fence intent with retained observation evidence before expiry; `complete-intent` sets only `observed-applied`, never an authorized intent or proof. Intent IDs cannot
 be reused. The durable commit must precede any future separately authorized side
 effect; this module has no effect callback or authorize/apply operation. A dead
 owner's ambiguous intent can only be reconciled by recording explicit retained
 observation references (`observed-applied`, `observed-not-applied`, or `unknown`).
 Even observed-applied leaves the shared intent `proposed`: it is audit, not host
-application authority. Reconciliation never executes or retries the effect;
+application authority. The scoped consumer additionally validates the exact immutable artifact, current host authorization, originals, receipt and independent-review provenance. Reconciliation never executes or retries the effect;
 observed-not-applied is not permission to replay it. Existing admission, exact
 preimages, containment, current fences and fresh proof remain downstream gates.
 
@@ -466,7 +466,7 @@ exact fixed model, or with unknown pricing/usage, the worker returns held before
 reservation/spawn. Offline injected process adapters prove Factory orchestration,
 not real provider enforcement. A separately evidenced adapter is required before
 any paid diagnosis activation; no live paid probe is authorized by this source
-change. This is distinct from the implemented source-only human outbox bridge and still-absent gate applicator.
+change. This is distinct from the implemented source-only human outbox and scoped input application boundaries.
 
 The worker rechecks current authorization/material inputs before spawn and again
 before accepting output. The injected/host deadline is finite (configured lower
@@ -687,8 +687,7 @@ the current leaf authorizes the next exact review; old authorizations are not et
 conflicting pins. Cycles and reuse of the original denied incident are refused.
 Abandonment permits no replacement. No command automatically launches/resumes work,
 converts denial to approval, resets limits or waives Factory constraints. Scheduler
-integration, atomic contained gate application/fresh proof and live pilot remain
-separately owned, unimplemented prerequisites.
+integration and live pilot remain separately owned, unimplemented prerequisites. The explicit scoped application/fresh-proof source boundary below does not activate them.
 
 Offline evidence (unit policy matrices plus minimal disposable process/tracker-API
 and local CLI boundaries, injected clocks/owners, no sleeps or live probes):
@@ -705,6 +704,104 @@ A→B→C exact local resolution/fresh diagnosis and unchanged cumulative charge
 They do not prove live model semantics, provider enforcement or delivered live
 notifications. No live configuration, install, service, credential, tracker probe,
 paid call, gate edit or pilot is performed.
+
+## Exact scoped verification-guidance application
+
+`cli/src/supervisor-gate-apply.mts:applyReviewedGate` is an explicit host API, not a
+CLI mode, scheduler or execution owner. Its supported consumer is the existing
+configured verification-only Markdown loader. A full exact `before` document is
+replaced with its independently reviewed `after` text **in the frozen verification
+input**, not in the project checkout, saved worktree, installed runtime or old
+proof. Commands in that text are never executed by the applicator. The ordinary
+independent verifier evaluates and executes lawful project evidence in its normal
+sandbox. This narrow input substitution avoids a pathname check/rename race with
+saved work or sandbox writers: no project file is ever replaced.
+
+The host supplies fresh current authorization, explicit one-project pilot permission,
+act/enabled/registered/global/unpaused state, the current durable journal `control` record with explicit act/pilot, an exact admission-generation fence,
+owned ticket/run/branch/worktree and selected runtime. These are host observations,
+not model claims. A stale caller snapshot cannot override durable observe/stop or missing pilot authorization; the application retains the operator-control identity and consumption refuses a changed control fence. Every invocation rechecks the complete exact `ReviewInput`,
+retained proposal, denial/supersession/resolution state, fixed-family independent
+review, settled accounting and **host `reviewCompletions` provenance plus retained
+original input/process identity**. The applicator never launches a reviewer. Missing
+or stale approval holds; changed material proposal inputs require fresh review.
+Factory-wide or unsupported physical/consumer scope uses the existing durable
+human-stop/outbox bridge. Tracker delivery still requires its independent current
+authorization and receipt; no live notification is enabled here.
+
+Actual inputs are checked, not just repeated snapshot objects: canonical project
+and exact receipt-owned registered Git worktree, current branch/common directory,
+historical baseline, target preimage in both root and worktree, current complete
+runtime/dependency inventory, normalized settings/family/policy/tracker, and every
+configured original instruction's exact reviewed bytes. Symlinks, hardlinks,
+foreign owners, secret/protected/config/runtime targets and guidance shared with
+another role refuse. Other dirty/untracked/index work and every branch remain
+untouched. The private canonical host state directory must be outside project and
+agent mounts. Host callers retain existing claim, cancellation and lock-order
+responsibilities; this API creates no replacement admission owner.
+
+### Intent, CAS and ambiguous publication
+
+An application ID is deterministic for one exact proposal. Before publication the
+host retains original authorization, proposal/rationale/scope/expiry, review/input,
+receipt and before/after identities in `intent.json`, then commits the shared
+fenced intent by journal revision CAS. Only then can `source.md` be published in
+that private application directory using **exclusive creation**, bounded exact
+bytes and file/directory fsync. It cannot truncate a prior artifact or project file.
+A short host application lock serializes cooperating publishers; there is no
+external process or tracker call under it. Fenced live-owner completion records
+`observed-applied`; the shared intent remains an audit, not proof or approval.
+
+After a crash, a live/unknown previous owner holds. With an authoritatively dead
+PID/start owner, reconciliation compares the retained intent and actual artifact:
+exact postimage is observed-applied, absent is observed-not-applied, partial/foreign
+bytes are unknown. **No observation retries, repairs or republishes the effect.**
+Even an absent artifact needs human reconciliation rather than blind replay. All
+original work, charges and old evidence remain retained. Unknown/expired/fenced
+artifacts cannot be consumed; no timer, restart or notification resets authority.
+
+### Enforced fresh analysis and independent proof
+
+The explicit `loadExecutionContext({ gate })` host API takes the exact application,
+ticket and run capability. It validates the artifact and current authorization
+again and substitutes only the named verification source. Every other role and
+Factory prompt is unchanged. Each original instruction read is compared with its
+reviewed hash, including during composition; a stale callback cannot hide an
+actual guideline edit. Application/input/review/fence/expiry and the actual current
+candidate SHA enter `identity`/`policyIdentity`. Changing the candidate requires a
+new context and new execution analysis; old frozen context is not rewritten.
+
+`analyse({ executionContext, runId, ... })` enforces the actual ticket/run scope
+and emits the renewed policy/candidate-bound manifest through the ordinary analysis consumer. Its ticket-input hash and analysis workspace/base/tip must match the reviewed source and exact owned candidate. `runVerifier({ execution: ... })` checks that exact manifest, requirements,
+policy and candidate before launching the normal separate verifier; an old manifest cannot authorize it. It also binds the complete frozen ticket text/hash, corrected verification instructions, selected immutable verifier template and owned sandbox workspace; a valid context cannot be paired with stale prompt arguments. It requires a fresh evidence directory so prior FAIL or
+INCONCLUSIVE records remain immutable. Context and scope are checked again after
+the verifier. Normal immutable-candidate, browser preflight, cleanup, host proof,
+exact-SHA publication/CI/review/merge gates remain mandatory. At every publication/push authorization, `postAndDeliver` independently binds the frozen proof's gate input/application/review/fence/expiry/postimage/candidate and verification-source hash to the journaled artifact. Thus even a valid amended-context recheck cannot launder an old same-SHA PASS proof. Approval is **not** a verifier PASS, host proof or merge approval.
+
+Unamended normal/recovery execution and existing-delivery continuation check the
+host application journal at their real ticket/run boundaries. They cannot silently
+reuse pre-correction analysis/proof—even at the same SHA. Another explicitly
+identified ticket/run is unaffected; unknown run scope for the affected ticket
+holds rather than guessing. No default CLI/environment selector activates the
+amended context. A trusted host integration must explicitly carry its scoped
+context through analysis, verification and current delivery rechecks; if that
+cannot be done under current ownership/execution contracts, retain the work and
+escalate instead of editing the checkout or relaxing Factory.
+
+Offline evidence uses the public applicator, complete runtime/context, actual
+analysis consumer with a fixture-owned Pi process, normal separate verifier
+boundary, a real local Node evidence command and normal host-proof/delivery APIs.
+One disposable Git/filesystem case covers exact scope, saved dirty/index/other-branch
+preservation, post-publication crash observation without duplicate action, changed
+candidate/guideline/authorization refusal, fresh analysis/verifier proof, same-SHA old PASS refusal under both unamended and valid amended-context rechecks, and retained old FAIL. Unit matrices cover absent/legacy/denied/stale approvals, proposal/project
+mismatch, authorization/fence/expiry and unsupported scope. These are source wiring
+proofs, **not** live model semantic approval, provider ceiling enforcement, paid
+activation or a completed pilot. Scheduler transport and live activation remain
+separate prerequisites; default paid review/diagnosis still hold.
+
+```sh
+node --test cli/test/supervisor-gate-apply.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts orchestrator/context.test.mts orchestrator/instructions.test.mts orchestrator/handoff.test.mts cli/test/runtime-bundle.test.mts
+```
 
 ## Reproduce offline evidence
 
