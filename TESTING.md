@@ -204,6 +204,40 @@ no default provider-enforcement adapter, joint mixed-workload lease, cross-proce
 cancel channel or execution-owner scoped-context consumer. All four commit shards
 and the separate browser lifecycle gate remain mandatory.
 
+## Final supervisor offline acceptance audit
+
+```sh
+node --test cli/test/supervisor-acceptance.test.mts
+node --test cli/test/supervisor-*.test.mts cli/test/scheduler.test.mts cli/test/jam-detect.test.mts cli/test/recovery-claim.test.mts cli/test/recovery-run.test.mts cli/test/runtime-bundle.test.mts orchestrator/supervisor*.test.mts orchestrator/gate-review.test.mts board/supervisor.test.mts
+```
+
+The first is one minimal copied-install/public CLI and selected-runtime boundary
+integration, using the existing readiness disposable Git/stub-command helper,
+fixture package installer/fake service backend and complete-override publisher.
+It proves public observe inspection has no effects, both configured-family fixed
+roles and omitted-disabled policy, finite-policy explicit act refusal, complete
+selection/no fallback on a missing lifecycle helper, and honest cross-process stop
+pending across a fresh CLI read with saved dirty/index/refs and charges retained.
+A reservation is explicitly seeded through the actual journal API; it is not a
+worker launched by the installed CLI. The selected unbound lifecycle helper is
+invoked explicitly, not represented as an effecting installed scheduler hook.
+Direct CLI/module child timeouts/output caps are finite; the reused local Git
+helper has no per-command timeout and remains inside the unchanged shard deadline.
+No sleeps or live external services.
+
+The second command reuses existing component source worker/reviewer/outbox/scoped
+application/proof/recovery and real tick process boundaries. Their provider,
+accounting, admission, tracker and sandbox adapters are injected as documented in
+those sections; they do not activate the copied CLI or prove live semantic review.
+Unit failure matrices remain in their owning files, with no duplicated browser E2E.
+**Integrated action acceptance remains BLOCKED**, not skipped or manufactured green:
+no shipped provider-enforcement/accounting adapter, joint mixed-workload lease,
+authenticated cross-process cancel channel or default scoped execution-owner/host
+binding. See the [criterion audit and held runbook](docs/supervisor.md#final-offline-acceptance-audit).
+No runtime assets/dependencies are introduced by this fixture. These focused commands
+are not substitutes for all four mandatory `scripts/test-shard.sh` commands at the
+top of this file and the separate 30-second browser lifecycle gate below.
+
 ## Runtime bundle preparation
 
 ```sh
