@@ -493,7 +493,12 @@ console.log('sha256:'+'a'.repeat(64));
         });
         const hp={...p,state,runtimeDescriptor:runtime.env.FACTORY_RUNTIME_DESCRIPTOR!,runtimes:dirname(runtime.directory),data:dirname(dirname(runtime.directory))};
         const { prepareSupervisorHost } = await import(pathToFileURL(join(runtime.directory,'supervisor-host.mts')).href);
-        const prepared=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:options.invocationId,backend,tracker:source,rollout:options.rollout});
+        const prepared=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:options.invocationId,backend,tracker:source});
+        // Disposable synthetic operator attestation only: no installed/actual quiescence assertion.
+        const rolloutFile=join(p.config,'supervisor-rollout.json');
+        const writeRollout=()=>writeFileSync(rolloutFile,JSON.stringify({version:1,project,...((({host,hostDependencies,selected,dependencies})=>({host,hostDependencies,selected,dependencies}))(prepared.runtime.identity)),
+          recordedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+3600000).toISOString(),olderRuntimesQuiesced:true,unmanagedWorkQuiesced:true}),{mode:0o600});
+        writeRollout();
         assert.equal(prepared.hold,undefined,'read-only preparation does not strand ownership before exact cache reuse');
         assert.equal(prepared.runtime.lease(),undefined);
         assert.equal(prepared.initial.preflightHold,null);
@@ -562,7 +567,8 @@ console.log('sha256:'+'a'.repeat(64));
         assert.equal((await reconcileSupervisorHost(hp,prepared.hold!,prepared.runtime.lease()!)).released,true,'original receipts make restart closure idempotent');
         const sameHost=await prepared.invoke('sk-synthetic-offline-not-a-secret');
         assert.equal(sameHost.state,'reused',JSON.stringify(sameHost));
-        const again=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'cached-advice',backend,tracker:source,rollout:options.rollout});
+        writeRollout(); // Renewal alone must not change material basis or replenish cumulative history.
+        const again=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'cached-advice',backend,tracker:source});
         assert(again.initial.preflightHold,'host maxCalls=1 is already spent');
         const reused=await again.invoke('sk-synthetic-offline-not-a-secret');
         assert.equal(reused.state,'reused',JSON.stringify(reused));
@@ -574,8 +580,8 @@ console.log('sha256:'+'a'.repeat(64));
         const hostFile=join(p.config,'supervisor.json'), larger=JSON.parse(readFileSync(hostFile,'utf8'));
         larger.cumulative.calls=2;writeFileSync(hostFile,JSON.stringify(larger),{mode:0o600});
         writeFileSync(humanPath,readFileSync(humanPath,'utf8')+'\nAuthoritative successor instruction before new bounded call');
-        const late=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'final-stale',backend,tracker:source,rollout:options.rollout});
-        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier:join(fake,'late-network.json'),changeOriginal:humanPath,
+        const late=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'final-stale',backend,tracker:source});
+        writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier:join(fake,'late-network.json'),changeOriginal:rolloutFile,
           diagnosisInput:join(state,'supervisor',supervisorHash(project.root),supervisorHash('final-stale'),'input.json')}));
         cp.spawn=((command:any,args:any[],opts:any)=> {
           if(String(args[0]).endsWith('supervisor-guard.mjs')) {args=['--import',preload.href,...args];opts={...opts,stdio:[...opts.stdio,'ignore']};}

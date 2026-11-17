@@ -42,7 +42,7 @@ export function usdCeilingMicroUSD(value: number): number {
 }
 export type DiagnosisGrant = { version: 1; id: string; project: ProjectIdentity; ticket: number; runId: string; attemptId: string | null;
   incidentId: string; basis: string; invocationId: string; fence: string; holdId: string; runtime: string; dependencies: string;
-  profile: string; policy: string; owner: Owner; deadline: string; reserved: { tokens: number; cost: number } };
+  profile: string; policy: string; rollout?: string; owner: Owner; deadline: string; reserved: { tokens: number; cost: number } };
 /** Detach from caller-owned input and freeze every nested record; persisted consumption still validates the identity. */
 export function diagnosisGrant(input: Omit<DiagnosisGrant, 'id'>): DiagnosisGrant {
   const grant = validateDiagnosisGrant(structuredClone({ ...input, id: supervisorHash(input) }));
@@ -50,7 +50,8 @@ export function diagnosisGrant(input: Omit<DiagnosisGrant, 'id'>): DiagnosisGran
   freeze(grant); return grant;
 }
 export function validateDiagnosisGrant(g: any): DiagnosisGrant {
-  advisoryRecord(g, ['version','id','project','ticket','runId','attemptId','incidentId','basis','invocationId','fence','holdId','runtime','dependencies','profile','policy','owner','deadline','reserved']);
+  advisoryRecord(g, ['version','id','project','ticket','runId','attemptId','incidentId','basis','invocationId','fence','holdId','runtime','dependencies','profile','policy','owner','deadline','reserved',...(g.rollout === undefined ? [] : ['rollout'])]);
+  advisoryDemand(g.rollout === undefined || advisoryHash(g.rollout),'invalid rollout identity');
   validateProject(g.project); validateAdvisoryOwner(g.owner); advisoryRecord(g.reserved, ['tokens','cost']);
   advisoryDemand(g.version === 1 && Number.isSafeInteger(g.ticket) && g.ticket > 0 && advisoryText(g.runId)
     && (g.attemptId === null || advisoryText(g.attemptId)) && ['invocationId','fence','holdId'].every(k => advisoryText(g[k]))

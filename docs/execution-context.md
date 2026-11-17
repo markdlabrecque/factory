@@ -66,10 +66,19 @@ and fresh T04 whole-group absence outside the runtime lock, then removes only an
 exact matching token/record under that lock. It cannot release a successor, kill a
 reconstructed PID/group, reset charges, or turn retained advice into authority.
 
-This is not public activation or a usable-advice command. Later public composition
-must establish real rollout quiescence, mount/resource isolation and control
-prerequisites; no installed-proof boolean is accepted here. Auth remains an
-explicit trusted handoff parameter, never discovered from user configuration.
+This runtime API is not activation authority. The explicit public advisory host now reads
+an expiring private [operator rollout attestation](factory-cli.md#operator-rollout-attestation)
+bound to the canonical project/tracker plus `identity.host`, `hostDependencies`, `selected`
+and `dependencies`. These are actual verified complete-runtime/dependency identities, not
+operator-selected substitute ABI values. Compatibility checks above and raw custody/claims
+remain required; a human assertion cannot bypass them. Public acquisition requires the full
+configured timeout remaining. Fresh record reads before authorization/publication must match
+the policy/grant pin; changes or expiry invalidate usable output, not accounting obligations.
+No record data enters diagnosis basis, and renewal never resets history. The component-only
+host prerequisite booleans are not public source proof or installed quiescence evidence.
+Mount/resource isolation and actual older-runtime/unmanaged-work quiescence remain the future
+operator's responsibility, not an automated conclusion. Auth remains an explicit trusted
+handoff parameter, never discovered from user configuration.
 
 ## Explicit saved-run diagnosis collector
 

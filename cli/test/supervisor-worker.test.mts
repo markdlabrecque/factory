@@ -56,6 +56,13 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
         run: (f: typeof run) => { run = f; }, timeOut: () => { clock += 30000; wake(); },
         advance: (ms: number) => { clock += ms; }, accounting: (value: typeof actual) => { actual = value; }, cleanup: (value: boolean) => { gone = value; }, spawned: () => spawned };
     }
+    const missingAuth=fixture('missing-auth');
+    let acquired=false;
+    const owned={kind:'owned-openai',model:missingAuth.b.model,reservation:missingAuth.b.reservation,start:async()=>{throw Error('must not start');}} as any;
+    for (const apiKey of [undefined,'','synthetic key','synthetic\nkey','x'.repeat(16385)]) {
+      assert.equal((await diagnoseProject({...missingAuth.options(),boundary:owned,apiKey,beforeReserve:async()=>{acquired=true;}})).state,'held');
+      assert.equal(acquired,false);assert.deepEqual(missingAuth.state().reservations,{});
+    }
     const f = fixture('observe');
     const asyncOptions = f.options(), syncCurrent = asyncOptions.current;
     const result = await diagnoseProject({...asyncOptions,current:async () => syncCurrent()}); assert.equal(result.state, 'proposed');
@@ -70,6 +77,7 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
     f.a.snapshot.observedAt = '2026-11-17T12:01:00.000Z';
     f.b.start = () => { throw Error('unchanged wait must not launch a process'); };
     assert.equal((await diagnoseProject(f.options())).state, 'reused'); assert.deepEqual(f.state().charged, saved.charged);
+    assert.equal((await diagnoseProject({...f.options(),boundary:owned,beforeReserve:async()=>{throw Error('cache must not acquire');}})).state,'reused');
     const preCancelledReuse = new AbortController(); preCancelledReuse.abort();
     assert.equal((await diagnoseProject({ ...f.options(), signal: preCancelledReuse.signal })).state, 'held');
     const corruptedInput = JSON.parse(readFileSync(d.inputRef, 'utf8')); corruptedInput.snapshot.material.settings = 'f'.repeat(64);

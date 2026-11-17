@@ -1,4 +1,4 @@
-// Source-only non-CLI host: read-only exact reuse precedes paid ownership; genuine current controls/originals feed
+// Trusted explicit advisory host: read-only exact reuse precedes paid ownership; genuine current controls/originals feed
 // the existing owned worker. Original terminal receipts permit exact idempotent release, never activation or advice execution.
 import { existsSync, realpathSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import { readRegistry } from './project-registry.mts';
 import { schedulingState } from './scheduling-observation.mts';
 import { readHostAdvisoryPolicy, advisoryLimitHold } from './supervisor-host-policy.mts';
 import { createSupervisorRuntime } from './supervisor-runtime.mts';
+import { readSupervisorRollout, assertRolloutWindow, type RolloutPin } from './supervisor-rollout.mts';
 import { canonicalAdmissionProject, claimSupervisorHold, checkSupervisorHold, releaseSupervisorHold } from './supervisor-admission.mts';
 import { collectSupervisorInput, readSupervisorOriginal } from './supervisor-input.mts';
 import type { HoldKey } from './supervisor-admission.mts';
@@ -37,12 +38,13 @@ export type SupervisorHostOptions = {
   backend: Pick<ScheduleBackend, 'status'>;
   /** Explicit bounded read-only tracker source. Auth is not discovered by this API. */
   tracker: TicketContextSource;
-  /** Explicit owner rollout prerequisite, NOT an installed-provider capability or a replacement for raw custody. */
-  rollout: { olderRuntimesQuiesced: true; unmanagedWorkQuiesced: true };
+  /** Component-test-only prerequisite. Public CLI never supplies this; it reads the private operator record instead.
+   * Neither source replaces actual runtime compatibility, raw custody or finite spending controls. */
+  rollout?: { olderRuntimesQuiesced: true; unmanagedWorkQuiesced: true };
 };
 /** Rebuild before cache reuse; acquire exact exclusion/pins only before a NEW paid reservation. Failure after acquisition retains ownership.
  * Returned current() always rebuilds originals before cache comparison, outside every admission/journal/runtime lock.
- * Explicit invoke delegates to the owned branch of the existing worker; no CLI/activation or automatic release. */
+ * Explicit invoke delegates to the existing owned worker; no activation. Only exact terminal receipts permit release. */
 export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   o = {...o,paths:structuredClone(o.paths),project:structuredClone(o.project),rollout:structuredClone(o.rollout)};
   const project = canonicalAdmissionProject(o.project), p = structuredClone(o.paths);
@@ -68,10 +70,17 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   const fence = randomUUID();
   let hold: ReturnType<typeof claimSupervisorHold> | undefined, released = false;
   const runtime = await createSupervisorRuntime({paths:p,projectRoot:project.root,stateDir:p.state,invocationId:o.invocationId,fence,deferLease:true});
+  let rolloutPin: RolloutPin | undefined;
+  const readRollout = () => readSupervisorRollout(p.config,{project,host:runtime.identity.host,
+    hostDependencies:runtime.identity.hostDependencies,selected:runtime.identity.selected,dependencies:runtime.identity.dependencies},
+    [project.root,workflow.env.FACTORY_HOST_RUNTIME_ROOT,runtime.context.runtimeRoot]);
   const acquire = async () => {
     if (hold) throw Error('Supervisor host held: invocation already attempted paid acquisition');
+    if (!o.rollout) rolloutPin = readRollout();
+    const timeout = runtime.context.config.supervisor.limits!.diagnosis.timeoutSeconds * 1000;
+    if (rolloutPin) assertRolloutWindow(rolloutPin,registrationAt!,timeout);
     hold = claimSupervisorHold(p.state,{project,invocationId:o.invocationId,fence,runtimeRoot:workflow.root,
-      savedRun:{key:runKey,executionId:saved.executionId},rollout:o.rollout});
+      savedRun:{key:runKey,executionId:saved.executionId},rollout:o.rollout ?? {olderRuntimesQuiesced:true,unmanagedWorkQuiesced:true}});
     runtime.acquire();
   };
   const selectedTracker = runtime.context.config.TRACKER;
@@ -83,6 +92,8 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   const current = async () => {
     runtime.assertCurrent(); runtime.context.assertCurrent({strictOriginals:true});
     const controls = await assertControls();
+    if (rolloutPin && supervisorHash(readRollout()) !== supervisorHash(rolloutPin))
+      throw Error('Supervisor host held: rollout attestation changed during invocation');
     const host = readHostAdvisoryPolicy(p.config,[project.root,runtime.context.runtimeRoot]);
     if (hold && !released && !checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed');
     // Unique collection timestamp only names the private freeze; it never changes the material basis.
@@ -111,6 +122,8 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
       ...controls,mode});
     runtime.assertCurrent(); runtime.context.assertCurrent({strictOriginals:true});
     if (hold && !released && !checkSupervisorHold(p.state,hold)) throw Error('Supervisor host held: exact exclusion changed during collection');
+    if (rolloutPin && supervisorHash(readRollout()) !== supervisorHash(rolloutPin))
+      throw Error('Supervisor host held: rollout attestation expired or changed during collection');
     return {input,controls,host,policy,mode,preflightHold:reason ?? null};
   };
   // Return no send permission, no auth value and no implicit cleanup on failure. The exact IDs remain inspectable.
@@ -121,11 +134,11 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
     return {snapshot:{...c.input.snapshot,mode:c.mode},facts:c.input.facts,family:runtime.context.config.AGENT.family,
       policy:c.policy,registered:c.controls.registered,globalAllowed:c.controls.global==='on',paused:c.controls.projectControl!=='enabled',
       outsideAdmissionLocks:true,shared:{tokens:c.host.policy.cumulative.tokens,cost:c.host.policy.cumulative.cost},capacity:c.host.policy.capacity,
-      advisory:{policy:{holdId:hold?.id ?? 'unacquired',host:c.host.policy,project:c.policy,at:registrationAt!},controls:c.controls,
+      advisory:{policy:{holdId:hold?.id ?? 'unacquired',host:c.host.policy,project:c.policy,at:registrationAt!,...(rolloutPin ? {rollout:rolloutPin} : {})},controls:c.controls,
         runtime:runtime.identity.selected,dependencies:runtime.identity.dependencies,attemptId:saved.recovery?.id ?? null,preflightHold:c.preflightHold}};
   };
   return Object.freeze({project,get hold() { return hold ? structuredClone(hold) : undefined; },runtime,current,initial,
-    /** Explicit source API only. No credential discovery, scheduling, review, recovery or release. */
+    /** Explicit invocation only. No credential discovery, scheduling, review or recovery. */
     invoke: async (apiKey: string, signal?: AbortSignal) => {
       registrationAt = new Date().toISOString();
       const result = await diagnoseProject({stateDir:p.state,current:authorization,boundary:runtime.boundary,

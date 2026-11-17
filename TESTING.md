@@ -36,6 +36,28 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Explicit diagnosis command boundary
+
+`cli/test/supervisor-command.test.mts` covers strict named-ticket parsing, redacted
+result/exit permutations and signal handoff through component command facades. It
+also exercises genuine host refusal using a disposable registry/current saved run
+and failing backend, and actual source-bin routing for invalid/no-run requests.
+`documentation-cli.test.mts` checks help and the documented no-run refusal. These
+are cheap units/local control boundaries, not installed transport or paid-provider
+proof. The public copied-install journey belongs to its dedicated acceptance task;
+this suite does not duplicate the host/SDK matrix. No real auth file/key retrieval,
+service mutation or paid call occurs. New public acquisition remains held without a
+valid private operator rollout record; component facades cannot establish public authority.
+`cli/test/supervisor-rollout.test.mts` covers strict schema/project/runtime/time permutations,
+full-timeout window refusal and one disposable filesystem boundary (canonical private
+permissions/UID, links, special files, bounded fatal UTF-8, replacement and expiry).
+The existing normal-producer host fixture now uses the default public record reader with a
+**synthetic disposable operator assertion**, reaches the same network-denied SDK boundary,
+proves renewal does not change basis/resend/reset charges, and invalidates late output when
+the record changes. This is not an installed quiescence or model-quality claim and does not
+duplicate the public copied-install journey. The new `supervisor-rollout.mts` module is in
+the complete runtime inventory/flat copy; no dependency archive or client stack is added.
+
 ## Documentation fixture checks
 
 Exercise documentation examples in disposable directories, not a registered project or a real home. Use `factoryToml` in `cli/test/config-fixture.mts` and `loadTomlConfig` for complete TOML fences. Combine labeled fragments with compatible base configurations without duplicate tables. Assert both profiles, both families, defaults and explicit sources, and reject legacy keys and invalid tier declarations. Create real contained Markdown fixtures for instruction ordering, deduplication, missing files and escaping or secret aliases.

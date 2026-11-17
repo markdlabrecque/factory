@@ -1,5 +1,5 @@
-// Read-only versioned supervisor inspection and audited per-project fences; exact resolution remains a separate local control.
-// No model/tracker/service launch. Unsupported activation/cross-process cancellation stays explicitly held.
+// Passive supervisor inspection, audited fences/resolution and explicit named-ticket advisory diagnosis.
+// Only diagnose composes the trusted host; no activation, scheduling, action or cross-process PID cancellation.
 import { userInfo } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readSupervisor, commitSupervisor, supervisorHumanHold } from '../supervisor-state.mts';
@@ -12,9 +12,13 @@ import { loadTomlConfig } from '../../../orchestrator/project-config.mts';
 import type { SupervisorPolicy } from '../../../orchestrator/supervisor-policy.mts';
 import { realpathSync } from 'node:fs';
 import type { Paths } from '../paths.mts';
-import { resolveProject, runStateDir } from '../runs.mts';
+import { resolveProject, runStateDir, findRun } from '../runs.mts';
 import { tomlIdentity } from '../../../orchestrator/project-config.mts';
 import { resolveSupervisorRequest } from '../supervisor-escalation.mts';
+import { prepareSupervisorHost } from '../supervisor-host.mts';
+import { commandContextSource } from '../../../orchestrator/ticket-context-source.mts';
+import type { DiagnosisResult } from '../supervisor-worker.mts';
+import type { ScheduleBackend } from '../platform/scheduler.mts';
 export function supervisorResolve(p: Paths, action: string | undefined, extra: string[], o: {
   project?: string; incident?: string; request?: string; proposal?: string; reason?: string; revised?: string; abandon?: boolean; confirm?: boolean;
 }): number {
@@ -28,6 +32,74 @@ export function supervisorResolve(p: Paths, action: string | undefined, extra: s
     proposalId:o.proposal,actor:`uid:${user.uid}:${user.username}`,reason:o.reason,nextProposalId:o.revised??null});
   console.log(`Recorded exact local resolution at revision ${state.revision}. Original denial/work/charges retained; no approval, action or automatic resume.`);
   return 0;
+}
+
+/** Strict named-current-run surface, deliberately independent of mode/resolve options. */
+export function parseSupervisorDiagnosis(extra: string[], o: Record<string, unknown>): number {
+  if (Object.entries(o).some(([k,v]) => v !== undefined && !['project','json'].includes(k))
+    || typeof o.project !== 'string' || !o.project.trim() || extra.length !== 1 || !/^[1-9][0-9]*$/.test(extra[0])
+    || !Number.isSafeInteger(Number(extra[0]))) throw Error('Expected factory supervisor diagnose <ticket> --project <name|path> [--json]');
+  return Number(extra[0]);
+}
+/** Redacted terminal result: retain only selected identities, accounting and bounded advice, never worker bodies. */
+export function supervisorDiagnosisProjection(s: SupervisorState, ticket: number, invocationId: string, result: DiagnosisResult, runId: string | null = null) {
+  const diagnostic = 'diagnosticId' in result ? s.diagnostics[result.diagnosticId] ?? Object.values(s.diagnostics).find(d => d.id === result.diagnosticId) : undefined;
+  const reservation = Object.values(s.reservations).find(r => r.id === (diagnostic?.reservationId ?? invocationId));
+  const incident = diagnostic ? s.incidents[diagnostic.incidentId] : undefined;
+  return {version:1,authority:'advice-only',state:result.state,
+    project:{root:safeReference(s.project.root),tracker:{kind:s.project.tracker.kind,host:safeExcerpt(s.project.tracker.host),project:safeExcerpt(s.project.tracker.project)}},
+    ticket,runId:incident ? safeExcerpt(incident.facts.runId) : runId ? safeExcerpt(runId) : null,invocationId:safeExcerpt(invocationId),
+    incidentId:diagnostic?.incidentId ?? null,diagnosticId:diagnostic?.id ?? null,
+    reason:result.state === 'held' ? (result.reason.includes('quiescence has not been established')
+      ? 'Independent older-runtime and unmanaged-work quiescence evidence is unavailable; no exclusion was acquired.'
+      : result.reason === 'Bounded explicit OpenAI API-key handoff required for a new diagnosis'
+      ? result.reason : 'Diagnosis held by current selection, authorization, ownership or provider prerequisites; inspect local originals.')
+      : result.state === 'human-required' ? 'Retained human decision required; inspect exact diagnostic and accounting before any further work.' : 'Retained advice; not execution authority',
+    recommendation:'decision' in result ? {kind:result.decision.action.kind} : null,
+    accounting:{costUnit:'micro-usd',reserved:reservation?.reserved ?? null,actual:reservation?.actual ?? null,
+      known:reservation ? reservation.actual !== null : null,cumulativeCharged:s.charged,refunds:false},
+    evidence:diagnostic ? [safeReference(diagnostic.inputRef)] : [],
+    cancellation:{pending:!!reservation && reservation.state !== 'finished',meaning:'Owned cancellation may remain pending; no immediate termination or raw PID kill is claimed.'}};
+}
+/** Signals request cancellation, never process.exit/kill; await the owner's bounded terminal result. */
+export async function withSupervisorCancellation(invoke: (signal: AbortSignal)=>Promise<number>, signals: Pick<NodeJS.Process,'on'|'off'> = process): Promise<number> {
+  const abort=new AbortController(); let signalExit=0;
+  const interrupt=()=>{signalExit ||= 130;abort.abort();}, terminate=()=>{signalExit ||= 143;abort.abort();};
+  signals.on('SIGINT',interrupt);signals.on('SIGTERM',terminate);
+  try { const code=await invoke(abort.signal);return signalExit || code; }
+  catch (e) { if (signalExit) return signalExit; throw e; }
+  finally {signals.off('SIGINT',interrupt);signals.off('SIGTERM',terminate);}
+}
+export type DiagnosisCommandServices = {
+  backend: Pick<ScheduleBackend,'status'>;
+  output?: (text:string)=>void;
+  /** Component fixture only; never a public flag or installed capability assertion. */
+  prepare?: typeof prepareSupervisorHost;
+  signal?: AbortSignal;
+  apiKey?: string;
+};
+export async function supervisorDiagnose(p: Paths, extra: string[], o: SupervisorOptions, services: DiagnosisCommandServices): Promise<number> {
+  const ticket = parseSupervisorDiagnosis(extra,o), output=services.output ?? console.log, invocationId=randomUUID();
+  p={...p,state:runStateDir(p)};
+  let project: SupervisorState['project'] | undefined, runId: string | null = null;
+  try {
+    const ctx=resolveProject(p,{project:o.project});
+    project={root:realpathSync(ctx.root),tracker:tomlIdentity(ctx.scaffold)};
+    runId=findRun(p,ctx,String(ticket)).run?.executionId ?? null;
+    if (!runId) throw Error('Supervisor host held: exact current saved execution required');
+    const host=await (services.prepare ?? prepareSupervisorHost)({paths:p,project,ticket,invocationId,backend:services.backend,tracker:commandContextSource(project.tracker)});
+    const result=await host.invoke(services.apiKey ?? '',services.signal);
+    const state=readSupervisor(runStateDir(p),project);
+    output(JSON.stringify(supervisorDiagnosisProjection(state,ticket,invocationId,result,runId),null,o.json ? undefined : 2));
+    return result.state === 'human-required' ? 2 : ['proposed','reused'].includes(result.state) ? 0 : 1;
+  } catch (e) {
+    // Never echo arbitrary exception bodies (tracker/provider errors may contain credentials or raw output).
+    const reason=e instanceof Error && /^(Supervisor host held:|Advisory held:)/.test(e.message) ? safeExcerpt(e.message) : 'Diagnosis held: project, saved run, controls, policy or supported runtime unavailable; inspect local originals.';
+    let state: SupervisorState | null = null;
+    try { if (project) state=readSupervisor(runStateDir(p),project); } catch { /* invalid journals are never repaired */ }
+    output(JSON.stringify(state ? {...supervisorDiagnosisProjection(state,ticket,invocationId,{state:'held',reason},runId),reason} : {version:1,authority:'advice-only',state:'held',ticket,invocationId,runId:null,reason}));
+    return 1;
+  }
 }
 
 export type SupervisorOptions = { project?: string; json?: boolean; pilot?: boolean; confirm?: boolean; offset?: string };

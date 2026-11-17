@@ -59,7 +59,7 @@ Orphan entries and supervisor holds are retained, including dead owners. A canon
 root match **or** colliding tracker/run-state namespace conflicts; exact ownership
 checks bind root **and** structured tracker, invocation/fence and PID/start.
 
-These are source primitives, not a public diagnosis command. `settleAdvisory` can
+These are source primitives used by the explicit diagnosis command below, not execution authority. `settleAdvisory` can
 close an actual registered/authorized invocation only with revalidated immutable known
 provider usage and confirmed whole-group cleanup. Journal CAS atomically finishes the
 reservation and retains full reserved charge plus a local human-required disposition,
@@ -85,8 +85,54 @@ source admission API may exempt only one explicitly named current modern saved r
 with a complete source/runtime/claim-bound immutable normal custody seal; new
 attempts and recovery/delivery ownership cannot inherit it. It never deletes or
 filters other raw records, and active entries/claims still hold. This prerequisite
-adds no public host command or automatic cleanup/recovery. No real installation,
+adds no public quiescence-attestation command or automatic cleanup/recovery. No real installation,
 rollout, paid probe or pilot acceptance is implied by offline copied-runtime tests.
+
+## Explicit advisory diagnosis
+
+```sh
+factory supervisor diagnose <ticket> --project <name|path> [--json]
+```
+
+This explicit request selects exactly one registered canonical project and its current
+saved execution. Positive decimal ticket numbers only; no historical run, model,
+actor, capability, budget-reset or authentication flags. The actual command calls
+`prepareSupervisorHost` and its `invoke`/existing `diagnoseProject`; it does not
+create a second host or enable act. Observe permits explicit advisory diagnosis
+within existing controls; global off/unknown, never-opted-in/paused projects,
+stopped mode, unsupported/opaque complete overrides, missing originals/policy,
+and unresolved human/denial holds still refuse. Ordinary complete overrides are
+unchanged for non-advisory work.
+
+The supported API-key route accepts only an already supplied bounded non-secret-in-output
+`OPENAI_API_KEY` environment handoff. It never discovers credentials, reads auth
+files, resolves vault references or probes a token/model. Missing/invalid auth or
+unsupported family is held before new paid acquisition; exact retained reuse needs
+no new paid call or key. The private host/project cumulative ceilings, owned worker,
+one-use send gate, receipt settlement and exact cleanup/reconciliation are unchanged.
+
+**Default held rollout prerequisite:** new paid acquisition reads the private operator
+record `Paths.config/supervisor-rollout.json`. Absence or any unsafe/invalid binding holds
+before exclusion/pins. This is expiring **human attestation**, not automated proof that
+older runtimes or unmanaged work stopped. Actual runtime compatibility and raw saved-run
+custody/claims checks still apply, including legacy/unknown records. Component-only host
+callers retain their explicit prerequisite API; the public CLI cannot inject it. See the
+[manual maintenance-window contract](#operator-rollout-attestation). No installed journey,
+live pilot permission, policy provisioning, scheduling, review, recovery, gate edit,
+delivery or notification is implied.
+Do not enable/mutate a project merely to get past a hold.
+
+Output is version-1 JSON (`--json` compact, otherwise pretty) with advice-only authority,
+`held|proposed|reused|human-required`, safe project/ticket/current-run identity,
+invocation/diagnostic/incident IDs where present, bounded reason/recommendation kind,
+reservation, known/unknown actual accounting, cumulative charges and safe local evidence
+references. No raw prompt, stdout/stderr, provider stream, reasoning or secret is printed.
+Advice grants no execution authority. Exits: 0 proposed/reused, 2 retained human-required,
+1 held/invalid/failed. Status/explain still exit 0 for successful observations of holds.
+SIGINT/SIGTERM request owned cancellation and await its bounded settlement, then exit
+130/143 respectively; they do not claim immediate termination. Pending/unknown accounting
+retains full charge and exclusion. Separate `stop` writes only its durable fence and
+reports pending cancellation, never kills a raw PID.
 
 ## Supervisor inspection and project controls
 
@@ -142,6 +188,53 @@ No automatic release/refund/retry follows. Do not interpret stop as implementati
 container, tracker POST or admitted gate-operation cancellation. Resolve remains the
 exact separate command below, never a blanket approve/resume.
 
+## Operator rollout attestation
+
+This source contract is for a **future separately authorized operator maintenance window**,
+not permission to configure or activate a live installation. During that window the operator
+must independently stop/quiesce older Factory runtimes and unmanaged work sharing the run
+store, establish host-only mount/resource isolation, and inspect ownership/custody. A human
+assertion cannot bypass unknown legacy records, live claims, unsupported artifact ABI,
+changed selected dependencies, policies or controls. No automated quiescence proof is claimed.
+
+Only after those checks, a future authorized operator may manually write UTF-8 JSON at
+`Paths.config/supervisor-rollout.json` with this exact schema (placeholders are not valid IDs):
+
+```json
+{
+  "version": 1,
+  "project": {"root": "/canonical/project", "tracker": {"kind": "github", "host": "github.com", "project": "owner/repo"}},
+  "host": "<host complete-runtime SHA-256>",
+  "hostDependencies": "<host dependency-manifest SHA-256>",
+  "selected": "<selected complete-runtime SHA-256>",
+  "dependencies": "<selected dependency-manifest SHA-256>",
+  "recordedAt": "2026-11-17T00:00:00.000Z",
+  "expiresAt": "2026-11-17T01:00:00.000Z",
+  "olderRuntimesQuiesced": true,
+  "unmanagedWorkQuiesced": true
+}
+```
+
+Use actual current complete-runtime identities, not arbitrary source commit IDs. The directory
+must be canonical, current-UID-owned mode **0700**, outside project/runtime mounts; the record
+must be a current-UID-owned mode **0600** regular file with one link, at most 16 KiB. Aliases,
+links, special files, invalid UTF-8, unknown fields/versions, foreign structured tracker/project
+or either runtime/dependency identity, future recording time and expired/stale windows hold.
+Times are canonical UTC ISO strings; the entire attested window is at most 24 hours. No
+secrets, keys, budgets, enable/mode or approval fields belong in this record. No command creates,
+renews or edits it, and there are no rollout/debug/actor/capability flags.
+
+A new call needs the **full configured diagnosis timeout** remaining at registration; otherwise
+it is refused rather than silently extending expiry. Fresh reads before authorization and
+publication must match the pinned record identity. Expiry, replacement or content changes
+invalidate inflight new authorization/usable output; cleanup/accounting still remain required.
+The immutable grant and registered policy pin its identity, transitively binding receipts.
+Renewal requires repeating the operator checks; renewal alone does not change diagnosis basis,
+resend unchanged advice, replenish incident allowance, reset cumulative history or raise spending
+authority. The separate finite enabled host policy, all project/role caps, global ON and project
+opt-in remain mandatory. Status/explain do not read this record or refresh platform/provider
+state, acquire leases or write. Offline tests use disposable synthetic operator assertions only.
+
 ## Advisory host policy foundation
 
 The advisory source foundation defines a private host policy at
@@ -153,8 +246,9 @@ reset/refund command, automatic provisioning or policy upgrade. The config
 directory and policy file must be owner-only, outside all agent/project mounts;
 missing, unreadable, linked, malformed, unknown or insufficient policy holds.
 
-No public paid diagnosis command or host-policy provisioning/inspection command is
-shipped by this foundation. Existing status/explain remain passive journal
+The explicit diagnosis command above consumes this foundation; no host-policy
+provisioning/inspection command is shipped. The separate rollout record below is read-only.
+Existing status/explain remain passive journal
 observations, not validation of current host spending permission. The source host
 loader can inspect and validate policy without writing it; a later explicitly
 approved installation/configuration step must establish the private directory and

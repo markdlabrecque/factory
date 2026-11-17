@@ -137,6 +137,8 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
     const b = o.boundary, model = modelForRole(a.family, 'supervisor').model;
     if (b && 'kind' in b && b.kind === 'owned-openai') {
       if (a.advisory?.preflightHold) return held(a.advisory.preflightHold);
+      // Exact cached reuse above needs no auth. Refuse an obviously impossible NEW call before exclusion/pins.
+      if (a.family !== 'openai' || !o.apiKey || o.apiKey.length > 16384 || /[\s\x00-\x1f\x7f]/.test(o.apiKey)) return held('Bounded explicit OpenAI API-key handoff required for a new diagnosis');
       await o.beforeReserve?.();
       a = structuredClone(await current());
       if (hostHold(a) || diagnosisBasis(a.snapshot) !== basisHash) return held('Authorization/material changed during paid acquisition; exact ownership retained');
@@ -304,7 +306,8 @@ async function ownedDiagnosis(o: WorkerOptions, a: DiagnosisAuthorization, s: Su
     const worker = handle.process.evidence.worker;
     const grant = diagnosisGrant({version:1,project,ticket:(a.snapshot.scope as {ticket:number}).ticket,runId:a.facts.runId,attemptId:data.attemptId,
       incidentId,basis,invocationId:o.invocationId,fence:o.fence,holdId:data.policy.holdId,runtime:data.runtime,dependencies:data.dependencies,
-      profile:ADVISORY_PROFILE_ID,policy:hostAdvisoryPolicyIdentity(data.policy.host),owner:{pid:worker.pid,start:worker.start},deadline,reserved:b.reservation});
+      profile:ADVISORY_PROFILE_ID,policy:hostAdvisoryPolicyIdentity(data.policy.host),
+      ...(data.policy.rollout ? {rollout:data.policy.rollout.identity} : {}),owner:{pid:worker.pid,start:worker.start},deadline,reserved:b.reservation});
     s = readSupervisor(o.stateDir,project);
     commit({kind:'register-advisory-worker',id:`${o.invocationId}:register`,at:new Date().toISOString(),reservationId:o.invocationId,fence:o.fence,owner,grant});
     const observation = await fresh();
