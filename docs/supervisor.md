@@ -4,6 +4,54 @@ This is the authoritative reference for the project supervisor feature. The impl
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
+## Advisory MVP scope and OpenAI build gate
+
+The owner approved a smaller first release: **explicit operator-requested advisory
+diagnosis for one named ticket with a saved run, using OpenAI only**. It must collect
+complete current originals, retain a recommendation or actionable local human
+request, and expose a sanitized result through CLI/Board. No automatic recovery,
+independent review, gate correction, code delivery, scheduled diagnosis or tracker
+notification belongs to this MVP. Project-wide incidents without a saved run are
+deferred. Existing general workflow support for both configured families remains
+unchanged; an unsupported diagnosis family must refuse, never switch to OpenAI.
+These are approved implementation boundaries, **not shipped command capability**.
+There is not yet a public diagnosis command or supported paid adapter.
+
+The [OpenAI boundary investigation](research/supervisor-openai-boundary.md) records
+primary provider documentation and the exact inspected Pi/Pi-AI 1.5.2 artifacts.
+It positively identifies the policy's fixed Mid `openai/gpt-6.1-terra`; model
+existence is not the blocker. OpenAI's server-side `max_output_tokens` includes
+reasoning and invisible generated tokens, but is not an all-in token/dollar cap.
+The current Factory print invocation does not install reservation-bound request
+limits, prevent all retry/compaction/cache-warming request paths, or retain raw
+terminal provider usage durably. An SDK retry setting alone proves none of those
+combined properties. Host/source versions and account access remain distinct.
+
+The next bounded implementation must harden the **existing Pi/OpenAI path** and
+supply its trusted worker boundary: bind the exact serialized request to finite
+conservative all-in reservations and known worst-case pricing, admit at most one
+generation request, capture authoritative terminal usage separately from model
+text, and enforce owned deadline/cleanup independently of the Factory controller.
+A provider-enforced accepted request ceiling must still bound remote spending if
+all local processes die. Missing usage remains unknown; retain the full charge
+and capacity, without replay or refund. Account alerts and delayed account-level
+hard limits cannot replace exact per-diagnosis bounds. The approved advisory scope
+permits focused existing-Pi boundary hardening, not an unrelated provider stack,
+provider/model fallback or a weaker spending guarantee.
+
+Only after that evidence exists can a real host connect complete saved-run input,
+current controls, atomic exclusive admission and the existing diagnosis/journal/
+projection APIs. A busy-state read or `admissionHold` assertion is not exclusion.
+The host must add a durable hold respected by competing manual, dispatch, recovery
+and delivery admission, without manufacturing an execution or recovery charge.
+Crash ordering must retain an uncertain hold; no model call occurs under a lock.
+Do not expose an effecting or paid CLI route before these prerequisites pass.
+
+The broader contracts below remain retained for deferred autonomy. Their component
+source APIs do not mean those installed journeys pass acceptance. The advisory MVP
+requires its own actual public copied-install diagnosis evidence and the complete
+mandatory tests/review; source merge is not installation or live pilot approval.
+
 ## Operator modes, inspection and held recovery
 
 [`factory supervisor status|explain|mode|stop`](factory-cli.md#supervisor-inspection-and-project-controls)
