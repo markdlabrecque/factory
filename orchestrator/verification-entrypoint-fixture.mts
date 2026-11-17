@@ -22,6 +22,8 @@ import { addProject } from '../cli/src/projects.mts';
 import { recordRuntimeOwnership, withRuntimeLock, writeRuntimeDescriptor } from '../cli/src/runtime-ownership.mts';
 import { resolveWorkflow } from './workflow.mts';
 import { claimSupervisorHold, checkSupervisorHold } from '../cli/src/supervisor-admission.mts';
+import { readPayloadCustody, payloadRunClosed } from './payload-custody.mts';
+import { readAdmission } from '../board/admission.mts';
 
 
 export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false) {
@@ -40,6 +42,13 @@ export async function normalEntrypointFixture(t: TestContext, scenario: string, 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import net from 'node:net'; import tls from 'node:tls'; import http from 'node:http'; import https from 'node:https';
+import { syncBuiltinESMExports } from 'node:module';
+const denyNetwork = () => { throw Error('Offline normal fixture: outbound network denied'); };
+globalThis.fetch = denyNetwork;
+net.connect = denyNetwork; net.createConnection = denyNetwork; net.Socket.prototype.connect = denyNetwork;
+tls.connect = denyNetwork; http.request = denyNetwork; http.get = denyNetwork; https.request = denyNetwork; https.get = denyNetwork;
+syncBuiltinESMExports();
 const root = process.cwd(), scenario = process.env.SCENARIO, fake = process.env.FAKE_STATE;
 const git = (cwd, args) => execFileSync('git', args, {cwd, encoding:'utf8'}).trim();
 const readFileSyncBarrier = () => { try { return readFileSync(join(fake, 'release'), 'utf8') === 'yes'; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
@@ -48,11 +57,19 @@ export const pi = (model, options) => {
   return Object.defineProperty({model, thinking: options.thinking}, 'sessionRoot', {value:options.sessionStorage?.hostSessionsDir});
 };
 export async function createSandbox(o) {
+  if (scenario === 'no-commit-custody') {
+    const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
+    const run = JSON.parse(readFileSync(join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json')));
+    const c = readPayloadCustody(process.env.SANDCASTLE_STATE_DIR,run.payloadCustody);
+    if (c.sealed || c.payloads.size !== 1 || [...c.payloads.values()][0].container) throw Error('SDK create lacked durable pending custody');
+    writeFileSync(join(fake,'custody-before-create'),'pending');
+  }
   writeFileSync(join(fake, 'sandbox-options.json'), JSON.stringify(o));
   const worktree = join(root, '.factory/worktrees', o.branch); mkdirSync(join(root, '.factory/worktrees'), {recursive:true});
   git(root, ['worktree', 'add', '-b', o.branch, worktree, o.baseBranch]);
   writeFileSync(join(fake, 'live'), 'yes');
-  return {worktreePath:worktree, sandboxId:'fixture-container',
+  if (scenario === 'custody-create-error') throw Error('ambiguous SDK create after platform acceptance');
+  return {worktreePath:worktree, sandboxId:scenario === 'custody-registration-error' ? undefined : 'fixture-container',
     exec: async cmd => {
       if (cmd.startsWith('command -v playwright')) return scenario === 'setup-bad' ? {stdout:'browser preflight failed: Chromium launch',exitCode:1} : {stdout:'browser preflight OK',exitCode:0};
       if (cmd === 'hostname') return {stdout:'fixture-container',exitCode:0};
@@ -81,6 +98,12 @@ export async function createSandbox(o) {
           while (!readFileSyncBarrier()) await new Promise(resolve => setTimeout(resolve, 10));
         }
         if (scenario.startsWith('no-commit')) {
+          if (scenario === 'no-commit-custody') {
+            const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
+            const run = JSON.parse(readFileSync(join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json')));
+            const c = readPayloadCustody(process.env.SANDCASTLE_STATE_DIR,run.payloadCustody);
+            if (c.sealed || [...c.payloads.values()][0].container !== 'fixture-container') throw Error('Actual returned sandbox was not registered');
+          }
           if (scenario === 'no-commit-dirty') writeFileSync(join(worktree,'app.txt'),'uncommitted');
           const session = join(o.agent.sessionRoot, 'fixture.jsonl'); mkdirSync(o.agent.sessionRoot, {recursive:true});
           if (scenario !== 'no-commit-unavailable') writeFileSync(session, JSON.stringify({type:'message',message:{role:'assistant',stopReason:'stop',content:[{type:'text',text:'I cannot implement this safely because the agreed audit, Q&A and plan in comments are unavailable. Inspect /private/context. token=fixture-secret'}]}}));
@@ -369,7 +392,7 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(state,'owner_repo--7.json'), JSON.stringify({iid:'7',project:'owner/repo',stage:'stopped',executionId:'old-execution',evidenceDir:oldEvidence,note:'old explanation must not be reused'}));
     }
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
+      cwd: root, encoding: 'utf8', env: { ...runtime.env, GIT_ALLOW_PROTOCOL: 'file', PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
@@ -377,6 +400,20 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(existsSync(join(fake, 'npm-called')), false, 'execution must not invoke npm');
       assert.equal(existsSync(join(root, 'node_modules')), false, 'execution must not create project dependencies');
       assert.equal(existsSync(join(root, '.factory/node_modules')), false, 'execution must not fall back to project dependencies');
+    }
+    if (['custody-create-error','custody-registration-error'].includes(scenario)) {
+      assert.notEqual(result.status,0,result.stdout + result.stderr);
+      const run = JSON.parse(readFileSync(join(state,'owner_repo--7.json'),'utf8'));
+      const c = readPayloadCustody(state,run.payloadCustody);
+      assert.equal(c.sealed,false); assert.equal(c.payloads.size,1);
+      assert.equal([...c.payloads.values()][0].container,undefined,'ambiguous construction/registration never invents an identity');
+      assert.equal(existsSync(join(fake,'live')),true);
+      assert.equal(Object.keys(readAdmission(state).entries).length,1,'dead controller retains managed custody');
+      assert.equal(existsSync(join(fake,'implementer-started')),false);
+      assert.throws(() => claimSupervisorHold(state,{project:{root,tracker:{kind:'github',host:'github.com',project:'owner/repo'}},
+        invocationId:'interrupted-producer',runtimeRoot:runtime.directory,savedRun:{key:'owner_repo--7',executionId:run.executionId},
+        rollout:{olderRuntimesQuiesced:true,unmanagedWorkQuiesced:true}}),/not quiescent/);
+      return;
     }
     if (scenario === 'primary-cleanup-error') {
       assert.notEqual(result.status, 0);
@@ -395,7 +432,33 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(existsSync(join(fake, 'live')), ['no-commit-cleanup-error','no-commit-unconfirmed-cleanup'].includes(scenario));
       assert.equal(existsSync(join(fake, 'verifier-started')), false);
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '');
-      const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+      const runFile = join(state, 'owner_repo--7.json');
+      const rawRun = readFileSync(runFile,'utf8'), run = JSON.parse(rawRun);
+      const custody = readPayloadCustody(state, run.payloadCustody);
+      assert.equal(custody.sealed, !['no-commit-cleanup-error','no-commit-unconfirmed-cleanup'].includes(scenario));
+      if (!custody.sealed) assert.equal(Object.keys(readAdmission(state).entries).length,1,'uncertain close retains entry despite process exit');
+      if (scenario === 'no-commit-custody') {
+        assert.equal(readFileSync(join(fake,'custody-before-create'),'utf8'),'pending');
+        assert.deepEqual([...custody.payloads.values()], [{container:'fixture-container',absent:true}]);
+        assert.deepEqual(readAdmission(state).entries, {}, 'only sealed actual normal scope releases its managed entry');
+        const project = {root,tracker:{kind:'github' as const,host:'github.com',project:'owner/repo'}};
+        const options = {project,invocationId:'actual-normal-producer',runtimeRoot:runtime.directory,
+          savedRun:{key:'owner_repo--7',executionId:run.executionId},rollout:{olderRuntimesQuiesced:true as const,unmanagedWorkQuiesced:true as const}};
+        const bytes = '{"stage":"stopped"}';
+        writeFileSync(join(state,'legacy.json'),bytes);
+        assert.throws(() => claimSupervisorHold(state,options), /unknown run ownership/);
+        assert.equal(readFileSync(join(state,'legacy.json'),'utf8'),bytes);
+        rmSync(join(state,'legacy.json')); // fixture-only foreign record; target run is never moved or filtered.
+        const expected = {project,key:'owner_repo--7',executionId:run.executionId,runtime:{id:runtime.id,dependencies:runtime.manifest.dependencies}};
+        assert.equal(payloadRunClosed(state,run,expected),true);
+        for (const patch of [{executionId:'successor'},{claim:'stale-fence'},{recovery:{id:'repair'}},{delivery:{state:'ci-waiting'}},{payloadCustody:{version:1,nonce:'missing'}}])
+          assert.equal(payloadRunClosed(state,{...run,...patch},expected),false);
+        assert.equal(payloadRunClosed(state,run,{...expected,project:{...project,root:home}}),false);
+        assert.throws(() => claimSupervisorHold(state,{...options,savedRun:{...options.savedRun,executionId:'stale-execution'}}),/unknown run ownership/);
+        const hold = claimSupervisorHold(state,options);
+        assert(checkSupervisorHold(state,hold));
+        assert.equal(readFileSync(runFile,'utf8'),rawRun,'admission preserves the exact raw saved record');
+      }
       if (scenario === 'no-commit-stale') {
         assert.equal(run.executionId, 'new-execution'); assert.equal(run.note, 'new execution owns this record');
         assert.equal(run.evidenceDir, 'new-evidence'); assert.equal(run.stage, 'implementing');

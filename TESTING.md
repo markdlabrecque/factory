@@ -87,6 +87,28 @@ these tests establish no paid provider, installed mount, quiescence or cleanup
 authority. The fixture Git helper has per-call bounds; whole-test 120-second bounds
 and the unchanged four 180-second shards remain required.
 
+## Normal payload custody source prerequisite
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 orchestrator/payload-custody.test.mts orchestrator/no-commit.test.mts orchestrator/verification-entrypoint-sandbox.test.mts cli/test/supervisor-admission.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Cheap event-table units cover before creation, pending/ambiguous construction,
+registration, exact close, still-open handoff, terminal seal, multiple payloads and
+forbidden reuse of a sealed nonce. A private-filesystem case proves exclusive event
+publication and fresh attempt pointers; these synthetic events are not platform
+proof. The existing actual flat-main fixture additionally asserts durable pending
+custody *inside the SDK constructor*, actual returned-container registration before
+agent work, independent exact absence via controlled Docker-inspect responses, and
+terminal saved-record admission without altering the target raw record. Ambiguous
+create, missing returned identity and failed/unconfirmed close retain entries after
+actual controller exit. Foreign legacy records, stale claims/executions/nonces,
+recovery and delivery ownership refuse. The real producer, filesystem and admission
+code execute; SDK, tracker/auth and Docker transport are synthetic, not live platform
+or provider evidence. These tests prove no full advisory-host composition or rollout.
+The complete inventory and shared flat-copy fixtures carry the new module; no
+package, archive, dependency, concurrency or shard-deadline change is required.
+
 ## Shared admission exclusion
 
 ```sh

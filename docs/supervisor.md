@@ -211,9 +211,42 @@ The initial claim requires conservative **shared run-state quiescence**, because
 legacy claims and raw run records cannot establish exact canonical-root ownership:
 no live/unknown normal/delivery claims, recovery claims or pending charges, managed
 entries or any raw run record without definitive ownership and whole-payload cleanup.
-No shipped legacy raw-record producer supplies this proof, so even queued, waiting,
-done or stopped records hold, including dead controllers, dangling claims, starting
-handoffs and unresolved recovery payloads. A stage label is not cleanup. This may hold unrelated
+Legacy raw-record producers supply no such proof, so queued, waiting, done or
+stopped legacy records hold, including dead controllers, dangling claims, starting
+handoffs and unresolved recovery payloads. A stage label is not cleanup.
+
+The standard normal `main.mts` now produces a private append-only
+`<state>/payload-custody/<nonce>/000000.json` event chain. Its saved run carries only
+`payloadCustody: {version: 1, nonce}`. The immutable opening binds canonical
+root/structured tracker, run key/ticket/execution/claim, selected source and dependency
+identities, managed entry, runtime lease, exact controller PID/start, historical
+baseline and ticket-input hash. Before calling the actual Sandcastle constructor it
+persists a pending creation. Only the actual returned sandbox ID can register that
+creation. The custody close helper itself calls `closeSandbox`, including independent
+exact Docker-container absence observation; a caller boolean, readiness cleanup
+projection or branch/worktree receipt cannot append absence authority.
+
+Each payload (including additional stages) must be registered and observed absent.
+Only after the actual entire normal scope returns/throws, including post-container
+verification publication and delivery handoffs, does main append its terminal seal
+and permit normal entry/lease cleanup. No payload is a refusal, not a never-launched
+certificate. Construction/registration ambiguity, failed close, interrupted sealing
+or controller loss retains pending custody, entries and cleanup leases. There is no
+PID-kill, refund, replay, metadata repair or journal deletion path here.
+
+`claimSupervisorHold` accepts an optional **explicit** `savedRun: {key, executionId}`.
+For that raw file only it validates the complete event chain, exact current saved
+claim/baseline/input/project/runtime binding and terminal seal under the admission
+lock, after checking the selected launcher/custody/close source bytes. Missing target,
+foreign scope, stale nonce/fence, unknown/legacy or any additional raw record still
+holds. Live claims, managed entries, recovery ownership and pending charges remain
+independent guards. A new normal/recovery admission clears the old pointer before
+payload work; every new normal scope creates a fresh nonce. Delivery continuation
+changes claim/ownership and cannot reuse the old normal closure; recovery/delivery
+records are not admitted by this exception. Raw records and evidence are preserved.
+No waiting, tracker, model or network operation occurs under admission/journal locks.
+This is the normal-run source prerequisite only, not a composed advisory host or
+installed quiescence/rollout approval. This may hold unrelated
 projects sharing the store rather than infer their ownership. Existing conflicting
 supervisor holds refuse even when their owners died. Managed entry claims canonicalize
 root aliases too. They wrap CLI manual/dispatch (including complete overrides), shell

@@ -75,6 +75,7 @@ export interface RunState {
   stageSince: string;
   startedAt: string;
   executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
+  payloadCustody?: { version: 1; nonce: string }; // private source journal pointer; never readiness/projection authority
   implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
   delivery?: DeliveryCheckpoint; // host-only current pointer; never reconstructed from note prose
@@ -336,7 +337,7 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   }
   const run = trackStage(cur, { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
     queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token,
-    verification: undefined, delivery: undefined, recovery: kind === 'normal' ? undefined : cur.recovery,
+    verification: undefined, delivery: undefined, payloadCustody: undefined, recovery: kind === 'normal' ? undefined : cur.recovery,
     executionId: kind === "normal" ? token : cur.executionId, updatedAt: at, stageSince: at } as RunState, at);
   return { ok: true, key, token, claim, current, run };
 }

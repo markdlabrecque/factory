@@ -1,4 +1,5 @@
-// Durable project exclusion and exact release from validated local terminal journal closure; no scheduler or send permission.
+// Durable exclusion accepts only an exact current source-sealed normal run; opaque/foreign raw records remain held.
+// Exact release requires local terminal supervisor journal closure; neither closure grants scheduler/send permission.
 // Admission and supervisor journals have separate locks. No cross-store lock, provider or tracker work runs here.
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,6 +8,8 @@ const flat = existsSync(new URL('./admission.mts', import.meta.url));
 const { admissionConflict, claimLive, newToken, ownerOf, validAdmissionIdentity, withAdmission } = await import(flat ? './admission.mts' : '../../board/admission.mts');
 const { validateRuntimeBundle } = await import('./runtime-bundle.mts');
 const { readSupervisor } = await import('./supervisor-state.mts');
+const { payloadRunClosed } = await import(flat ? './payload-custody.mts' : '../../orchestrator/payload-custody.mts');
+const { readLayoutRecord } = await import(flat ? './ownership.mts' : '../../orchestrator/ownership.mts');
 
 /** Resolve symlink aliases before acquiring the lock; tracker is structured, not a project display name. */
 export function canonicalAdmissionProject(project: AdmissionIdentity): AdmissionIdentity {
@@ -26,6 +29,7 @@ const exact = (h: SupervisorHold | undefined, k: HoldKey): boolean => !!h && h.i
  * A complete compatible runtime must be selected and all older/unmanaged work quiesced before using it.
  * Conservatively require shared-store quiescence: legacy claims/run records lack canonical checkout identity. */
 export function claimSupervisorHold(dir: string, o: { project: AdmissionIdentity; invocationId: string; runtimeRoot: string;
+  savedRun?: { key: string; executionId: string };
   rollout: { olderRuntimesQuiesced: true; unmanagedWorkQuiesced: true } }): SupervisorHold {
   const project = canonicalAdmissionProject(o.project);
   if (!o.invocationId?.trim() || o.rollout?.olderRuntimesQuiesced !== true || o.rollout?.unmanagedWorkQuiesced !== true)
@@ -37,6 +41,13 @@ export function claimSupervisorHold(dir: string, o: { project: AdmissionIdentity
   if (reader !== current || !manifest.files.some(f => f.path === 'supervisor-admission.mts')
     || readFileSync(join(o.runtimeRoot, 'supervisor-admission.mts'), 'utf8') !== readFileSync(new URL(import.meta.url), 'utf8'))
     throw Error('Supervisor held: selected runtime is not admission-compatible');
+  if (o.savedRun) {
+    // A pinned but independently rewritten/custom launcher cannot confer this source producer's authority.
+    for (const asset of ['payload-custody.mts','main.mts','sandbox-readiness.mts']) {
+      if (readFileSync(join(o.runtimeRoot,asset),'utf8') !== readFileSync(new URL(flat ? `./${asset}` : `../../orchestrator/${asset}`,import.meta.url),'utf8'))
+        throw Error('Supervisor held: selected runtime lacks the current source payload producer');
+    }
+  }
   const owner = ownerOf(process.pid);
   if (!owner.start) throw Error('Supervisor held: owner start identity unknown');
   return withAdmission(dir, tx => {
@@ -44,13 +55,18 @@ export function claimSupervisorHold(dir: string, o: { project: AdmissionIdentity
     if (Object.keys(tx.state.entries).length || Object.values(tx.state.claims).some(claimLive)
       || Object.values(tx.state.recovery).some(r => r.pending.length)) throw Error('Supervisor held: managed work or pending accounting is not quiescent');
     // Strict raw records: do not reconcile dead PIDs into apparent quiescence or silently skip corrupt records.
+    let savedRunSeen = false;
     for (const name of readdirSync(dir).filter(n => n.endsWith('.json'))) {
-      try { JSON.parse(readFileSync(join(dir, name), 'utf8')); } catch { throw Error('Supervisor held: unreadable run ownership'); }
-      // Stage labels and controller death cannot establish payload cleanup, handoff closure or
-      // ownership of legacy raw records. No shipped raw-record producer provides that proof.
-      // Keep even historical parked/terminal records held rather than invent a cleanup certificate.
-      throw Error('Supervisor held: active or unknown run ownership; raw record lacks definitive ownership and payload cleanup');
+      let run: unknown;
+      try { run = JSON.parse(readLayoutRecord(join(dir, name))); } catch { throw Error('Supervisor held: unreadable run ownership'); }
+      // Source-owned immutable custody, not stages, readiness cleanup booleans or PID death.
+      // Every raw record is checked; an explicit exact saved run never hides foreign/legacy records.
+      if (!o.savedRun || name !== `${o.savedRun.key}.json` || !payloadRunClosed(dir, run, {
+        project, ...o.savedRun, runtime: { id: manifest.id, dependencies: manifest.dependencies },
+      })) throw Error('Supervisor held: active or unknown run ownership; raw record lacks definitive ownership and payload cleanup');
+      savedRunSeen = true;
     }
+    if (o.savedRun && !savedRunSeen) throw Error('Supervisor held: exact saved run is missing');
     const hold: SupervisorHold = { id: newToken(), project, invocationId: o.invocationId, fence: newToken(), owner, pending: [], settled: [] };
     tx.state.supervisorHolds[hold.id] = hold; tx.commit(); return structuredClone(hold);
   });

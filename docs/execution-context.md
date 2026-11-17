@@ -66,6 +66,28 @@ runtime proves actual installed mount or cleanup authority. Refer to the
 [complete input contract](supervisor.md#complete-saved-run-input-collection) for
 source roles, authoritative decisions, cache stability and refusal conditions.
 
+## Normal payload custody and terminal handoff
+
+The standard launcher inventories `payload-custody.mts` with the exact selected
+source/dependency identity. Actual normal main saves a fresh private journal nonce
+on its current run before payload creation, durably writes pending custody before
+calling Sandcastle, registers its actual returned exact container and records absence
+only through the real close helper's independent Docker observation. This journal
+is separate from branch/worktree ownership receipts and mutable readiness reports.
+
+A lexical normal scope owns implementation, verification and host delivery. Its
+terminal seal is appended only after that scope has actually unwound and every
+registered payload is absent with no pending creation; only then may its cleanup
+entry and runtime lease release on exit. Ambiguous construction/registration, failed
+close and controller loss retain ownership. Early no-payload failure does not mint
+closure. A successor scope receives a fresh nonce; normal/recovery admission clears
+old pointers, and delivery continuation's changed claim cannot inherit authority.
+The admission exception validates only an explicitly selected current saved run
+against its complete immutable source-bound chain; all legacy/foreign raw records
+remain held. See [the exclusion protocol](supervisor.md#shared-admission-exclusion).
+No full advisory host, credentials, installed activation or runtime policy change is
+introduced by this source protocol.
+
 ## Launcher contract
 
 A trusted launcher selects a prepared runtime once and supplies:
