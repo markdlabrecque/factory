@@ -161,6 +161,38 @@ in the run record. Later refreshes change current assessments, not that attempt.
 Delivery proofs bind the model-policy and resolver files, so policy drift requires
 fresh verification.
 
+## Advisory host policy source foundation
+
+Project TOML is not host spending authority. The separate, host-owned
+`Paths.config/supervisor.json` has this strict version-1 shape (illustrative
+ceilings, not defaults or authorization to provision/activate):
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "profile": "b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587",
+  "capacity": 1,
+  "cumulative": { "tokens": 10000000, "cost": 100000000, "calls": 10 }
+}
+```
+
+`cost` is integer **micro-USD**, not dollars. All ceilings must be finite positive
+safe integers, capacity must be one, and the profile must match the shipped fixed
+OpenAI advisory contract. Missing/disabled/unsupported/unknown-field/malformed
+policy holds; there is no unlimited default or reset interval. Existing project
+and diagnosis role ceilings must independently fit the complete 1,054,096-token /
+5,808,792-micro-USD reservation. Required review configuration stays unchanged;
+no review calls are consumed by diagnosis. Cumulative history includes legacy and
+uncertain reservations, never only measured actual usage. Increasing a ceiling
+cannot clear spent resources, stop or human/denial holds.
+
+The source loader requires a canonical private owner-owned directory/file outside
+all known agent/project mounts and refuses links or read uncertainty without
+rewriting anything. No command provisions this policy or activates a paid host
+through it yet. See the [journal authorization contract](supervisor.md#advisory-grants-finite-host-policy-and-one-use-send-permission)
+and [operator boundary](factory-cli.md#advisory-host-policy-foundation).
+
 ## Optional supervisor policy
 
 Omission is `{ enabled: false }`; it adds no model calls or scheduler. Logical observation is free of paid diagnosis. `enabled = true` is only a policy prerequisite, **not action mode** or permission to start a worker. Mode belongs to explicit operator state, never ticket readiness or TOML. Disabled/unregistered projects and stopped mode cannot admit paid diagnosis/review. Observe can receive bounded diagnosis proposals only, with the same finite reservations and known provider enforcement/accounting; it cannot admit reviews or actions. The [supervisor contract](supervisor.md#configuration-model-and-paid-call-foundation) retains the notification/reviewer/application blockers.

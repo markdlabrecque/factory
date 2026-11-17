@@ -84,6 +84,28 @@ No automatic release/refund/retry follows. Do not interpret stop as implementati
 container, tracker POST or admitted gate-operation cancellation. Resolve remains the
 exact separate command below, never a blanket approve/resume.
 
+## Advisory host policy foundation
+
+The advisory source foundation defines a private host policy at
+`Paths.config/supervisor.json` (normally `~/.config/factory/supervisor.json`),
+separate from project TOML. Its [strict schema](project-config.md#advisory-host-policy-source-foundation)
+requires explicit enabled state, the exact shipped fixed OpenAI profile, capacity
+one and finite cumulative token/micro-USD/call ceilings. There are **no defaults**,
+reset/refund command, automatic provisioning or policy upgrade. The config
+directory and policy file must be owner-only, outside all agent/project mounts;
+missing, unreadable, linked, malformed, unknown or insufficient policy holds.
+
+No public paid diagnosis command or host-policy provisioning/inspection command is
+shipped by this foundation. Existing status/explain remain passive journal
+observations, not validation of current host spending permission. The source host
+loader can inspect and validate policy without writing it; a later explicitly
+approved installation/configuration step must establish the private directory and
+compatible complete runtime. Do not create policy or enable scheduling merely to
+make a diagnosis pass. Current global-off/unknown, project pause, stop and retained
+human/denial holds still win. The [one-use authorization contract](supervisor.md#advisory-grants-finite-host-policy-and-one-use-send-permission)
+records send/stop ordering and legacy uncertainty. This change performs no real
+policy installation, service/registry/project/scheduler mutation or paid probe.
+
 ## Supervisor scheduler lifecycle boundary
 
 `factory tick` now collects short project checkpoint/completed-pass/failure hints and

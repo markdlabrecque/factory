@@ -9,6 +9,13 @@ const { supervisorHash, validateProject, validateScope, validateIncident, valida
 
 import type { Diagnostic } from '../../orchestrator/supervisor.mts';
 import type { ProducerEvent } from '../../board/execution-events.mts';
+import { validateDiagnosisGrant, validateSendAuthorization, ADVISORY_PROFILE_ID, advisoryReservation } from './supervisor-advisory-contract.mts';
+import type { DiagnosisGrant, SendAuthorization } from './supervisor-advisory-contract.mts';
+import { validateHostAdvisoryPolicy, hostAdvisoryPolicyIdentity, advisoryLimitHold } from './supervisor-host-policy.mts';
+import type { HostAdvisoryPolicy } from './supervisor-host-policy.mts';
+import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts';
+export type AdvisoryControls = { registered: boolean; global: 'on' | 'off' | 'unknown'; projectControl: 'enabled' | 'paused' | 'unknown' };
+export type AdvisoryRegistration = { holdId: string; host: HostAdvisoryPolicy; project: SupervisorPolicy; at: string };
 const { validateDiagnostic } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
 
 const { observeEvent, eventIdFor } = await import(existsSync(new URL('./execution-events.mts', import.meta.url)) ? './execution-events.mts' : '../../board/execution-events.mts');
@@ -31,6 +38,9 @@ export type SupervisorState = {
   intents: Record<string, IntentMemory>; humans: Record<string, HumanRequest>; reservations: Record<string, Reservation>;
   /** Absent only in pre-diagnosis version-1 journals. Added without discarding any old safety indexes. */
   diagnostics?: Record<string, Diagnostic>;
+  /** Legacy reservations have no advisory policy/grant: absence is uncertainty, never reconstructed no-send. */
+  advisory?: { policies: Record<string, AdvisoryRegistration>; workers: Record<string, { grant: DiagnosisGrant; at: string }>;
+    sends: Record<string, SendAuthorization> };
   reviewCompletions?: Record<string, { inputRef: string; policy: string; proposer: string }>;
   deliveries?: Record<string, { requestId: string; target: number; attemptedAt: string }>;
   resolutions?: Record<string, { requestId: string; proposalId: string; actor: string; reason: string; at: string; nextProposalId: string | null }>;
@@ -51,6 +61,10 @@ export type Event = { id: string; at: string } & (
   | { kind: 'notify-ack'; incidentId: string; requestId: string; target: number; channel: string; receipt: string }
   | { kind: 'resolve-human'; incidentId: string; requestId: string; proposalId: string; actor: string; reason: string; nextProposalId: string | null }
   | { kind: 'reserve'; reservation: Reservation; limits: Limits }
+  | { kind: 'reserve-advisory'; reservation: Reservation; limits: Limits; policy: AdvisoryRegistration; controls: AdvisoryControls }
+  | { kind: 'register-advisory-worker'; reservationId: string; fence: string; owner: Owner; grant: DiagnosisGrant }
+  | { kind: 'authorize-advisory-send'; grantId: string; reservationId: string; fence: string; worker: Owner; payload: string;
+      policy: AdvisoryRegistration; controls: AdvisoryControls }
   | { kind: 'finish'; reservationId: string; fence: string; owner: Owner; actual: Resources }
   | { kind: 'diagnosis'; diagnostic: Diagnostic; owner: Owner; actual: Resources | null; processConfirmed: boolean; request: HumanRequest | null }
   | { kind: 'reconcile-worker'; reservationId: string }
@@ -67,6 +81,19 @@ const time = (x: any) => typeof x === 'string' && Number.isFinite(Date.parse(x))
 const same = (a: unknown, b: unknown) => supervisorHash(a) === supervisorHash(b);
 function resources(x: any): void { object(x, ['tokens','cost']); demand(count(x.tokens) && count(x.cost), 'finite integer token/cost units required'); }
 function owner(x: any): void { object(x, ['pid','start']); demand(Number.isSafeInteger(x.pid) && x.pid > 0 && text(x.start), 'PID/start identity required'); }
+function validateAdvisoryRegistration(p: AdvisoryRegistration): void {
+  object(p, ['holdId','host','project','at']); validateHostAdvisoryPolicy(p.host);
+  object(p.project, ['enabled','limits']); object(p.project.limits, ['maxTokens','maxCostUsd','maxCalls','diagnosis','review']);
+  for (const role of ['diagnosis','review'] as const) object(p.project.limits![role], ['maxTokens','maxCostUsd','maxCalls','timeoutSeconds']);
+  const zero = { tokens: 0, cost: 0, calls: 0 };
+  const hold = advisoryLimitHold({ host: p.host, project: p.project, hostUsed: zero, projectUsed: zero, roleUsed: zero,
+    active: 0, incidentCalls: 0, registered: true, global: 'on', projectControl: 'enabled', mode: 'observe' });
+  demand(text(p.holdId) && p.holdId.length <= 200 && time(p.at) && !hold, hold ?? 'invalid advisory registration policy');
+}
+function validateAdvisoryControls(c: AdvisoryControls): void {
+  object(c, ['registered','global','projectControl']); demand(typeof c.registered === 'boolean' && ['on','off','unknown'].includes(c.global)
+    && ['enabled','paused','unknown'].includes(c.projectControl), 'unknown advisory controls');
+}
 function facts(x: any): void {
   object(x, ['scope','requirements','gate','runId','failure']); validateScope(x.scope);
   demand(hash(x.requirements) && hash(x.gate) && hash(x.failure) && text(x.runId), 'invalid incident facts');
@@ -85,7 +112,7 @@ function entries(x: any): [string, any][] {
 }
 /** Strict read validation; no recovery/reset from unknown versions, foreign identities or malformed owners. */
 export function validateSupervisor(s: any, project: ProjectIdentity): SupervisorState {
-  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history', ...['control','diagnostics','deliveries','resolutions','reviewCompletions'].filter(k => Object.hasOwn(s, k))]);
+  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history', ...['control','diagnostics','deliveries','resolutions','reviewCompletions','advisory'].filter(k => Object.hasOwn(s, k))]);
   validateProject(s.project); demand(s.version === 1 && same(s.project, project) && count(s.revision), 'version/project/revision mismatch');
   if (s.control) {
     object(s.control, ['mode','actor','at','pilot']);
@@ -141,6 +168,24 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
       && time(r.at) && time(r.deadline) && r.deadline > r.at && (r.kind !== 'diagnosis' || Date.parse(r.deadline) - Date.parse(r.at) <= DIAGNOSIS_TIMEOUT_MS) && ['active','finished','ambiguous'].includes(r.state)
       && (r.state === 'finished' ? r.actual !== null : r.actual === null)
       && (r.reviewId === null || r.kind === 'review' && text(r.reviewId) && s.reviews[supervisorHash(r.reviewId)]?.invocationId === r.id), 'invalid reservation');
+  }
+  if (s.advisory) {
+    object(s.advisory, ['policies','workers','sends']);
+    for (const [key, p] of entries(s.advisory.policies)) {
+      validateAdvisoryRegistration(p);
+      const r = s.reservations[key]; demand(r?.kind === 'diagnosis' && p.at === r.at && same(r.reserved, advisoryReservation()), 'orphan advisory policy');
+    }
+    for (const [key, w] of entries(s.advisory.workers)) {
+      object(w, ['grant','at']); const g = validateDiagnosisGrant(w.grant), r = s.reservations[key], p = s.advisory.policies[key];
+      demand(p && r && key === supervisorHash(g.invocationId) && g.incidentId === r.incidentId && g.fence === r.fence
+        && same(g.project, s.project) && s.incidents[g.incidentId].facts.scope.kind === 'ticket'
+        && s.incidents[g.incidentId].facts.scope.ticket === g.ticket && s.incidents[g.incidentId].facts.runId === g.runId
+        && g.policy === hostAdvisoryPolicyIdentity(p.host) && g.holdId === p.holdId && g.deadline === r.deadline
+        && same(g.reserved, r.reserved) && !same(g.owner, r.owner) && time(w.at) && w.at >= r.at && w.at < r.deadline, 'foreign worker grant');
+    }
+    for (const [key, a] of entries(s.advisory.sends)) {
+      const w = s.advisory.workers[key]; demand(w && a.at >= w.at, 'send without registered worker'); validateSendAuthorization(a, w.grant);
+    }
   }
   demand(Object.values<any>(s.reservations).filter(r => r.state === 'active').length <= 1, 'multiple project decisions');
   object(s.charged, ['diagnosis','review']); resources(s.charged.diagnosis); resources(s.charged.review);
@@ -220,7 +265,29 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       if (p.change.category === 'factory-policy') m.incident.state = 'human-required';
       break;
     }
+    case 'reserve-advisory':
     case 'reserve': {
+      if (event.kind === 'reserve-advisory') {
+        validateAdvisoryRegistration(event.policy); validateAdvisoryControls(event.controls);
+        demand(Date.parse(event.reservation.deadline) - Date.parse(event.reservation.at) <= event.policy.project.limits!.diagnosis.timeoutSeconds * 1000,
+          'advisory role deadline exceeded');
+        demand(event.policy.at === event.at && event.reservation.kind === 'diagnosis'
+          && same(event.reservation.reserved, advisoryReservation()), 'advisory reservation must use fixed supported bounds');
+        const all = [state, ...(environment.projects ?? []).filter(p => !same(p.project, state.project))];
+        const usage = (ps: SupervisorState[], role?: 'diagnosis') => {
+          const rs = ps.flatMap(p => Object.values(p.reservations)).filter(r => !role || r.kind === role);
+          return { tokens: rs.reduce((n,r) => n + r.reserved.tokens, 0), cost: rs.reduce((n,r) => n + r.reserved.cost, 0), calls: rs.length };
+        };
+        const hold = advisoryLimitHold({ host: event.policy.host, project: event.policy.project, hostUsed: usage(all), projectUsed: usage([state]),
+          roleUsed: usage([state], 'diagnosis'), active: all.flatMap(p => Object.values(p.reservations)).filter(r => r.state !== 'finished').length,
+          incidentCalls: Object.values(state.reservations).filter(r => r.incidentId === event.reservation.incidentId && r.kind === 'diagnosis').length,
+          ...event.controls, mode: state.control?.mode ?? 'observe' });
+        demand(!hold, hold ?? 'advisory policy held');
+        s.advisory ??= { policies: {}, workers: {}, sends: {} };
+        s.advisory.policies[supervisorHash(event.reservation.id)] = structuredClone(event.policy);
+      }
+      if (event.kind === 'reserve') demand(![state, ...(environment.projects ?? [])].some(p => Object.keys(p.advisory?.policies ?? {}).some(key => p.reservations[key]?.state !== 'finished')),
+        'unsettled advisory reservation excludes legacy workers');
       demand(s.control?.mode !== 'stopped' && (event.reservation.kind !== 'review' || !s.control || s.control.mode === 'act'), 'operator mode fences new workers');
       const r = event.reservation; const m = current(r.incidentId); const l = event.limits;
       object(l, ['project','shared','capacity','reviewCalls','reviewTimeoutMs']); resources(l.project); resources(l.shared); resources(r.reserved); liveOwner(r.owner);
@@ -242,8 +309,31 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       for (const unit of ['tokens','cost'] as const) s.charged[r.kind][unit] += r.reserved[unit];
       break;
     }
+    case 'register-advisory-worker': {
+      const r = owned(event.reservationId, event.fence, event.owner), g = validateDiagnosisGrant(event.grant);
+      current(r.incidentId); demand(s.control?.mode !== 'stopped', 'stop fences worker registration'); liveOwner(g.owner);
+      const key = supervisorHash(r.id), p = s.advisory?.policies[key];
+      demand(p && !s.advisory!.workers[key] && !s.advisory!.sends[key] && g.invocationId === r.id && g.fence === r.fence,
+        'legacy or duplicate worker registration held');
+      s.advisory!.workers[key] = { grant: structuredClone(g), at: event.at }; break;
+    }
+    case 'authorize-advisory-send': {
+      const key = supervisorHash(event.reservationId), r = s.reservations[key], w = s.advisory?.workers[key];
+      validateAdvisoryRegistration(event.policy); validateAdvisoryControls(event.controls);
+      demand(r?.kind === 'diagnosis' && r.state === 'active' && w && w.grant.id === event.grantId && w.grant.fence === event.fence
+        && r.fence === event.fence && same(w.grant.owner, event.worker) && !s.advisory!.sends[key]
+        && same(s.advisory!.policies[key], event.policy) && hash(event.payload) && event.at >= w.at && event.at < r.deadline,
+        'send permission is stale, foreign, consumed or unregistered');
+      liveOwner(event.worker); liveOwner(r.owner); current(r.incidentId);
+      demand(s.control?.mode !== 'stopped' && event.controls.registered === true && event.controls.global === 'on'
+        && event.controls.projectControl === 'enabled', 'stop or current host/project controls fence new authorization');
+      const receipt = { version: 1 as const, grantId: w.grant.id, invocationId: r.id, fence: r.fence, worker: event.worker,
+        profile: ADVISORY_PROFILE_ID, payload: event.payload, at: event.at };
+      s.advisory!.sends[key] = validateSendAuthorization({ ...receipt, receipt: supervisorHash(receipt) }, w.grant); break;
+    }
     case 'finish': {
       const r = owned(event.reservationId, event.fence, event.owner); resources(event.actual);
+      demand(!s.advisory?.policies[supervisorHash(r.id)], 'advisory settlement requires raw provider and owned cleanup receipts');
       demand(event.actual.tokens <= r.reserved.tokens && event.actual.cost <= r.reserved.cost, 'actual exceeds reserved ceiling');
       r.actual = event.actual; r.state = 'finished'; break; // No refund, including failed calls.
     }
@@ -264,6 +354,8 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
         demand(!supervisorRevisionHold(s, p.id), 'diagnosis differs from exact operator-permitted revision');
         demand(!s.proposals[p.id] || same(s.proposals[p.id], p), 'proposal changed'); s.proposals[p.id] = p;
       }
+      demand(!s.advisory?.policies[supervisorHash(r.id)] || event.actual === null && event.processConfirmed === false && d.outcome !== 'proposed',
+        'advisory settlement requires raw provider and owned cleanup receipts');
       const needsHuman = d.outcome !== 'proposed' || d.decision?.action.kind === 'escalate';
       demand(needsHuman ? event.request !== null && event.request.proposalId === d.id && event.request.incidentId === d.incidentId : event.request === null, 'diagnosis and required human stop must publish atomically');
       if (event.request) putHuman(event.request);
@@ -389,6 +481,17 @@ export function commitSupervisor(stateDir: string, project: ProjectIdentity, exp
   try { observeEvent(stateDir, supervisorObservation(after, event)); }
   catch { /* Telemetry failure never changes journal authority or a successful delivery receipt. */ }
   return after;
+}
+/** Only this API returns new send permission. Existing/replayed receipts are observational, never permission.
+ * Stop and this transition share commitSupervisor's lock/CAS. No request runs under that lock. */
+export function authorizeAdvisorySend(stateDir: string, project: ProjectIdentity, expectedRevision: number,
+  input: Omit<Extract<Event, { kind: 'authorize-advisory-send' }>, 'id' | 'kind'>): SendAuthorization {
+  const before = readSupervisor(stateDir, project), key = supervisorHash(input.reservationId);
+  demand(before.revision === expectedRevision && !before.advisory?.sends[key], 'send permission already consumed or stale revision');
+  const after = commitSupervisor(stateDir, project, expectedRevision, { ...input, kind: 'authorize-advisory-send',
+    id: `advisory-send:${input.grantId}` });
+  demand(after.revision === expectedRevision + 1 && after.advisory?.sends[key], 'replay is not new permission');
+  return structuredClone(after.advisory!.sends[key]);
 }
 /** Select scalar attribution from the committed state, never raw adapter usage or source text. */
 export function supervisorObservation(after: SupervisorState, event: Event): ProducerEvent {
