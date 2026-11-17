@@ -112,8 +112,39 @@ supervisor journal under its stop lock, then HTTP occurs outside every lock.
 Raw terminal evidence is not yet durable settlement or a proof artifact.
 [Request contract](design/supervisor-provider-contract.md) and
 [supervisor limits](supervisor.md#bounded-direct-pi-request-source-adapter) distinguish
-this actual source/copy/transport proof from later watchdog, owned cleanup,
-installed factory and public-command acceptance. No activation is implied.
+this request proof from the owned lifecycle composition below and later installed
+factory/public-command acceptance. No activation is implied.
+
+### Owned advisory runtime assets
+
+The complete inventory also ships `supervisor-openai.mts`, `supervisor-process.mts`,
+`supervisor-runner.mts` and `supervisor-guard.mjs`, unchanged in copied bundles.
+The trusted source factory must be loaded from that exact selected flat runtime;
+it accepts no caller executable, argv, environment or transport selector. Its fresh
+empty cwd/HOME and detached Node guard/worker have no project settings, tools,
+sessions or credential discovery. Explicit auth crosses owned IPC only at handoff,
+not the immutable grant or process evidence.
+
+The minimal guard owns its group and starts an absolute bounded deadline before
+waiting for the parent/worker. Parent loss, timeout and termination signal only
+that still-live anchor's own group. Bounded parent-side Linux `/proc` or Darwin
+ps capability evidence must establish exact start/group/session identity; unknown
+Darwin session evidence is explicitly held, not claimed supported. Private durable
+process association precedes journal registration and grant handoff. The actual
+T02 final transport gate remains the sole send permission and T03 publishes durable
+raw/scalar usage. Whole-group ESRCH observation, not anchor exit or pipe closure,
+is required for a private cleanup receipt; live/reused/unknown groups are never
+raw-killed on reopen. The worker also exits on anchor IPC disconnect and retains
+its own same-grant deadline; unexpected anchor loss is not permission for network
+work to wait indefinitely. This fallback is not a group cleanup receipt. Missing
+evidence holds ownership and full charge.
+
+These APIs do not acquire shared admission or runtime-store leases, construct
+complete current facts, settle advisory reservations, release exclusion, publish
+advice or provide public host wiring. Later trusted composition must supply those
+contracts and all agent-mount exclusions. The old injected print worker remains
+component-only. See the [owned boundary](supervisor.md#owned-short-lived-advisory-process-boundary)
+for lifecycle, strict evidence and explicit platform limitations.
 
 ### Exact scoped gate-input corrections
 

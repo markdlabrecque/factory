@@ -64,6 +64,14 @@ test('complete inventory, deterministic identity, private install and validation
   assert.equal(typeof state.authorizeAdvisorySend, 'function');
   for (const name of ['supervisor-advisory-contract.mts', 'supervisor-host-policy.mts'])
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'cli/src', name)), 'advisory assets ship unchanged');
+  const owned = await import(pathToFileURL(join(a.directory, 'supervisor-openai.mts')).href);
+  assert.equal(typeof owned.createOpenAIDiagnosisBoundary, 'function');
+  const processBoundary = await import(pathToFileURL(join(a.directory, 'supervisor-process.mts')).href);
+  assert.equal(typeof processBoundary.confirmOwnedCleanup, 'function');
+  for (const name of ['supervisor-openai.mts', 'supervisor-process.mts', 'supervisor-runner.mts', 'supervisor-guard.mjs']) {
+    assert.ok(a.manifest.files.some(f => f.path === name), 'every actual owned process asset is inventoried');
+    assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'cli/src', name)), `${name} ships unchanged`);
+  }
   const worker = await import(pathToFileURL(join(a.directory, 'supervisor-worker.mts')).href);
   assert.equal(typeof worker.diagnoseProject, 'function', 'complete selected worker imports without source-tree dependencies');
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-worker.mts')), readFileSync(join(f.source, 'cli/src/supervisor-worker.mts')), 'worker ships unchanged');

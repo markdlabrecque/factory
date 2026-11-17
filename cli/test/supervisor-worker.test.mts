@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diagnoseProject } from '../src/supervisor-worker.mts';
-import type { DiagnosisBoundary, WorkerOptions } from '../src/supervisor-worker.mts';
+import type { ComponentDiagnosisBoundary as DiagnosisBoundary, WorkerOptions } from '../src/supervisor-worker.mts';
 import { readSupervisor, supervisorFile, commitSupervisor } from '../src/supervisor-state.mts';
 import { supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-contract.mts';
 import { modelForRole } from '../../orchestrator/model-policy.mts';
