@@ -140,6 +140,13 @@ operator work; source tests do not claim delivery, paid-call enforcement or bene
 
 The [Board supervisor view](supervisor.md#board-observation-and-outcome-costs) reads
 these observations only and never triggers delivery, review, repair or resolution.
+The shared CLI/Board retained projection separates reserved resources from nullable
+actual usage in tokens/micro-USD. `provider-usage-derived` denotes a retained host
+settlement; `legacy-component-reported` is only a component report, never proof of
+a provider invoice. Missing/ambiguous actual usage and absent known-usage sums are
+null, not zero. Full cumulative reservation charges remain retained without refunds.
+Proposal, diagnosis, human request and delivery counts are not execution progress
+or proof; admission exclusions and stop-pending owners remain separately visible.
 
 ### Raw advisory accounting is not telemetry or invoice reconciliation
 

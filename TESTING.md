@@ -417,6 +417,16 @@ shards and the separate lifecycle gate remain mandatory.
 
 ## Supervisor operator inspection and controls
 
+Retained advice permutations use cheap units in `cli/test/supervisor-command.test.mts`
+and `board/supervisor.test.mts`: all six typed categories share the diagnose/status
+projection, bounded rationale/alternatives omit private draft/gate/stream bodies,
+unknown usage stays null, legacy component usage is not provider invoicing, and
+orphan admission exclusions remain paged without pruning. The existing in-memory
+HTTP boundary traps filesystem mutations, provider/tracker network and child
+launches (allowing only canonical-root read-only Git identity probes), counting even
+caught calls. No listener/browser or second public install journey is needed for
+this display boundary; mandatory lifecycle/hosted gates remain separate.
+
 ```sh
 node --test cli/test/supervisor-command.test.mts cli/test/supervisor-worker.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
 ```

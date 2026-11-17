@@ -5,13 +5,13 @@ import { exportEvents, supervisorOutcomeMetrics } from './execution-events.mts';
 
 /** Defense in depth over the CLI allowlist; every string including identities is untrusted display data. */
 export function supervisorText(value: string): string {
-  return value.replace(/-----BEGIN [^-]*(?:PRIVATE KEY|SECRET)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/gi, '[REDACTED]')
+  return value.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/-----BEGIN [^-]*(?:PRIVATE KEY|SECRET)[^-]*-----[\s\S]*?(?:-----END [^-]+-----|$)/gi, '[REDACTED]')
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|AKIA[A-Z0-9]{16})\b/g, '[REDACTED]')
     .replace(/\b(?:authorization|password|passwd|secret|token|api[_-]?key)\s*[:=]\s*[^\n]+/gi, '[REDACTED]')
     .replace(/https?:\/\/[^\s<>"']+/gi, s => { try { const u = new URL(s); if (u.protocol !== 'https:' || /(?:secret|credential|\.env|op:)/i.test(u.pathname)) return '[REDACTED URL]'; u.username = ''; u.password = ''; u.search = ''; u.hash = ''; return u.href; } catch { return '[REDACTED URL]'; } })
     .replace(/(^|[^A-Za-z0-9_./-])(?:\/[A-Za-z0-9_.~-]+)+[^\s<>"'`\[\](){},;]*|[A-Za-z]:\\[^\s<>"']+|(?:~\/|op:\/\/)[^\s<>"'`\[\](){},;]+/g, '$1[REDACTED PATH]')
     .replace(/(?<![\w])(?:\.?[\w.-]+\/)*(?:\.ssh|\.env(?:\.[\w.-]+)?|[\w.-]*(?:credentials?|secrets?)[\w.-]*)(?:\/[^\s<>"'`\[\](){},;]+)?/gi, '[REDACTED PATH]')
-    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+    .replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, ' ').slice(0,512);
 }
 export function sanitizeSupervisor(value: unknown): any {
   if (typeof value === 'string') return supervisorText(value);
@@ -29,7 +29,7 @@ export async function buildSupervisorData(stateRoot: string, offset = 0, options
   for (const project of registered.projects) {
     try {
       const status = await read(project.root, offset);
-      if (status?.version !== 1 || status.authority !== 'observation-only' || !Number.isSafeInteger(status.revision) || status.revision <= 0) throw Error('Missing or unsupported journal');
+      if (status?.version !== 1 || status.authority !== 'observation-only' || !Number.isSafeInteger(status.revision) || status.revision < 0) throw Error('Missing or unsupported journal');
       const key = status.telemetry?.projectKey;
       const exported = typeof key === 'string' && /^[a-f0-9]{64}$/.test(key) ? exportEvents(stateRoot, { project: status.project.tracker.project }) : null;
       projects.push({ name: supervisorText(project.name), state: 'known', status: sanitizeSupervisor(status),
