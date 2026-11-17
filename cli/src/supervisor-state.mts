@@ -1,10 +1,10 @@
-// Host-owned supervisor journal: atomic CAS transitions, retained incidents/denials and separately charged resources.
+// Host-owned supervisor journal: durably synced scoped CAS transitions, retained incidents/denials and separately charged resources.
 // Retains operator fences, completion, receipts, resolution audits and fenced application observations; emits redacted telemetry after commit, never executes effects or resets charges.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
 import type { ProjectIdentity, Scope, Incident, Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
-const { ownerState, withAdmissionLock, writeDurable } = await import(existsSync(new URL('./admission.mts', import.meta.url)) ? './admission.mts' : '../../board/admission.mts');
+const { ownerState, withAdmissionLock } = await import(existsSync(new URL('./admission.mts', import.meta.url)) ? './admission.mts' : '../../board/admission.mts');
 const { supervisorHash, validateProject, validateScope, validateIncident, validateProposal, validateIndependentReview, validateIntent, validateHumanRequest } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 
 import type { Diagnostic } from '../../orchestrator/supervisor.mts';
@@ -469,12 +469,12 @@ export function readSupervisor(stateDir: string, project: ProjectIdentity): Supe
  * stateDir MUST be host-owned, outside project/agent mounts, as for admission/recovery. No async effects inside locks. */
 export function commitSupervisor(stateDir: string, project: ProjectIdentity, expectedRevision: number, event: Event): SupervisorState {
   validateProject(project);
-  const after = withAdmissionLock(join(stateDir, 'supervisor'), () => {
+  const after = withAdmissionLock(join(stateDir, 'supervisor'), write => {
     const j = readJournal(stateDir), key = supervisorHash(project.root);
     const before = j.projects[key] ? validateSupervisor(j.projects[key], project) : emptySupervisor(project);
     demand(before.revision === expectedRevision, 'revision CAS failed');
     const after = transitionSupervisor(before, event, { ownerState, projects: Object.values(j.projects) });
-    if (after !== before) { j.projects[key] = after; writeDurable(supervisorFile(stateDir), JSON.stringify(j) + '\n'); }
+    if (after !== before) { j.projects[key] = after; write(supervisorFile(stateDir), JSON.stringify(j) + '\n'); }
     return after;
   }, -1);
   // Best-effort observation is outside the authority lock. Replays share a stable event ID; telemetry cannot change the committed outcome.

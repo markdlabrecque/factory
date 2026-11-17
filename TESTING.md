@@ -146,8 +146,12 @@ Synthetic non-secret auth, a clean child environment, disabled global fetch and
 native socket/HTTP/TLS paths, and the SDK-supported HTTP seam with no fallback keep
 all responses offline. Deterministic IPC barriers exercise stop-first zero-send
 and authorization-first in-flight stop; real 429/503 SDK error paths and context
-overflow yield one transmission without retries/compaction; repeated requests,
-changed input, inherited debug/TLS configuration and corrupt selected artifacts refuse.
+overflow yield one transmission without retries/compaction; repeated requests refuse.
+Pure precondition units own changed frozen input and inherited debug/TLS configuration
+refusal before provider startup; copied-bundle validation owns corrupt selected
+artifacts. These cases do not need repeated SDK/process bootstraps. The same nine
+transport scenarios retain the real SDK/request/journal boundaries and original
+15-second child limit, four-way file concurrency and 180-second shard deadlines.
 A fixture-side filesystem barrier mutates real copied prompt/dependency bytes after
 initial validation and input read; the final gate refuses with zero authorization
 and sends, without sleeps or a production callback/flag. Duplicate terminal events
@@ -163,6 +167,31 @@ The [provider contract](docs/design/supervisor-provider-contract.md) records the
 conservative bound and limits. Extend this same suite, not a duplicate boundary matrix.
 It enters the unchanged four-shard inventory automatically; the independent
 browser lifecycle gate remains mandatory.
+
+## Raw advisory usage receipts
+
+```sh
+node --test cli/test/supervisor-openai-usage.test.mts cli/test/runtime-bundle.test.mts cli/test/documentation*.test.mts
+```
+
+Cheap units own missing/explicit-zero/inconsistent/unsafe and over-reservation
+counter cases, reasoning inclusion, service/cache variants, wrong association,
+stream truncation and completed/incomplete/failed status, normalized-Pi-counter
+exclusion, conservative derived integer charge and strict scalar receipt identity.
+No retention-specific provider field is invented: explicit raw write=0 requires
+no retention breakdown; absent write count and any positive write are unknown.
+One private temporary filesystem/journal boundary owns atomic raw+scalar retention,
+reopen/idempotence, conflicting/corrupt records, permissions, hard/symlinks
+(including the lock-directory path), path-restricted/revoked prepared-writer scope,
+changed directory identity and unchanged reservations/charges. Cheap
+filesystem fault injection proves ancestor-sync refusal before publication and
+directory-sync failure after rename: visible bytes do not yield durable success
+or known resources while synchronization fails. This is not a power-loss experiment.
+An IPC-only registered local child supplies real PID/start identity; all provider metadata/control/exclusion data is synthetic.
+There are no network/provider calls or duplicated transport permutations. Copied
+bundle assertions import the inventoried helper unchanged. Later owned cleanup,
+final journal settlement/exclusion release and installed-host activation are not
+claimed by these tests. Full mandatory shards and separate lifecycle remain gates.
 
 ## Independent gate review and managed escalation
 

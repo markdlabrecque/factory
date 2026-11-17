@@ -3,7 +3,27 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateAdvisoryPayload } from '../src/supervisor-openai-request.mts';
+import { validateAdvisoryPayload, validateAdvisoryEnvironment, validateAdvisoryInput } from '../src/supervisor-openai-request.mts';
+import { diagnosisGrant } from '../src/supervisor-advisory-contract.mts';
+import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
+import { supervisorFixture } from './supervisor-fixture.mts';
+import { usageFixture } from './supervisor-usage-fixture.mts';
+
+test('pure worker environment and frozen input preconditions refuse drift before provider startup', () => {
+  const keys=['PATH','HOME','LANG','LC_ALL','LC_CTYPE','TZ','NODE_CHANNEL_FD','NODE_CHANNEL_SERIALIZATION_MODE'];
+  assert.doesNotThrow(()=>validateAdvisoryEnvironment(keys));
+  for(const key of ['OPENAI_LOG','NODE_TLS_REJECT_UNAUTHORIZED','NODE_OPTIONS','HTTP_PROXY','PI_PROVIDER'])
+    assert.throws(()=>validateAdvisoryEnvironment([...keys,key]),/environment must be isolated/);
+  const f=usageFixture(), snapshot=supervisorFixture(f.g.project.root).snapshot, {id,...body}=f.g;
+  const grant=diagnosisGrant({...body,project:snapshot.project,ticket:snapshot.scope.ticket,runId:snapshot.material.runId,
+    runtime:snapshot.material.runtime,dependencies:snapshot.material.dependencies,basis:diagnosisBasis(snapshot)});
+  assert.deepEqual(validateAdvisoryInput(snapshot,grant),snapshot);
+  for(const mutate of [(s:any)=>{s.material.settings='c'.repeat(64);},(s:any)=>{s.material.runtime='c'.repeat(64);},
+    (s:any)=>{s.material.dependencies='c'.repeat(64);},(s:any)=>{s.material.runId='other-run';},
+    (s:any)=>{s.scope.ticket++;},(s:any)=>{s.project.tracker.project='owner/other';}]) {
+    const changed=structuredClone(snapshot); mutate(changed); assert.throws(()=>validateAdvisoryInput(changed,grant),/input does not match grant/);
+  }
+});
 
 test('copied pinned Pi adapter consumes real journal permission before one bounded request and exposes raw terminal usage', () => {
   const output = execFileSync(process.execPath, [fileURLToPath(new URL('./supervisor-provider-fixture.mts', import.meta.url)),
@@ -24,6 +44,6 @@ test('copied pinned Pi adapter consumes real journal permission before one bound
     { prompt_cache_key: 'warming' }, { service_tier: 'priority' }, { max_output_tokens: 4097 }, { truncation: 'auto' }])
     assert.throws(() => validateAdvisoryPayload({ ...evidence.payload, ...change }, system, user));
   assert.deepEqual(evidence.scenarios.map((s: any) => [s.scenario, s.transmissions, s.authorizations]), [
-    ['complete',1,1], ['stop-first',0,0], ['inflight-stop',1,1], ['retry-429',1,1], ['retry-503',1,1], ['overflow',1,1], ['duplicate-terminal',1,1], ['changed-input',0,0], ['environment',0,0], ['tls-environment',0,0], ['artifact-drift',0,0], ['mid-load-prompt',0,0], ['mid-load-dependencies',0,0],
+    ['complete',1,1], ['stop-first',0,0], ['inflight-stop',1,1], ['retry-429',1,1], ['retry-503',1,1], ['overflow',1,1], ['duplicate-terminal',1,1], ['mid-load-prompt',0,0], ['mid-load-dependencies',0,0],
   ]);
 });

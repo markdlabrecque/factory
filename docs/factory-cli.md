@@ -30,6 +30,19 @@ The same host-owned project gate precedes explicit complete overrides, including
 
 Recovery host checks run within the existing preparation/pre-charge flow and repeat after image readiness. Complete input must still match the existing preparation before charge, including parent planning comments. A failed source or changed hash publishes a ticket-input hold without replacing the preparation. Host-known failure charges no attempt. Capacity, activity-generation, ownership and admission-time local checks still apply; no budget is refunded or reset. After a container starts, existing charged-attempt and exact-container cleanup rules remain. Settlement and scheduled local maintenance run independently of the new-launch gate, including during project holds or pauses under the existing global-off/unknown/cancellation policy. Unconfirmed cleanup continues to hold ownership, and report state-write failures are reported directly.
 
+## Local persistence durability
+
+Authority and receipt writes use atomic private files with strict file/directory
+synchronization. Newly created containing directories are synchronized as well;
+visibility after a rename is not a successful durable acknowledgment. Unsupported
+or failed directory syncing is an I/O hold/error, not a best-effort success.
+A failure after rename may leave a visible record: inspect retained journal and
+ownership/evidence before deciding the next step. Do not erase it, reset charges,
+retry a generation from absence or assume it was unsent. Private provider-receipt
+reopen also requires successful synchronization before returning known resources;
+uncertainty is null/unknown, never a zero bill or cleanup permission. No command
+repairs unsupported storage or changes filesystem configuration automatically.
+
 ## Supervisor inspection and project controls
 
 ```sh

@@ -52,6 +52,10 @@ test('complete inventory, deterministic identity, private install and validation
   assert.equal(typeof hostPolicy.readHostAdvisoryPolicy, 'function');
   const request = await import(pathToFileURL(join(a.directory, 'supervisor-openai-request.mts')).href);
   assert.equal(typeof request.requestAdvisory, 'function');
+  const usage = await import(pathToFileURL(join(a.directory, 'supervisor-openai-usage.mts')).href);
+  assert.equal(typeof usage.providerUsage, 'function'); assert.equal(typeof usage.persistProviderUsage, 'function');
+  assert.equal(typeof usage.providerResources, 'function');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-openai-usage.mts')), readFileSync(join(f.source, 'cli/src/supervisor-openai-usage.mts')), 'usage ships unchanged');
   const provider = JSON.parse(readFileSync(join(a.directory, 'supervisor-provider/package-lock.json'), 'utf8'));
   assert.equal(provider.packages['node_modules/@earendil-works/pi-ai'].version, '1.5.2');
   assert.equal(provider.packages['node_modules/openai'].version, '7.19.0');
@@ -81,6 +85,9 @@ test('complete inventory, deterministic identity, private install and validation
   for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md', 'gate-review.mts', 'prompt.gate-review.md']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
   }
+  const providerArchive=join(a.directory,'supervisor-provider/pi-ai-1.5.2.tgz'), originalArchive=readFileSync(providerArchive);
+  writeFileSync(providerArchive,'corrupt'); assert.throws(()=>validateRuntimeBundle(a.directory),'pre-entry provider artifact drift is a bundle-validation case');
+  writeFileSync(providerArchive,originalArchive); validateRuntimeBundle(a.directory);
   assert(!readFileSync(join(a.directory, 'main.mts'), 'utf8').includes('sandcastle-islandhealth'));
   assert(existsSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs')));
   writeFileSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs'), 'poison');

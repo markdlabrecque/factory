@@ -82,12 +82,11 @@ if (process.argv[2] === '--request-worker') {
           { status, headers: { 'content-type': 'application/json', 'retry-after': '0' } });
         return new Response(sse(terminal) + (o.scenario === 'duplicate-terminal' ? sse(terminal) : ''), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
       };
-      if (o.scenario === 'changed-input') o.snapshot.material.settings = 'c'.repeat(64);
       const options = { ...o, apiKey: 'sk-synthetic-offline-not-a-secret', fetch: transport };
       let result: any, refused: string | undefined;
       try { result = await requestAdvisory(options); } catch (e) { refused = String(e); }
       let extraRequestDenied = false;
-      if (!['stop-first','changed-input','environment','tls-environment','artifact-drift','mid-load-prompt','mid-load-dependencies'].includes(o.scenario)) {
+      if (!['stop-first','mid-load-prompt','mid-load-dependencies'].includes(o.scenario)) {
         try { await requestAdvisory(options); } catch (e) { extraRequestDenied = /consumed/.test(String(e)); }
       }
       process.send!({ transmissions, serialized, payload, ...result, refused, extraRequestDenied, driftApplied }, () => process.disconnect());
@@ -102,16 +101,13 @@ export async function runProviderSpike() {
   try {
     const bundle = prepareRuntimeBundle({ sourceRoot: fileURLToPath(new URL('../../', import.meta.url)), runtimeStore: join(root, 'runtimes'), install: installPackages });
     const scenarios: any[] = [];
-    for (const scenario of ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','changed-input','environment','tls-environment','artifact-drift','mid-load-prompt','mid-load-dependencies']) {
+    for (const scenario of ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','mid-load-prompt','mid-load-dependencies']) {
       let runtimeRoot = bundle.directory;
-      if (scenario === 'artifact-drift' || scenario.startsWith('mid-load-')) {
+      if (scenario.startsWith('mid-load-')) {
         runtimeRoot = join(root, `runtime-${scenario}`); cpSync(bundle.directory, runtimeRoot, { recursive: true });
-        if (scenario === 'artifact-drift') writeFileSync(join(runtimeRoot, 'supervisor-provider/pi-ai-1.5.2.tgz'), 'corrupt');
       }
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--request-worker'],
-        { stdio: ['ignore','ignore','ignore','ipc'], env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C',
-          ...(scenario === 'environment' ? { OPENAI_LOG: 'debug' } : {}),
-          ...(scenario === 'tls-environment' ? { NODE_TLS_REJECT_UNAUTHORIZED: '0' } : {}) } });
+        { stdio: ['ignore','ignore','ignore','ipc'], env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C' } });
       const closed = once(child, 'close');
       try {
         assert.deepEqual((await once(child, 'message'))[0], { ready: true });
@@ -141,7 +137,7 @@ export async function runProviderSpike() {
         }
         assert.equal(outcome.error, undefined, JSON.stringify(outcome));
         const journal = readSupervisor(stateDir, project), sends = Object.values(journal.advisory!.sends);
-        if (['stop-first','changed-input','environment','tls-environment','artifact-drift','mid-load-prompt','mid-load-dependencies'].includes(scenario)) { assert.equal(outcome.transmissions, 0); assert.equal(sends.length, 0); }
+        if (['stop-first','mid-load-prompt','mid-load-dependencies'].includes(scenario)) { assert.equal(outcome.transmissions, 0); assert.equal(sends.length, 0); }
         else { assert.equal(outcome.transmissions, 1, JSON.stringify(outcome)); assert.equal(sends.length, 1); assert.equal(outcome.extraRequestDenied, true); }
         if (scenario.startsWith('mid-load-')) assert.equal(outcome.driftApplied, true, 'deterministic drift barrier reached');
         if (['complete','inflight-stop'].includes(scenario)) {

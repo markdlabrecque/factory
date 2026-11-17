@@ -112,6 +112,75 @@ No watchdog, cleanup receipt, complete `DiagnosisBoundary`, trusted host factory
 public command or paid activation is supplied by this source adapter alone;
 T03/T04 and subsequent composition remain required. Paid launch remains held.
 
+## Raw provider usage and private receipts
+
+`supervisor-openai-usage.mts` distinguishes complete raw provider evidence from
+unknown accounting. `captureProviderEvidence` retains only original response
+status/request ID and terminal type, response ID/model/status/service, usage and
+incomplete reason, plus the actual adapter's grant/authorization association,
+terminal-integrity flag and stream-completion observation. It excludes normalized
+Pi counters/cost, prompt/originals, output/hidden reasoning, auth/headers and error
+prose. This selected raw metadata is not a provider invoice or signature.
+
+`providerUsage` returns a strict identity-hashed scalar receipt binding grant,
+invocation/fence, journal authorization, profile/price, raw hash and request/response
+IDs. Known usage requires an exact completed/incomplete terminal association,
+clean ended stream, Standard service, explicit safe integer input/cache/output/
+reasoning/total counters, totals consistency and profile bounds. Completed input
+must be positive; explicit zero output/cache/reasoning is valid where consistent.
+Missing counters, normalized default zeros, unsafe/negative/inconsistent values,
+extra usage fields, wrong identity/model/tier, missing or ambiguous stream,
+unrepresented cache writes or out-of-reservation usage stay **unknown**, not zero.
+An incomplete `max_output_tokens`/`content_filter` terminal can establish counters
+without valid advice. Failed provider status is retained but conservatively remains
+unknown usage; neither terminal status nor usage proves valid diagnosis text.
+
+The supported SDK declares `cached_tokens` and `cache_write_tokens`, not the
+fixture's retention-specific breakdown. This profile forbids writes: explicit raw
+`cache_write_tokens: 0` establishes zero writes without inventing retention fields.
+Missing write total is unknown. If an optional retention breakdown is present it
+must be exactly zero and consistent; any positive write remains unsupported,
+whatever its retention. No unsupported provider API field is required as evidence.
+
+Known `resources.cost` is a **conservative derived upper charge** in integer
+micro-USD under `terra-standard-2026-11-17-v1`, not measured account dollars. Exact
+upward arithmetic uses the fixed worst-allowed input/output profile rates; cached
+reads do not fabricate an account-specific discount. Reasoning is already in
+output. Known actual tokens and this derived charge are separate from the full
+monotonic reservation. No refund, renewed call, cleanup, exclusion release or
+execution authority follows from a usage receipt.
+
+`persistProviderUsage` requires the exact grant and send receipt already retained
+in the real supervisor journal. One atomic private `terminal.json` under
+`<host-state>/supervisor/usage/<project-hash>/<invocation-hash>/` contains bounded
+selected raw metadata and scalar derivation. Publication uses a separate short
+filesystem lock/fsync/atomic replacement, never nested with the supervisor lock;
+its store is evidence, **not a second permission store**. The private lock
+subdirectory is validated before use too; a linked lock path cannot write into a
+project. Shared durable directory creation synchronizes the containing chain,
+including visible directories left by an earlier failed attempt; folder-sync
+errors propagate rather than reporting best-effort durability. The same synchronous
+lock scope supplies a path-restricted writer for its already-synced store directories:
+journal/receipt writes do not repeatedly resync the whole ancestor chain. Every
+file and post-replacement directory still synchronizes; changed directory identity,
+I/O failure, an escaped destination or an expired scope refuses. No cross-call
+filesystem cache or caller-provided durability boolean is involved. Reopen synchronizes
+validated existing evidence before returning known resources. Existing identical data
+is idempotent; conflicting/corrupt/linked/foreign/unsafe records are never repaired
+or replaced. Missing/corrupt private state yields null `providerResources`, not
+zero. Reopen revalidates journal association, raw evidence, receipt identity and
+raw/scalar agreement. Files are 0600 and private leaf directories 0700; paths must
+be canonical, host-owned and outside known project roots. Trusted host composition
+must also establish that state is outside every agent mount. Reading creates
+nothing. Publish only the final evidence record, not a live interim observation
+that would later need replacement. Later lifecycle code must pair this observation
+with exact owned cleanup before any final journal settlement or release.
+
+Unit metadata is synthetic; one disposable filesystem/journal/registered-child
+case proves actual durable publication/reopen and corruption/permission/link
+refusal. Copied runtimes import the inventoried helper unchanged. No additional
+provider request, duplicate transport matrix, live billing or installation runs.
+
 ## Advisory grants, finite host policy and one-use send permission
 
 The source-only advisory foundation adds `supervisor-advisory-contract.mts` and
