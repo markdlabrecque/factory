@@ -185,6 +185,25 @@ live tracker, paid model, service or credential is used by these added cases. Ex
 standalone copied-install fixtures include the new view asset. All four commit shards
 and the separate browser lifecycle gate remain mandatory.
 
+## Outside-lock supervisor lifecycle
+
+```sh
+node --test cli/test/supervisor-schedule.test.mts cli/test/scheduler.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Pure policy/hint tests cover coalescing, unknown/off/paused/observe/stopped admission
+and explicit one-project pilot requirements. One extension of the existing stubbed
+tick/process fixture proves post-unlock nonblocking handoff, two-project context
+isolation, unchanged rotation, exact in-process abort, late review refusal and
+restart reuse of a retained wait without new charge. The complete-runtime fixture
+imports the actual flat lifecycle helper. Existing worker/state tests own the finite
+shared-capacity/accounting matrices; recovery and proof gates are not duplicated.
+The lifecycle fixture uses injected clocks and inert process/termination adapters,
+not sleeps, live agents, trackers, services, installs or a real pilot. It establishes
+no default provider-enforcement adapter, joint mixed-workload lease, cross-process
+cancel channel or execution-owner scoped-context consumer. All four commit shards
+and the separate browser lifecycle gate remain mandatory.
+
 ## Runtime bundle preparation
 
 ```sh

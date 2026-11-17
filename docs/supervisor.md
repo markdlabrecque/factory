@@ -1,6 +1,6 @@
 # Project supervisor authority contracts
 
-This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, a source-only thin advisory host broker and exact scoped gate-input application**. There is no scheduler wiring, live action activation adapter, notification service or pilot rollout here. The CLI supplies read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. The explicit gate applicator below publishes only one exact scoped verification-guidance input artifact; it never edits project files or branches. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation, broker and scoped application modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
+This is the authoritative reference for the project supervisor feature. The implementation supplies **import-safe records, optional inert policy, read-only frozen snapshots, host-owned durable state, explicit bounded diagnosis and independent review workers, a durable host tracker-comment outbox with exact local resolution, a source-only thin advisory host broker and exact scoped gate-input application**. The scheduler has a short hint hook and an explicit outside-lock source lifecycle transport, but no live action activation adapter, notification service or pilot rollout. The CLI supplies read-only inspection and audited per-project mode/stop fences, refusing unsupported act activation. The explicit gate applicator below publishes only one exact scoped verification-guidance input artifact; it never edits project files or branches. `factory supervisor resolve` is a local audit control, not activation. Existing Factory gates remain unchanged. All actual contract, policy, snapshot, state, diagnosis, review, escalation, broker, scoped application and lifecycle modules and prompts ship in the complete runtime inventory. Imports start no work; state persistence and diagnosis invocation are explicit. Paid launch remains held without demonstrated provider-enforceable ceilings, known pricing/accounting and host authorization.
 
 A supervisor is a durable logical project responsibility, not a permanent model process. Host records, not memory or agent prose, own authorization. Observe is the starting mode. Action mode needs explicit one-project pilot opt-in, finite project/global cost and capacity limits, cancellation fencing and host admission. Missing or unknown accounting holds paid calls. Diagnosis uses the configured family's fixed Mid role, at most two calls per unchanged incident and ten minutes per call, with one active decision per project. Independent gate review uses the separate fixed Large role, not automatic diagnosis escalation. No model/provider fallback or reviewer shopping is authorized.
 
@@ -54,7 +54,7 @@ The command/host reader ship with the CLI tree; the Board adapter below joins th
 complete runtime inventory alongside existing state/worker/review/escalation and
 scoped application assets. Source-only unit and disposable CLI tests prove controls, not
 provider enforcement, live delivery, atomic gate application, scheduler integration
-or an operational pilot. Scoped input application is independently evidenced below; live capabilities and scheduler/pilot prerequisites retain their separate scope.
+or an operational pilot. Scoped input application and outside-lock lifecycle transport are independently evidenced below; live capabilities and pilot prerequisites retain their separate scope.
 
 ## Board observation and outcome costs
 
@@ -433,7 +433,7 @@ paid agent, secret store or installed project is used.
 not a resident model session or a second provider stack. These actual assets join
 the complete selected runtime. Complete project overrides must include them; no
 absent future application asset is imported. Scheduler wakeups and
-operator commands are not implemented by diagnosis.
+operator commands are not implemented by diagnosis. The separate outside-lock lifecycle transport below calls this API without changing its authority or budget ownership.
 
 ### Input, output and unchanged decisions
 
@@ -744,8 +744,7 @@ rephrase or replace the original. Resolution chains retain A→B→C history whi
 the current leaf authorizes the next exact review; old authorizations are not eternal
 conflicting pins. Cycles and reuse of the original denied incident are refused.
 Abandonment permits no replacement. No command automatically launches/resumes work,
-converts denial to approval, resets limits or waives Factory constraints. Scheduler
-integration and live pilot remain separately owned, unimplemented prerequisites. The explicit scoped application/fresh-proof source boundary below does not activate them.
+converts denial to approval, resets limits or waives Factory constraints. Live host activation and pilot remain separately unimplemented prerequisites; the source lifecycle hook below does not turn a resolution into resumption. The explicit scoped application/fresh-proof source boundary below does not activate them.
 
 Offline evidence (unit policy matrices plus minimal disposable process/tracker-API
 and local CLI boundaries, injected clocks/owners, no sleeps or live probes):
@@ -854,12 +853,101 @@ preservation, post-publication crash observation without duplicate action, chang
 candidate/guideline/authorization refusal, fresh analysis/verifier proof, same-SHA old PASS refusal under both unamended and valid amended-context rechecks, and retained old FAIL. Unit matrices cover absent/legacy/denied/stale approvals, proposal/project
 mismatch, authorization/fence/expiry and unsupported scope. These are source wiring
 proofs, **not** live model semantic approval, provider ceiling enforcement, paid
-activation or a completed pilot. Scheduler transport and live activation remain
-separate prerequisites; default paid review/diagnosis still hold.
+activation or a completed pilot. The explicit lifecycle transport below can connect the host workers, but does not supply live activation or a default execution-context consumer; default paid review/diagnosis still hold.
 
 ```sh
 node --test cli/test/supervisor-gate-apply.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts orchestrator/context.test.mts orchestrator/instructions.test.mts orchestrator/handoff.test.mts cli/test/runtime-bundle.test.mts
 ```
+
+## Outside-lock event and lifecycle transport
+
+`cli/src/commands/tick.mts` collects short local hints before project maintenance
+and after completed/failed passes. It calls `SupervisorTickHook.handoff` only after
+releasing the tick lock. It never awaits diagnosis, review, notification or gate
+application. The existing pass/recovery flow, rotation, dispatch cap, saved absolute
+CLI/Node/PATH routing and macOS `factory supervise` scheduler meaning are unchanged.
+Off/unknown, cancellation, an unconfirmed pass group, or a failed tick setup drops
+new handoff work. Paused/unopted projects can produce a checkpoint hint, not permission.
+Read-only refresh is never an authorization source. The default hook has **no host
+binding** and performs no model/tracker/action work.
+
+`cli/src/supervisor-schedule.mts:supervisorWakeups` is a narrowly trusted source API,
+not an installed worker service, new provider stack, polling/retry scheduler or TOML
+activation setting. Its synchronous bounded hint collector coalesces one batch per
+project (at most 1024 projects). Explicit host producers can signal checkpoint,
+completed pass/run failure, gate refusal, delivery, prerequisites, requirements and
+exact audited owner-response changes. Kinds are hints only: the fresh host binding
+must collect the complete current original snapshot. Neither tracker responses nor
+hint IDs grant approval. There is no new tracker watcher or implicit tracker refresh.
+Checkpoint recollection on subsequent ticks observes changes that occurred during an
+active worker; hints are not a durable work queue and do not promise lossless delivery.
+
+Handoff schedules microtasks after unlock. Each project has its own short-lived
+controller/context; the shared existing journal still atomically enforces one fenced
+unsettled decision per project, finite diagnosis/review capacity and cumulative charges.
+Another host/process races through those same reservations, never a second budget.
+The actual `diagnoseProject` API uses authoritative material identity (excluding only
+observation time) and validates retained originals before reusing an unchanged wait,
+including after restart. Repeated hints cannot themselves spend a new call. Restart,
+mode changes, denial and unknown cleanup never reset charges or reclaim capacity.
+
+Scheduled work is narrower than the explicit diagnosis API: it requires current
+registered/enabled/global-on/unpaused authorization, outside-lock assertion and
+**durable act/pilot**. Observe/stop or unknown authorization fences scheduled diagnosis
+as well as review/action. A trusted host must supply `admissionHold`, backed by the
+existing shared implementation/recovery admission owner and an actual finite resource
+lease. A read-only diagnosis may coexist with implementation only if that host can
+prove independent available capacity without a race; recovery retains project-wide
+exclusion. A callback returning no hold is a necessary host assertion, **not a new
+atomic mixed-workload lease primitive**. The shipped interfaces do not yet supply
+that joint lease, so a production binding must hold absent a demonstrated one. No
+supervisor repair launcher is added: non-gate advice remains input to the existing
+successful-pass/two-pass jam broker, with its original charge and exclusion gates.
+
+For a gate decision, the transport calls the committed fresh fixed-Large review API
+with the exact original proposal/snapshot/journal, and optionally the committed
+scoped applicator only after `review-approved`. It rechecks current control/material
+identity, cancellation and admission before each stage and through each worker's
+current-authorization callback. Review denial/human stop uses the existing durable
+outbox; notification remains independently authorized, exact-target and receipt-only.
+Absent review/application transport retains the proposal/approval, never fabricates
+execution. A returned application still requires **new analysis and independent
+verification**. The transport does not launch execution or create a default selector:
+a trusted host must explicitly carry `loadExecutionContext({gate})` through the normal
+analysis → separate verifier → new host proof → `postAndDeliver` scoped rechecks.
+Absent that execution owner/consumer, retain the artifact and escalate rather than
+editing a checkout, replaying an uncertain effect or accepting an old same-SHA PASS.
+
+A retained host instance can cancel an exact active controller with `cancel(root)`;
+only that controller's diagnosis/reviewer AbortSignal reaches its original trusted
+process boundary. Maintenance handoff also rechecks active bindings and aborts on
+changed material/control/global/pause authority. Late review output cannot authorize
+application. There is no raw-PID kill, implementation-group signal, timer-based owner
+reclamation or accounting release. Across processes/restarts, no trustworthy control
+channel is shipped: CLI stop honestly remains cancellation-pending for unsettled
+workers. PID/start/control evidence must be reconciled by the owning boundary, not
+turned into broad kill permission. Cancellation cannot retract an already admitted
+tracker POST or published artifact; their ambiguity/observation rules remain intact.
+
+**Residual activation boundaries:** no shipped default adapter demonstrates all-in
+provider-enforceable token/cost/accounting after controller death; no production
+joint implementation/supervisor resource lease, authenticated cross-process cancel
+channel or scoped execution-owner transport is claimed. The CLI still refuses act.
+Offline adapters prove source connections only, not those runtime capabilities,
+semantic reviewer approval, live notification or a pilot. No global enabling,
+install, service/project mutation, paid call or live tracker delivery is performed.
+The actual lifecycle helper joins the complete selected runtime inventory.
+
+```sh
+node --test cli/test/supervisor-schedule.test.mts cli/test/scheduler.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Pure policy/hint tests and one extension of the existing stubbed tick/process boundary
+prove two-project isolation, nonblocking pending review, unchanged rotation, exact
+in-process cancellation, durable stop/late review refusal and restart wait reuse with
+unchanged charges. Existing worker/state/recovery/proof tests retain the shared finite
+capacity, denial, admission and independent-proof matrices. Clocks/processes/owners
+are injected; no sleeps, services, live agents or tracker delivery are used.
 
 ## Reproduce offline evidence
 

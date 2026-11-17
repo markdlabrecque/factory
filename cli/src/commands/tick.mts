@@ -1,3 +1,5 @@
+// Supervisor hooks collect bounded local hints only; their non-awaited handoff runs after releasing the tick lock.
+// No default paid/authority transport is installed. Read-only refresh never grants supervisor permission.
 // Each registered project gets local recovery settlement and follow-up observation under the tick lock before its
 // pause gate. Maintenance never launches, refreshes or counts a pass; failure disables recovery launch for this tick.
 // Global off/unknown and cancellation still stop all maintenance. Paused projects keep their pause and spent budgets.
@@ -83,10 +85,14 @@ import type { ProjectContext } from '../runs.mts';
 import { findRun, projectRuns } from '../runs.mts';
 import { cleanProject } from '../clean.mts';
 import type { SpawnOptions } from './dispatch.mts';
+import { supervisorWakeups } from '../supervisor-schedule.mts';
+import type { SupervisorTickHook } from '../supervisor-schedule.mts';
 /** Runs one pass for a project; resolves to dispatch.sh's exit code. The default is runDispatchSh. */
 export type Pass = (ctx: ProjectContext, args: string[], o: Required<Pick<SpawnOptions, 'env' | 'onSpawn'>> & Pick<SpawnOptions, 'signal' | 'mayLaunch'> & { group: true }) => Promise<number>;
 export type TickOptions = {
   backend: ScheduleBackend; pass?: Pass; log?: (line: string) => void; signal?: AbortSignal; cancel?: CancelOptions;
+  /** Trusted source-only lifecycle transport. Enqueue is local/synchronous; handoff is outside the tick lock. */
+  supervisor?: SupervisorTickHook;
   /** Wall clock (UTC timestamps) and monotonic clock (durations). */
   now?: () => Date; mono?: () => number;
   /** Jam confirmation after a completed pass (jam-detect.mts afterPass); replaceable in tests. */
@@ -198,6 +204,8 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
   const wall = o.now ?? (() => new Date());
   const mono = o.mono ?? (() => performance.now());
   const signal = o.signal ?? new AbortController().signal;
+  // Default hint collection is inert: there is deliberately no guessed host authority or paid provider adapter.
+  const supervisor = o.supervisor ?? supervisorWakeups(() => undefined);
   const out: TickResult = { result: 'done', passes: [], skipped: {}, errors: {}, refreshed: {} };
   const secs = (from: number) => `${Math.round((mono() - from) / 1000)}s`;
   const stop = (result: TickResult['result'], line: string): TickResult => { log(line); return { ...out, result }; };
@@ -207,11 +215,19 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
     if (s.state === 'unknown') return stop('unknown', `tick skipped: scheduler state unknown (${s.reason})`);
     return null;
   };
+  const handoff = (blocked = false) => {
+    try { supervisor.handoff(blocked ? AbortSignal.abort() : signal); }
+    catch (e) { log(`supervisor handoff held: ${String(e).split('\n')[0]}`); }
+  };
+  const enqueue = (root: string, kind: Parameters<SupervisorTickHook['enqueue']>[1]) => {
+    try { supervisor.enqueue(root, kind); }
+    catch (e) { log(`supervisor wake held: ${String(e).split('\n')[0]}`); }
+  };
   const early = await gate();
-  if (early) return early;
+  if (early) { handoff(true); return early; }
   const lock = acquireTickLock(p);
   if ('busy' in lock) return stop('busy', `tick skipped: ${lock.busy}`);
-  let keepLock = false;
+  let keepLock = false, handoffAllowed = false;
   const startedMono = mono();
   // Timing history is best effort: a malformed file or failed write is logged and never stops the tick.
   const history = (...entries: HistoryEntry[]) => { try { appendHistory(p, entries); } catch (e) { log(`timing history not recorded: ${(e as Error).message}`); } };
@@ -248,6 +264,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       // Read again for each project: an opt-out or removal during the tick applies from here on.
       let project = readRegistry(p).projects.find(x => x.root === root);
       if (!project) continue;
+      enqueue(root, 'checkpoint');
       const attempt = wall().toISOString();
       const record = (s: ProjectState) => { state.projects[root] = s; writeTickState(p, state); };
       const skip = (reason: string) => { log(`skip ${project.name}: ${reason}`); out.skipped[project.name] = reason; record({ attemptedAt: attempt, result: 'skipped', reason }); };
@@ -355,6 +372,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       writeTickState(p, state);
       history(passEntry(root, project.name, entry));
       lock.clearPass();
+      if (!result.cancelled) enqueue(root, result.code === 0 && !result.error ? 'pass-completed' : 'run-failure');
       out.passes.push(project.name);
       log(`pass ${project.name}: ${result.error ? `failed: ${result.error}` : `exit ${result.code}`} after ${secs(from)}${result.cancelled ? ' (cancelled)' : ''}${result.leftover ? ' (leftover processes terminated)' : ''}`);
       // Cleanup and jam confirmation, after the pass is recorded so their time is not the pass's. Only a completed pass
@@ -371,6 +389,7 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
       rmSync(report, { force: true });
       if (result.cancelled) cancelled = true;
     }
+    handoffAllowed = true;
     const interrupted = cancelled || signal.aborted;
     if (!interrupted && out.result === 'done' && Object.keys(out.errors).length) out.result = 'failed';
     const ended = tickEntry(interrupted ? 'interrupted' : out.result as TickHistory['result']);
@@ -381,7 +400,10 @@ export async function tick(p: Paths, o: TickOptions): Promise<TickResult> {
     if (out.result !== 'done' && out.result !== 'failed') return stop(out.result, `tick stopped after ${secs(startedMono)}: scheduler is no longer on`);
     log(`tick end: ${out.passes.length} passes, ${Object.keys(out.refreshed).length} refreshed, ${Object.keys(out.skipped).length} skipped, ${Object.keys(out.errors).length} failed, ${secs(startedMono)}`);
     return out;
-  } finally { if (!keepLock) lock.release(); }
+  } finally {
+    if (!keepLock) lock.release();
+    handoff(!handoffAllowed || keepLock || signal.aborted || ['off','unknown'].includes(out.result));
+  }
 }
 
 type PassOutcome = { code?: number; error?: string; unconfirmed?: number; cancelled?: boolean; leftover?: { escalated: boolean } };

@@ -4,6 +4,16 @@
 // project visits and their rotation, the read-only refresh of projects not opted in (#94), `factory clean` after each completed pass (#97), state file, bounded timing history, exit codes and lock, and the unit directives. The service manager is the only global
 // state: no test reads or writes a local on/off flag. Disposable HOME and Git repos only.
 import { test } from 'node:test';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import type { ChildProcess } from 'node:child_process';
+import { supervisorWakeups } from '../src/supervisor-schedule.mts';
+import type { SupervisorHost, SupervisorWakeResult } from '../src/supervisor-schedule.mts';
+import type { DiagnosisBoundary } from '../src/supervisor-worker.mts';
+import type { ReviewBoundary } from '../src/supervisor-review.mts';
+import { readSupervisor, commitSupervisor } from '../src/supervisor-state.mts';
+import { reviewFixture, AT } from './supervisor-fixture.mts';
+import { modelForRole } from '../../orchestrator/model-policy.mts';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -538,4 +548,81 @@ test('each completed pass is followed by factory clean for its project; a failed
   assert.equal(broken.result, 'done', 'a failing clean never fails the tick');
   assert.ok(lines.includes('clean a: failed: boom'));
   assert.equal(has(second.name), true);
+});
+
+test('tick hands off two isolated supervisors after unlock; late owned review is fenced and restart reuses wait', async t => {
+  const { p, sched, roots: [a, b] } = await armed(t, ['a', 'b']);
+  for (const root of [a, b]) setProjectSchedule(p, root, true);
+  const stateDir = join(p.state, 'supervisor-lifecycle');
+  const auths = new Map([a, b].map(root => [root, reviewFixture(root)]));
+  for (const { authorization: x } of auths.values()) {
+    commitSupervisor(stateDir, x.snapshot.project, 0, { id: `pilot:${x.snapshot.project.root}`, kind: 'control', at: AT, mode: 'act', pilot: true, actor: 'uid:1000:fixture' });
+  }
+  const child = () => Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), pid: 98765 }) as unknown as ChildProcess;
+  const complete = (c: ChildProcess, value: unknown) => { c.stdout!.emit('data', Buffer.from(JSON.stringify(value))); c.emit('exit', 0); c.emit('close', 0); };
+  const results: SupervisorWakeResult[] = [], terminated: ChildProcess[] = [];
+  let starts = 0, reviewChild: ChildProcess, reviewInput: any;
+  let reviewed!: () => void, waited!: () => void;
+  const reviewStarted = new Promise<void>(done => reviewed = done), bFinished = new Promise<void>(done => waited = done);
+  const bindings = new Map<string, SupervisorHost>();
+  for (const [root, { authorization: x, input }] of auths) {
+    const boundary: DiagnosisBoundary = {
+      model: modelForRole(x.family, 'supervisor').model, reservation: { tokens: 100, cost: 100 }, pricingKnown: true, accountingKnown: true, enforceable: true,
+      start(_cmd, _args, o) {
+        assert.equal(existsSync(p.tickLock), false, 'no process is started under the tick lock'); starts++;
+        const c = child(), context = JSON.parse(o.input.slice(o.input.lastIndexOf('\n\n{') + 2));
+        assert.equal(context.snapshot.project.root, root);
+        const action = root === a ? { kind: 'gate-change', proposal: input.proposal } : { kind: 'wait', expectation: 'External CI completes' };
+        queueMicrotask(() => complete(c, { version: 1, incidentId: context.incidentId, basisHash: context.basisHash,
+          classification: 'evidence-mechanism', rationale: 'Preserve original evidence and saved work', alternatives: ['Await owner evidence'], action }));
+        return c;
+      }, async terminate(c) { terminated.push(c); return true; }, usage: () => ({ tokens: 20, cost: 20 }),
+    };
+    const reviewBoundary: ReviewBoundary = { ...boundary, model: modelForRole(x.family, 'gateReview').model,
+      start(_cmd, _args, o) {
+        assert.equal(existsSync(p.tickLock), false); starts++; reviewChild = child();
+        reviewInput = JSON.parse(o.input.slice(o.input.lastIndexOf('\n\n{') + 2));
+        assert.equal(reviewInput.input.snapshot.project.root, a); reviewed(); return reviewChild;
+      } };
+    bindings.set(root, { diagnosis: { stateDir, current: () => structuredClone(x), boundary, now: () => Date.parse(AT), timer: () => () => {} },
+      // Offline fixture owns no implementation or recovery leases. A real mixed-resource adapter is NOT established here.
+      admissionHold: () => undefined,
+      review: () => ({ stateDir, current: () => ({ ...structuredClone(x), input: structuredClone(input), proposer: 'fixture-diagnosis', notification: { mode: 'act', authorized: false } }),
+        boundary: reviewBoundary, now: () => Date.parse(AT), timer: () => () => {} }),
+      application: () => { throw Error('cancelled review cannot reach application or proof'); },
+    });
+  }
+  const hook = supervisorWakeups(root => bindings.get(root), result => { results.push(result); if (result.root === b) waited(); });
+  const visited: string[] = [];
+  const tickOptions = { backend: sched, log: () => {}, supervisor: hook, maintenance: () => {}, clean: () => {}, recovery: async () => {},
+    pass: async (ctx: { root: string }) => { assert.equal(existsSync(p.tickLock), true); visited.push(ctx.root); return 0; } };
+  const result = await tick(p, tickOptions);
+  assert.equal(result.result, 'done'); assert.deepEqual(visited, [a, b]);
+  await reviewStarted; await bFinished;
+  assert.equal(results.some(r => r.root === a), false, 'a pending review never delays the other project or tick');
+  const bBefore = readSupervisor(stateDir, auths.get(b)!.authorization.snapshot.project);
+  const project = auths.get(a)!.authorization.snapshot.project, before = readSupervisor(stateDir, project);
+  commitSupervisor(stateDir, project, before.revision, { id: 'operator-stop', kind: 'control', at: AT, mode: 'stopped', pilot: false, actor: 'uid:1000:fixture' });
+  // The next short maintenance handoff observes the durable fence and aborts only the retained live worker handle.
+  hook.handoff(new AbortController().signal);
+  assert.equal(hook.cancel(a), true); assert.equal(hook.cancel('/foreign'), false);
+  complete(reviewChild!, { version: 1, inputHash: reviewInput.inputHash, proposalId: reviewInput.proposalId,
+    ...reviewInput.identity, disposition: 'approve', reason: 'Late result must never authorize an artifact' });
+  await hook.settled();
+  assert.ok(terminated.includes(reviewChild!));
+  const stopped = readSupervisor(stateDir, project);
+  assert.deepEqual(stopped.intents, {}); assert.equal(Object.values(stopped.reviews).some(r => r.disposition === 'approve'), false);
+  assert.equal(stopped.control!.mode, 'stopped'); assert.equal(Object.keys(stopped.reservations).length, 2);
+  // A new lifecycle object has no private model memory. The journal coalesces unchanged waits after restart.
+  const restartResults: SupervisorWakeResult[] = [];
+  const restarted = supervisorWakeups(root => bindings.get(root), r => restartResults.push(r));
+  auths.get(b)!.authorization.snapshot.observedAt = '2026-11-17T12:01:00.000Z';
+  const startCount = starts;
+  await tick(p, { ...tickOptions, supervisor: restarted }); await restarted.settled();
+  assert.deepEqual(visited, [a, b, b, a], 'the existing rotation is unchanged');
+  assert.equal(starts, startCount, 'stopped project and unchanged wait spend no new model calls');
+  assert.deepEqual(readSupervisor(stateDir, auths.get(b)!.authorization.snapshot.project).charged, bBefore.charged);
+  assert.ok(restartResults.some(r => r.root === b && r.state === 'completed' && r.diagnosis.state === 'reused'));
+  assert.ok(restartResults.some(r => r.root === a && r.state === 'held'));
+  assert.equal(existsSync(p.tickLock), false);
 });
