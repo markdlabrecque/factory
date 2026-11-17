@@ -8,7 +8,58 @@ The companion [machine-readable index](supervisor-acceptance.json) pins the immu
 T12 baseline; current T13 final-head gates belong in the PR/epic delivery ledger,
 not an invented self-hash in this document.
 
-## Acceptance decision and evidence boundaries
+## Current status and next gate — 2026-11-17
+
+**Source/offline delivery is complete.** [Epic 257](https://github.com/markdlabrecque/factory/issues/257)
+and all fourteen child tasks were completed through separate reviewed PRs into
+`develop`. The final source acceptance merge is
+[`85c61ad11d35512cde8cacfd41e23710d7f17429`](https://github.com/markdlabrecque/factory/commit/85c61ad11d35512cde8cacfd41e23710d7f17429)
+via [PR 285](https://github.com/markdlabrecque/factory/pull/285). Its final delivery
+ledger records 1,084 mandatory-suite passes, 12 separate lifecycle passes,
+eight documentation checks, independent review and six green hosted checks on
+the reviewed head. These are completed source gates, not live-provider evidence.
+
+Subsequent, separately approved local work installed the accepted source from
+`/home/mark/Projects/factory/code`; the installed and source workflow digests
+matched, and local/Tailscale Board HTTP checks passed. This is one local operational
+observation, not general installed compatibility, rollout or pilot acceptance.
+The installed host/selected runtime used for evaluation is
+`6f123be45e5393170bc681beb0e7dd6bdf9c587119ef706359b26895bfe18efe`, distinct from
+historical fixture identities below.
+
+The [private evaluation ledger](https://github.com/markdlabrecque/factory-advisory-eval/blob/main/EVALUATION.md)
+records a genuine managed OpenAI/Pi run in a separate tracker namespace. It stopped
+on the deliberately missing operator-approved original, preserved work and retained
+real execution/custody/failure evidence. Real installed host preparation, without
+invoking the provider boundary, accepted that saved run and finite policy with no
+preflight hold and no supervisor reservation or exclusion acquired.
+**Real advisory generation, its usage/settlement, useful advice and live unchanged
+reuse remain NOT RUN.** The real implementation call does not prove that advisory
+provider boundary.
+
+The current goal is [ticket 286](https://github.com/markdlabrecque/factory/issues/286):
+prove and, if compatible, implement the existing OpenAI provider's Pi login-backed
+authentication while retaining finite remote request/accounting and ownership
+guarantees. The pinned Pi serializer omits output-cap/cache fields for ChatGPT
+login requests; accepting a bearer token alone is not sufficient. The chosen next
+step is supported login-backed source work, not obtaining a separate API key.
+After reviewed delivery and controlled installation, recheck the retained run,
+policy, controls and truthful rollout attestation before resuming the approved
+one-call evaluation. Changed profile/spend premises require owner review; no
+ambiguous replay, new allowance or implementation rerun is implied.
+
+At the 2026-11-17 22:13 UTC handoff, the global scheduler timer was enabled/active;
+Factory, the evaluation project, Convoke and R2 were paused, and Island Health was
+not opted in. This is a dated observation, not a permanent configuration or an
+instruction to enable/unpause anything. Re-read current controls before any work.
+Broader autonomy, remedies and the original action acceptance remain separate.
+
+## Historical acceptance checkpoint and evidence boundaries
+
+The following T12/T13 checkpoint describes evidence before the final PR 285 merge.
+Its pending source-gate wording is historical; the completed source disposition and
+current operational gates are recorded above. Original artifacts and results are
+retained without promoting synthetic/offline evidence to live-provider proof.
 
 Baseline: develop merge `7734ba95c8358b49db87733be8a2d477775d8549`, reviewed
 head `f9ef921e74a60aa81fc8deb5b8bf0583b4910dbf`, base
@@ -32,8 +83,9 @@ Local T13 verification on this documentation working tree passed: focused superv
 115, documentation 8, mandatory shards 295/239/346/204 = 1084 and separate lifecycle
 12; logs are `271-focused.log`, `271-docs.log`, `271-shard-{1,2,3,4}.log` and
 `271-lifecycle.log` under the evidence root. They do not assert a future final SHA,
-hosted checks or independent review. Until those gates are finalized,
-release/merge acceptance is **BLOCKED**. No child closure automatically
+hosted checks or independent review. At this pre-merge checkpoint,
+release/merge acceptance was **BLOCKED**; PR 285 subsequently finalized those
+source gates as recorded above. No child closure automatically
 establishes epic acceptance: explicitly compare this matrix and the epic's public
 CLI/Board, ownership, accounting, complete-original and no-effects requirements.
 
@@ -67,7 +119,7 @@ the retained artifacts. Actual local execution may consume synthetic inputs;
 | Selected bundle/dependency identity | `266-index.md`, journeys' manifests/protected leases; four archive hashes in JSON | No-op installer not SDK proof; actual loader is proof. Installed compatibility NOT RUN |
 | Public CLI/Board advice and stop | `270-index.json`, journeys A/B; A fresh status/explain/Board/reuse, B durable Human after fsync/controller loss | Exactly two copied journeys, not direct worker calls; Board production projection, not browser E2E |
 | No effects, work preserved | journeys' dirty/index/refs/worktree/raw-run comparisons and rejecting program traps; `264-index.json` | Normal producer sandbox/agent/Docker synthetic. No dispatch/recovery/review/gate edit/delivery/notification authorized |
-| Current T13 release gates | Current logs/results to be finalized in PR/epic ledger per TESTING.md | **BLOCKED** until exact-head mandatory/lifecycle/independent/hosted/latest-base/merge gates recorded |
+| Historical T13 release checkpoint | Original logs/results and final [PR 285 ledger](https://github.com/markdlabrecque/factory/pull/285) per TESTING.md | Pending at document creation; source gates finalized in PR 285, not live-provider acceptance |
 | T14 real provider acceptance and useful diagnosis | **NOT RUN / BLOCKED** pending separate explicit paid operational approval and eligible host | Out of source epic scope; synthetic typed wait/SSE JSON is not useful model judgment |
 
 A: one request, known input 25/output 10/reasoning 8/total 35, derived upper charge
