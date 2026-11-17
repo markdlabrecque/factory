@@ -117,6 +117,14 @@ unsupported family is held before new paid acquisition; exact retained reuse nee
 no new paid call or key. The private host/project cumulative ceilings, owned worker,
 one-use send gate, receipt settlement and exact cleanup/reconciliation are unchanged.
 
+Pi's existing OpenAI **Sign in with ChatGPT** login is not supported for this
+bounded advisory command yet. The [pinned-source/offline investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
+shows that its serializer omits the approved remote output cap and explicit cache
+policy. There is no login-auth flag or automatic fallback; do not export a bearer
+into `OPENAI_API_KEY` to bypass the hold. Supported upstream request bounds and a
+reviewed subscription-accounting policy are prerequisites, not a request to obtain
+a separate key or rerun the saved implementation.
+
 **Default held rollout prerequisite:** new paid acquisition reads the private operator
 record `Paths.config/supervisor-rollout.json`. Absence or any unsafe/invalid binding holds
 before exclusion/pins. This is expiring **human attestation**, not automated proof that

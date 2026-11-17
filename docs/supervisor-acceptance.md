@@ -43,7 +43,16 @@ authentication while retaining finite remote request/accounting and ownership
 guarantees. The pinned Pi serializer omits output-cap/cache fields for ChatGPT
 login requests; accepting a bearer token alone is not sufficient. The chosen next
 step is supported login-backed source work, not obtaining a separate API key.
-After reviewed delivery and controlled installation, recheck the retained run,
+The [bounded source/offline investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
+now records **BLOCKED**: the exact serializer omits the approved 4,096-token cap
+and explicit cache policy, and the current final payload validator refuses the
+synthetic login-shaped request before transmission. No auth integration is shipped;
+no live login request, usage or cleanup was tested. Upstream support for an accepted
+remote cap and compatible input/cache/service/raw-usage semantics, plus owner review
+of subscription accounting, must precede implementation and any evaluation resumption.
+The ticket stays open; this finding does not change historical acceptance JSON,
+consume/reset an operational allowance or establish working support.
+After supported implementation, reviewed delivery and controlled installation, recheck the retained run,
 policy, controls and truthful rollout attestation before resuming the approved
 one-call evaluation. Changed profile/spend premises require owner review; no
 ambiguous replay, new allowance or implementation rerun is implied.

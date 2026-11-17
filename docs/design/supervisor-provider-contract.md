@@ -7,6 +7,19 @@ This selects and implements a supported request surface, **not a complete `Diagn
 public diagnose command, paid permission or operational acceptance**. Existing paid
 launch holds remain. The fixed role is `openai/gpt-6.1-terra`, high thinking.
 
+## Login-backed capability hold
+
+The [ticket 286 investigation](../research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
+proves offline that this pinned serializer's OpenAI Sign in with ChatGPT branch
+omits the approved `max_output_tokens: 4096` and explicit cache mode, and replaces
+the configuration-update sequence with top-level high reasoning. The current
+payload gate correctly refuses it before transport. No runtime auth selector,
+credential discovery, fallback, dependency change or relaxed payload contract is
+introduced. A supported login-specific remote ceiling and compatible usage/cache/
+accounting contract remain prerequisites; a bearer-export interface alone is not
+sufficient. The API-key contract below remains unchanged. Subscription usage is
+not an API invoice, and source findings do not unblock the live evaluation.
+
 ## Selected supported surface
 
 Use the **direct Pi-AI OpenAI Responses SDK**, in a fresh trusted owned child, not

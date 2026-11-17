@@ -26,6 +26,22 @@ test('pure worker environment and frozen input preconditions refuse drift before
   }
 });
 
+test('pinned ChatGPT-login serializer lacks the approved remote cap/cache contract and is refused before transmission', () => {
+  const evidence = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./supervisor-provider-fixture.mts', import.meta.url)),
+    '--login-serialization-spike'], { timeout: 15000, maxBuffer: 1024 * 1024,
+    env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C' }, encoding: 'utf8' }));
+  assert.equal(evidence.transmissions, 0);
+  assert.match(evidence.refusal, /unsupported serialized request/);
+  const payload = evidence.payload;
+  assert.equal(payload.model, 'gpt-6.1-terra');
+  for (const field of ['max_output_tokens', 'prompt_cache_options', 'prompt_cache_retention', 'prompt_cache_key'])
+    assert.equal(Object.hasOwn(payload, field), false, `${field} is absent from actual serialized login payload`);
+  assert.deepEqual(payload.reasoning, { effort: 'high', summary: 'auto' });
+  assert.equal(payload.input.some((item: any) => item.type === 'configuration_update'), false);
+  assert.equal(payload.service_tier, 'default'); assert.equal(payload.truncation, 'disabled');
+  assert.equal(payload.store, false); assert.equal(payload.stream, true);
+});
+
 test('copied pinned Pi adapter consumes real journal permission before one bounded request and exposes raw terminal usage', () => {
   // Bound each independent fresh request handshake, not the aggregate nine-case matrix.
   // The unchanged standard test/shard bounds still cap the complete integration.
