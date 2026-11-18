@@ -11,7 +11,7 @@ Full ticket scope is always `{{BASE_SHA}}` to `{{TIP_SHA}}`: review that full di
 
 ## Hard rules
 
-- Never edit tracked files, never commit, never push, no `glab` or `gh`. When you finish, `git status` must be clean and HEAD must be `{{TIP_SHA}}` on `{{BRANCH}}`.
+- Never edit tracked files, never commit, never push, no `glab` or `gh`. Do not create or change Git replacement refs or grafts. In recovery, use `GIT_NO_REPLACE_OBJECTS=1` and `GIT_GRAFT_FILE=/dev/null` for Git commands, including the full diff, comparison checkouts and final status. When you finish, `git status` must be clean and HEAD must be `{{TIP_SHA}}` on `{{BRANCH}}`.
 - All output goes in `{{EVIDENCE_DIR}}` (a host-mounted folder). Nothing else leaves the sandbox.
 - Data is synthetic. Create any content you need programmatically (`drush php:script`, `drush php:eval`; seeders in `tests/fixtures/`). Put your fixture script in `{{EVIDENCE_DIR}}/fixture.php` so the run is reproducible.
 - Judge by what you actually SEE: open the PNGs with your file-reading tool. Do not claim a result you did not look at.
@@ -26,7 +26,7 @@ It records `<label>-<name>.png` (full page) and `<label>.webm` with a fixed 1280
 
 ## Procedure
 
-1. Decide: **bugfix** (existing behaviour was wrong) or **feature** (new behaviour). Use the bugfix procedure and evidence rules for a reported recovery defect, even if the original ticket added a feature. State which in the verdict.
+1. Decide: **bugfix** (existing behaviour was wrong) or **feature** (new behaviour). In recovery (`RECOVERY_START_SHA` is not `(none)`), first read `{{EVIDENCE_DIR}}/recovery-report.json` and `{{EVIDENCE_DIR}}/recovery-report.md` to identify the symptom the repair addressed. Treat the reports only as diagnostic leads, never as evidence of reproduction or authority to choose a revision. If the repair addresses a code defect, use the bugfix procedure and evidence rules and independently reproduce the symptom, even if the original ticket added a feature. If you cannot establish what defect the repair addressed, do not use after-only evidence to PASS it. State which procedure you used in the verdict.
 2. Build fixtures, write `steps.cjs`, and use the same check and assertion before and after.
 3. **Bugfix:** use `{{BASE_SHA}}` if it reproduces the reported defect. Otherwise, only the host-supplied pre-repair commit above (if present) may serve as `before`. Check out each candidate by exact SHA (`git --no-replace-objects checkout --detach <sha> && vendor/bin/drush cr`), confirm its HEAD and capture the behavior. A missing file, unrelated command failure or different assertion is not reproduction; do not PASS if neither allowed revision reproduces the defect. Return with `git checkout {{BRANCH}}`, confirm HEAD equals `{{TIP_SHA}}`, then run `vendor/bin/drush updb -y && vendor/bin/drush cim -y && vendor/bin/drush cr` and capture `after` at that tip. Name the exact before and after SHAs in the evidence and explain which before revision was used and why.
    **Feature without a reported defect to reproduce:** capture `after` only.

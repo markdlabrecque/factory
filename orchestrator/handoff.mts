@@ -24,8 +24,8 @@ import type { Delivered, Delivery } from "./tracker.mts";
 // The hand-off every branch goes through before it leaves the host: the independent verifier, then evidence posted to
 // the ticket, then on PASS push and normal delivery (tracker.deliver: an MR on GitLab, a PR merged after CI on GitHub
 // with MERGE.auto). Blocked merge gates leave the run waiting for a person. main.mts calls it after its implementer; a recovery run (slice four) calls the same functions after
-// its repair agent. Only repair verification may also compare behavior against the validated attempt start commit;
-// the historical base, verifier immutability check, PASS gate, push and delivery limits remain unchanged. Two things protect a run
+// its repair agent. Recovery can compare behavior against the validated attempt start, but refuses Git replacement
+// refs so proof still names the actual tree. The historical base, PASS gate, push and delivery limits remain unchanged. Two things protect a run
 // that reuses a ticket's record and evidence folder (a recovery attempt on a preserved branch): beginVerification
 // removes an earlier verdict.md and clears the record's verdict/PR before the verifier starts, so only this run's
 // verdict can count and a stale PASS never reads as delivery (cli/src/recovery-state.mts deliveryMarker); and the PR
@@ -75,9 +75,19 @@ export function beginVerification(host: Pick<Host, "setStage">, iid: string, evi
 }
 
 const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const rawGit = (sandbox: VerifierSandbox, args: string) => sandbox.exec(`GIT_GRAFT_FILE=/dev/null git --no-replace-objects ${args}`);
+
+async function replacementHold(sandbox: VerifierSandbox): Promise<string | undefined> {
+  // A replacement can change the checked tree without changing HEAD or making ordinary status dirty.
+  const refs = await rawGit(sandbox, `for-each-ref --count=1 --format='%(refname)' refs/replace`);
+  if (refs.exitCode !== 0) return 'Could not rule out Git replacement refs in the recovery workspace';
+  if (refs.stdout.trim()) return 'Git replacement refs are not allowed in the recovery workspace';
+}
 
 async function recoveryComparisonHold(sandbox: VerifierSandbox, baseline: string, start: string, tip: string): Promise<string | undefined> {
-  const git = (args: string) => sandbox.exec(`GIT_GRAFT_FILE=/dev/null git --no-replace-objects ${args}`);
+  const git = (args: string) => rawGit(sandbox, args);
+  const replacement = await replacementHold(sandbox);
+  if (replacement) return replacement;
   for (const [role, sha] of [['implementation baseline', baseline], ['pre-repair start', start], ['repaired tip', tip]]) {
     if (!objectId.test(sha)) return `Invalid recorded ${role} SHA; verifier not started`;
     const object = await git(`rev-parse --verify ${sha}^{commit}`);
@@ -89,6 +99,8 @@ async function recoveryComparisonHold(sandbox: VerifierSandbox, baseline: string
   }
   const head = await git('rev-parse --verify HEAD');
   if (head.exitCode !== 0 || head.stdout.trim() !== tip) return 'Verifier workspace HEAD is not the exact repaired tip; verifier not started';
+  const status = await git('status --porcelain --untracked-files=all');
+  if (status.exitCode !== 0 || status.stdout.trim()) return 'Verifier workspace is not clean against the raw repaired tip; verifier not started';
 }
 
 /** Run the independent verifier on `tip` in the run's sandbox. Returns why the result can't be used, or undefined. */
@@ -128,9 +140,14 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
     completionSignal: "<promise>COMPLETE</promise>",
     name: "verifier",
   });
-  const headResult = await sandbox.exec('git rev-parse HEAD');
-  const dirtyResult = await sandbox.exec('git status --porcelain');
-  if ((headResult.exitCode ?? 0) !== 0 || (dirtyResult.exitCode ?? 0) !== 0) return 'Verifier immutability checks could not be completed; not posting or pushing';
+  if (comparison) {
+    const hold = await replacementHold(sandbox);
+    if (hold) return `${hold}; not posting or pushing`;
+  }
+  const headResult = comparison ? await rawGit(sandbox, 'rev-parse --verify HEAD') : await sandbox.exec('git rev-parse HEAD');
+  const dirtyResult = comparison ? await rawGit(sandbox, 'status --porcelain --untracked-files=all') : await sandbox.exec('git status --porcelain');
+  const ok = (result: { exitCode?: number }) => result.exitCode === 0 || (!comparison && result.exitCode === undefined);
+  if (!ok(headResult) || !ok(dirtyResult)) return 'Verifier immutability checks could not be completed; not posting or pushing';
   const after = headResult.stdout.trim();
   const dirty = dirtyResult.stdout.trim();
   if (ver.commits.length || after !== o.tip || dirty) {

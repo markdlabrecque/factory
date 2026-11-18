@@ -247,6 +247,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   assert.equal(record.tip, tip);
   assert.ok(prompts[1].includes(`Full ticket scope is always \`${baseline}\` to \`${tip}\``));
   assert.ok(prompts[1].includes(`commit for behavioral comparison only is \`${savedStart}\``));
+  assert.match(prompts[1], /first read `\/home\/agent\/evidence\/7\/recovery-report\.json` and `\/home\/agent\/evidence\/7\/recovery-report\.md`/);
   assert.equal(git(origin, "rev-parse", "7-fix-login"), tip, "the exact verified tip was pushed");
   const gh = readFileSync(join(fake, "gh.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).args as string[]);
   // #153: the REST merge API preserves the same exact-head guard as initial/continued delivery.

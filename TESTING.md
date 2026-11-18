@@ -833,9 +833,11 @@ Recovery entrypoint/runner tests exercise the same proof lifecycle with isolated
 private Git metadata and teardown. The runner's fixture verifier executes the same
 zero-count assertion on real disposable commits: a missing module on the original
 base is not the defect, the saved start can reproduce it, and the repaired tip passes.
-The runner also covers original-base reproduction and non-delivery on INCONCLUSIVE;
-handoff cases refuse missing, non-exact, unrelated or mismatched Git identities.
-The entrypoint checks the packaged prompt and original proof identity. For the
+The runner gets the symptom from the repair report in a feature-shaped ticket and
+also covers original-base reproduction and non-delivery on INCONCLUSIVE. A real
+Git fixture confirms replacement refs left by either agent cannot publish proof
+or deliver a substituted tree. Handoff cases refuse missing, non-exact, unrelated
+or mismatched Git identities. The entrypoint checks the packaged prompt and original proof identity. For the
 smallest changed-boundary run:
 
 ```sh

@@ -100,6 +100,7 @@ for (const [fault, message] of [
       exec: async cmd => {
         if (cmd.startsWith('command -v playwright ')) return { exitCode: 0, stdout: 'browser preflight OK\n' };
         const git = 'GIT_GRAFT_FILE=/dev/null git --no-replace-objects ';
+        if (cmd === `${git}for-each-ref --count=1 --format='%(refname)' refs/replace`) return { exitCode: 0, stdout: '' };
         if (cmd === `${git}rev-parse --verify HEAD`) return { exitCode: 0, stdout: fault === 'wrong HEAD' ? start : tip };
         for (const sha of [baseline, start, tip]) {
           if (cmd !== `${git}rev-parse --verify ${sha}^{commit}`) continue;

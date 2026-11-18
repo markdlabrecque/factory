@@ -162,7 +162,7 @@ function fixture(t: TestContext, s: Scenario = {}) {
     root, record, attempt: { id: ID, startSha }, model: REPAIR_MODEL, title: "Fix login", baseSha,
     proof: { state: join(home, 'state'), executionId: 'execution', requirementsHash: 'c'.repeat(64) },
     provenance: async () => fixtureProvenance, promptArgs: {
-      ISSUE_IID: "7", ISSUE_TITLE: "Fix login", TICKET: "ticket text", BASE_BRANCH: "main", BASE_SHA: baseSha, BRANCH: "7-fix-login",
+      ISSUE_IID: "7", ISSUE_TITLE: "Fix login", TICKET: s.behavior ? 'Add count validation for login.' : 'ticket text', BASE_BRANCH: "main", BASE_SHA: baseSha, BRANCH: "7-fix-login",
       EVIDENCE_DIR: "/home/agent/evidence/7", CATALOGUE: "(none)", ATTEMPT: "1", ATTEMPT_ID: ID, REPAIR_MINUTES: "15",
       RECOVERY_START_SHA: 'untrusted-prompt-value',
     },
@@ -285,16 +285,19 @@ for (const comparison of ['saved start', 'original base', 'neither'] as const) {
     const f: Fixture = fixture(t, {
       clean: true,
       behavior: { base: comparison === 'original base' ? false : undefined, start: comparison === 'neither' },
-      repair: `printf 'export const accepts = count => count >= 0;\\n' > behavior.mjs && ${COMMIT} && ${writeReport()}`,
+      repair: `printf 'export const accepts = count => count >= 0;\\n' > behavior.mjs && ${COMMIT} && ${writeReport({ cause: 'count 0 was rejected' })}`,
       verify: prompt => {
         const [, baseline, tip] = /Full ticket scope is always `([0-9a-f]+)` to `([0-9a-f]+)`/.exec(prompt)!;
         const [, start] = /commit for behavioral comparison only is `([0-9a-f]+)`/.exec(prompt)!;
         assert.equal(baseline, f.baseSha);
         assert.equal(start, f.startSha);
         assert.equal(tip, f.rec().tip);
-        // Independent fixture verifier: a PASS requires a real red assertion and a green rerun, not the repair report.
+        assert.match(prompt, /first read `\/home\/agent\/evidence\/7\/recovery-report\.json` and `\/home\/agent\/evidence\/7\/recovery-report\.md`/);
+        // The feature ticket doesn't name the symptom. Get the input from the report, but prove it with real checks.
+        const { cause } = JSON.parse(readFileSync(join(f.rec().evidence, 'recovery-report.json'), 'utf8'));
+        const [, count] = /^count (\d+) was rejected$/.exec(cause)!;
         return `set -eu
-printf '%s\\n' 'import assert from "node:assert/strict"; const { accepts } = await import(process.cwd() + "/behavior.mjs"); assert.equal(accepts(0), true); console.log("zero accepted");' > "$EVIDENCE/check.mjs"
+printf '%s\\n' 'import assert from "node:assert/strict"; const { accepts } = await import(process.cwd() + "/behavior.mjs"); assert.equal(accepts(${count}), true); console.log("zero accepted");' > "$EVIDENCE/check.mjs"
 probe() {
   git rev-parse HEAD > "$EVIDENCE/$1.txt"
   node "$EVIDENCE/check.mjs" >> "$EVIDENCE/$1.txt" 2>&1
@@ -331,6 +334,30 @@ printf '%s' '${JSON.stringify(report)}' > "$EVIDENCE/verification.json"`;
       branch: '7-fix-login', base: 'main', baseline: f.baseSha, tip: tip!, requirementsHash: 'c'.repeat(64) }, proofId);
     assert.match(readFileSync(join(root, 'verdict.md'), 'utf8'), new RegExp(`Compared ${before} .* to ${tip}`));
     assert.deepEqual(f.delivered, [{ sha: tip, branch: '7-fix-login' }]);
+  });
+}
+
+for (const phase of ['repair', 'verifier'] as const) {
+  test(`a Git replacement left by the ${phase} cannot publish proof or deliver a substituted tree`, async t => {
+    // Give the replacement the same parent as the actual tip but the pre-repair tree.
+    const replace = `substitute=$(git -c user.name=r -c user.email=r@r commit-tree HEAD^^{tree} -p HEAD^ -m substitute) && git replace HEAD "$substitute" && git reset --hard HEAD && test -z "$(git status --porcelain)"`;
+    const f = fixture(t, { clean: true,
+      repair: [COMMIT, phase === 'repair' ? replace : 'true', writeReport()].join(' && '),
+      verify: phase === 'verifier' ? `${replace} && ${PASS}` : PASS,
+    });
+    const refs = f.refs();
+    const result = await f.run();
+    const { gitDir, tip, evidence } = result.record;
+    assert.equal(result.outcome, 'failed', result.reason);
+    const log = join(evidence, `${phase}.log`);
+    assert.match(result.reason, /Git replacement refs are not allowed/, existsSync(log) ? readFileSync(log, 'utf8') : undefined);
+    assert.deepEqual(f.agentRuns, phase === 'repair' ? ['repair'] : ['repair', 'verifier']);
+    const gitArgs = ['--git-dir', gitDir];
+    assert.equal(git(f.root, ...gitArgs, 'rev-parse', 'HEAD'), tip);
+    assert.notEqual(git(f.root, ...gitArgs, 'rev-parse', 'HEAD^{tree}'), git(f.root, '--no-replace-objects', ...gitArgs, 'rev-parse', 'HEAD^{tree}'));
+    assert.equal(existsSync(join(f.home, 'state/verification')), false);
+    assert.deepEqual(f.comments, []);
+    assertPreserved(f, { refs });
   });
 }
 
