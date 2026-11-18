@@ -1,4 +1,4 @@
-// Preparation holds are projected as observations, never as launch permission or a budget renewal.
+// Preparation and triage human holds are projected as observations, never as launch permission or a budget renewal.
 // Local recovery maintenance and read-only follow-up projection. Settlement retains exact-container and owner fencing.
 // Observations describe saved work, not permission to launch: only successful scheduled passes can confirm/admit repair.
 // No tracker, dispatcher, refresh, budget renewal, project edit or agent launch happens here. Status uses the same
@@ -13,7 +13,7 @@ import { validDelivery } from '../../board/delivery.mts';
 import type { Paths } from './paths.mts';
 import { settleRecovery } from './recovery-run.mts';
 import type { Settled } from './recovery-run.mts';
-import { mutateRecovery, readRecovery, remainingAttempts, runningAttempt } from './recovery-state.mts';
+import { describeTriage, mutateRecovery, readRecovery, remainingAttempts, runningAttempt } from './recovery-state.mts';
 import type { Followup, RecoveryState } from './recovery-state.mts';
 
 export type FollowupFacts = { recovery: RecoveryState; runs: RunState[]; claims: AdmissionClaim[];
@@ -43,8 +43,12 @@ export function projectFollowups(f: FollowupFacts): Record<string, Followup> {
     const preparation=observedPreparation && observedPreparation.state!=='ready' && r.stage==='stopped'
       && (observedPreparation.ticket===ticket || observedPreparation.scope==='project')
       && (!last || Date.parse(observedPreparation.at)>=Date.parse(last.startedAt)) ? observedPreparation : undefined;
+    const triage = f.recovery.triage?.[ticket];
+    const humanHold = triage?.state === 'human' && r.stage === 'stopped' && !r.mr && !r.delivery
+      && (!r.stageSince || Date.parse(r.stageSince) <= Date.parse(triage.at))
+      && (!last || Date.parse(last.startedAt) < Date.parse(triage.at));
     const merged = !!r.mergedAt || r.delivery?.state === 'merged';
-    const relevant = (r.stage === 'stopped' && !!r.branch) || !!r.delivery || !!r.mr || !!last
+    const relevant = (r.stage === 'stopped' && !!r.branch) || humanHold || !!r.delivery || !!r.mr || !!last
       || claim?.iid === r.iid || !!f.recovery.followups?.[ticket];
     if (!relevant) continue;
     let state: Followup['state'], reason: string, nextAction: string;
@@ -54,6 +58,11 @@ export function projectFollowups(f: FollowupFacts): Record<string, Followup> {
     } else if (uncertain) {
       state = 'operator-required'; reason = uncertain;
       nextAction = 'Confirm the recorded owner and exact container cleanup; retain the claim until settlement is safe.';
+    } else if (humanHold) {
+      state = 'operator-required'; reason = `Recovery triage ${describeTriage(triage)}`;
+      nextAction = triage.delivery === 'delivered'
+        ? `Read the recovery triage comment on #${ticket}. Update the ticket or remove the needs-human label to let Factory try a repair.`
+        : `The recovery triage comment on #${ticket} is pending. Check ticket access; Factory retries delivery on a later eligible pass.`;
     } else if (running || claim || f.settled?.state === 'running') {
       const activeTicket = running?.ticket ?? claim?.iid ?? (f.settled?.state === 'running' ? f.settled.attempt.ticket : undefined);
       state = 'waiting'; reason = `Recovery on #${activeTicket} is active.`;

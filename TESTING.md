@@ -881,6 +881,23 @@ comment sanitization, idempotent escalation and release on label removal. Runtim
 fixtures verify the helper, contract and template ship together and import without a
 project or credentials. No paid model, live tracker, installed runtime or service is used.
 
+## Recovery triage host tests
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/jam-detect.test.mts cli/test/recovery-{command,followup,prepare,state}.test.mts cli/test/documentation.test.mts
+```
+
+Jam tests inject triage, inspection, preparation and launch around disposable host
+records. They cover opt-in, result routing, one new call per pass, unchanged budgets
+on human holds, the dispatch selection rule for needs-human, and rechecks after the
+triage await. Spawn and group cleanup are injected for triage protocol and ownership
+cases; a fake timer drives the deadline. The existing preparation tests exercise the
+shared subprocess runner with fixture-owned Node children. Status tests use private
+local records to check backward compatibility and show the cause, delivery state
+and ticket-comment next action. No live tracker, runtime installation, model,
+Docker or scheduler is used. Run the four commit-tier shards and the separate
+browser lifecycle gate after these focused tests.
+
 ## Host launch readiness tests
 
 ```sh

@@ -1,20 +1,18 @@
 // Durable managed admission precedes preparation probes/model work; uncertain group cleanup retains its entry.
 // Run the selected complete workflow under saved scheduler Node/PATH, with project-mode review. Preparation owns a bounded process group,
 // confirms cleanup before interpreting stdout, and never consumes an attempt. Tests inject process boundaries.
-import { spawn } from 'node:child_process';
 import { claimManagedEntry, releaseManagedEntry } from '../../board/admission.mts';
-import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Paths } from './paths.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
 import { projectWorkflow } from './workflow.mts';
-import { terminateGroup } from './tick-cancel.mts';
+import { runRecoveryHelper } from './recovery-helper-process.mts';
+import type { RecoveryHelperOptions } from './recovery-helper-process.mts';
 import { digest, held, validPreparation } from '../../orchestrator/recovery-analysis-contract.mts';
 import type { Preparation } from '../../orchestrator/recovery-analysis-contract.mts';
-export type PreparationProcess = (node: string, args: string[], o: {cwd:string;env:NodeJS.ProcessEnv;detached:true;stdio:['ignore','pipe','pipe']}) => ChildProcess;
-export type PrepareOptions = {root:string;tracker:string;ticket:number;base:string;dir:string;node?:string;path?:string;signal?:AbortSignal;workflowEnv?:NodeJS.ProcessEnv;
-  spawn?:PreparationProcess; terminate?:typeof terminateGroup; setupTimeoutMs?:number};
+export type PrepareOptions = RecoveryHelperOptions & {tracker:string;ticket:number;base:string;workflowEnv?:NodeJS.ProcessEnv;setupTimeoutMs?:number};
+export const preparationOwnerFile = (p: Paths, root: string) => join(p.recovery, `prepare-${digest(resolve(root))}.json`);
 export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Preparation> {
   if (!Number.isSafeInteger(o.ticket) || o.ticket<=0 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(o.base) || o.base.includes('..'))
     return held('config','Recovery preparation requires a numeric ticket and recorded base','project');
@@ -36,40 +34,17 @@ export async function prepareRecovery(p: Paths, o: PrepareOptions): Promise<Prep
   if (hostHold) return held('config', hostHold, 'project');
   const helper = workflow.entrypoints.preparation;
   if (o.signal?.aborted) return held('timeout','Preparation cancelled','project');
-  const owner = join(p.recovery,`prepare-${digest(resolve(o.root))}.json`);
+  const owner = preparationOwnerFile(p,o.root);
   try { mkdirSync(p.recovery,{recursive:true}); } catch (e) {return held('ownership',String(e),'project');}
   // An uncertain previous cleanup remains a project-wide stop. Never overwrite its process identity.
   if (existsSync(owner)) return held('ownership',`Previous preparation ownership is unconfirmed: ${owner}; confirm its named process group/workspace cleanup before removing this record`,'project');
   try { writeFileSync(owner,JSON.stringify({root:o.root,at:new Date().toISOString()}),{flag:'wx',mode:0o600}); }
   catch (e) { return held('ownership',String(e),'project'); }
-  const run = async (args:string[],timeout:number): Promise<{ok:boolean;output:string;code?:'timeout'|'ownership';reason?:string}> => {
-    if (o.signal?.aborted) return {ok:false,output:'',code:'timeout',reason:'Preparation cancelled'};
-    return new Promise(accept => {
-      let child:ChildProcess;
-      try { child = (o.spawn ?? spawn)(o.node ?? process.execPath,args,{cwd:o.root,env:{...process.env,...workflow.env,PATH:o.path ?? process.env.PATH,
-        SANDCASTLE_STATE_DIR:o.dir},detached:true,stdio:['ignore','pipe','pipe']}); }
-      catch (e) { accept({ok:false,output:'',reason:String(e)}); return; }
-      let output='',diagnostics='',expired=false,settled=false,overflow=false;
-      const finish = async (code:number|null, error?:Error) => {
-        if (settled) return; settled=true; clearTimeout(timer); o.signal?.removeEventListener('abort',abort);
-        let confirmed = !child.pid;
-        try { if (child.pid) confirmed = (await (o.terminate ?? terminateGroup)(child.pid,{graceMs:1000,confirmMs:5000})).confirmed; }
-        catch { confirmed=false; }
-        if (!confirmed) { uncertain=true; accept({ok:false,output:'',code:'ownership',reason:`Preparation process group ${child.pid} cleanup unconfirmed; ownership kept at ${owner}`}); }
-        else accept({ok:!expired && !overflow && !error && code === 0,output,code:expired ? 'timeout' : undefined,
-          reason:expired ? `Preparation timed out or cancelled; ${diagnostics.slice(-700)}` : overflow ? 'Preparation output exceeded protocol limit' : error?.message ?? diagnostics.slice(-500)});
-      };
-      const abort = () => {expired=true; void finish(null);};
-      const timer=setTimeout(abort,timeout);
-      o.signal?.addEventListener('abort',abort,{once:true});
-      child.stdout?.on('data',b => {output+=String(b); if (output.length>16384) {overflow=true;output=output.slice(0,16384);void finish(null);} });
-      child.stderr?.on('data',b => {diagnostics=(diagnostics+String(b)).slice(-2000);});
-      // Exit, not close: descendants may retain inherited pipes. The group is still ours to terminate.
-      child.once('exit',code => {void finish(code);}); child.once('error',e => {void finish(null,e);});
-      try { if (child.pid) writeFileSync(owner,JSON.stringify({root:o.root,pid:child.pid,at:new Date().toISOString()})); }
-      catch (e) { void finish(null,e as Error); }
-      if (o.signal?.aborted) abort();
-    });
+  const run = async (args:string[],timeout:number) => {
+    const result = await runRecoveryHelper(o, { args, timeout, owner, env: workflow.env, name: 'Preparation',
+      recordPid: pid => writeFileSync(owner,JSON.stringify({root:o.root,pid,at:new Date().toISOString()})) });
+    if (result.code === 'ownership') uncertain = true;
+    return result;
   };
   try {
     const setupMs = o.setupTimeoutMs ?? 60_000, started = Date.now();

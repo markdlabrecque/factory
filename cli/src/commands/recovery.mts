@@ -1,6 +1,6 @@
 // Follow-up status derives current local ownership, pause, budgets and delivery gates without settlement or writes.
 // Opened PRs and delivered attempts stay outstanding; only authoritative merged records complete follow-up.
-// Preparation readiness is observational status, separate from attempt verdicts, ownership claims and budgets.
+// Preparation and per-ticket triage are shown separately from attempt verdicts, ownership claims and budgets.
 // `factory recovery status|reset|review [--project <name|path>] [--json (status)] [--confirm (review)]` (slice four
 // self-recovery, #62; review #63).
 // status: selected complete workflow identity and recovery eligibility. Installed Factory bundles are trusted;
@@ -27,7 +27,7 @@ import { readAdmission, withAdmission } from '../../../board/admission.mts';
 import type { AdmissionClaim } from '../../../board/admission.mts';
 import type { Paths } from '../paths.mts';
 import { changedSinceReview, missingWorkflow, readReview, recordReview, recoveryCopyProblem, workflowFiles } from '../recovery-review.mts';
-import { ATTEMPT_LIMIT, CONFIRM_PASSES, readRecovery, recoveryFile, remainingAttempts, resetRecovery, runningAttempt } from '../recovery-state.mts';
+import { ATTEMPT_LIMIT, CONFIRM_PASSES, describeTriage, readRecovery, recoveryFile, remainingAttempts, resetRecovery, runningAttempt } from '../recovery-state.mts';
 import type { Attempt, Episode, RecoveryState, Renewal } from '../recovery-state.mts';
 import { resolveProject, runStateDir } from '../runs.mts';
 import type { ProjectContext } from '../runs.mts';
@@ -39,10 +39,10 @@ const RECENT = 10;
 export type RecoveryOptions = { project?: string; cwd?: string; json?: boolean; confirm?: boolean; now?: number; at?: string };
 
 export type AttemptView = Attempt & { logExists?: boolean; reportExists?: boolean };
-// Preparation status is shown separately from historical attempt verdicts and budgets.
 export type RecoverySummary = {
   workflow?: { mode: 'factory' | 'project'; root: string; id: string };
   preparation?: RecoveryState['preparation'];
+  triage?: RecoveryState['triage'];
   active: boolean; inactiveReason?: string; file: string; problem?: string;
   episode: Episode | null; running: Attempt | null; claim: AdmissionClaim | null;
   budgets: { ticket: number; used: number; remaining: number; renewedAt?: string; renewal?: string }[];
@@ -72,7 +72,7 @@ export function recoverySummary(p: Paths, ctx: ProjectContext): RecoverySummary 
   catch (e) { problem = (e as Error).message; }
   const budgets = Object.entries(s.budgets).map(([k, b]) => ({ ticket: Number(k), used: b.used, remaining: remainingAttempts(s, Number(k)),
     ...(b.renewedAt ? { renewedAt: b.renewedAt } : {}), ...(b.renewal ? { renewal: b.renewal } : {}) })).sort((a, b) => a.ticket - b.ticket);
-  return { ...base, ...(problem ? { problem } : {}), preparation:s.preparation, episode: s.episode ?? null, running: runningAttempt(s) ?? null, claim, budgets, followups,
+  return { ...base, ...(problem ? { problem } : {}), preparation:s.preparation, ...(s.triage ? { triage: s.triage } : {}), episode: s.episode ?? null, running: runningAttempt(s) ?? null, claim, budgets, followups,
     attempts: s.attempts.slice(-RECENT).reverse().map(withFiles), renewals: s.renewals.slice(-RECENT).reverse(), episodes: s.episodes.slice(-RECENT).reverse() };
 }
 
@@ -111,6 +111,7 @@ function show(ctx: ProjectContext, r: RecoverySummary, now: number) {
   if (r.problem) console.log(`Problem: ${r.problem}`);
   console.log(`Jam: ${describeJam(r.episode, now)}`);
   if (r.preparation) console.log(`Preparation: #${r.preparation.ticket} ${r.preparation.code} (${r.preparation.scope}): ${r.preparation.reason}`);
+  for (const [ticket, v] of Object.entries(r.triage ?? {})) console.log(`Triage: #${ticket} ${v.at} ${describeTriage(v)}`);
   console.log(`Running: ${r.running ? describeAttempt(r.running, now) : 'none'}`);
   if (r.claim) console.log(`Claim: #${r.claim.iid} held since ${r.claim.at} by process ${r.claim.owner.pid}${r.claim.attempt ? ` for attempt ${r.claim.attempt}` : ''}`);
   if (r.budgets.length) {

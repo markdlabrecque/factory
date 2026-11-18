@@ -1,6 +1,6 @@
 // Recovery reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent. Delivery waits never
-// renew budgets. Only verified progress or explicit requirement/reset rules do. Optional followups record local
-// observations, never launch authority; identical observations keep their original changedAt.
+// renew budgets. Only verified progress or explicit requirement/reset rules do. Preparation, per-ticket triage and
+// follow-ups are observations, never launch authority; identical follow-ups keep their original changedAt.
 // Self-recovery's durable record (slice four, #55): one file per project, `<state>/recovery/<key>.json`, where `key` is
 // derived from the project's canonical root and the file repeats `root`. It holds:
 // - `episode`: the current jam. A jam is identified by its affected tickets (the sorted iids the jam detector reports).
@@ -34,6 +34,8 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, r
 import { join } from 'node:path';
 import type { RunState } from '../../board/board.mts';
 import type { Paths } from './paths.mts';
+import { hasFields, isHumanAction, isTriageText } from '../../orchestrator/recovery-triage-contract.mts';
+import type { Delivery, HumanAction } from '../../orchestrator/recovery-triage-contract.mts';
 
 export const CONFIRM_PASSES = 2;
 export const ATTEMPT_LIMIT = 2;
@@ -55,8 +57,11 @@ export type Budget = { used: number; renewedAt?: string; renewal?: RenewalKind }
 export type Watch = { seenAt: string; content: string; labels: string[]; delivery?: string };
 export type Followup = { state: 'waiting' | 'paused' | 'operator-required' | 'pending' | 'complete';
   reason: string; nextAction: string; changedAt: string };
-// Preparation status is observational only; it cannot renew budgets or replace historical attempt verdicts.
+export type TriageObservation = { at: string; reason: string } & (
+  { state: 'human'; action: HumanAction; cause: string; delivery: Delivery } |
+  { state: 'repair' | 'released' | 'unavailable' | 'ownership' });
 export type RecoveryState = { preparation?: {at:string;ticket:number;state:string;code:string;reason:string;scope:string};
+  triage?: Record<string, TriageObservation>;
   version: 1; root: string; nextSeq: number; episode?: Episode; episodes: Episode[];
   budgets: Record<string, Budget>; attempts: Attempt[]; renewals: Renewal[]; watch?: Record<string, Watch>;
   followups?: Record<string, Followup> };
@@ -78,6 +83,18 @@ const validEpisode = (e: any) => e && typeof e.id === 'string' && isTime(e.start
   && Array.isArray(e.passes) && e.passes.every((x: any) => typeof x?.pass === 'string' && isTime(x.at))
   && (e.confirmedAt === undefined || isTime(e.confirmedAt)) && (e.endedAt === undefined || isTime(e.endedAt))
   && (e.end === undefined || ENDS.includes(e.end)) && (e.generation === undefined || (Number.isInteger(e.generation) && e.generation >= 0));
+
+const validTriageObservation = (v: any): v is TriageObservation => {
+  const common = ['at', 'reason', 'state'];
+  return isTime(v?.at) && isTriageText(v.reason) && (v.state === 'human'
+    ? hasFields(v, [...common, 'action', 'cause', 'delivery']) && isHumanAction(v.action) && isTriageText(v.cause)
+      && (v.delivery === 'pending' || v.delivery === 'delivered')
+    : hasFields(v, common) && ['repair', 'released', 'unavailable', 'ownership'].some(state => state === v.state));
+};
+
+export function describeTriage(v: TriageObservation): string {
+  return v.state === 'human' ? `human (${v.action}, ${v.delivery}): ${v.cause}` : `${v.state}: ${v.reason}`;
+}
 
 /** Only ENOENT means empty. IO uncertainty, malformed data or another project's file holds recovery. */
 export function readRecovery(p: Paths, root: string): RecoveryState {
@@ -104,6 +121,8 @@ export function readRecovery(p: Paths, root: string): RecoveryState {
     && (d.preparation === undefined || (isTime(d.preparation?.at) && isIid(d.preparation.ticket)
       && ['ready','held','error'].includes(d.preparation.state) && ['ticket','project'].includes(d.preparation.scope)
       && typeof d.preparation.code === 'string' && typeof d.preparation.reason === 'string'))
+    && (d.triage === undefined || (d.triage && typeof d.triage === 'object' && !Array.isArray(d.triage)
+      && Object.entries(d.triage).every(([k, v]) => /^[1-9]\d*$/.test(k) && Number.isSafeInteger(Number(k)) && validTriageObservation(v))))
     && (d.watch === undefined || (d.watch && typeof d.watch === 'object' && !Array.isArray(d.watch)
       && Object.entries<any>(d.watch).every(([k, w]) => isIid(Number(k)) && isTime(w?.seenAt) && typeof w.content === 'string'
         && Array.isArray(w.labels) && w.labels.every((l: unknown) => typeof l === 'string') && optStr(w.delivery))))

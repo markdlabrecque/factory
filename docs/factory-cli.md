@@ -745,33 +745,66 @@ analysis/verification; generated Factory comments do not invalidate their own pr
 Current source checks before verification/delivery never rewrite a running prompt
 or an old proof. Existing claim, eligibility, base/tip, budget and cleanup gates remain.
 
-# Selected-runtime recovery triage helper
+# Recovery triage
 
-The triage helper is separate from recovery preparation and does not admit or
-charge a repair. It submits one bounded evidence bundle on stdin to the fixed
-Mid analysis model with tools disabled and the configured analysis timeout. It
-reads the saved execution, frozen ticket context, local Git data, logs and text
-evidence; it never fetches or changes the checkout, saved work or evidence.
+Triage is off by default. Set `[recovery]` with `triage = true` in
+[`.factory/factory.toml`](project-config.md#optional-recovery-triage) to enable it.
+On a successful scheduled pass with a confirmed jam, Factory runs the selected
+workflow's triage helper after local candidate screening, just before recovery
+preparation would start. Disabled or omitted settings and a selected workflow
+without a triage entrypoint skip this step. Complete workflow validation and
+review still apply; Factory never borrows a helper from a different workflow.
 
-Factory keeps one private result per ticket in `<state>/recovery/triage/`.
-The stop key binds the run's execution and stop details, the saved branch tip,
-frozen ticket input, triage prompt and model. Identical stops reuse advice or
-cached failures. Changed input during the call invalidates the reply. Corrupt or
-unreadable state is preserved and reported as unavailable, without a model call.
+The helper submits one bounded evidence bundle on stdin to the fixed Mid analysis
+model with tools disabled. It reads the saved execution, frozen ticket context,
+local Git data, logs and text evidence; it never fetches or changes the checkout,
+saved work or evidence. Factory keeps one private result per ticket under
+`<state>/recovery/triage/`. The stop key binds the execution and stop details, saved
+branch tip, frozen ticket input, triage prompt and model. An unchanged stop reuses
+advice or a cached failure. There is at most one new model call per unchanged stop
+and at most one per project per scheduled pass. Changed input during the call
+invalidates the reply. Unreadable or corrupt saved results are preserved.
 
-A non-repair recommendation adds the configured needs-human label and posts one
-managed comment per stop. Incomplete delivery remains pending and retries without
-calling the model again. After delivery, removing the label releases the unchanged
-stop for ordinary recovery. A change to the ticket input or saved stop makes the
-old advice stale. Triage reports repair, human, released or unavailable; none of
-these results grants permission to modify a gate, reuse proof or deliver work.
+| Result | What Factory does |
+| --- | --- |
+| `repair` | Continues to ordinary preparation and admission. |
+| `human` | Prepares nothing and spends no attempt for this ticket. A fresh result ends the scan; a saved result lets the next stopped candidate in the jam be considered. |
+| `released` | A human removed the label after delivery. Continues to ordinary preparation and admission. |
+| `unavailable` | Logs the failure and continues to ordinary preparation if the project, jam and run are still eligible. |
+
+Every non-repair recommendation adds the configured needs-human label and posts
+one managed comment on the ticket for that stop. The comment explains the cause
+and what needs a decision. A suggested gate change is not applied. Incomplete
+delivery stays pending and can retry without another model call on a later
+eligible pass. By default the needs-human label excludes the ticket from later
+jam reports, so a pending comment may not retry while that label keeps the ticket
+out of selection. After delivery, remove the label to let Factory try a repair
+under the usual eligibility and jam-confirmation rules. Edit the ticket or add a
+human comment to provide new input for triage; remove the label as well if it
+excludes the ticket. The managed comment and label alone do not renew budgets.
+
+The host uses saved scheduler Node/PATH, shared state and a dedicated process
+group. The helper has a 16 KiB stdout limit and a deadline of the configured
+analysis timeout plus 60 seconds. Malformed output, failure, timeout or
+cancellation is unavailable; stopped scheduling still prevents preparation.
+Factory confirms group cleanup before accepting output. If cleanup cannot be
+confirmed, recovery holds the project and launches nothing, even on later passes
+with triage off. Confirm the recorded process group is gone and reconcile the
+retained managed entry before clearing `<state>/recovery/triage-<root-hash>.json`.
+
+`factory recovery status` (including `--json`) shows the latest observation per
+ticket. Factory also appends it to `.factory/logs/recover-<ticket>.log` and shows
+an applicable human hold as `operator-required` with a next action on the
+comment. Triage never charges, renews or resets a budget and never authorizes
+admission, proof reuse, gate changes or delivery.
 
 # Recovery execution-analysis preparation
 
 A current Board assessment does not authorize recovery. After a confirmed jam,
-read-only local candidate screening can skip proven ticket refusals. Once one target
-passes that screening, the host runs the selected `recovery-analysis.mts` through
-`cli/src/recovery-prepare.mts` and rechecks scheduling authorization. Nothing scans
+read-only local candidate screening can skip proven ticket refusals. Once a target
+passes screening and any [opt-in triage](#recovery-triage) lets it proceed, the host
+runs the selected `recovery-analysis.mts` through `cli/src/recovery-prepare.mts`
+and rechecks scheduling authorization. Nothing scans
 past that target after analysis starts. Preparation is not a repair attempt and
 never renews or charges a budget.
 
@@ -842,7 +875,7 @@ After normal dispatch, the scheduler decides whether a project is jammed (#61): 
 - **The rule** (`findJam`). No jam while any of the project's runs is in flight, the pass launched work, a candidate still waits for analysis, or the shared cap has no free slot: normal work and shared capacity come first. Otherwise the jam is every ready, not excluded ticket whose run record is `stopped` (and whose PR is not open), plus every candidate held only by prerequisites that are themselves in the jam, to any depth (`decide` now names a held ticket's open prerequisites, `waitingOn`). A hold on a prerequisite outside the jam (outside the agent queue, with an open PR, or progressing) is respected and not counted. Explicit exclusion labels, excluded assignees and tickets waiting for a model label are never demand.
 - **The report.** The tick gives every scheduled pass a pass id and its own file, `<state>/scheduler/jam/<pass id>.json` (`FACTORY_PASS_ID`, `FACTORY_JAM_REPORT`). A dispatcher pass that is not a dry run writes there, after the board update and before launching, `{version:1, pass, project, at, tickets, reasons | none, observed}`: the jammed tickets with why, or why there is none, and for each jammed or still-ready ticket with a stopped or done run its `unitHash` and labels minus `ready`, `needs-human` and the done stage. Manual passes are not asked for one. The tick removes the file after the pass, and removes any a dead tick left behind.
 - **Counting** (`afterPass`). Only a pass that exited 0 and was not cancelled is handed on, after its result and timing are recorded. First `settleRecovery`: while the project's attempt runs, or its container is unconfirmed, the pass is not counted (the attempt holds the project). Then each reported ticket is observed (`observeTicket` with `deliveryMarker` of its run record, so a person's change or verified delivery renews a spent budget), and the pass is counted with `observePass` at the project's admission generation. The same jam on two consecutive completed passes, with no normal admission between them, is confirmed; a pass with no jam ends the episode. A missing report (a dispatcher copy older than #61) is not counted, quietly; one for another pass or project, or a malformed one, is logged and not counted.
-- **Launching.** For a confirmed jam, scan its initially stopped candidates once in ascending numeric ticket order. Skip a ticket only when its own attempt budget is exhausted under the current rules. A dependency-held ticket has no work of its own; its stopped prerequisite is repaired. If the selected workflow is invalid or a project override lacks a current review (`recoveryCopyProblem`, #63), the jam is only recorded and logged. Before every candidate, recheck scheduling/cancellation, reread the run, recovery episode, activity generation and review. Read-only `inspectRecoveryCandidate` continues only after `ticket-refused`, logging the ticket, stable code and reason. The first locally viable target gets execution-analysis preparation, then scheduling authorization is rechecked before launch. A preparation hold or any later outcome ends the scan without trying another target. Stop on `project-stopped`, `admitted-failed`, the first `started` result or any exception. `launchRecovery` rechecks admission under the shared lock, so at most one candidate can be admitted per pass. All-local-refusal passes spend no budget. There is no refusal cache; a later eligible pass rechecks local facts. No labels, requirements, saved work, evidence or receipts are deleted to advance the scan. After it settles, the next pass with the same unchanged jam can start the ticket's second attempt; then the budget stops it until verified progress, a requirement change or a reset.
+- **Launching.** For a confirmed jam, scan its initially stopped candidates once in ascending numeric ticket order. Skip a ticket only when its own attempt budget is exhausted under the current rules. A dependency-held ticket has no work of its own; its stopped prerequisite is repaired. If the selected workflow is invalid or a project override lacks a current review (`recoveryCopyProblem`, #63), the jam is only recorded and logged. Before every candidate, recheck scheduling/cancellation, reread the run, recovery episode, activity generation and review. Read-only `inspectRecoveryCandidate` continues only after `ticket-refused`, logging the ticket, stable code and reason. A locally viable target gets [opt-in triage](#recovery-triage) before execution-analysis preparation. A saved human hold permits scanning the next target; a fresh one ends the scan. Scheduling authorization and the confirmed stop are rechecked after triage, and scheduling authorization is checked again before launch. A preparation hold or any later outcome ends the scan without trying another target. Stop on `project-stopped`, `admitted-failed`, the first `started` result or any exception. `launchRecovery` rechecks admission under the shared lock, so at most one candidate can be admitted per pass. All-local-refusal passes spend no budget. There is no refusal cache; a later eligible pass rechecks local facts. No labels, requirements, saved work, evidence or receipts are deleted to advance the scan. After it settles, the next pass with the same unchanged jam can start the ticket's second attempt; then the budget stops it until verified progress, a requirement change or a reset.
 - Logged to the tick's output as `recovery <project>: …`. What it recorded is shown by `factory recovery status`, summarized in `factory status`, and the repair logs by `factory logs --recovery`; see "Slice four: recovery status and reset". Errors here are logged and never fail the pass or the tick.
 - Tests: `orchestrator/graph.test.mts` (the rule), `orchestrator/jam-report.test.mts` (the real scaffolded dispatcher writing a report against a stubbed `gh`), `cli/test/jam-detect.test.mts` (confirmation, inactive copies, stopped scheduling, running attempts, generations, budgets) and `cli/test/scheduler.test.mts` (one report per pass, removed afterwards; failed and cancelled passes not counted).
 
@@ -862,7 +895,7 @@ Status reprojects current local facts rather than treating the snapshot as truth
 
 Operator view and explicit reset (#62, `cli/src/commands/recovery.mts`).
 
-- **`factory recovery status [--project <name|path>] [--json]`.** Read-only. Whether recovery is active in the project (`recoveryCopyProblem`: the reviewed workflow, #63), the current jam (its tickets, how many of the two passes have seen it, or when it was confirmed), the last preparation code/scope/reason, the running attempt and any recovery claim in the admission record, each ticket's budget (attempts left of two, and the last renewal: `progress`, `requirement-change` or `reset`), the last ten attempts newest first (outcome, start and finish, branch, reason, repair log and retained `recovery-report.md`, each marked `(missing)` if the file is gone), renewals and ended jams. `--json` prints `{version:1, project, recovery}`. A malformed recovery record (never overwritten) is shown as a problem and exits 1.
+- **`factory recovery status [--project <name|path>] [--json]`.** Read-only. Whether recovery is active in the project (`recoveryCopyProblem`: the reviewed workflow, #63), the current jam (its tickets, how many of the two passes have seen it, or when it was confirmed), the last preparation code/scope/reason, the latest triage observation per ticket, the running attempt and any recovery claim in the admission record, each ticket's budget (attempts left of two, and the last renewal: `progress`, `requirement-change` or `reset`), the last ten attempts newest first (outcome, start and finish, branch, reason, repair log and retained `recovery-report.md`, each marked `(missing)` if the file is gone), renewals and ended jams. `--json` prints `{version:1, project, recovery}`. A malformed recovery record (never overwritten) is shown as a problem and exits 1.
 - **`factory recovery reset [--project <name|path>]`.** Under the admission lock, so it cannot interleave with a launch, it refuses (exit 1, nothing changed) while recovery is active: a running attempt or one whose container is not yet confirmed gone (the next globally enabled tick settles it locally, even while the project is paused), a recovery claim, or an admitted attempt whose charge is still pending. Otherwise `resetRecovery`: the jam episode ends (`reset`), so confirmation starts over on later completed passes, and every ticket's budget is renewed. It launches nothing; the normal scheduled passes re-evaluate the project. Ticket branches, worktrees, run records, logs, reports and evidence are untouched, and recovery history is kept. It is separate from `factory retry`, which clears one stopped run.
 - Follow-up state, reason and next action appear in both status formats as described in [Persistent deferred recovery follow-through](#persistent-deferred-recovery-follow-through).
 - **`factory status`** adds a `Recovery:` line after the project's schedule (active or inactive, and the jam), the running attempt, the last finished attempt and its outcome, and tickets with spent budget; `--json` adds `recovery` (the same summary as `recovery status --json`).
