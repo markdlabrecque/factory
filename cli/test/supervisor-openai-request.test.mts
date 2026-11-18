@@ -26,7 +26,7 @@ test('pure worker environment and frozen input preconditions refuse drift before
   }
 });
 
-test('pinned ChatGPT-login serializer lacks the approved remote cap/cache contract and is refused before transmission', () => {
+test('pinned ChatGPT-login serializer lacks the API-key remote cap/cache contract and is refused before transmission', () => {
   const evidence = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./supervisor-provider-fixture.mts', import.meta.url)),
     '--login-serialization-spike'], { timeout: 15000, maxBuffer: 1024 * 1024,
     env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C' }, encoding: 'utf8' }));
@@ -67,6 +67,6 @@ test('copied pinned Pi adapter consumes real journal permission before one bound
     { prompt_cache_key: 'warming' }, { service_tier: 'priority' }, { max_output_tokens: 4097 }, { truncation: 'auto' }])
     assert.throws(() => validateAdvisoryPayload({ ...evidence.payload, ...change }, system, user));
   assert.deepEqual(evidence.scenarios.map((s: any) => [s.scenario, s.transmissions, s.authorizations]), [
-    ['complete',1,1], ['stop-first',0,0], ['inflight-stop',1,1], ['retry-429',1,1], ['retry-503',1,1], ['overflow',1,1], ['duplicate-terminal',1,1], ['mid-load-prompt',0,0], ['mid-load-dependencies',0,0],
+    ['complete',1,1], ['stop-first',0,0], ['inflight-stop',1,1], ['retry-429',1,1], ['retry-503',1,1], ['overflow',1,1], ['duplicate-terminal',1,1], ['mid-load-prompt',0,0], ['mid-load-dependencies',0,0], ['subscription',1,1],
   ]);
 });

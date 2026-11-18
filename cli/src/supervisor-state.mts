@@ -9,7 +9,7 @@ const { supervisorHash, validateProject, validateScope, validateIncident, valida
 
 import type { Diagnostic } from '../../orchestrator/supervisor.mts';
 import type { ProducerEvent } from '../../board/execution-events.mts';
-import { validateDiagnosisGrant, validateSendAuthorization, ADVISORY_PROFILE_ID, advisoryReservation } from './supervisor-advisory-contract.mts';
+import { validateDiagnosisGrant, validateSendAuthorization, ADVISORY_PROFILE_ID, subscriptionProfile, advisoryReservation } from './supervisor-advisory-contract.mts';
 import type { DiagnosisGrant, SendAuthorization, ProviderUsageReceipt } from './supervisor-advisory-contract.mts';
 import { validateProviderUsageReceipt } from './supervisor-advisory-contract.mts';
 export type AdvisorySettlement = { grantId: string; holdId: string; invocationId: string; fence: string;
@@ -35,6 +35,10 @@ export type Reservation = {
   at: string; deadline: string; reserved: Resources; actual: Resources | null;
   state: 'active' | 'finished' | 'ambiguous'; reviewId: string | null;
 };
+/** Admission charge never refunds a reservation; known subscription overrun increases cumulative usage. */
+export function chargedResources(r: Reservation): Resources {
+  return { tokens: Math.max(r.reserved.tokens,r.actual?.tokens ?? 0), cost: Math.max(r.reserved.cost,r.actual?.cost ?? 0) };
+}
 export type IntentMemory = { intent: Intent; owner: Owner; outcome: 'pending' | 'observed-applied' | 'observed-not-applied' | 'unknown'; evidence: string[] };
 export type SupervisorState = {
   version: 1; project: ProjectIdentity; revision: number;
@@ -176,7 +180,7 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
   }
   for (const [id, r] of entries(s.reservations)) {
     object(r, ['id','incidentId','kind','owner','fence','at','deadline','reserved','actual','state','reviewId']); owner(r.owner); resources(r.reserved);
-    if (r.actual !== null) { resources(r.actual); demand(r.actual.tokens <= r.reserved.tokens && r.actual.cost <= r.reserved.cost, 'accounting overflow'); }
+    if (r.actual !== null) { resources(r.actual); demand((r.actual.tokens <= r.reserved.tokens || subscriptionProfile(s.advisory?.policies[id]?.host.profile ?? '') && !!s.advisory?.settlements?.[id]) && r.actual.cost <= r.reserved.cost, 'accounting overflow'); }
     demand(id === supervisorHash(r.id) && text(r.id) && text(r.fence) && s.incidents[r.incidentId] && ['diagnosis','review'].includes(r.kind)
       && time(r.at) && time(r.deadline) && r.deadline > r.at && (r.kind !== 'diagnosis' || Date.parse(r.deadline) - Date.parse(r.at) <= DIAGNOSIS_TIMEOUT_MS) && ['active','finished','ambiguous'].includes(r.state)
       && (r.state === 'finished' ? r.actual !== null : r.actual === null)
@@ -187,14 +191,14 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
     object(s.advisory, ['policies','workers','sends', ...(Object.hasOwn(s.advisory, 'settlements') ? ['settlements'] : [])]);
     for (const [key, p] of entries(s.advisory.policies)) {
       validateAdvisoryRegistration(p);
-      const r = s.reservations[key]; demand(r?.kind === 'diagnosis' && p.at === r.at && same(r.reserved, advisoryReservation()), 'orphan advisory policy');
+      const r = s.reservations[key]; demand(r?.kind === 'diagnosis' && p.at === r.at && same(r.reserved, advisoryReservation(p.host.profile)), 'orphan advisory policy');
     }
     for (const [key, w] of entries(s.advisory.workers)) {
       object(w, ['grant','at']); const g = validateDiagnosisGrant(w.grant), r = s.reservations[key], p = s.advisory.policies[key];
       demand(p && r && key === supervisorHash(g.invocationId) && g.incidentId === r.incidentId && g.fence === r.fence
         && same(g.project, s.project) && s.incidents[g.incidentId].facts.scope.kind === 'ticket'
         && s.incidents[g.incidentId].facts.scope.ticket === g.ticket && s.incidents[g.incidentId].facts.runId === g.runId
-        && g.policy === hostAdvisoryPolicyIdentity(p.host) && g.rollout === p.rollout?.identity
+        && g.profile === p.host.profile && g.policy === hostAdvisoryPolicyIdentity(p.host) && g.rollout === p.rollout?.identity
         && (!p.rollout || g.deadline <= p.rollout.expiresAt) && g.holdId === p.holdId && g.deadline === r.deadline
         && same(g.reserved, r.reserved) && !same(g.owner, r.owner) && time(w.at) && w.at >= r.at && w.at < r.deadline, 'foreign worker grant');
     }
@@ -218,7 +222,7 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
   object(s.charged, ['diagnosis','review']); resources(s.charged.diagnosis); resources(s.charged.review);
   for (const kind of ['diagnosis','review']) {
     const rs = Object.values<any>(s.reservations).filter(r => r.kind === kind);
-    demand(['tokens','cost'].every(unit => rs.reduce((n, r) => n + r.reserved[unit], 0) === s.charged[kind][unit]), 'lost charge');
+    demand(['tokens','cost'].every(unit => rs.reduce((n, r) => n + chargedResources(r)[unit], 0) === s.charged[kind][unit]), 'lost charge');
   }
   for (const m of Object.values<any>(s.incidents)) demand(m.incident.diagnosisCalls === Object.values<any>(s.reservations).filter(r => r.kind === 'diagnosis' && r.incidentId === m.incident.id).length, 'lost diagnosis counter');
   entries(s.events).forEach(([, v]) => demand(hash(v), 'invalid event digest'));
@@ -299,11 +303,11 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
         demand(Date.parse(event.reservation.deadline) - Date.parse(event.reservation.at) <= event.policy.project.limits!.diagnosis.timeoutSeconds * 1000,
           'advisory role deadline exceeded');
         demand(event.policy.at === event.at && event.reservation.kind === 'diagnosis'
-          && same(event.reservation.reserved, advisoryReservation()), 'advisory reservation must use fixed supported bounds');
+          && same(event.reservation.reserved, advisoryReservation(event.policy.host.profile)), 'advisory reservation must use fixed supported bounds');
         const all = [state, ...(environment.projects ?? []).filter(p => !same(p.project, state.project))];
         const usage = (ps: SupervisorState[], role?: 'diagnosis') => {
           const rs = ps.flatMap(p => Object.values(p.reservations)).filter(r => !role || r.kind === role);
-          return { tokens: rs.reduce((n,r) => n + r.reserved.tokens, 0), cost: rs.reduce((n,r) => n + r.reserved.cost, 0), calls: rs.length };
+          return { tokens: rs.reduce((n,r) => n + chargedResources(r).tokens, 0), cost: rs.reduce((n,r) => n + chargedResources(r).cost, 0), calls: rs.length };
         };
         const hold = advisoryLimitHold({ host: event.policy.host, project: event.policy.project, hostUsed: usage(all), projectUsed: usage([state]),
           roleUsed: usage([state], 'diagnosis'), active: all.flatMap(p => Object.values(p.reservations)).filter(r => r.state !== 'finished').length,
@@ -322,7 +326,7 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       demand(text(r.id) && text(r.fence) && !s.reservations[supervisorHash(r.id)] && r.state === 'active' && r.actual === null && r.reviewId === null && r.at === event.at && time(r.deadline), 'invalid new reservation');
       const elapsed = Date.parse(r.deadline) - Date.parse(r.at);
       demand(['diagnosis','review'].includes(r.kind) && elapsed > 0 && elapsed <= (r.kind === 'diagnosis' ? DIAGNOSIS_TIMEOUT_MS : l.reviewTimeoutMs), 'call deadline exceeded');
-      demand(r.reserved.tokens > 0 && r.reserved.cost > 0, 'unknown/zero paid reservation');
+      demand(r.reserved.tokens > 0 && (r.reserved.cost > 0 || event.kind === 'reserve-advisory' && subscriptionProfile(event.policy.host.profile) && r.reserved.cost === 0), 'unknown/zero paid reservation');
       demand(!Object.values(s.reservations).some(x => x.state === 'active' || x.state === 'ambiguous'), 'project decision unsettled');
       const peers = (environment.projects ?? [state]).filter(x => !same(x.project, state.project));
       peers.forEach(x => validateSupervisor(x, x.project)); const all = [...peers, state];
@@ -355,7 +359,7 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       demand(s.control?.mode !== 'stopped' && event.controls.registered === true && event.controls.global === 'on'
         && event.controls.projectControl === 'enabled', 'stop or current host/project controls fence new authorization');
       const receipt = { version: 1 as const, grantId: w.grant.id, invocationId: r.id, fence: r.fence, worker: event.worker,
-        profile: ADVISORY_PROFILE_ID, payload: event.payload, at: event.at };
+        profile: w.grant.profile, payload: event.payload, at: event.at };
       s.advisory!.sends[key] = validateSendAuthorization({ ...receipt, receipt: supervisorHash(receipt) }, w.grant); break;
     }
     case 'settle-advisory': {
@@ -367,11 +371,12 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
         demand(d.reservationId === r.id && d.fence === r.fence && d.incidentId === r.incidentId && d.completedAt === event.at
           && d.basisHash === s.advisory!.workers[key].grant.basis && d.startedAt === r.at,
           'foreign terminal diagnostic');
-        const usable = d.outcome === 'proposed' && event.at < r.deadline && s.control?.mode !== 'stopped'
+        const overrun = subscriptionProfile(v.usage.profile) && !!v.usage.usage && (v.usage.usage.output > 4096 || v.usage.resources!.tokens > r.reserved.tokens);
+        const usable = !overrun && d.outcome === 'proposed' && event.at < r.deadline && s.control?.mode !== 'stopped'
           && !m.superseded && !m.denied && m.incident.state !== 'human-required' && !supervisorHumanHold(s) && !supervisorRevisionHold(s);
         if (!usable && d.outcome === 'proposed') {
           const {id, ...body} = d;
-          Object.assign(body,{outcome:'stale',decision:null,reason:'Current journal stop/human/denial/material fence refused usable publication'});
+          Object.assign(body,{outcome:'stale',decision:null,reason:'Current journal stop/human/denial/material fence or subscription target overrun refused usable publication'});
           d = validateDiagnostic({id:supervisorHash(body),...body});
         }
         terminal.disposition = d.outcome === 'proposed' && d.decision?.action.kind !== 'escalate' ? 'retained-advice' : 'local-human-required';
@@ -383,7 +388,9 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
         else m.incident.state = 'human-required';
       }
       s.advisory!.settlements ??= {}; s.advisory!.settlements[key] = terminal;
-      r.actual = structuredClone(v.usage.resources); r.state = 'finished'; break;
+      r.actual = structuredClone(v.usage.resources); r.state = 'finished';
+      for (const unit of ['tokens','cost'] as const) s.charged[r.kind][unit] += chargedResources(r)[unit] - r.reserved[unit];
+      break;
     }
     case 'finish': {
       const r = owned(event.reservationId, event.fence, event.owner); resources(event.actual);

@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { mkdirSync, chmodSync, writeFileSync, readFileSync, readdirSync, existsSync, cpSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { normalEntrypointFixture } from '../../orchestrator/verification-entrypoint-fixture.mts';
-import { ADVISORY_PROFILE_ID } from '../src/supervisor-advisory-contract.mts';
+import { ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE_ID } from '../src/supervisor-advisory-contract.mts';
 import { readSupervisor, supervisorFile } from '../src/supervisor-state.mts';
 import { readAdmission } from '../../board/admission.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
@@ -17,7 +17,7 @@ async function journey(t:any, unknown:boolean) {
     const {home,root,p,state,fake,bin,runtime,project,run,git,rawRun}=c;
     mkdirSync(p.config,{recursive:true,mode:0o700}); chmodSync(p.config,0o700); chmodSync(state,0o700);
     writeFileSync(p.projects,JSON.stringify({version:1,projects:[{name:'fixture',root,schedule:{enabled:true,branch:'main',since:new Date().toISOString()}}]}));
-    writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:1}}),{mode:0o600});
+    writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:unknown ? SUBSCRIPTION_PROFILE_ID : ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:1}}),{mode:0o600});
     // Synthetic user-approved expiring record, read through the default production source, NOT installed quiescence proof.
     writeFileSync(join(p.config,'supervisor-rollout.json'),JSON.stringify({version:1,project,host:runtime.id,hostDependencies:runtime.manifest.dependencies,
       selected:runtime.id,dependencies:runtime.manifest.dependencies,recordedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+3600000).toISOString(),
@@ -41,6 +41,14 @@ else process.exit(90);
 `,{mode:0o755});
     cpSync(join(bin,'gh'),join(bin,'gh-axi'));
     for(const name of ['docker','op','pi','npm']) writeFileSync(join(bin,name),`#!${process.execPath}\nimport {appendFileSync} from 'node:fs';appendFileSync(${JSON.stringify(calls)},JSON.stringify({program:${JSON.stringify(name)},args:process.argv.slice(2)})+'\\n');process.exit(90);\n`,{mode:0o755});
+    if(unknown) writeFileSync(join(bin,'pi'),`#!${process.execPath}
+import {appendFileSync,readFileSync} from 'node:fs';
+const args=process.argv.slice(2);appendFileSync(${JSON.stringify(calls)},JSON.stringify({program:'pi',args})+'\\n');
+if(JSON.stringify(args)!==JSON.stringify(['auth','print-bearer-token','--min-expiry','50m','--provider','openai']))process.exit(90);
+const journal=JSON.parse(readFileSync(${JSON.stringify(supervisorFile(state))},'utf8'));
+if(Object.values(journal.projects).some(s=>Object.keys(s.reservations).length))process.exit(91);
+console.log('synthetic-chatgpt-not-a-token');
+`,{mode:0o755});
     // Deliberately retain both staged and unstaged work and an untracked file before diagnosis.
     writeFileSync(join(root,'staged.txt'),'staged original'); git(root,'add','staged.txt');
     writeFileSync(join(root,'app.txt'),'dirty original'); writeFileSync(join(root,'untracked.txt'),'untracked original');
@@ -57,7 +65,7 @@ else process.exit(90);
     const env={HOME:home,FACTORY_HOME:home,PATH:`${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,LANG:'C',OPENAI_API_KEY:'sk-synthetic-offline-not-a-secret'};
     const evidence:any={executable:process.execPath,instrumentation:['--import',preload.href],source:p.app,runtime:runtime.directory,runtimeId:runtime.id,dependencies:runtime.manifest.dependencies,commands:[],synthetic:['read-only tracker/service replies','expiring operator assertion','HTTP SSE and usage; not remote enforcement, invoice or model quality']};
     const command=(...args:string[])=>{
-      const argv=[cli,'supervisor',...args,'--project',root];
+      const argv=[cli,'supervisor',...args,'--project',root,...(unknown && args[0]==='diagnose' ? ['--auth','pi-login'] : [])];
       const r=spawnSync(process.execPath,['--import',preload.href,...argv],{env,cwd:root,encoding:'utf8',timeout:15000});
       evidence.commands.push({argv,status:r.status,stdout:r.stdout,stderr:r.stderr});
       return r;
@@ -81,7 +89,7 @@ else process.exit(90);
       assert.equal(existsSync(leases)?readdirSync(leases).length:0,0,'unchanged fresh diagnosis creates no runtime pin');
       assert.equal(Object.keys(readSupervisor(state,project).reservations).length,1,'unchanged fresh diagnosis creates no reservation');
     }else{
-      const argv=[cli,'supervisor','diagnose','7','--project',root,'--json'];
+      const argv=[cli,'supervisor','diagnose','7','--project',root,'--json','--auth','pi-login'];
       const child=spawn(process.execPath,['--import',preload.href,...argv],{env,cwd:root,stdio:['ignore','pipe','pipe','ipc','pipe','pipe','pipe']});
       t.after(()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');});
       let stdout='',stderr='';child.stdout!.on('data',b=>stdout+=b);child.stderr!.on('data',b=>stderr+=b);
@@ -130,10 +138,12 @@ else process.exit(90);
     assert.equal(evidence.request.payload.stream,true);
     assert.equal(evidence.request.payload.store,false);
     assert.equal(evidence.request.payload.truncation,'disabled');
-    assert.equal(evidence.request.payload.max_output_tokens,4096);
+    assert.equal(evidence.request.payload.max_output_tokens,unknown ? undefined : 4096);
+    if(unknown){assert.deepEqual(evidence.request.payload.reasoning,{effort:'high',summary:'auto'});assert.equal(Object.hasOwn(evidence.request.payload,'prompt_cache_options'),false);assert.equal(Object.values(readSupervisor(state,project).reservations)[0].reserved.cost,0);}
     evidence.programs=readFileSync(calls,'utf8');evidence.preservation=before;
     evidence.normalTrackerCalls=readFileSync(join(fake,'gh.jsonl'),'utf8');
-    assert.equal(/"program":"(?:docker|op|pi|npm)"/.test(evidence.programs),false,'no forbidden program invoked');
+    assert.equal(/"program":"(?:docker|op|npm)"/.test(evidence.programs),false,'no forbidden program invoked');
+    assert.equal(evidence.programs.trim().split('\n').map((s:string)=>JSON.parse(s)).filter((v:any)=>v.program==='pi').length,unknown ? 1 : 0,'only explicit new subscription invocation exports synthetic auth');
     const artifact=process.env.FACTORY_270_EVIDENCE;
     if(artifact){mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,unknown?'journey-b.json':'journey-a.json'),JSON.stringify(evidence,null,2));}
     t.diagnostic(JSON.stringify({copiedCLI:cli,runtime:runtime.id,journey:unknown?'B':'A',requests:1,artifact:artifact??'not retained'}));

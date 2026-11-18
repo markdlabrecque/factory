@@ -74,12 +74,20 @@ parent release gates. No source gate establishes T14 paid permission or pilot su
 fixture's `--login-serialization-spike` mode to load the actual digest-checked
 archived Pi serializer with a synthetic non-`sk-` credential shape. This is a
 local SDK integration test, not another transport stack or copied-install E2E.
-It proves the login branch omits the approved remote cap/cache fields, emits
-high reasoning without a configuration update, and is rejected by the production
-payload validator before any transmission. It never resolves auth or bypasses the
-production API-key precondition; the existing copied adapter/journal matrix owns
-those request/ownership guarantees. No real login, remote acceptance, usage,
-subscription invoice or operational success is implied. Run the focused suite:
+It proves the login branch omits the API-key profile's remote cap/cache fields,
+emits high reasoning without a configuration update, and is rejected by the
+API-key payload validator before transmission. The same existing copied
+adapter/journal matrix also covers the explicit subscription profile accepting
+that exact pinned login shape after real grant/worker authorization. Neither test
+resolves real auth or bypasses the production API-key precondition. New
+`supervisor-auth.test.mts` units cover bounded synthetic credential child output,
+selection, expiry-request argv, cancellation/deadline/malformed/oversize/sanitized
+failures and no fallback. Worker tests refuse bad auth before acquisition.
+Known usage and overrun/charge/human-stop policy are cheap receipt/state units.
+The existing normal-producer known-custody case uses synthetic subscription auth
+to prove receipt-backed runtime/exclusion release and auth-free same/fresh-host
+reuse; its unknown-usage variant keeps API-key coverage. No new E2E matrix or
+real login, remote acceptance, usage, invoice or operational success is implied. Run the focused suite:
 
 ```sh
 node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-openai-request.test.mts
@@ -121,7 +129,10 @@ stop/authorization orderings; these two cases do not duplicate their fault matri
 
 Read-only `gh`/`gh-axi` and `systemctl` stubs record every public-phase call and
 reject mutations; Docker, Pi, npm and 1Password commands reject invocation.
-Synthetic auth is environment-only. Private finite policy and an explicitly
+Journey A retains synthetic API-key environment auth. Journey B explicitly selects
+`--auth pi-login` and a matching host profile; an exact-argv fake Pi executable
+returns a synthetic bearer before reservation. Real Pi, auth stores and refresh
+are never used. Private finite policy and an explicitly
 user-approved synthetic expiring operator assertion use the production default
 record source, not injected host capabilities or emptied prerequisites. Dirty,
 staged, untracked and parked worktree content, index, refs and raw saved run are

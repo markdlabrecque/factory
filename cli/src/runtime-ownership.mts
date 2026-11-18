@@ -275,11 +275,11 @@ export async function releaseAdvisoryRuntimeLease(p: Paths, expected: AdvisoryRu
   const { readOwnedProcess, readOwnedCleanup } = await import('./supervisor-process.mts');
   const { readProviderUsage } = await import('./supervisor-openai-usage.mts');
   const { supervisorHash } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
-  const { ADVISORY_PROFILE_ID } = await import('./supervisor-advisory-contract.mts');
+  const { ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE_ID } = await import('./supervisor-advisory-contract.mts');
   expected = structuredClone(expected);
   const b = expected.binding, s = readSupervisor(b.stateDir,b.project), key = supervisorHash(b.invocationId);
   const g = s.advisory?.workers[key]?.grant, a = s.advisory?.sends[key], terminal = s.advisory?.settlements?.[key];
-  if (!g || !a || !terminal || !expected.process || b.profile !== ADVISORY_PROFILE_ID || g.profile !== b.profile
+  if (!g || !a || !terminal || !expected.process || ![ADVISORY_PROFILE_ID, SUBSCRIPTION_PROFILE_ID].includes(b.profile) || g.profile !== b.profile
     || g.invocationId !== b.invocationId || g.fence !== b.fence || terminal.grantId !== g.id || terminal.fence !== b.fence
     || !['local-human-required','retained-advice'].includes(terminal.disposition) || terminal.authorization !== a.receipt
     || g.owner.pid !== expected.owner.pid || g.owner.start !== expected.owner.start) throw Error('Protected runtime settlement held');

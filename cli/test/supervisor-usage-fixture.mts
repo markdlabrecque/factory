@@ -4,18 +4,18 @@ import { hostAdvisoryPolicyIdentity } from '../src/supervisor-host-policy.mts';
 import { supervisorHash } from '../../orchestrator/supervisor-contract.mts';
 import { incidentIdentity } from '../src/supervisor-state.mts';
 import { captureProviderEvidence } from '../src/supervisor-openai-usage.mts';
-export function usageFixture(worker = { pid: 124, start: 'worker' }, root = '/fixture/project') {
+export function usageFixture(worker = { pid: 124, start: 'worker' }, root = '/fixture/project', profile = ADVISORY_PROFILE_ID) {
   const h = 'a'.repeat(64), at = new Date().toISOString();
   const project = { root, tracker: { kind: 'github' as const, host: 'github.com', project: 'owner/repo' } };
   const facts = { scope: { kind: 'ticket' as const, ticket: 7 }, requirements: h, gate: h, runId: 'run-1', failure: h }, incidentId = incidentIdentity(project,facts);
-  const host = { version: 1 as const, enabled: true as const, profile: ADVISORY_PROFILE_ID, capacity: 1 as const,
+  const host = { version: 1 as const, enabled: true as const, profile, capacity: 1 as const,
     cumulative: { tokens: 10_000_000, cost: 100_000_000, calls: 10 } };
   const role = { maxTokens: 5_000_000, maxCostUsd: 50, maxCalls: 5, timeoutSeconds: 600 };
   const registration = { at, holdId: 'synthetic-exclusion-identity', host,
     project: { enabled: true, limits: { maxTokens: 10_000_000, maxCostUsd: 100, maxCalls: 10, diagnosis: role, review: role } } };
   const g = diagnosisGrant({ version: 1, project, ticket: 7, runId: facts.runId, attemptId: null, incidentId, basis: h,
-    invocationId: 'invocation', fence: 'fence', holdId: registration.holdId, runtime: h, dependencies: h, profile: ADVISORY_PROFILE_ID,
-    policy: hostAdvisoryPolicyIdentity(host), owner: worker, deadline: new Date(Date.parse(at) + 600_000).toISOString(), reserved: advisoryReservation() });
+    invocationId: 'invocation', fence: 'fence', holdId: registration.holdId, runtime: h, dependencies: h, profile,
+    policy: hostAdvisoryPolicyIdentity(host), owner: worker, deadline: new Date(Date.parse(at) + 600_000).toISOString(), reserved: advisoryReservation(profile) });
   const body = { version: 1 as const, grantId: g.id, invocationId: g.invocationId, fence: g.fence, worker, profile: g.profile, payload: h, at };
   const a = { ...body, receipt: supervisorHash(body) };
   const result = { authorization: a, response: { status: 200, requestId: 'req_unit' }, terminalProblem: null,

@@ -458,7 +458,7 @@ console.log('sha256:'+'a'.repeat(64));
     if (scenario.startsWith('no-commit')) {
       if (scenario === 'no-commit-blocked') assert.equal(result.status, 0, result.stdout + result.stderr);
       else assert.notEqual(result.status, 0, result.stdout + result.stderr);
-      assert.equal(existsSync(join(fake, 'closed')), true, 'cleanup completed before exit');
+      assert.equal(existsSync(join(fake, 'closed')), true, `cleanup completed before exit: ${result.stdout}${result.stderr}`);
       assert.equal(existsSync(join(fake, 'live')), ['no-commit-cleanup-error','no-commit-unconfirmed-cleanup'].includes(scenario));
       assert.equal(existsSync(join(fake, 'verifier-started')), false);
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '');
@@ -493,7 +493,13 @@ console.log('sha256:'+'a'.repeat(64));
         // The only synthetic surfaces are the existing SDK/platform/tracker boundaries; no provider call is made.
         mkdirSync(p.config,{recursive:true,mode:0o700}); chmodSync(p.config,0o700); chmodSync(state,0o700);
         writeFileSync(p.projects,JSON.stringify({version:1,projects:[{name:'fixture',root,schedule:{enabled:true,branch:'main',since:new Date().toISOString()}}]}));
-        writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:1}}),{mode:0o600});
+        const subscription = scenario === 'no-commit-custody';
+        const { SUBSCRIPTION_PROFILE_ID } = await import('../cli/src/supervisor-advisory-contract.mts');
+        let loginExports = 0;
+        const hostAuth = subscription ? {auth:'pi-login' as const,resolveLogin:async () => {
+          loginExports++; return 'synthetic-chatgpt-not-a-token';
+        }} : {};
+        writeFileSync(join(p.config,'supervisor.json'),JSON.stringify({version:1,enabled:true,profile:subscription ? SUBSCRIPTION_PROFILE_ID : ADVISORY_PROFILE_ID,capacity:1,cumulative:{tokens:10000000,cost:100000000,calls:1}}),{mode:0o600});
         const backend = new FakeSchedule(p); backend.enabled=true; backend.timer='active';
         const humanPath=join(fake,'current-human.txt');
         writeFileSync(humanPath,'Complete current human instructions');
@@ -504,7 +510,7 @@ console.log('sha256:'+'a'.repeat(64));
         });
         const hp={...p,state,runtimeDescriptor:runtime.env.FACTORY_RUNTIME_DESCRIPTOR!,runtimes:dirname(runtime.directory),data:dirname(dirname(runtime.directory))};
         const { prepareSupervisorHost } = await import(pathToFileURL(join(runtime.directory,'supervisor-host.mts')).href);
-        const prepared=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:options.invocationId,backend,tracker:source});
+        const prepared=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:options.invocationId,backend,tracker:source,...hostAuth});
         // Disposable synthetic operator attestation only: no installed/actual quiescence assertion.
         const rolloutFile=join(p.config,'supervisor-rollout.json');
         const writeRollout=()=>writeFileSync(rolloutFile,JSON.stringify({version:1,project,...((({host,hostDependencies,selected,dependencies})=>({host,hostDependencies,selected,dependencies}))(prepared.runtime.identity)),
@@ -566,6 +572,8 @@ console.log('sha256:'+'a'.repeat(64));
           return;
         }
         assert.equal(diagnosis.state,'proposed',JSON.stringify(diagnosis));
+        assert.equal(loginExports,subscription ? 1 : 0,'new subscription call resolves auth once');
+        assert.equal(prepared.runtime.identity.profile,subscription ? SUBSCRIPTION_PROFILE_ID : ADVISORY_PROFILE_ID);
         assert(existsSync(barrier),'the actual SDK reached only the network-denied synthetic SSE transport');
         const terminal=readSupervisor(state,project), key=supervisorHash(options.invocationId);
         assert.equal(terminal.advisory?.settlements?.[key]?.disposition,'retained-advice');
@@ -579,10 +587,11 @@ console.log('sha256:'+'a'.repeat(64));
         const sameHost=await prepared.invoke('sk-synthetic-offline-not-a-secret');
         assert.equal(sameHost.state,'reused',JSON.stringify(sameHost));
         writeRollout(); // Renewal alone must not change material basis or replenish cumulative history.
-        const again=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'cached-advice',backend,tracker:source});
+        const again=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'cached-advice',backend,tracker:source,...hostAuth});
         assert(again.initial.preflightHold,'host maxCalls=1 is already spent');
         const reused=await again.invoke('sk-synthetic-offline-not-a-secret');
         assert.equal(reused.state,'reused',JSON.stringify(reused));
+        assert.equal(loginExports,subscription ? 1 : 0,'both same-host and fresh-host cache reuse avoid auth');
         assert.equal(again.hold,undefined,'cache reuse creates no unreleasable exclusion');
         assert.equal(again.runtime.lease(),undefined,'cache reuse creates no paid pin');
         assert.deepEqual(readSupervisor(state,project).charged,terminal.charged);
@@ -591,7 +600,7 @@ console.log('sha256:'+'a'.repeat(64));
         const hostFile=join(p.config,'supervisor.json'), larger=JSON.parse(readFileSync(hostFile,'utf8'));
         larger.cumulative.calls=2;writeFileSync(hostFile,JSON.stringify(larger),{mode:0o600});
         writeFileSync(humanPath,readFileSync(humanPath,'utf8')+'\nAuthoritative successor instruction before new bounded call');
-        const late=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'final-stale',backend,tracker:source});
+        const late=await prepareSupervisorHost({paths:hp,project,ticket:7,invocationId:'final-stale',backend,tracker:source,...hostAuth});
         writeFileSync(preloadConfig,JSON.stringify({scenario:'complete',barrier:join(fake,'late-network.json'),changeOriginal:rolloutFile,
           diagnosisInput:join(state,'supervisor',supervisorHash(project.root),supervisorHash('final-stale'),'input.json')}));
         cp.spawn=((command:any,args:any[],opts:any)=> {

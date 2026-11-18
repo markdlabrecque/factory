@@ -16,6 +16,46 @@ composition remain required. Fixture eligibility and HTTP/SSE are synthetic;
 remote acceptance, billing and paid evaluation remain untested/unauthorized.
 The findings below describe the original unchanged-print investigation.
 
+## Revised owner decision: explicit subscription mode (2026-11-17)
+
+After the original blocked investigation below, the owner explicitly approved a
+**changed contract**, not an assertion that Pi supports the missing remote cap:
+subscription-covered calls with a 4,096-output-token best-effort local target,
+no guaranteed remote cap or API-dollar ceiling, actual usage logging, honest
+unknowns, and preserved one-call/ownership/no-replay safeguards. Approval covers
+source implementation/offline tests only, not auth acquisition, installation or
+live diagnosis. The decision is recorded on
+[ticket 286](https://github.com/markdlabrecque/factory/issues/286).
+
+The [new explicit subscription profile](../design/supervisor-provider-contract.md#owner-approved-subscription-profile)
+implements that revised policy through the existing host/owned-process/journal
+pipeline. `--auth pi-login` must match the private host profile; API-key remains
+the default, unchanged. The supported Pi bearer-export interface is bounded and
+lazy: reused advice does not acquire credentials. All credential/error output is
+excluded from durable data. No Pi auth command was run during implementation.
+The token target is checked at settlement because raw usage may arrive only at
+terminal completion; it cannot bound hidden reasoning or surviving remote work.
+Known target overruns remain known, increase cumulative debit when necessary and
+withhold advice with a human stop; missing usage never becomes zero. API invoice
+accounting is explicitly not applicable, not a measured zero-dollar invoice.
+
+The original API-key-profile refusal regression remains. Its shared provider
+fixture also exercises the same actual pinned login serializer through the new
+profile's final HTTP gate, journal grant and registered child, with synthetic
+transport only. Existing normal-producer custody coverage now proves known
+subscription settlement, exact runtime/exclusion release and auth-free reuse;
+the two copied-public journeys retain API-key known behavior and subscription
+unknown-accounting/no-replay behavior. Auth-child tests use synthetic pipes or a
+fake Pi executable, never credentials. These are source/offline wiring claims,
+not evidence of account entitlement, real login success, backend acceptance,
+subscription quota, real token usage or operational readiness.
+
+The original **BLOCKED** disposition below remains accurate for its original
+hard-remote-cap contract and the unchanged API-key payload gate. Its upstream-cap
+prerequisite is **superseded for the explicitly approved subscription mode**, not
+for the API-key route and not for any future hard-bound claim. No dependency
+upgrade, provider/model change, budget reset or operational rerun is implied.
+
 ## Pi-login capability disposition (ticket 286, 2026-11-17)
 
 **BLOCKED: the pinned OpenAI Sign in with ChatGPT route does not supply the

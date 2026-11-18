@@ -1,7 +1,7 @@
 // Validate actual provider metadata independently of Pi counters; retain one private atomic record. No refund, cleanup or execution authority.
 import { existsSync, constants, openSync, closeSync, fstatSync, readSync, lstatSync, realpathSync, mkdirSync, fsyncSync } from 'node:fs';
 import { join, dirname, resolve, relative, sep } from 'node:path';
-import { ADVISORY_PROFILE, validateDiagnosisGrant, validateSendAuthorization, validateProviderUsageReceipt,
+import { ADVISORY_PROFILE, advisoryProfile, subscriptionProfile, validateDiagnosisGrant, validateSendAuthorization, validateProviderUsageReceipt,
   advisoryRecord, advisoryDemand, advisoryCount } from './supervisor-advisory-contract.mts';
 import type { DiagnosisGrant, SendAuthorization, ProviderUsageReceipt, ProviderUsage } from './supervisor-advisory-contract.mts';
 import { readSupervisor, readSupervisorProjects } from './supervisor-state.mts';
@@ -29,19 +29,21 @@ export function captureProviderEvidence(result: any): RawProviderEvidence {
     terminalProblem: 'malformed-or-oversize-provider-evidence', streamComplete: false }; }
 }
 /** Price is a conservative derived profile charge, not measured account dollars. Reasoning is already in output. */
-function resources(u: ProviderUsage) {
+function resources(u: ProviderUsage, subscription = false) {
+  if (subscription) return { tokens: u.total, cost: 0 };
   const p = ADVISORY_PROFILE, n = BigInt(u.input) * BigInt(p.inputMicroNumerator) + BigInt(u.output) * BigInt(p.outputMicroNumerator);
   return { tokens: u.total, cost: Number((n + BigInt(p.denominator - 1)) / BigInt(p.denominator)) };
 }
 export function providerUsage(g: DiagnosisGrant, a: SendAuthorization, raw: RawProviderEvidence): ProviderUsageReceipt {
   validateDiagnosisGrant(g); validateSendAuthorization(a, g);
+  const subscription = subscriptionProfile(g.profile), profile = advisoryProfile(g.profile);
   let reason: ProviderUsageReceipt['reason'] = 'evidence', usage: ProviderUsage | null = null;
   // Inputs to this function are bounded selected metadata; malformed/cyclic objects cannot become fabricated zero usage.
   try { advisoryDemand(Buffer.byteLength(JSON.stringify(raw)) <= PROVIDER_EVIDENCE_BYTES, 'oversize evidence'); supervisorHash(raw); }
   catch { raw = captureProviderEvidence(null); }
   const status = raw?.terminal?.response?.status;
   const base = { version: 1 as const, grantId: g.id, authorization: a.receipt, invocationId: g.invocationId, fence: g.fence,
-    profile: g.profile, price: ADVISORY_PROFILE.price, rawHash: supervisorHash(raw),
+    profile: g.profile, price: profile.price, rawHash: supervisorHash(raw),
     requestId: requestId(raw?.response?.requestId) ? raw.response.requestId : null,
     responseId: responseId(raw?.terminal?.response?.id) ? raw.terminal.response.id : null,
     terminalStatus: ['completed','incomplete','failed'].includes(status) ? status as 'completed' | 'incomplete' | 'failed' : null };
@@ -67,24 +69,24 @@ export function providerUsage(g: DiagnosisGrant, a: SendAuthorization, raw: RawP
     advisoryRecord(d, ['cached_tokens','cache_write_tokens', ...(Object.hasOwn(d ?? {}, 'cache_write_tokens_details') ? ['cache_write_tokens_details'] : [])]);
     advisoryRecord(u.output_tokens_details, ['reasoning_tokens']);
     const values = [u.input_tokens,d.cached_tokens,d.cache_write_tokens,u.output_tokens,u.output_tokens_details.reasoning_tokens,u.total_tokens];
-    advisoryDemand(values.every(advisoryCount) && u.input_tokens > 0 && d.cached_tokens <= u.input_tokens && d.cache_write_tokens === 0
+    advisoryDemand(values.every(advisoryCount) && u.input_tokens > 0 && d.cached_tokens <= u.input_tokens && (subscription ? d.cache_write_tokens <= u.input_tokens : d.cache_write_tokens === 0)
       && u.output_tokens_details.reasoning_tokens <= u.output_tokens && Number.isSafeInteger(u.input_tokens + u.output_tokens)
       && u.total_tokens === u.input_tokens + u.output_tokens, 'missing/inconsistent counters or unexpected cache write');
     // No write is permitted by this profile. Explicit authoritative write=0 needs no invented retention-specific API field.
     // If optional breakdown exists it must agree with zero; a positive write remains unknown, whatever its retention.
-    if (Object.hasOwn(d, 'cache_write_tokens_details')) {
+    if (!subscription && Object.hasOwn(d, 'cache_write_tokens_details')) {
       advisoryRecord(d.cache_write_tokens_details, ['ttl_30m_tokens','ttl_12h_tokens']);
       advisoryDemand(d.cache_write_tokens_details.ttl_30m_tokens === 0 && d.cache_write_tokens_details.ttl_12h_tokens === 0, 'cache retention contradicts zero writes');
     }
-    reason = 'bounds'; advisoryDemand(u.input_tokens <= ADVISORY_PROFILE.input && u.output_tokens <= ADVISORY_PROFILE.output
+    reason = 'bounds'; advisoryDemand(subscription || u.input_tokens <= ADVISORY_PROFILE.input && u.output_tokens <= ADVISORY_PROFILE.output
       && u.total_tokens <= g.reserved.tokens, 'usage exceeds reservation');
     usage = { input: u.input_tokens, cacheRead: d.cached_tokens, cacheWrite: d.cache_write_tokens, output: u.output_tokens,
       reasoning: u.output_tokens_details.reasoning_tokens, total: u.total_tokens };
-    advisoryDemand(resources(usage).cost <= g.reserved.cost, 'cost exceeds reservation'); reason = 'complete';
+    advisoryDemand(resources(usage, subscription).cost <= g.reserved.cost, 'cost exceeds reservation'); reason = 'complete';
   } catch { usage = null; }
   const body = { ...base, state: usage ? 'known' as const : 'unknown' as const, reason, usage,
-    resources: usage ? resources(usage) : null, costKind: usage ? 'derived-upper-micro-usd' as const : null,
-    serviceTier: usage ? 'default' as const : null, cachePolicy: usage ? 'explicit-unmarked' as const : null };
+    resources: usage ? resources(usage, subscription) : null, costKind: usage ? (subscription ? 'subscription-api-invoice-not-applicable' as const : 'derived-upper-micro-usd' as const) : null,
+    serviceTier: usage ? 'default' as const : null, cachePolicy: usage ? (subscription ? 'provider-managed' as const : 'explicit-unmarked' as const) : null };
   return validateProviderUsageReceipt({ ...body, id: supervisorHash(body) }, g, a);
 }
 

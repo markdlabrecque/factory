@@ -9,7 +9,7 @@ import { RUNTIME_ASSETS } from './runtime-assets.mts';
 import { validateRuntimeBundle } from './runtime-bundle.mts';
 import { acquireAdvisoryRuntimeLease, transferAdvisoryRuntimeLease, releaseAdvisoryRuntimeLease, assertAdvisoryRuntimeLease } from './runtime-ownership.mts';
 import { verifyPinnedProvider } from './supervisor-openai-request.mts';
-import { ADVISORY_PROFILE_ID } from './supervisor-advisory-contract.mts';
+import { ADVISORY_PROFILE_ID, advisoryProfile } from './supervisor-advisory-contract.mts';
 import type { Paths } from './paths.mts';
 import type { OpenAIDiagnosisBoundary } from './supervisor-openai.mts';
 const flat = existsSync(new URL('./admission.mts', import.meta.url));
@@ -30,7 +30,7 @@ export function assertAdvisoryRuntimeSource(root: string) {
 }
 /** Explicit trusted host API; no project/environment callback can assert an installed boundary.
  * The caller still owes actual rollout isolation/control prerequisites before any public composition. */
-export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: string; stateDir: string; invocationId: string; fence: string; deferLease?: boolean }) {
+export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: string; stateDir: string; invocationId: string; fence: string; deferLease?: boolean; profile?: string }) {
   o = structuredClone(o);
   const projectRoot = realpathSync(o.projectRoot), stateDir = realpathSync(o.stateDir);
   if (projectRoot !== o.projectRoot || stateDir !== o.stateDir || !o.invocationId || !o.fence) throw Error('Advisory held: canonical explicit invocation required');
@@ -44,7 +44,8 @@ export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: st
   await verifyPinnedProvider(workflow.root);
   const pins = [{root:hostRoot,id:host.id,dependencies:host.dependencies}];
   if (workflow.root !== hostRoot) pins.push({root:workflow.root,id:selected.id,dependencies:selected.dependencies});
-  const binding = {stateDir,project,invocationId:o.invocationId,fence:o.fence,profile:ADVISORY_PROFILE_ID,pins};
+  const profile = o.profile ?? ADVISORY_PROFILE_ID; advisoryProfile(profile);
+  const binding = {stateDir,project,invocationId:o.invocationId,fence:o.fence,profile,pins};
   let lease = o.deferLease ? undefined : acquireAdvisoryRuntimeLease(o.paths,host.id,binding);
   const acquire = () => { if (!lease) lease = acquireAdvisoryRuntimeLease(o.paths,host.id,binding); };
   let released = false;
@@ -61,7 +62,7 @@ export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: st
   const { loadExecutionContext } = await import(pathToFileURL(join(workflow.root,'context.mts')).href);
   const context = await loadExecutionContext({cwd:projectRoot,moduleRoot:workflow.root,env:{...workflow.env,SANDCASTLE_STATE_DIR:stateDir}});
   const adapter = await import(pathToFileURL(join(workflow.root,'supervisor-openai.mts')).href);
-  const owned: OpenAIDiagnosisBoundary = adapter.createOpenAIDiagnosisBoundary({runtimeRoot:workflow.root,stateDir});
+  const owned: OpenAIDiagnosisBoundary = adapter.createOpenAIDiagnosisBoundary({runtimeRoot:workflow.root,stateDir,profile});
   let started = false;
   const boundary: OpenAIDiagnosisBoundary = Object.freeze({kind:owned.kind,model:owned.model,reservation:owned.reservation,
     async start(input) {
@@ -77,7 +78,7 @@ export async function createSupervisorRuntime(o: { paths: Paths; projectRoot: st
         assertCurrent(); context.assertCurrent({strictOriginals:true}); handle.handoff(request, observe);
       }};
     }});
-  return Object.freeze({context,boundary,identity:Object.freeze({host:host.id,hostDependencies:host.dependencies,selected:selected.id,dependencies:selected.dependencies,profile:ADVISORY_PROFILE_ID}),
+  return Object.freeze({context,boundary,identity:Object.freeze({host:host.id,hostDependencies:host.dependencies,selected:selected.id,dependencies:selected.dependencies,profile}),
     lease:() => structuredClone(lease), assertCurrent, acquire,
     release:async () => { if (!lease) throw Error('Advisory held: no runtime lease'); await releaseAdvisoryRuntimeLease(o.paths,lease); released = true; }});
 }

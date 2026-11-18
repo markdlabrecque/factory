@@ -39,20 +39,30 @@ provider boundary.
 
 The current goal is [ticket 286](https://github.com/markdlabrecque/factory/issues/286):
 prove and, if compatible, implement the existing OpenAI provider's Pi login-backed
-authentication while retaining finite remote request/accounting and ownership
-guarantees. The pinned Pi serializer omits output-cap/cache fields for ChatGPT
+authentication with the explicitly revised subscription target/accounting contract
+and retained ownership guarantees. The pinned Pi serializer omits output-cap/cache fields for ChatGPT
 login requests; accepting a bearer token alone is not sufficient. The chosen next
 step is supported login-backed source work, not obtaining a separate API key.
-The [bounded source/offline investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
-now records **BLOCKED**: the exact serializer omits the approved 4,096-token cap
-and explicit cache policy, and the current final payload validator refuses the
-synthetic login-shaped request before transmission. No auth integration is shipped;
-no live login request, usage or cleanup was tested. Upstream support for an accepted
-remote cap and compatible input/cache/service/raw-usage semantics, plus owner review
-of subscription accounting, must precede implementation and any evaluation resumption.
-The ticket stays open; this finding does not change historical acceptance JSON,
-consume/reset an operational allowance or establish working support.
-After supported implementation, reviewed delivery and controlled installation, recheck the retained run,
+The [original investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
+recorded **BLOCKED under the original hard-bound contract**. The owner then
+explicitly approved a revised subscription contract: 4,096-output-token best-effort
+local/post-response target, no guaranteed remote cap or API-dollar ceiling, honest
+token logging and unchanged one-call/ownership/replay safeguards. Source support
+now adds explicit `--auth pi-login` and a matching private subscription profile
+through the real owned pipeline, not a token accepted under the API-key profile.
+The [provider contract](design/supervisor-provider-contract.md#owner-approved-subscription-profile)
+details its limitations. Known overruns remain known and require a human rather
+than publishing advice; unknown usage/cleanup retains charge/exclusion/pins.
+
+New evidence is **synthetic/offline only**: actual pinned login serializer and
+journal permission; bounded fake auth and failures; known subscription settlement,
+original-receipt runtime/exclusion release and auth-free reuse in the existing
+normal producer; unknown subscription/no-replay in copied public journey B.
+Journey A continues to exercise known API-key behavior. No live login, token export,
+backend acceptance, real usage or cleanup was tested. Historical acceptance JSON
+stays immutable; this change does not install, activate, consume/reset an
+operational allowance or authorize evaluation resumption. After final source
+review/checks and separately approved controlled installation, recheck the retained run,
 policy, controls and truthful rollout attestation before resuming the approved
 one-call evaluation. Changed profile/spend premises require owner review; no
 ambiguous replay, new allowance or implementation rerun is implied.
