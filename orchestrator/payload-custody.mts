@@ -1,4 +1,4 @@
-// Source-owned normal payload journal: immutable, run-indexed creation/identity/absence/closed-handoff records.
+// Source-owned normal payload journal: immutable creation/identity, one-time resume, absence and closure records.
 // Only exact platform-observed close can close a payload. Interrupted creation/registration/control flow stays held.
 import { randomUUID, createHash } from 'node:crypto';
 import { closeSync, fsyncSync, openSync, readdirSync, writeFileSync } from 'node:fs';
@@ -17,7 +17,7 @@ export interface PayloadBinding {
 }
 export type CustodyEvent = { kind: 'open'; binding: PayloadBinding } | { kind: 'pending'; id: string }
   | { kind: 'registered'; id: string; container: string } | { kind: 'absent'; id: string; container: string }
-  | { kind: 'sealed' };
+  | { kind: 'implementation-continuation'; id: string } | { kind: 'sealed' };
 const uuid = (s: unknown): s is string => typeof s === 'string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(s);
 const hash = (s: unknown) => createHash('sha256').update(JSON.stringify(s)).digest('hex');
 const same = (a: unknown, b: unknown) => hash(a) === hash(b);
@@ -33,7 +33,7 @@ function validBinding(b: PayloadBinding): boolean {
 }
 /** Cheap transition interpreter also used on every read. No stage, PID liveness or readiness fact is an event. */
 export function custodyState(events: readonly CustodyEvent[]) {
-  let binding: PayloadBinding | undefined, sealed = false;
+  let binding: PayloadBinding | undefined, sealed = false, continued = false;
   const payloads = new Map<string, { container?: string; absent: boolean }>();
   for (const event of events) {
     if (sealed) throw Error('Payload custody already sealed');
@@ -50,6 +50,10 @@ export function custodyState(events: readonly CustodyEvent[]) {
       if (!fields(event,['kind','id','container']) || !p || p.container || typeof event.container !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(event.container)
         || [...payloads.values()].some(v => v.container === event.container)) throw Error('Invalid exact payload registration');
       p.container = event.container;
+    } else if (event.kind === 'implementation-continuation') {
+      const p = payloads.get(event.id);
+      if (!fields(event,['kind','id']) || continued || !p?.container || p.absent) throw Error('Invalid or repeated implementation continuation');
+      continued = true;
     } else if (event.kind === 'absent') {
       const p = payloads.get(event.id);
       if (!fields(event,['kind','id','container']) || !p?.container || p.absent || p.container !== event.container) throw Error('Invalid exact payload absence');
@@ -59,7 +63,7 @@ export function custodyState(events: readonly CustodyEvent[]) {
       sealed = true;
     } else throw Error('Unknown payload custody event');
   }
-  return { binding, sealed, payloads };
+  return { binding, sealed, payloads, continued };
 }
 function directory(state: string, pointer: PayloadPointer): string {
   if (!fields(pointer,['version','nonce']) || pointer.version !== 1 || !uuid(pointer.nonce)) throw Error('Unknown payload pointer');
@@ -86,6 +90,7 @@ export function beginPayloadCustody(state: string, binding: PayloadBinding) {
       if (!sandbox.sandboxId) throw Error('Unknown actual sandbox identity');
       append({kind:'registered',id,container:sandbox.sandboxId});
     },
+    reserveImplementationContinuation(id: string) { append({kind:'implementation-continuation',id}); },
     async close(id: string, sandbox: {sandboxId?: string; close(): Promise<unknown>}) {
       const p = custodyState(events).payloads.get(id);
       if (!p?.container || p.container !== sandbox.sandboxId) throw Error('Payload identity changed before close');

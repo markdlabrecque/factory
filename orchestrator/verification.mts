@@ -85,7 +85,8 @@ export function validateEvidence(root: string) {
   const first = verdictBytes.toString('utf8').replaceAll('\r\n', '\n').split('\n')[0];
   demand(first === `VERDICT: ${report.verdict}`, 'verdict.md first line must exactly match verification.json');
   const artifacts: Artifact[] = report.artifacts.map(a => {
-    demand(!['verdict.md', 'verification.json', 'browser-preflight.log'].includes(a.path.split('/').at(-1)!), 'reserved diagnostic is not acceptance evidence');
+    demand(!['verdict.md', 'verification.json', 'browser-preflight.log', 'implementation-initial-outcome.json',
+      'implementation-continuation-outcome.json', 'implementation-initial-diagnostic.json'].includes(basename(a.path)), 'reserved diagnostic is not acceptance evidence');
     if (a.kind === 'image') demand(a.path.endsWith('.png'), 'images must be PNG');
     if (a.kind === 'video') demand(/\.(webm|mp4)$/.test(a.path), 'videos must be WebM or MP4');
     const bytes = file(root, a.path); return { ...a, bytes: bytes.length, sha256: sha256(bytes) };

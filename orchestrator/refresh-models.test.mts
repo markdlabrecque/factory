@@ -80,7 +80,7 @@ for (const kind of ["github", "gitlab"]) {
       export const createSandbox = async ({branch, baseBranch, sandbox}) => {
         execFileSync('git', ['branch', branch, baseBranch]);
         const closed = join(process.env.FAKE_STATE,'implementer-closed'); rmSync(closed, {force:true});
-        return { sandboxId:'fixture-implementer', close: async () => {writeFileSync(closed, 'yes');}, exec: async () => ({stdout:'browser preflight OK',exitCode:0}), run: async () => {
+        return { sandboxId:'fixture-implementer', close: async () => {writeFileSync(closed, 'yes');}, exec: async command => ({stdout: command === 'git rev-parse --verify HEAD' ? execFileSync('git', ['rev-parse', branch], {encoding:'utf8'}) : command.includes('status --porcelain') ? '' : 'browser preflight OK', exitCode:0}), run: async () => {
           writeFileSync(sandbox.mounts[0].hostPath + '/blocked.json', JSON.stringify({blockers: [{iid:20, what:'provider', evidence:'missing API'}]}));
           return {commits: []};
         }};

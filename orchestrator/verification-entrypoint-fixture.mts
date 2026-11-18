@@ -47,7 +47,7 @@ export async function normalEntrypointFixture(t: TestContext, scenario: string, 
     cpSync(join(import.meta.dirname, 'fixtures/entrypoint/sandcastle'), sdk, { recursive: true });
     writeFileSync(join(sdk, 'index.mjs'), `
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import net from 'node:net'; import tls from 'node:tls'; import http from 'node:http'; import https from 'node:https';
 import { syncBuiltinESMExports } from 'node:module';
@@ -104,6 +104,40 @@ export async function createSandbox(o) {
         if (scenario === 'publication' && process.env.FIXTURE_BARRIER === 'yes') {
           while (!readFileSyncBarrier()) await new Promise(resolve => setTimeout(resolve, 10));
         }
+        if (scenario.startsWith('continuation-')) {
+          const executionId = o.promptArgs.EXECUTION_ID;
+          const writeOutcome = (turn, status) => writeFileSync(join(evidence, 'implementation-' + turn + '-outcome.json'), JSON.stringify({version:1, executionId, turn, status, reason:'fixture outcome', nextAction:'finish behavior'}));
+          const session = join(o.agent.sessionRoot, 'fixture.jsonl'); mkdirSync(o.agent.sessionRoot, {recursive:true});
+          const reply = text => writeFileSync(session, JSON.stringify({type:'message',message:{role:'assistant',stopReason:'stop',content:[{type:'text',text}]}}));
+          writeOutcome('initial', scenario === 'continuation-false-success' ? 'implemented' : 'incomplete');
+          reply('Initial exploration and green baseline');
+          if (scenario === 'continuation-wrong-checkout') git(worktree,['switch','-c','wrong-branch']);
+          if (scenario === 'continuation-superseded') {
+            const file = join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json');
+            writeFileSync(file, JSON.stringify({...JSON.parse(readFileSync(file)), executionId:'replacement',note:'replacement owns this run'}));
+          }
+          return { commits:[], iterations:[{sessionFilePath:session}], resume:async (correction, options) => {
+            const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
+            const run = JSON.parse(readFileSync(join(process.env.SANDCASTLE_STATE_DIR,'owner_repo--7.json')));
+            const c = readPayloadCustody(process.env.SANDCASTLE_STATE_DIR,run.payloadCustody);
+            if (!c.continued || c.binding.executionId !== executionId || c.binding.baseline !== o.promptArgs.BASE_SHA || c.sealed || options.signal.aborted || options.completionSignal.length) throw Error('unsafe continuation arguments');
+            if (existsSync(join(fake,'continuation-started'))) throw Error('unexpected third implementation turn');
+            writeFileSync(join(fake,'continuation-started'),correction);
+            if (scenario === 'continuation-error') throw Error('fixture resume failed');
+            if (scenario === 'continuation-stalled') {
+              setImmediate(() => process.kill(process.pid, 'SIGTERM'));
+              return new Promise(() => {});
+            }
+            reply('Continuation result');
+            if (scenario === 'continuation-exhausted') {
+              writeOutcome('continuation', 'incomplete');
+              return { commits:[], iterations:[{sessionFilePath:session}], resume:async () => { throw Error('unexpected third implementation turn'); } };
+            }
+            writeOutcome('continuation', 'implemented');
+            writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','continued implementation']);
+            return { commits:scenario === 'continuation-outside-commit' ? [] : [{sha:git(worktree,['rev-parse','HEAD']).trim()}], iterations:[{sessionFilePath:session}] };
+          } };
+        }
         if (scenario.startsWith('no-commit')) {
           if (scenario.startsWith('no-commit-custody')) {
             const { readPayloadCustody } = await import(process.env.FACTORY_RUNTIME_ROOT + '/payload-custody.mts');
@@ -132,7 +166,9 @@ export async function createSandbox(o) {
         if (scenario === 'missing-baseline') rmSync(join(root,'.git/objects',${JSON.stringify(baseline.slice(0, 2))},${JSON.stringify(baseline.slice(2))}));
         return {commits:['implementation']};
       }
+      if (scenario.startsWith('continuation-') && existsSync(join(fake,'verifier-started'))) throw Error('verifier ran twice');
       writeFileSync(join(fake,'verifier-started'),'yes');
+      if (scenario === 'continuation-failed-verification') throw Error('fixture verifier failure');
       writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\\nSynthetic checks');
       if (scenario !== 'legacy-prompt') writeFileSync(join(evidence,'verification.json'),${JSON.stringify(JSON.stringify(fixtureReport()))});
       writeFileSync(join(evidence,'check.txt'),process.env.FIXTURE_ARTIFACT ?? 'Assertions passed');
@@ -453,6 +489,41 @@ console.log('sha256:'+'a'.repeat(64));
       const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
       assert.match(run.note, /fixture primary error/); assert.match(run.note, /fixture teardown failed/);
       assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '');
+      return;
+    }
+    if (scenario.startsWith('continuation-')) {
+      const resumed = !['continuation-false-success','continuation-superseded','continuation-wrong-checkout'].includes(scenario);
+      const verified = ['continuation-pass','continuation-failed-verification'].includes(scenario);
+      const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
+      assert.equal(result.status, scenario === 'continuation-pass' ? 0 : 1, result.stdout + result.stderr);
+      assert.equal(existsSync(join(fake,'continuation-started')), resumed);
+      assert.equal(existsSync(join(fake,'verifier-started')), verified);
+      assert.equal(existsSync(join(fake,'live')), false);
+      const { readPayloadCustody } = await import('./payload-custody.mts');
+      const payload = readPayloadCustody(state, run.payloadCustody);
+      assert.equal(payload.continued, resumed); assert.equal(payload.sealed, scenario !== 'continuation-stalled');
+      if (resumed) {
+        assert.match(readFileSync(join(run.evidenceDir,'implementation-initial-diagnostic.json'),'utf8'), /Initial exploration and green baseline/);
+        assert.match(readFileSync(join(fake,'continuation-started'),'utf8'), /unchanged baseline checks did not implement/);
+      }
+      if (scenario === 'continuation-pass') {
+        const proof = JSON.parse(readFileSync(join(proofRoot(state, 'owner/repo', '7', run.verification.id), 'proof.json'), 'utf8'));
+        assert.equal(proof.baseline, baseline); assert.equal(proof.tip, git(origin, 'rev-parse', '7-fix-login'));
+        assert.equal(proof.executionId, run.executionId);
+      } else {
+        assert.equal(run.verification, undefined);
+        const remote = spawnSync('git', ['rev-parse', '--verify', 'refs/heads/7-fix-login'], {cwd: origin});
+        assert.notEqual(remote.status, 0, 'no branch pushed');
+      }
+      if (scenario === 'continuation-exhausted') {
+        const final = JSON.parse(readFileSync(join(run.evidenceDir,'no-commit.json'),'utf8'));
+        assert.match(final.continuation, /continuation-exhausted/); assert.equal(final.agentReply, 'Continuation result');
+      }
+      if (scenario === 'continuation-error') assert.match(run.note, /continuation-exhausted: fixture resume failed/);
+      if (scenario === 'continuation-stalled') assert.match(result.stderr, /did not settle; launch and cleanup ownership retained/);
+      if (scenario === 'continuation-outside-commit') assert.match(run.note, /resumed SDK commit report disagrees/);
+      if (scenario === 'continuation-wrong-checkout') assert.match(run.note, /clean original checkout no longer confirmed/);
+      if (scenario === 'continuation-superseded') assert.equal(run.note, 'replacement owns this run');
       return;
     }
     if (scenario.startsWith('no-commit')) {

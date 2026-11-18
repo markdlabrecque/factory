@@ -3,7 +3,7 @@
 // Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
 // Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
-// Zero-commit diagnostics attribute bounded Pi session replies without delivery authority, then exit after owned teardown.
+// Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 import { beginPayloadCustody } from './payload-custody.mts';
 import { ownerOf } from './admission.mts';
@@ -16,6 +16,8 @@ import type { ReadinessReport } from './readiness-schema.mts';
 // #149: unknown dependency reads hold implementer and recovery work without needs-human labels.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
 import { diagnostic, diagnosticText, finalReply, saveDiagnostic, sanitizeReply } from './no-commit.mts';
+import { continuationRefusal, outcomeFile, readImplementationOutcome, waitForContinuation, type ImplementationTurn } from './implementation-outcome.mts';
+import { performance } from 'node:perf_hooks';
 import { recordModelResolution } from "./assessment.mts";
 import { createSandbox, pi } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -357,6 +359,7 @@ if (recovering) {
 // This lexical scope owns every normal launch handoff, including post-teardown delivery.
 let custody: ReturnType<typeof beginPayloadCustody> | undefined;
 let normalExit = 0;
+let continuationUnsettled = false;
 async function normalRun(): Promise<void> {
 function fail(msg: string): never { lastMessage = msg; throw Error(msg); }
 if ('error' in picked) fail(`#${iid} ${picked.error} Not started.`);
@@ -425,7 +428,7 @@ function readBlocked(): ImplementerBlocker[] | undefined {
   const file = resolve(evidenceHost, "blocked.json");
   if (!existsSync(file)) return undefined;
   try {
-    const list = JSON.parse(readFileSync(file, "utf8")).blockers;
+    const list = JSON.parse(readFileSync(file, 'utf8')).blockers;
     if (!Array.isArray(list)) return [];
     return list.map((b: Partial<ImplementerBlocker>) => ({
       iid: Number.isInteger(b.iid) ? (b.iid as number) : null,
@@ -532,34 +535,129 @@ try {
   sandboxCancel.signal.throwIfAborted();
   // ---- 1. implementer ----------------------------------------------------------
   setStage(iid, { stage: "implementing" });
-  const impl = await sandbox.run({
-    agent: pi(implementerModel, { thinking: AGENT.thinking, env: piEnvFor(implementerModel, openaiCredential), sessionStorage: { hostSessionsDir: diagnosticSessions } }),
+  const implementer = pi(implementerModel, { thinking: AGENT.thinking, env: piEnvFor(implementerModel, openaiCredential), sessionStorage: { hostSessionsDir: diagnosticSessions } });
+  // The first turn keeps its existing idle limit. Resume may only spend the remainder of one
+  // such window measured from the first start; a long, productive first turn earns no resume.
+  const deadline = performance.now() + 600_000;
+  const initial = await sandbox.run({
+    agent: implementer,
     promptFile: context.codePath('prompt.md'),
-    promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.implementation.text },
+    promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.implementation.text,
+      EXECUTION_ID: executionId, IMPLEMENTATION_OUTCOME_FILE: outcomeFile('initial') },
     maxIterations: 1,
-    completionSignal: "<promise>COMPLETE</promise>",
-    name: "implementer", signal: sandboxCancel.signal,
+    completionSignal: [], // Wait for natural process exit, never force-complete on an agent marker.
+    name: 'implementer', signal: sandboxCancel.signal,
   });
-  if (!impl.commits.length) {
-    diagnosticExecutionId = executionId;
-    blockers = readBlocked();
-    let worktree: 'dirty' | 'clean' | 'unknown' = 'unknown';
+  const observeTip = async () => {
+    const head = await sandbox.exec('git rev-parse --verify HEAD');
+    const sha = head.stdout.trim();
+    if (head.exitCode !== 0 || !/^[a-f0-9]{40}$/.test(sha) || [baseSha, sha].some(id => spawnSync('git', ['cat-file', '-e', `${id}^{commit}`]).status !== 0)) {
+      throw Error('Missing historical verification baseline or tip Git object; verifier not started. Preserve work for restored-baseline verification or explicit human review.');
+    }
+    if (sh('git', ['rev-parse', '--verify', `refs/heads/${branch}`]) !== sha || spawnSync('git', ['merge-base', '--is-ancestor', baseSha, sha]).status !== 0) {
+      throw Error('Implementation tip does not match the owned branch and original baseline; verifier not started.');
+    }
+    return sha;
+  };
+  const ownedCheckout = async () => {
+    const ref = await sandbox.exec('git symbolic-ref -q HEAD');
+    return ref.exitCode === 0 && ref.stdout.trim() === `refs/heads/${branch}`;
+  };
+  const statusArgs = ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none'];
+  const worktreeState = async (): Promise<'dirty' | 'clean' | 'unknown'> => {
     try {
-      const status = await sandbox.exec('git --no-optional-locks status --porcelain --untracked-files=normal');
-      if (status.exitCode === 0) worktree = status.stdout.trim() ? 'dirty' : 'clean';
+      const status = await sandbox.exec(`git ${statusArgs.join(' ')}`);
+      if (status.exitCode === 0) return status.stdout.trim() ? 'dirty' : 'clean';
     } catch { /* An unreadable fact stays unknown, not a filesystem diagnosis. */ }
-    const report = diagnostic(executionId, worktree, blockers !== undefined, finalReply(impl, diagnosticSessions), impl.logFilePath);
-    noCommitMessage = diagnosticText(report);
-    try { saveDiagnostic(evidenceHost, report); }
-    catch { noCommitMessage = diagnosticText(report, false) + ' Diagnostic evidence publication unavailable.'; }
-    lastMessage = noCommitMessage;
-    const current = readRuns().find(r => r.project === PROJECT && r.iid === iid);
-    noCommitSuperseded = current?.executionId !== executionId || current.claim !== claimToken;
-    if (noCommitSuperseded) finished = true; // Even an unclaimed manual run must not overwrite a newer execution on exit.
-    else setStage(iid, { note: noCommitMessage });
-  } else {
-    tip = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
-    if ([baseSha, tip].some(sha => spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`]).status !== 0)) throw Error('Missing historical verification baseline or tip Git object; verifier not started. Preserve work for restored-baseline verification or explicit human review.');
+    return 'unknown';
+  };
+  const observeZeroCommit = async (result: typeof initial, turn: ImplementationTurn) => {
+    const dependency = readBlocked();
+    const worktree = await worktreeState();
+    const outcome = readImplementationOutcome(evidenceHost, executionId, turn);
+    const report = diagnostic(executionId, worktree, dependency !== undefined, finalReply(result, diagnosticSessions), result.logFilePath);
+    return { report, outcome, dependency };
+  };
+  tip = await observeTip();
+  sandboxCancel.signal.throwIfAborted();
+  if ((tip === baseSha) !== (initial.commits.length === 0)) throw Error('SDK commit report disagrees with the owned Git baseline; verifier not started.');
+  if (tip === baseSha) {
+    diagnosticExecutionId = executionId;
+    let attempt = await observeZeroCommit(initial, 'initial');
+    const resume = initial.resume;
+    let refusal = continuationRefusal({ outcome: attempt.outcome, worktree: attempt.report.worktree,
+      dependencyReport: attempt.dependency !== undefined, zeroCommits: initial.commits.length === 0,
+      replyCaptured: !!attempt.report.agentReply, canResume: typeof resume === 'function',
+      cancelled: sandboxCancel.signal.aborted, remainingMs: deadline - performance.now() });
+    if (!refusal && resume) {
+      try {
+        if (!(await ownedCheckout()) || await observeTip() !== baseSha || await worktreeState() !== 'clean') {
+          refusal = 'continuation refused: clean original checkout no longer confirmed';
+        }
+        const hold = refusal ? undefined : recheck();
+        const hostCheckout = ['-C', sandbox.worktreePath];
+        if (hold) refusal = `continuation refused: ${sanitizeReply(hold)}`;
+        if (!refusal && (sh('git', [...hostCheckout, 'symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${branch}`
+          || sh('git', [...hostCheckout, 'rev-parse', 'HEAD']) !== baseSha || sh('git', [...hostCheckout, ...statusArgs]) || readBlocked() !== undefined)) {
+          refusal = 'continuation refused: host checkout or dependency report changed';
+        }
+        if (!refusal && (sandboxCancel.signal.aborted || deadline - performance.now() < 1)) refusal = 'continuation refused: cancellation or shared implementation time exhausted';
+        if (!refusal) {
+          saveDiagnostic(evidenceHost, { ...attempt.report, outcome: attempt.outcome, evidence: 'implementation-initial-diagnostic.json',
+            automaticAction: 'Initial turn only; the host may reserve one same-session continuation.' });
+          custody.reserveImplementationContinuation(payloadCreation);
+        }
+      } catch { refusal = 'continuation refused: eligibility, diagnostic or durable reservation unavailable'; }
+      if (!refusal) {
+        noCommitMessage = 'Initial implementation made zero commits; see implementation-initial-diagnostic.json. Continuation reserved; final Git state unconfirmed.';
+        const remaining = Math.floor(deadline - performance.now());
+        if (remaining <= 0) throw Error('continuation-exhausted: shared implementation time expired before resume');
+        const timeout = new AbortController();
+        const timer = setTimeout(() => timeout.abort(Error('shared implementation time expired')), remaining);
+        const signal = AbortSignal.any([sandboxCancel.signal, timeout.signal]);
+        let continued: typeof initial;
+        try {
+          signal.throwIfAborted();
+          continuationUnsettled = true;
+          const work = Promise.resolve().then(() => {
+            signal.throwIfAborted();
+            return resume(
+              `Continue this same ticket. Exploration and unchanged baseline checks did not implement it. Make the smallest focused change, run targeted checks and commit it, or report a concrete blocker. Follow the same outcome schema with executionId ${executionId}, turn continuation, and write it to ${evidenceBox}/${outcomeFile('continuation')}. Return normally; do not emit a completion marker.`,
+              { name: 'implementer-continuation', signal, completionSignal: [] },
+            );
+          }).finally(() => { continuationUnsettled = false; });
+          continued = await waitForContinuation(work, signal);
+          signal.throwIfAborted();
+          tip = await observeTip();
+          const commits = sh('git', ['rev-list', `${baseSha}..${tip}`]).split('\n').filter(Boolean).sort();
+          if (!(await ownedCheckout()) || JSON.stringify(commits) !== JSON.stringify(continued.commits.map(c => c.sha).sort())) {
+            throw Error('resumed SDK commit report disagrees with the owned checkout and original Git baseline');
+          }
+          signal.throwIfAborted();
+        } catch (error) {
+          throw Error(`continuation-exhausted: ${sanitizeReply(error instanceof Error ? error.message : String(error))}`);
+        } finally { clearTimeout(timer); }
+        if (tip === baseSha) {
+          attempt = await observeZeroCommit(continued, 'continuation');
+          refusal = 'continuation-exhausted: no commits against the original baseline';
+        } else noCommitMessage = undefined;
+      }
+    }
+    if (tip === baseSha) {
+      blockers = attempt.dependency;
+      const report = { ...attempt.report, outcome: attempt.outcome, continuation: refusal };
+      noCommitMessage = diagnosticText(report);
+      try { saveDiagnostic(evidenceHost, report); }
+      catch { noCommitMessage = diagnosticText(report, false) + ' Diagnostic evidence publication unavailable.'; }
+      lastMessage = noCommitMessage;
+      const current = readRuns().find(r => r.project === PROJECT && r.iid === iid);
+      noCommitSuperseded = current?.executionId !== executionId || current.claim !== claimToken;
+      if (noCommitSuperseded) finished = true; // Never overwrite a newer execution on exit.
+      else setStage(iid, { note: noCommitMessage });
+    }
+  }
+  sandboxCancel.signal.throwIfAborted();
+  if (tip !== baseSha) {
     // The real diff replaces the predicted footprint for conflict checks from now on.
     patchManifest(PROJECT, Number(iid), { actualFootprint: sh("git", ["diff", "--name-only", `${baseSha}...${tip}`]).split("\n").filter(Boolean) });
 
@@ -590,6 +688,7 @@ if (verificationRefusal) fail(verificationRefusal);
 if (noCommitMessage) {
   const current = readRuns().find(r => r.project === PROJECT && r.iid === iid);
   noCommitSuperseded ||= current?.executionId !== executionId || current.claim !== claimToken;
+  noCommitSuperseded ||= readAdmission(stateDir()).claims[keyFor(iid!, PROJECT)]?.token !== claimToken;
   if (noCommitSuperseded) { finished = true; fail('No-commit execution was superseded; diagnostic retained only under its original execution.'); }
 }
 if (noCommitMessage && !blockers) fail(noCommitMessage);
@@ -655,7 +754,9 @@ catch (error) { normalExit = 1; lastMessage = (error as Error).message; console.
 finally {
   if (custody) {
     try {
-      custody.finish(); // normalRun has actually returned/thrown: no payload or launch continuation remains in this scope.
+      // Deadline/cancellation may beat session transfer or sync; absence alone cannot settle an in-flight SDK call.
+      if (continuationUnsettled) throw Error('Implementation continuation did not settle; launch and cleanup ownership retained');
+      custody.finish(); // No payload or launch continuation remains in this scope.
       entryCleanupConfirmed = true;
       runtimeLease.confirmedCleanup();
     } catch (error) {
