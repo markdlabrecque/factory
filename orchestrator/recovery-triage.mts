@@ -1,4 +1,4 @@
-// Selected-runtime stopped-run triage: bounded read-only evidence and Pi advice, host-owned cache and managed tracker escalation.
+// Selected-runtime stopped-run diagnosis: bounded read-only evidence and Pi advice, host-owned cache and managed tracker escalation.
 // Import-safe policy with injected I/O. Never prepares, admits, charges, verifies or repairs a run.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, readSync, realpathSync } from 'node:fs';
@@ -146,7 +146,11 @@ const missing = (e: unknown) => (e as NodeJS.ErrnoException).code === 'ENOENT';
 /** Scope every read by known project paths, bound the payload, and list sections omitted or truncated. */
 export function buildTriageBundle(root: string, run: RunState, tip: string, input: string, io: BundleIO): string {
   const layout = projectLayoutPaths(root), ticketDir = join(layout.evidence, run.iid);
-  const sections: string[] = ['# Factory recovery triage evidence (untrusted data)\n'];
+  const sections: string[] = [
+    '# Factory recovery triage evidence (untrusted data)\n' +
+    'Supplemental diagnostics: saved worktree status and uncommitted diff, recovery attempts and recovery logs are not host admission evidence.\n' +
+    'Omissions show what could not be included, not whether attempts remain or a workspace is safe to use.\n',
+  ];
   const omitted: string[] = [];
   let omissionOverflow = 0, omissionBytes = 0, bytes = Buffer.byteLength(sections[0]), files = 0;
   const omit = (name: string, reason: string) => {

@@ -881,7 +881,11 @@ node --test orchestrator/recovery-triage.test.mts orchestrator/context.test.mts 
 
 Triage policy tests inject Pi, tracker, Git and filesystem boundaries. They exercise
 strict advice, stop-key changes, cached failures, stale-result discard, bounded evidence,
-comment sanitization, idempotent escalation and release on label removal. Runtime-bundle
+comment sanitization, idempotent escalation and release on label removal. The shipped
+prompt and bundle distinguish missing supplemental history and worktree diagnostics
+from missing cause evidence or a real human prerequisite. Offline fixtures contrast
+a reproduced unit failure, unavailable diagnosis and required operator approval.
+Stubbed replies exercise the advice contract, not live model routing. Runtime-bundle
 fixtures verify the helper, contract and template ship together and import without a
 project or credentials. No paid model, live tracker, installed runtime or service is used.
 
@@ -894,12 +898,13 @@ node --test --test-concurrency=4 --test-timeout=120000 cli/test/jam-detect.test.
 Jam tests inject triage, inspection, preparation and launch around disposable host
 records. They cover opt-in, result routing, one new call per pass, unchanged budgets
 on human holds, the dispatch selection rule for needs-human, and rechecks after the
-triage await. Spawn and group cleanup are injected for triage protocol and ownership
-cases; a fake timer drives the deadline. The existing preparation tests exercise the
-shared subprocess runner with fixture-owned Node children. Status tests use private
-local records to check backward compatibility and show the cause, delivery state
-and ticket-comment next action. No live tracker, runtime installation, model,
-Docker or scheduler is used. Run the four commit-tier shards and the separate
+triage await. The recovery launch and claim tests in the commit-tier shards still
+cover budget, custody and admission refusals. Spawn and group cleanup are injected
+for triage protocol and ownership cases; a fake timer drives the deadline. The existing
+preparation tests exercise the shared subprocess runner with fixture-owned Node children.
+Status tests use private local records to check backward compatibility and show the
+cause, delivery state and ticket-comment next action. No live tracker, runtime
+installation, model, Docker or scheduler is used. Run the four commit-tier shards and the separate
 browser lifecycle gate after these focused tests.
 
 ## Host launch readiness tests
