@@ -36,6 +36,10 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Standard implementation continuation
+
+`orchestrator/implementation-outcome.test.mts` covers bounded execution/turn reports and fail-closed eligibility. `orchestrator/payload-custody.test.mts` verifies durable one-time reservation without treating it as cleanup. `orchestrator/verification-entrypoint-continuation.test.mts` exercises the flat normal runner with stubbed SDK, tracker and container boundaries and disposable real Git. It checks that a resumed commit keeps the original baseline and requires the independent verifier; second incompletion, a stalled or failed resume, false success, wrong checkout, an unexplained Git delta and superseded execution do not push. A stalled SDK resume or post-resume Git probe retains unsealed custody even when the container is gone. The fixture supplies the inspected Sandcastle resume contract, not a live Pi transport or a production rollout test.
+
 ## Source acceptance release pack
 
 The [acceptance matrix and operator-held runbook](docs/supervisor-acceptance.md) and

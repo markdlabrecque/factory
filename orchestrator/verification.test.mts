@@ -33,6 +33,11 @@ test('reject unsafe, missing, empty, and reserved artifacts', () => {
     const r = report(); r.artifacts[0].path = path; r.criteria[0].evidence = [path];
     assert.throws(() => validateEvidence(fixture(r)));
   }
+  for (const path of ['implementation-initial-outcome.json', 'implementation-continuation-outcome.json', 'implementation-initial-diagnostic.json']) {
+    const r = report(); r.artifacts[0].path = path; r.criteria[0].evidence = [path];
+    const dir = fixture(r); writeFileSync(join(dir, path), '{"status":"implemented"}');
+    assert.throws(() => validateEvidence(dir), /reserved diagnostic is not acceptance evidence/);
+  }
   const dir = fixture(); writeFileSync(join(dir, 'check.txt'), ''); assert.throws(() => validateEvidence(dir));
   const linked = fixture(); symlinkSync('check.txt', join(linked, 'link.txt'));
   const r = report(); r.artifacts[0].path = 'link.txt'; r.criteria[0].evidence = ['link.txt'];
