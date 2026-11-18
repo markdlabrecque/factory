@@ -765,9 +765,19 @@ advice or a cached failure. There is at most one new model call per unchanged st
 and at most one per project per scheduled pass. Changed input during the call
 invalidates the reply. Unreadable or corrupt saved results are preserved.
 
+Triage diagnoses the stop and advises whether a change to saved code can plausibly
+fix it. The bundle identifies worktree status and uncommitted diffs, prior recovery
+evidence and recovery logs as supplemental diagnostics. Missing or unreadable
+supplemental artifacts alone do not warrant human review, and do not imply a
+clean worktree, available budget or valid custody. Missing evidence needed for
+diagnosis, contradictory evidence that prevents a sound diagnosis, or a genuine
+human prerequisite still warrants escalation. The host alone decides eligibility
+and rechecks it after triage; advice never bypasses preparation, admission or
+independent verification.
+
 | Result | What Factory does |
 | --- | --- |
-| `repair` | Continues to ordinary preparation and admission. |
+| `repair` | Recommends a source repair; the host continues to ordinary preparation and admission only if its checks allow it. |
 | `human` | Prepares nothing and spends no attempt for this ticket. A fresh result ends the scan; a saved result lets the next stopped candidate in the jam be considered. |
 | `released` | A human removed the label after delivery. Continues to ordinary preparation and admission. |
 | `unavailable` | Logs the failure and continues to ordinary preparation if the project, jam and run are still eligible. |

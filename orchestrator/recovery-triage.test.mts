@@ -180,6 +180,62 @@ test('bundle prioritizes recorded versions and verdicts, bounds bytes/files and 
   assert.ok(!large.includes('�'));
 });
 
+test('shipped prompt separates repair advice from host authorization and preserves diagnostic escalation', () => {
+  const prompt = readFileSync(new URL('./prompt.triage.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(prompt, /`repair` is advice, not authorization/);
+  assert.match(prompt, /Do not escalate solely because .*attempt history.*worktree.* (is|are) missing/);
+  assert.match(prompt, /Do not infer.*budget.*ownership/);
+  assert.match(prompt, /Escalate.*cause cannot be established.*human prerequisite.*contradictory/);
+  assert.match(prompt, /wrong comparison.*`repair`.*operator approval.*human/);
+});
+
+// Exercise the evidence and advice contract, not how a live model would classify it.
+for (const scenario of ['reproduced failure', 'missing diagnosis', 'operator approval'] as const) test(`stopped revision with no supplemental artifacts: ${scenario}`, () => {
+  const verdict = scenario === 'reproduced failure' ? 'Independent unit verification: comparator returns false for equal counts; expected true.' :
+    scenario === 'operator approval' ? 'Independent verification blocked: required operator approval was denied.' : undefined;
+  const recommendation = scenario === 'reproduced failure' ?
+    { ...advice({ kind: 'repair', expectation: 'Fix the comparison; keep the same unit assertion.' }), cause: 'The saved comparison rejects equality.' } :
+    { ...advice({ kind: 'escalate', question: scenario === 'operator approval' ? 'Can the operator approve verification?' : 'What failed in verification?',
+      nextAction: scenario === 'operator approval' ? 'Resolve the required approval.' : 'Provide the missing failure evidence.' }),
+      cause: verdict ?? 'No verification result or saved diff available.', classification: 'evidence-mechanism' };
+  const f = fixture(() => JSON.stringify(recommendation));
+  let bundle = '';
+  f.d.bundle = (savedRun, savedTip, input) => (bundle = buildTriageBundle('/fixture/root', savedRun, savedTip, input, {
+    directory: () => { throw Error('No materialized worktree'); },
+    entries: dir => {
+      if (dir.endsWith('/logs')) return { truncated: false, entries: [] };
+      if (verdict && dir.endsWith('/saved-execution')) return { truncated: false, entries: [{ name: 'verdict.md', kind: 'file' }] };
+      throw Error('No evidence directory');
+    },
+    git: (_cwd, args) => {
+      if (args[0] === 'log') return 'Saved comparator change';
+      if (args[0] === 'diff' && verdict) return '-return actual <= expected;\n+return actual < expected;';
+      throw Error('Unavailable Git evidence');
+    },
+    text: () => {
+      assert.ok(verdict, 'only the listed verdict may be read');
+      return { text: verdict, truncated: false };
+    },
+    siblings: () => ({ runs: [], truncated: false }),
+  }));
+  const repairable = scenario === 'reproduced failure';
+  assert.equal(f.triage().state, repairable ? 'repair' : 'human');
+  assert.equal(f.state.label, !repairable);
+  assert.equal(f.state.comments.length, repairable ? 0 : 1);
+  assert.match(bundle, /Supplemental diagnostics:.*worktree.*recovery attempts.*not host admission evidence/);
+  assert.match(bundle, /^- "saved worktree status and uncommitted diff": .*unconfirmed worktree$/m);
+  assert.match(bundle, /^- "recovery attempts": missing, unreadable or symlink directory$/m);
+  assert.match(bundle, /^- "recover-4.log": log not found$/m);
+  assert.doesNotMatch(bundle, /^## "saved worktree/m);
+  if (verdict) {
+    assert.ok(bundle.includes(verdict));
+    assert.match(bundle, /\+return actual < expected;/);
+  } else {
+    assert.match(bundle, /^- "saved execution": missing, unreadable or symlink directory$/m);
+    assert.match(bundle, /^- "diff from recorded base": unavailable or exceeded read limit$/m);
+  }
+});
+
 test('Pi arguments retain the selected analysis model but expose no tools', () => {
   const argv = triagePiArgs('openai/gpt-6.1-terra', {}, () => false);
   assert.deepEqual(argv, ['-p', '--model', 'openai/gpt-6.1-terra', '--thinking', 'high', '--no-tools', '--no-extensions', '--no-skills', '--no-context-files', '--no-session']);
