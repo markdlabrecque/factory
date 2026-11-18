@@ -359,7 +359,7 @@ if (recovering) {
 // This lexical scope owns every normal launch handoff, including post-teardown delivery.
 let custody: ReturnType<typeof beginPayloadCustody> | undefined;
 let normalExit = 0;
-let continuationUnsettled = false;
+let implementationOperations = 0;
 async function normalRun(): Promise<void> {
 function fail(msg: string): never { lastMessage = msg; throw Error(msg); }
 if ('error' in picked) fail(`#${iid} ${picked.error} Not started.`);
@@ -548,8 +548,23 @@ try {
     completionSignal: [], // Wait for natural process exit, never force-complete on an agent marker.
     name: 'implementer', signal: sandboxCancel.signal,
   });
-  const observeTip = async () => {
-    const head = await sandbox.exec('git rev-parse --verify HEAD');
+  const runImplementationBoundary = async <T,>(signal: AbortSignal, start: () => Promise<T>): Promise<T> => {
+    signal.throwIfAborted();
+    implementationOperations++;
+    const work = Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return start();
+    }).finally(() => { implementationOperations--; });
+    return waitForContinuation(work, signal);
+  };
+  const implementationExec = async (command: string, signal = sandboxCancel.signal) => {
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(Error('implementation Git probe timed out')), 30_000);
+    try { return await runImplementationBoundary(AbortSignal.any([signal, timeout.signal]), () => sandbox.exec(command)); }
+    finally { clearTimeout(timer); }
+  };
+  const observeTip = async (signal?: AbortSignal) => {
+    const head = await implementationExec('git rev-parse --verify HEAD', signal);
     const sha = head.stdout.trim();
     if (head.exitCode !== 0 || !/^[a-f0-9]{40}$/.test(sha) || [baseSha, sha].some(id => spawnSync('git', ['cat-file', '-e', `${id}^{commit}`]).status !== 0)) {
       throw Error('Missing historical verification baseline or tip Git object; verifier not started. Preserve work for restored-baseline verification or explicit human review.');
@@ -559,21 +574,21 @@ try {
     }
     return sha;
   };
-  const ownedCheckout = async () => {
-    const ref = await sandbox.exec('git symbolic-ref -q HEAD');
+  const ownedCheckout = async (signal: AbortSignal) => {
+    const ref = await implementationExec('git symbolic-ref -q HEAD', signal);
     return ref.exitCode === 0 && ref.stdout.trim() === `refs/heads/${branch}`;
   };
   const statusArgs = ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none'];
-  const worktreeState = async (): Promise<'dirty' | 'clean' | 'unknown'> => {
+  const worktreeState = async (signal = sandboxCancel.signal): Promise<'dirty' | 'clean' | 'unknown'> => {
     try {
-      const status = await sandbox.exec(`git ${statusArgs.join(' ')}`);
+      const status = await implementationExec(`git ${statusArgs.join(' ')}`, signal);
       if (status.exitCode === 0) return status.stdout.trim() ? 'dirty' : 'clean';
-    } catch { /* An unreadable fact stays unknown, not a filesystem diagnosis. */ }
+    } catch { signal.throwIfAborted(); /* An unreadable fact otherwise stays unknown. */ }
     return 'unknown';
   };
-  const observeZeroCommit = async (result: typeof initial, turn: ImplementationTurn) => {
+  const observeZeroCommit = async (result: typeof initial, turn: ImplementationTurn, signal?: AbortSignal) => {
     const dependency = readBlocked();
-    const worktree = await worktreeState();
+    const worktree = await worktreeState(signal);
     const outcome = readImplementationOutcome(evidenceHost, executionId, turn);
     const report = diagnostic(executionId, worktree, dependency !== undefined, finalReply(result, diagnosticSessions), result.logFilePath);
     return { report, outcome, dependency };
@@ -590,58 +605,52 @@ try {
       replyCaptured: !!attempt.report.agentReply, canResume: typeof resume === 'function',
       cancelled: sandboxCancel.signal.aborted, remainingMs: deadline - performance.now() });
     if (!refusal && resume) {
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(Error('shared implementation time expired')), Math.max(0, deadline - performance.now()));
+      const signal = AbortSignal.any([sandboxCancel.signal, timeout.signal]);
       try {
-        if (!(await ownedCheckout()) || await observeTip() !== baseSha || await worktreeState() !== 'clean') {
-          refusal = 'continuation refused: clean original checkout no longer confirmed';
-        }
-        const hold = refusal ? undefined : recheck();
-        const hostCheckout = ['-C', sandbox.worktreePath];
-        if (hold) refusal = `continuation refused: ${sanitizeReply(hold)}`;
-        if (!refusal && (sh('git', [...hostCheckout, 'symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${branch}`
-          || sh('git', [...hostCheckout, 'rev-parse', 'HEAD']) !== baseSha || sh('git', [...hostCheckout, ...statusArgs]) || readBlocked() !== undefined)) {
-          refusal = 'continuation refused: host checkout or dependency report changed';
-        }
-        if (!refusal && (sandboxCancel.signal.aborted || deadline - performance.now() < 1)) refusal = 'continuation refused: cancellation or shared implementation time exhausted';
-        if (!refusal) {
-          saveDiagnostic(evidenceHost, { ...attempt.report, outcome: attempt.outcome, evidence: 'implementation-initial-diagnostic.json',
-            automaticAction: 'Initial turn only; the host may reserve one same-session continuation.' });
-          custody.reserveImplementationContinuation(payloadCreation);
-        }
-      } catch { refusal = 'continuation refused: eligibility, diagnostic or durable reservation unavailable'; }
-      if (!refusal) {
-        noCommitMessage = 'Initial implementation made zero commits; see implementation-initial-diagnostic.json. Continuation reserved; final Git state unconfirmed.';
-        const remaining = Math.floor(deadline - performance.now());
-        if (remaining <= 0) throw Error('continuation-exhausted: shared implementation time expired before resume');
-        const timeout = new AbortController();
-        const timer = setTimeout(() => timeout.abort(Error('shared implementation time expired')), remaining);
-        const signal = AbortSignal.any([sandboxCancel.signal, timeout.signal]);
-        let continued: typeof initial;
         try {
-          signal.throwIfAborted();
-          continuationUnsettled = true;
-          const work = Promise.resolve().then(() => {
-            signal.throwIfAborted();
-            return resume(
+          if (!(await ownedCheckout(signal)) || await observeTip(signal) !== baseSha || await worktreeState(signal) !== 'clean') {
+            refusal = 'continuation refused: clean original checkout no longer confirmed';
+          }
+          const hold = refusal ? undefined : recheck();
+          const hostCheckout = ['-C', sandbox.worktreePath];
+          if (hold) refusal = `continuation refused: ${sanitizeReply(hold)}`;
+          if (!refusal && (sh('git', [...hostCheckout, 'symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${branch}`
+            || sh('git', [...hostCheckout, 'rev-parse', 'HEAD']) !== baseSha || sh('git', [...hostCheckout, ...statusArgs]) || readBlocked() !== undefined)) {
+            refusal = 'continuation refused: host checkout or dependency report changed';
+          }
+          if (!refusal && (signal.aborted || deadline - performance.now() < 1)) refusal = 'continuation refused: cancellation or shared implementation time exhausted';
+          if (!refusal) {
+            saveDiagnostic(evidenceHost, { ...attempt.report, outcome: attempt.outcome, evidence: 'implementation-initial-diagnostic.json',
+              automaticAction: 'Initial turn only; the host may reserve one same-session continuation.' });
+            custody.reserveImplementationContinuation(payloadCreation);
+          }
+        } catch { refusal = 'continuation refused: eligibility, diagnostic or durable reservation unavailable'; }
+        if (!refusal) {
+          noCommitMessage = 'Initial implementation made zero commits; see implementation-initial-diagnostic.json. Continuation reserved; final Git state unconfirmed.';
+          try {
+            if (deadline - performance.now() < 1) throw Error('shared implementation time expired before resume');
+            const continued = await runImplementationBoundary(signal, () => resume(
               `Continue this same ticket. Exploration and unchanged baseline checks did not implement it. Make the smallest focused change, run targeted checks and commit it, or report a concrete blocker. Follow the same outcome schema with executionId ${executionId}, turn continuation, and write it to ${evidenceBox}/${outcomeFile('continuation')}. Return normally; do not emit a completion marker.`,
               { name: 'implementer-continuation', signal, completionSignal: [] },
-            );
-          }).finally(() => { continuationUnsettled = false; });
-          continued = await waitForContinuation(work, signal);
-          signal.throwIfAborted();
-          tip = await observeTip();
-          const commits = sh('git', ['rev-list', `${baseSha}..${tip}`]).split('\n').filter(Boolean).sort();
-          if (!(await ownedCheckout()) || JSON.stringify(commits) !== JSON.stringify(continued.commits.map(c => c.sha).sort())) {
-            throw Error('resumed SDK commit report disagrees with the owned checkout and original Git baseline');
+            ));
+            tip = await observeTip(signal);
+            const commits = sh('git', ['rev-list', `${baseSha}..${tip}`]).split('\n').filter(Boolean).sort();
+            if (!(await ownedCheckout(signal)) || JSON.stringify(commits) !== JSON.stringify(continued.commits.map(c => c.sha).sort())) {
+              throw Error('resumed SDK commit report disagrees with the owned checkout and original Git baseline');
+            }
+            if (tip === baseSha) {
+              attempt = await observeZeroCommit(continued, 'continuation', signal);
+              refusal = 'continuation-exhausted: no commits against the original baseline';
+            }
+            signal.throwIfAborted();
+            noCommitMessage = undefined;
+          } catch (error) {
+            throw Error(`continuation-exhausted: ${sanitizeReply(error instanceof Error ? error.message : String(error))}`);
           }
-          signal.throwIfAborted();
-        } catch (error) {
-          throw Error(`continuation-exhausted: ${sanitizeReply(error instanceof Error ? error.message : String(error))}`);
-        } finally { clearTimeout(timer); }
-        if (tip === baseSha) {
-          attempt = await observeZeroCommit(continued, 'continuation');
-          refusal = 'continuation-exhausted: no commits against the original baseline';
-        } else noCommitMessage = undefined;
-      }
+        }
+      } finally { clearTimeout(timer); }
     }
     if (tip === baseSha) {
       blockers = attempt.dependency;
@@ -683,6 +692,7 @@ try {
   }
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelSandbox);
 }
+if (implementationOperations) sandboxFailure = [sandboxFailure, 'Implementation SDK or Git work did not settle; launch and cleanup ownership retained'].filter(Boolean).join('; ');
 if (sandboxFailure) fail([noCommitMessage, sandboxFailure].filter(Boolean).join(' '));
 if (verificationRefusal) fail(verificationRefusal);
 if (noCommitMessage) {
@@ -754,8 +764,8 @@ catch (error) { normalExit = 1; lastMessage = (error as Error).message; console.
 finally {
   if (custody) {
     try {
-      // Deadline/cancellation may beat session transfer or sync; absence alone cannot settle an in-flight SDK call.
-      if (continuationUnsettled) throw Error('Implementation continuation did not settle; launch and cleanup ownership retained');
+      // Deadline/cancellation may beat SDK work or a Git probe; container absence alone cannot settle that call.
+      if (implementationOperations) throw Error('Implementation SDK or Git work did not settle; launch and cleanup ownership retained');
       custody.finish(); // No payload or launch continuation remains in this scope.
       entryCleanupConfirmed = true;
       runtimeLease.confirmedCleanup();

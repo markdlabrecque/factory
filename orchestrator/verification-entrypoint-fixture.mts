@@ -80,6 +80,10 @@ export async function createSandbox(o) {
     exec: async cmd => {
       if (cmd.startsWith('command -v playwright')) return scenario === 'setup-bad' ? {stdout:'browser preflight failed: Chromium launch',exitCode:1} : {stdout:'browser preflight OK',exitCode:0};
       if (cmd === 'hostname') return {stdout:'fixture-container',exitCode:0};
+      if (scenario === 'continuation-stalled-git' && cmd === 'git rev-parse --verify HEAD' && existsSync(join(fake,'continuation-started'))) {
+        setImmediate(() => process.kill(process.pid, 'SIGTERM'));
+        return new Promise(() => {});
+      }
       if (cmd.includes(' status --porcelain') && scenario === 'no-commit-unknown-worktree') return {stdout:'',exitCode:1};
       return {stdout:execFileSync('sh',['-c',cmd],{cwd:worktree,encoding:'utf8'}),exitCode:0};
     },
@@ -501,7 +505,8 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(existsSync(join(fake,'live')), false);
       const { readPayloadCustody } = await import('./payload-custody.mts');
       const payload = readPayloadCustody(state, run.payloadCustody);
-      assert.equal(payload.continued, resumed); assert.equal(payload.sealed, scenario !== 'continuation-stalled');
+      const stalled = scenario.startsWith('continuation-stalled');
+      assert.equal(payload.continued, resumed); assert.equal(payload.sealed, !stalled);
       if (resumed) {
         assert.match(readFileSync(join(run.evidenceDir,'implementation-initial-diagnostic.json'),'utf8'), /Initial exploration and green baseline/);
         assert.match(readFileSync(join(fake,'continuation-started'),'utf8'), /unchanged baseline checks did not implement/);
@@ -520,7 +525,7 @@ console.log('sha256:'+'a'.repeat(64));
         assert.match(final.continuation, /continuation-exhausted/); assert.equal(final.agentReply, 'Continuation result');
       }
       if (scenario === 'continuation-error') assert.match(run.note, /continuation-exhausted: fixture resume failed/);
-      if (scenario === 'continuation-stalled') assert.match(result.stderr, /did not settle; launch and cleanup ownership retained/);
+      if (stalled) assert.match(result.stderr, /did not settle; launch and cleanup ownership retained/);
       if (scenario === 'continuation-outside-commit') assert.match(run.note, /resumed SDK commit report disagrees/);
       if (scenario === 'continuation-wrong-checkout') assert.match(run.note, /clean original checkout no longer confirmed/);
       if (scenario === 'continuation-superseded') assert.equal(run.note, 'replacement owns this run');
