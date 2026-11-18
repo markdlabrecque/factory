@@ -78,7 +78,7 @@ export async function loadExecutionContext(input: { env?: NodeJS.ProcessEnv; cwd
     checkSavedLayout();
     const codePath = (path: string) => within(runtimeRoot, path);
     const projectPath = (path: string) => within(projectRoot, path);
-    const templates = Object.fromEntries(['prompt.md', 'prompt.verify.md', 'prompt.analyze.md', 'prompt.recover.md'].map(name => [name, readFileSync(codePath(name), 'utf8')]));
+    const templates = Object.fromEntries(['prompt.md', 'prompt.verify.md', 'prompt.analyze.md', 'prompt.recover.md', 'prompt.triage.md'].map(name => [name, readFileSync(codePath(name), 'utf8')]));
     const templateHashes = Object.fromEntries(Object.entries(templates).map(([name, text]) => [name, hash(text)]));
     const safetySettings = JSON.parse(JSON.stringify(normalizedSettings(config)));
     const identity = freezeSnapshot({ runtime: { id: manifest.id, dependencies: manifest.dependencies }, settings: safetySettings, templates: templateHashes, additive: additiveHashes(), ...(correction ? { gate: correction.identity } : {}) });

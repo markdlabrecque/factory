@@ -869,6 +869,18 @@ verification and delivery. Scheduled recovery fixtures inject synthetic preparat
 rather than running a real analyst. No test contacts live trackers, agents, Docker,
 credentials or a service manager.
 
+## Recovery triage helper tests
+
+```sh
+node --test orchestrator/recovery-triage.test.mts orchestrator/context.test.mts orchestrator/workflow.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Triage policy tests inject Pi, tracker, Git and filesystem boundaries. They exercise
+strict advice, stop-key changes, cached failures, stale-result discard, bounded evidence,
+comment sanitization, idempotent escalation and release on label removal. Runtime-bundle
+fixtures verify the helper, contract and template ship together and import without a
+project or credentials. No paid model, live tracker, installed runtime or service is used.
+
 ## Host launch readiness tests
 
 ```sh
