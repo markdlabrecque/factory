@@ -147,6 +147,28 @@ test('empty label axes and confidentiality false are preserved; setup is data', 
   });
 });
 
+test('recovery triage defaults off in both profiles and tracks explicit boolean settings', () => {
+  for (const profile of ['personal', 'client']) fixture(readFileSync(new URL(`./factory.${profile}.toml`, import.meta.url), 'utf8'), dir => {
+    const c = loadTomlConfig(dir);
+    assert.equal(c.recovery.triage, false);
+    assert.equal(c.sources['recovery.triage'], 'default');
+  });
+  for (const triage of [false, true]) fixture(personal() + `\n[recovery]\ntriage = ${triage}\n`, dir => {
+    const c = loadTomlConfig(dir);
+    assert.equal(c.recovery.triage, triage);
+    assert.equal(c.sources['recovery.triage'], 'explicit');
+  });
+});
+
+test('recovery triage rejects non-booleans and unknown keys', () => {
+  fixture(personal() + '\n[recovery]\ntriage = "true"\n', dir => {
+    assert.throws(() => loadTomlConfig(dir), /recovery\.triage: expected a boolean/);
+  });
+  fixture(personal() + '\n[recovery]\nunknown = true\n', dir => {
+    assert.throws(() => loadTomlConfig(dir), /recovery\.unknown: unknown key/);
+  });
+});
+
 const supervisorConfig = `
 [supervisor]
 enabled = true

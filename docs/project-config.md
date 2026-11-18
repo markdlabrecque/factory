@@ -96,6 +96,7 @@ are schema defaults; profiles explicitly override some of them.
 | `merge.auto` | `false`, boolean |
 | `merge.method` | `squash`; `merge`, `squash`, `rebase` |
 | `merge.required_checks` | `[]`, exact check/job names |
+| `recovery.triage` | `false`, boolean; opt in to triage before an automatic recovery attempt |
 | `graph.max_analyses_per_pass` | `5`, positive safe integer |
 | `graph.analysis_timeout_minutes` | `10`, positive finite number |
 | `graph.conflict_ignore` | `[]`, existing footprint-ignore paths |
@@ -225,6 +226,18 @@ all known agent/project mounts and refuses links or read uncertainty without
 rewriting anything. No command provisions this policy or activates a paid host
 through it yet. See the [journal authorization contract](supervisor.md#advisory-grants-finite-host-policy-and-one-use-send-permission)
 and [operator boundary](factory-cli.md#advisory-host-policy-foundation).
+
+## Optional recovery triage
+
+Recovery triage is off by default. To opt in, set `triage = true` under
+`[recovery]`. This changes automatic recovery: Factory checks why a run stopped
+before spending a repair attempt. If triage escalates instead of recommending a
+repair, Factory posts a ticket comment and adds the `labels.needs_human` label
+without spending an attempt.
+
+Adding `recovery.triage` to the schema changes the frozen settings identity even
+for projects that leave it off. After updating Factory, saved execution analysis
+is refreshed once per project.
 
 ## Optional supervisor policy
 
