@@ -15,6 +15,7 @@ export type EffectiveConfig = {
   TRACKER: { kind: 'github' | 'gitlab'; project: string; host?: string; gitlabHost?: string; projectId?: number; milestone?: string };
   AGENT: { family: ModelFamily };
   workflow: { mode: 'factory' | 'project'; directory?: string };
+  recovery: { triage: boolean };
   supervisor: SupervisorPolicy;
   instructions: Record<'common' | 'implementation' | 'verification' | 'analysis' | 'recovery' | 'supervisor' | 'gateReview', string[]>;
   LABELS: { ready: string[]; exclude: string[]; needsHuman: string; done: string };
@@ -97,7 +98,7 @@ export function loadTomlConfig(scaffoldDir: string, options: { strictOriginals?:
     sources[`${p}.${k}`] = Object.hasOwn(t, k) ? 'explicit' : 'default';
     return t[k] === undefined ? undefined : str(t, k, p);
   };
-  table(raw, '', ['version','tracker','agent','labels','graph','sandbox','selection','work','dispatch','merge','ci','workflow','instructions','supervisor']);
+  table(raw, '', ['version','tracker','agent','labels','graph','sandbox','selection','work','dispatch','merge','ci','workflow','instructions','recovery','supervisor']);
   sources.version = Object.hasOwn(raw, 'version') ? 'explicit' : 'default';
   if (raw.version !== 2) fail('version', 'unsupported configuration; version = 2 required; no conversion is performed');
   const t = section('tracker', ['kind','project','host','project_id'], true);
@@ -115,6 +116,8 @@ export function loadTomlConfig(scaffoldDir: string, options: { strictOriginals?:
   if (mode === 'project' && !directory) fail('workflow.directory', 'required in project mode');
   if (mode === 'factory' && directory !== undefined) fail('workflow.directory', 'not allowed in factory mode');
   if (directory) { try { validateRelativePath(directory); } catch { fail('workflow.directory', 'expected a repository-relative path without parent traversal'); } }
+  const r = section('recovery', ['triage']);
+  const recovery = { triage: bool(r, 'triage', 'recovery') };
   // No mode/model/provider selector: action mode belongs to authenticated operator state.
   const sp = section('supervisor', ['enabled','max_tokens','max_cost_usd','max_calls','diagnosis','review']);
   const enabled = bool(sp, 'enabled', 'supervisor');
@@ -178,7 +181,7 @@ export function loadTomlConfig(scaffoldDir: string, options: { strictOriginals?:
     return { command: str(st,'command',p), sudo: bool(st,'sudo',p), ...('timeout_ms' in st ? { timeoutMs: num(st,'timeout_ms',p,undefined,true) } : {}) };
   });
   return { source: { mode: 'toml', path }, sources, warnings: exclude.includes(needsHuman) ? [] : ['selection.labels.none does not contain labels.needs_human; add it to prevent human-held tickets from being selected.'],
-    TRACKER: tracker, AGENT: { family }, workflow: { mode, ...(directory ? { directory } : {}) }, supervisor, instructions, LABELS: { ready, exclude, needsHuman, done },
+    TRACKER: tracker, AGENT: { family }, workflow: { mode, ...(directory ? { directory } : {}) }, recovery, supervisor, instructions, LABELS: { ready, exclude, needsHuman, done },
     MERGE: { auto: bool(m,'auto','merge'), method: en(m,'method','merge',['merge','squash','rebase'],'squash'), requiredChecks: arr(m,'required_checks','merge') },
     SUBTASKS: { enabled: en(w,'units','work',['issues','subtasks'],'subtasks') === 'subtasks' },
     GRAPH: { maxAnalysesPerPass: num(g,'max_analyses_per_pass','graph',5,true), analysisTimeoutMinutes: num(g,'analysis_timeout_minutes','graph',10), conflictIgnore: arr(g,'conflict_ignore','graph'), pruneAfterDays: num(g,'prune_after_days','graph',30) },
