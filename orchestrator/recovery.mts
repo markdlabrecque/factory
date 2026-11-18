@@ -1,4 +1,4 @@
-// Runtime-owned repair/verifier templates share the fixed recovery lifecycle; project evidence never controls authority.
+// Runtime-owned repair/verifier templates share the fixed recovery lifecycle; only the claimed start commit can supplement the historical baseline for behavioral verification.
 import { eventIdFor, observeEvent } from './execution-events.mts';
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -286,6 +286,8 @@ export interface RecoveryDeps {
 export interface RecoveryContext {
   root: string;
   record: string;
+  /** Identity pinned by the entrypoint when it validated the host's recovery claim. */
+  attempt: Pick<AttemptRecord, 'id' | 'startSha'>;
   model: string;
   title: string;
   baseSha: string;
@@ -323,6 +325,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   const read = readAttemptRecord(ctx.record);
   if (!read.ok) throw new Error(`recovery attempt refused: ${read.reason}`);
   const rec = read.record;
+  if (rec.id !== ctx.attempt.id || rec.startSha !== ctx.attempt.startSha) throw Error('Recovery attempt identity changed after claim validation');
   if (rec.outcome || rec.phase !== "claimed") throw new Error(`recovery attempt ${rec.id} was already started (phase ${rec.phase}); it is never run twice`);
   const iso = () => new Date(deps.clock.now()).toISOString();
   const save = (phase: Phase, patch: Partial<AttemptRecord> = {}, note?: string) => {
@@ -450,10 +453,12 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
     if (ctx.cancel.aborted) return finish("interrupted", `cancelled before verification; ${preserved}`);
     save("verifying", { tip });
     if (!ctx.proof?.executionId || !ctx.baseSha) return finish('unresolved', 'Missing execution identity or historical implementation baseline; fresh verification requires host-owned identity');
-    if (!/^[0-9a-f]{40,64}$/.test(ctx.baseSha) || (await sb.exec(`git cat-file -e ${ctx.baseSha}^{commit} && git cat-file -e ${tip}^{commit}`)).exitCode !== 0) return finish('unresolved', 'Missing recorded historical baseline or tip Git object; verifier not started');
     verifiedProvenance = await ctx.provenance(sb);
-    const refused = await runVerifier(sb, { setStage: (_iid, patch) => deps.setStage(patch) },
-      { iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), promptArgs: { ...ctx.promptArgs, ADDITIVE_INSTRUCTIONS: ctx.verificationInstructions ?? '', TIP_SHA: tip }, tip, promptFile: ctx.verifyPrompt ?? VERIFY_PROMPT });
+    const refused = await runVerifier(sb, { setStage: (_iid, patch) => deps.setStage(patch) }, {
+      iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), tip, promptFile: ctx.verifyPrompt ?? VERIFY_PROMPT,
+      promptArgs: { ...ctx.promptArgs, ADDITIVE_INSTRUCTIONS: ctx.verificationInstructions ?? '' },
+      recoveryComparison: { baseline: ctx.baseSha, start: rec.startSha },
+    });
     rec.verifier = { tip, ...(refused ? { refused } : {}) };
     if (ctx.cancel.aborted) return finish("interrupted", `cancelled during verification; ${preserved}`);
     if (refused) return finish("failed", `${refused}; ${preserved}`);

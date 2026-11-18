@@ -265,7 +265,9 @@ if (recovering) {
   if (!claimed?.executionId) fail('Legacy run has no execution identity; historical PASS cannot authorize recovery delivery.');
   context.assertScope(Number(iid),claimed.executionId);
   const baseSha = claimed?.implementationBaseSha;
-  if (!baseSha || spawnSync('git', ['cat-file', '-e', `${baseSha}^{commit}`]).status !== 0) fail('Missing recorded implementation baseline; preserve this branch for explicit human review or fresh verification with an established historical baseline.');
+  const baseline = baseSha && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(baseSha)
+    ? spawnSync('git', ['--no-replace-objects', 'rev-parse', '--verify', `${baseSha}^{commit}`], { encoding: 'utf8' }) : undefined;
+  if (!baseSha || baseline?.status !== 0 || baseline.stdout.trim() !== baseSha) fail('Missing recorded implementation baseline; preserve this branch for explicit human review or fresh verification with an established historical baseline.');
   currentIid = iid;
   setStage(iid, { stage: "setup", note: `recovery attempt ${seq}: setting up`, base, starting: undefined });
   setInterval(() => { if (!finished) setStage(iid!, {}); }, 60_000).unref();
@@ -309,7 +311,7 @@ if (recovering) {
   runtimeLease.pendingCleanup();
   let recoveryReport: ReadinessReport | undefined;
   const result = await runRecoveryAttempt({
-    root: context.projectRoot, record: file, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
+    root: context.projectRoot, record: file, attempt: { id: rec.id, startSha: rec.startSha }, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
     proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash },
     provenance: (sb) => provenance(sb, rec.container),

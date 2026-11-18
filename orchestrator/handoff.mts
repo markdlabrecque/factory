@@ -24,8 +24,8 @@ import type { Delivered, Delivery } from "./tracker.mts";
 // The hand-off every branch goes through before it leaves the host: the independent verifier, then evidence posted to
 // the ticket, then on PASS push and normal delivery (tracker.deliver: an MR on GitLab, a PR merged after CI on GitHub
 // with MERGE.auto). Blocked merge gates leave the run waiting for a person. main.mts calls it after its implementer; a recovery run (slice four) calls the same functions after
-// its repair agent, so a repaired branch gets no shortcut: the same verifier prompt and model (AGENT.model), the same
-// "verifier must not change the branch" check, the same PASS gate, push and delivery limits. Two things protect a run
+// its repair agent. Only repair verification may also compare behavior against the validated attempt start commit;
+// the historical base, verifier immutability check, PASS gate, push and delivery limits remain unchanged. Two things protect a run
 // that reuses a ticket's record and evidence folder (a recovery attempt on a preserved branch): beginVerification
 // removes an earlier verdict.md and clears the record's verdict/PR before the verifier starts, so only this run's
 // verdict can count and a stale PASS never reads as delivery (cli/src/recovery-state.mts deliveryMarker); and the PR
@@ -74,9 +74,28 @@ export function beginVerification(host: Pick<Host, "setStage">, iid: string, evi
   host.setStage(iid, { stage: "verifying", verdict: undefined, verification: undefined, delivery: undefined, mr: undefined, mergedAt: undefined });
 }
 
+const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+async function recoveryComparisonHold(sandbox: VerifierSandbox, baseline: string, start: string, tip: string): Promise<string | undefined> {
+  const git = (args: string) => sandbox.exec(`GIT_GRAFT_FILE=/dev/null git --no-replace-objects ${args}`);
+  for (const [role, sha] of [['implementation baseline', baseline], ['pre-repair start', start], ['repaired tip', tip]]) {
+    if (!objectId.test(sha)) return `Invalid recorded ${role} SHA; verifier not started`;
+    const object = await git(`rev-parse --verify ${sha}^{commit}`);
+    if (object.exitCode !== 0 || object.stdout.trim() !== sha) return `Missing exact ${role} commit ${sha}; verifier not started`;
+  }
+  if ((await git(`merge-base --is-ancestor ${baseline} ${start}`)).exitCode !== 0
+    || (await git(`merge-base --is-ancestor ${start} ${tip}`)).exitCode !== 0) {
+    return 'Recorded implementation baseline, pre-repair start and repaired tip do not form the expected ancestry; verifier not started';
+  }
+  const head = await git('rev-parse --verify HEAD');
+  if (head.exitCode !== 0 || head.stdout.trim() !== tip) return 'Verifier workspace HEAD is not the exact repaired tip; verifier not started';
+}
+
 /** Run the independent verifier on `tip` in the run's sandbox. Returns why the result can't be used, or undefined. */
 export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "setStage">,
   o: { iid: string; evidenceHost: string; agent: unknown; promptArgs: Record<string, string>; tip: string; promptFile?: string;
+    /** Only the owned recovery runner sets this, from the admitted attempt and historical baseline. */
+    recoveryComparison?: { baseline: string; start: string };
     execution?: { context: import('./context.mts').ExecutionContext; runId: string; manifest: Manifest; requirementsHash: string; input?: import('./ticket-input.mts').FrozenTicketInput } }): Promise<string | undefined> {
   const current = () => {
     const e=o.execution;if(!e)return;
@@ -95,10 +114,16 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
   beginVerification(host, o.iid, o.evidenceHost);
   const preflight = await browserPreflight(sandbox, o.evidenceHost);
   if (preflight) return preflight;
+  const comparison = o.recoveryComparison;
+  if (comparison) {
+    const hold = await recoveryComparisonHold(sandbox, comparison.baseline, comparison.start, o.tip);
+    if (hold) return hold;
+  }
   const ver = await sandbox.run({
     agent: o.agent,
     promptFile: o.execution?.context.identity.gate ? o.execution.context.codePath('prompt.verify.md') : o.promptFile ?? VERIFY_PROMPT,
-    promptArgs: { ...o.promptArgs, TIP_SHA: o.tip },
+    promptArgs: { ...o.promptArgs, TIP_SHA: o.tip, RECOVERY_START_SHA: comparison?.start ?? '(none)',
+      ...(comparison ? { BASE_SHA: comparison.baseline } : {}) },
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
     name: "verifier",

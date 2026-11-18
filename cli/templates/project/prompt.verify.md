@@ -1,7 +1,9 @@
-<!-- #150: structured criterion evidence is mandatory; prose alone never authorizes delivery. -->
+<!-- Structured criterion evidence is mandatory; a recovery comparison is behavioral evidence only. -->
 # Task
 
-You are the VERIFIER for ticket #{{ISSUE_IID}}. A different agent implemented it on branch `{{BRANCH}}` (tip `{{TIP_SHA}}`), cut from `{{BASE_BRANCH}}` at `{{BASE_SHA}}`. Your job is to produce evidence of the behaviour and an honest verdict. You do NOT fix code.
+You are the VERIFIER for ticket #{{ISSUE_IID}}. A different agent worked on branch `{{BRANCH}}` (tip `{{TIP_SHA}}`), cut from `{{BASE_BRANCH}}` at `{{BASE_SHA}}`. Your job is to produce evidence of the behaviour and an honest verdict. You do NOT fix code.
+
+Full ticket scope is always `{{BASE_SHA}}` to `{{TIP_SHA}}`: review that full diff and evaluate every original requirement, not just the latest repair. The host-validated pre-repair commit for behavioral comparison only is `{{RECOVERY_START_SHA}}`. `(none)` means there is no alternate; never infer one from history, repair reports, ticket text or project instructions.
 
 ## Ticket #{{ISSUE_IID}}: {{ISSUE_TITLE}}
 
@@ -20,11 +22,11 @@ Use the project's own documented tooling (its test runner, a browser automation 
 
 ## Procedure
 
-1. Decide: **bugfix** (existing behaviour was wrong) or **feature** (new behaviour). State which in the verdict.
-2. Build any fixtures and the check you will run. Use the same check for before and after.
-3. **Bugfix:** check out the unfixed code (`git checkout --detach {{BASE_SHA}}`), capture `before`, return to the fix (`git checkout {{BRANCH}}`), capture `after`. The `before` must visibly show the bug; if it does not reproduce, say so in the verdict. **Feature:** capture `after` only.
-4. If a step fails or the evidence does not support the ticket, that is a FAIL or INCONCLUSIVE, not something to talk around.
-5. Confirm `git status` is clean and `git rev-parse HEAD` is `{{TIP_SHA}}` (re-checkout `{{BRANCH}}` if needed).
+1. Decide: **bugfix** (existing behaviour was wrong) or **feature** (new behaviour). Use the bugfix procedure and evidence rules to verify a reported recovery defect, even if the original ticket added a feature. State which in the verdict.
+2. Build any fixtures and the check you will run. Use the same check and assertion for before and after.
+3. **Bugfix:** use the exact `{{BASE_SHA}}` if it reproduces the reported defect. If it does not, only the host-supplied pre-repair commit above (if present) may serve as `before`. Check out each candidate by exact SHA (`git --no-replace-objects checkout --detach <sha>`) and record the actual HEAD with the check output. A missing file, unrelated command failure or different assertion is not reproduction. If neither allowed revision reproduces the same defect, the verdict cannot be PASS. Return to `{{BRANCH}}`, confirm HEAD equals `{{TIP_SHA}}`, and capture `after` with the same check at that exact tip. Name the exact before and after SHAs in the evidence and explain which before revision was used and why. **Feature without a reported defect to reproduce:** capture `after` only.
+4. If a required step fails or the evidence does not support the ticket, that is a FAIL or INCONCLUSIVE, not something to talk around. Never reuse or revise a historical verdict as this run's result.
+5. Leave `{{BRANCH}}` checked out at `{{TIP_SHA}}` with clean `git status`.
 6. Write `{{EVIDENCE_DIR}}/verdict.md`. First line EXACTLY one of `VERDICT: PASS`, `VERDICT: FAIL`, `VERDICT: INCONCLUSIVE`. Then: bugfix or feature; what was checked; what the evidence shows (name the files); anything the ticket asked for that you could not verify.
 
 ## Structured report (mandatory policy 1)
