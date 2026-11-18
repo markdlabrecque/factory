@@ -4,7 +4,7 @@ import { createProof } from './verification.mts';
 import { fixtureProvenance, writeVerification } from './fixtures/verification.mts';
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
@@ -65,6 +65,60 @@ test("a repaired branch is independently verified, posted and delivered like an 
   assert.equal(record.stage, "done");
   assert.equal(record.mr, "https://example.test/pr/9");
 });
+
+test('ordinary verification uses the implementation base and ignores alternating SHAs in prompt arguments', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'handoff-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { host } = fakeHost();
+  const sb = sandbox({ dir, writes: 'VERDICT: PASS\nlooks right' });
+  const run = sb.run;
+  sb.run = async o => {
+    assert.equal(o.promptArgs.BASE_SHA, 'historical');
+    assert.equal(o.promptArgs.RECOVERY_START_SHA, '(none)');
+    assert.equal(o.promptArgs.TIP_SHA, 'tip0000001');
+    return run(o);
+  };
+  assert.equal(await runVerifier(sb, host, { iid: '7', evidenceHost: dir, agent: {}, tip: 'tip0000001',
+    promptArgs: { BASE_SHA: 'historical', RECOVERY_START_SHA: 'untrusted', TIP_SHA: 'untrusted' } }), undefined);
+});
+
+for (const [fault, message] of [
+  ['moving ref', /Invalid recorded pre-repair start SHA/],
+  ['missing start', /Missing exact pre-repair start commit/],
+  ['peeled tag', /Missing exact pre-repair start commit/],
+  ['unrelated start', /expected ancestry/],
+  ['unrelated tip', /expected ancestry/],
+  ['wrong HEAD', /HEAD is not the exact repaired tip/],
+] as const) {
+  test(`recovery verifier refuses ${fault} before accepting evidence`, async t => {
+    const dir = mkdtempSync(join(tmpdir(), 'handoff-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const { host, calls } = fakeHost();
+    const baseline = 'a'.repeat(40), start = 'b'.repeat(40), tip = 'c'.repeat(40);
+    const sb: VerifierSandbox = {
+      run: async () => assert.fail('verifier must not start'),
+      exec: async cmd => {
+        if (cmd.startsWith('command -v playwright ')) return { exitCode: 0, stdout: 'browser preflight OK\n' };
+        const git = 'GIT_GRAFT_FILE=/dev/null git --no-replace-objects ';
+        if (cmd === `${git}for-each-ref --count=1 --format='%(refname)' refs/replace`) return { exitCode: 0, stdout: '' };
+        if (cmd === `${git}rev-parse --verify HEAD`) return { exitCode: 0, stdout: fault === 'wrong HEAD' ? start : tip };
+        for (const sha of [baseline, start, tip]) {
+          if (cmd !== `${git}rev-parse --verify ${sha}^{commit}`) continue;
+          if (sha === start && fault === 'missing start') return { exitCode: 128, stdout: '' };
+          return { exitCode: 0, stdout: sha === start && fault === 'peeled tag' ? baseline : sha };
+        }
+        if (cmd === `${git}merge-base --is-ancestor ${baseline} ${start}`) return { exitCode: Number(fault === 'unrelated start'), stdout: '' };
+        if (cmd === `${git}merge-base --is-ancestor ${start} ${tip}`) return { exitCode: Number(fault === 'unrelated tip'), stdout: '' };
+        assert.fail(`unexpected command: ${cmd}`);
+      },
+    };
+    const refused = await runVerifier(sb, host, { iid: '7', evidenceHost: dir, agent: {}, promptArgs: {}, tip,
+      recoveryComparison: { baseline, start: fault === 'moving ref' ? 'HEAD~' : start } });
+    assert.match(refused ?? '', message);
+    assert.equal(existsSync(join(dir, 'verification.json')), false);
+    assert.deepEqual(calls, []);
+  });
+}
 
 test("a blocked automatic merge parks the run with its open PR for a person", async () => {
   const dir = mkdtempSync(join(tmpdir(), "handoff-"));

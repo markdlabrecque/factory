@@ -830,10 +830,23 @@ selected fixture runtime's ordinary entrypoint against real temporary Git reposi
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
 Recovery entrypoint/runner tests exercise the same proof lifecycle with isolated
-private Git metadata and teardown. Adapter tests assert fresh host authorization after
-CI and before SHA-guarded merge. These prove host integrity and command contracts;
-they do not classify semantic acceptance coverage, validate video codecs or promise
-atomicity between an external ticket edit and a tracker merge.
+private Git metadata and teardown. The runner's fixture verifier executes the same
+zero-count assertion on real disposable commits: a missing module on the original
+base is not the defect, the saved start can reproduce it, and the repaired tip passes.
+The runner gets the symptom from the repair report in a feature-shaped ticket and
+also covers original-base reproduction and non-delivery on INCONCLUSIVE. A real
+Git fixture confirms replacement refs left by either agent cannot publish proof
+or deliver a substituted tree. Handoff cases refuse missing, non-exact, unrelated
+or mismatched Git identities. The entrypoint checks the packaged prompt and original proof identity. For the
+smallest changed-boundary run:
+
+```sh
+node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
+```
+
+Adapter tests assert fresh host authorization after CI and before SHA-guarded merge.
+These tests do not validate live verifier judgment, video codecs or atomicity between
+an external ticket edit and a tracker merge. The full commit gates above still apply.
 
 ## Existing-delivery continuation tests
 

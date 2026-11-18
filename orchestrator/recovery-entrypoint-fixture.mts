@@ -30,6 +30,7 @@ import type { Spawner } from "../cli/src/recovery-run.mts";
 import { observePass, readRecovery } from "../cli/src/recovery-state.mts";
 import { containerFor, readAttemptRecord } from "./recovery.mts";
 import type { AttemptRecord, Docker } from "./recovery.mts";
+import { readProof } from './verification.mts';
 
 const ID = "5b1f3c2a-9d8e-4f70-8a6b-0c1d2e3f4a5b";
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
@@ -61,6 +62,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   git(worktree, "commit", "-qam", "half done");
   writeFileSync(join(worktree, "untracked.txt"), "keep me\n");
   const otherRef = git(root, "rev-parse", "8-other");
+  const savedStart = git(worktree, 'rev-parse', 'HEAD');
 
   // The scaffold as factory init writes it, recorded as reviewed the way init records a new scaffold (#63).
   const state = join(home, "runs");
@@ -240,7 +242,12 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const record = (readAttemptRecord(join(p.recovery, "attempts", `${ID}.json`)) as { record: AttemptRecord }).record;
   assert.equal(record.outcome, "delivered", record.reason);
   const tip = git(root, "rev-parse", "7-fix-login");
+  const baseline = git(root, 'rev-parse', 'main');
+  assert.equal(record.startSha, savedStart);
   assert.equal(record.tip, tip);
+  assert.ok(prompts[1].includes(`Full ticket scope is always \`${baseline}\` to \`${tip}\``));
+  assert.ok(prompts[1].includes(`commit for behavioral comparison only is \`${savedStart}\``));
+  assert.match(prompts[1], /first read `\/home\/agent\/evidence\/7\/recovery-report\.json` and `\/home\/agent\/evidence\/7\/recovery-report\.md`/);
   assert.equal(git(origin, "rev-parse", "7-fix-login"), tip, "the exact verified tip was pushed");
   const gh = readFileSync(join(fake, "gh.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).args as string[]);
   // #153: the REST merge API preserves the same exact-head guard as initial/continued delivery.
@@ -269,6 +276,8 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   assert.match(inputText, /Agreed parent decisions and implementation plan/);
   const snapshot = JSON.parse(readFileSync(join(inputDir, 'ticket-context.json'), 'utf8'));
   assert.equal(snapshot.contentHash, runRec.verification!.requirementsHash);
+  readProof(state, { project: 'owner/repo', ticket: '7', executionId: runRec.executionId!, attemptId: ID,
+    branch: '7-fix-login', base: 'main', baseline, tip, requirementsHash: snapshot.contentHash }, runRec.verification!.id);
   if (copied) assert.equal(runRec.implementationModel, 'openai/gpt-6.1-terra');
   assert.deepEqual([runRec.stage, runRec.verdict, runRec.mr], ["done", "PASS", "https://github.com/owner/repo/pull/9"]);
 
