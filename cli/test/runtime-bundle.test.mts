@@ -38,6 +38,10 @@ test('complete inventory, deterministic identity, private install and validation
   assert.equal(a.id, b.id); assert.deepEqual(validateRuntimeBundle(a.directory), a.manifest);
   assert.deepEqual(a.manifest.files.map(x => x.path), [...RUNTIME_ASSETS.map(x => x.destination)].sort());
   assert(!existsSync(join(a.directory, 'config.mts')));
+  for (const path of ['recovery-triage.mts', 'recovery-triage-contract.mts', 'prompt.triage.md'])
+    assert.ok(a.manifest.files.some(file => file.path === path), path);
+  const triage = await import(pathToFileURL(join(a.directory, 'recovery-triage.mts')).href);
+  assert.equal(typeof triage.triageRecovery, 'function');
   const layout = await import(pathToFileURL(join(a.directory, 'project-layout.mts')).href);
   assert.equal(layout.projectLayoutPaths('/fixture-project').assets, '/fixture-project/.factory');
   const input = await import(pathToFileURL(join(a.directory, 'supervisor-input.mts')).href);

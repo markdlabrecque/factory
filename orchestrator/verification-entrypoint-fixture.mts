@@ -723,7 +723,7 @@ console.log('sha256:'+'a'.repeat(64));
       assert.match(verifierPrompt, /verification\.json/);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.implementation).sort(), ['common.md', 'impl.md']);
       assert.deepEqual(Object.keys(proof.provenance.settings.execution.additive.verification).sort(), ['common.md', 'verify.md']);
-      assert.deepEqual(Object.keys(proof.provenance.settings.execution.templates).sort(), ['prompt.analyze.md','prompt.md','prompt.recover.md','prompt.verify.md']);
+      assert.deepEqual(Object.keys(proof.provenance.settings.execution.templates).sort(), ['prompt.analyze.md','prompt.md','prompt.recover.md','prompt.triage.md','prompt.verify.md']);
       assert.deepEqual(proof.provenance.code, Object.fromEntries(runtime.manifest.files.map(file => [file.path,file.sha256])));
     } else if (['parent-read-failed', 'instruction-missing'].includes(scenario)) {
       assert.notEqual(result.status, 0, result.stdout + result.stderr);

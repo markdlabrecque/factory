@@ -745,6 +745,27 @@ analysis/verification; generated Factory comments do not invalidate their own pr
 Current source checks before verification/delivery never rewrite a running prompt
 or an old proof. Existing claim, eligibility, base/tip, budget and cleanup gates remain.
 
+# Selected-runtime recovery triage helper
+
+The triage helper is separate from recovery preparation and does not admit or
+charge a repair. It submits one bounded evidence bundle on stdin to the fixed
+Mid analysis model with tools disabled and the configured analysis timeout. It
+reads the saved execution, frozen ticket context, local Git data, logs and text
+evidence; it never fetches or changes the checkout, saved work or evidence.
+
+Factory keeps one private result per ticket in `<state>/recovery/triage/`.
+The stop key binds the run's execution and stop details, the saved branch tip,
+frozen ticket input, triage prompt and model. Identical stops reuse advice or
+cached failures. Changed input during the call invalidates the reply. Corrupt or
+unreadable state is preserved and reported as unavailable, without a model call.
+
+A non-repair recommendation adds the configured needs-human label and posts one
+managed comment per stop. Incomplete delivery remains pending and retries without
+calling the model again. After delivery, removing the label releases the unchanged
+stop for ordinary recovery. A change to the ticket input or saved stop makes the
+old advice stale. Triage reports repair, human, released or unavailable; none of
+these results grants permission to modify a gate, reuse proof or deliver work.
+
 # Recovery execution-analysis preparation
 
 A current Board assessment does not authorize recovery. After a confirmed jam,

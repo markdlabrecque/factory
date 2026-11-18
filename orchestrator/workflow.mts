@@ -50,6 +50,6 @@ export function resolveWorkflow(projectRoot: string, descriptor: string, inherit
     FACTORY_WORKFLOW_MODE: mode, FACTORY_HOST_RUNTIME_ROOT: hostRoot, FACTORY_HOST_RUNTIME_ID: hostId,
     FACTORY_HOST_RUNTIME_DEPENDENCIES: bundle(hostRoot).dependencies };
   return { mode, root, id: manifest.id, manifest, config, env,
-    entrypoints: { dispatch: join(root, 'dispatch.sh'), refresh: join(root, 'dispatch.mts'), main: join(root, 'main.mts'), preparation: join(root, 'recovery-analysis.mts'), config: join(root, 'config-read.mts'), capabilities: join(root, 'capabilities.mts') },
+    entrypoints: { dispatch: join(root, 'dispatch.sh'), refresh: join(root, 'dispatch.mts'), main: join(root, 'main.mts'), preparation: join(root, 'recovery-analysis.mts'), triage: join(root, 'recovery-triage.mts'), config: join(root, 'config-read.mts'), capabilities: join(root, 'capabilities.mts') },
     tsx: join(root, 'node_modules/tsx/dist/cli.mjs') };
 }
