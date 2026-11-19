@@ -186,7 +186,10 @@ certainty. No-send is not inferred from missing records.
   admission ownership are mandatory. Status/explain are passive, not readiness,
   rollout validation, provider probes or authorization.
 
-## Future operator-held procedure — do not execute under source approval
+## Future API-key procedure — do not execute under source approval
+
+This procedure is API-key-only. It does not authorize or describe a retry for the
+parked Pi-login evaluation, which requires fresh explicit approval.
 
 1. Obtain **separate explicit paid approval** naming project, current ticket/run,
    one additional call, maximum exposure and observation window. It must already
@@ -234,12 +237,12 @@ certainty. No-send is not inferred from missing records.
 
    Compare revisions across `--offset <nonnegative-integer>` pages. Holds are
    successful observations (exit 0), not permission. No auth retrieval now or as
-   part of inspection. Only a future explicitly approved API-key environment
-   handoff via `OPENAI_API_KEY` is supported; no auth-file discovery/1Password.
+   part of inspection. This procedure uses only a future explicitly approved
+   `OPENAI_API_KEY` environment handoff; no auth-file discovery/1Password.
 6. Only after all prerequisites and paid authorization, explicitly invoke once:
 
    ```sh
-   factory supervisor diagnose <ticket> --project <name|path> --json
+   factory supervisor diagnose <ticket> --project <name|path> --auth api-key --json
    ```
 
    **Not a dry run: this can SPEND.** Exit 0 proposed/reused; 2 retained human-required;

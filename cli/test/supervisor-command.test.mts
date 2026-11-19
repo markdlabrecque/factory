@@ -84,6 +84,8 @@ test('diagnosis source handler uses genuine held host and component facade only 
     const prepare=async()=>({invoke:async()=>authHold});
     const expectedAuthHold={reason:'Pi login handoff held: child deadline expired; auth-process cleanup unconfirmed; no fallback or reservation',
       piLoginFailure:{stage:'timeout',cleanupUnconfirmed:true}};
+    const {authorization,input}=reviewFixture(root),project=input.snapshot.project;
+    commitSupervisor(p.state,project,0,{id:'observe',at:AT,kind:'observe',facts:authorization.facts,snapshotHash:supervisorHash(input.snapshot),reason:'Original'});
     for (const json of [true,false]) {
       assert.equal(await supervisorDiagnose(p,['7'],{project:root,auth:'pi-login',json},{...services,prepare} as any),1);
       const view=JSON.parse(output.at(-1)!);
@@ -98,14 +100,20 @@ test('diagnosis source handler uses genuine held host and component facade only 
       assert.equal(await supervisorDiagnose(p,['7'],{project:root,json:true},{...services,prepare,signal:abort.signal} as any),code);
       assert.equal(invoked,true);const view=JSON.parse(output.at(-1)!);assert.equal(view.state,state);assert.equal(view.runId,'current-execution');assert.equal(Object.hasOwn(view,'piLoginFailure'),false);assert.doesNotMatch(output.at(-1)!,/provider stderr|token=hidden|synthetic-non-secret-key/);
     }
-    const journal=supervisorFile(p.state), invalid='PRIVATE invalid journal';
-    mkdirSync(dirname(journal),{recursive:true});
-    const prepareThenLoseJournal=async()=>({invoke:async()=>{writeFileSync(journal,invalid);return authHold;}});
-    assert.equal(await supervisorDiagnose(p,['7'],{project:root,auth:'pi-login',json:true},{...services,prepare:prepareThenLoseJournal} as any),1);
-    const {invocationId,...minimal}=JSON.parse(output.at(-1)!);
-    assert.match(invocationId,/^[a-f0-9-]{36}$/);
-    assert.deepEqual(minimal,{version:1,authority:'advice-only',state:'held',ticket:7,runId:'current-execution',...expectedAuthHold});
-    assert.equal(readFileSync(journal,'utf8'),invalid);
+    const journal=supervisorFile(p.state), recorded=readFileSync(journal,'utf8');
+    for (const replacement of [null,JSON.stringify({version:1,projects:{}}),'PRIVATE invalid journal']) {
+      writeFileSync(journal,recorded);
+      const prepareThenLoseRecord=async()=>({invoke:async()=>{
+        if (replacement===null) rmSync(journal); else writeFileSync(journal,replacement);
+        return authHold;
+      }});
+      assert.equal(await supervisorDiagnose(p,['7'],{project:root,auth:'pi-login',json:true},{...services,prepare:prepareThenLoseRecord} as any),1);
+      const {invocationId,...minimal}=JSON.parse(output.at(-1)!);
+      assert.match(invocationId,/^[a-f0-9-]{36}$/);
+      assert.deepEqual(minimal,{version:1,authority:'advice-only',state:'held',ticket:7,runId:'current-execution',...expectedAuthHold});
+      if (replacement===null) assert.equal(existsSync(journal),false);
+      else assert.equal(readFileSync(journal,'utf8'),replacement);
+    }
   } finally {rmSync(home,{recursive:true,force:true});}
 });
 

@@ -522,9 +522,12 @@ function readJournal(stateDir: string): Journal {
 }
 /** Read-only validated project inventory for cross-project host proof binding; no repair or authority inference. */
 export function readSupervisorProjects(stateDir: string): SupervisorState[] { return Object.values(readJournal(stateDir).projects); }
-export function readSupervisor(stateDir: string, project: ProjectIdentity): SupervisorState {
+/** When a write is already expected, do not substitute zero-valued initial state for a missing record. */
+export function readSupervisor(stateDir: string, project: ProjectIdentity, { requireRecord = false } = {}): SupervisorState {
   validateProject(project); const s = readJournal(stateDir).projects[supervisorHash(project.root)];
-  return s ? validateSupervisor(s, project) : emptySupervisor(project);
+  if (s) return validateSupervisor(s, project);
+  if (requireRecord) throw Error('Supervisor state held: missing project journal record');
+  return emptySupervisor(project);
 }
 /** One host-wide short lock + one atomic durable journal replacement includes shared capacity and project CAS.
  * stateDir MUST be host-owned, outside project/agent mounts, as for admission/recovery. No async effects inside locks. */

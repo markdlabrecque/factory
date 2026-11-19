@@ -127,11 +127,11 @@ export async function supervisorDiagnose(p: Paths, extra: string[], o: Superviso
     if (!runId) throw missingRun;
     const host=await (services.prepare ?? prepareSupervisorHost)({paths:p,project,ticket,invocationId,backend:services.backend,tracker:commandContextSource(project.tracker),auth:o.auth});
     const result=await host.invoke(services.apiKey ?? '',services.signal);
+    const auth=projectPiLoginFailure(result);
     let state: SupervisorState;
-    try { state=readSupervisor(runStateDir(p),project); }
+    // The worker recorded an observation before a classified login hold; absence is not empty accounting.
+    try { state=readSupervisor(runStateDir(p),project,{requireRecord:!!auth}); }
     catch (e) {
-      // Auth failed before acquisition. Keep its known evidence without fabricating a journal projection.
-      const auth=projectPiLoginFailure(result);
       if (!auth) throw e;
       output(JSON.stringify({version:1,authority:'advice-only',state:'held',ticket,invocationId,runId:safeExcerpt(runId),...auth},null,o.json ? undefined : 2));
       return 1;
