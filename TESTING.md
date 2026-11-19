@@ -155,9 +155,12 @@ review remain required; this focused command replaces none of them.
 ## Explicit diagnosis command boundary
 
 `cli/test/supervisor-command.test.mts` covers strict named-ticket parsing, redacted
-result/exit permutations and signal handoff through component command facades. It
-also exercises genuine host refusal using a disposable registry/current saved run
-and failing backend, and actual source-bin routing for invalid/no-run requests.
+result/exit permutations and signal handoff through component command facades.
+A classified login hold retains its fixed reason but omits accounting if the
+journal or project record disappears or the journal is corrupt. The fixture
+checks the read does not recreate or rewrite those records. It also exercises
+genuine host refusal using a disposable registry/current saved run and failing
+backend, and actual source-bin routing for invalid/no-run requests.
 `documentation-cli.test.mts` checks help and the documented no-run refusal. These
 are cheap units/local control boundaries, not installed transport or paid-provider
 proof. The public copied-install journey belongs to its dedicated acceptance task;

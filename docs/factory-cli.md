@@ -151,9 +151,10 @@ The existing `reason` field carries fixed operator prose. Other held results and
 successful results omit `piLoginFailure`; the unclassified legacy Pi-login reason
 is not assigned a stage retroactively. The codes describe local observations,
 not why Pi refused, whether a login expired, or whether any remote work stopped.
-Raw exception text and child output are never printed. If the journal cannot be
-read after a classified auth hold, a minimal held result preserves the reason and
-`piLoginFailure` without reporting journal-derived accounting. Held results still
+Raw exception text and child output are never printed. If the journal is unreadable
+or the project record is missing after a classified auth hold, a minimal held result
+preserves the reason and `piLoginFailure` and omits journal-derived accounting.
+Omitted accounting means unknown, not zero cumulative charges. Held results still
 exit 1 (absent the usual signal exit override) and do not authorize retries.
 
 No auth values are written to Factory files, logs, basis hashes or agent mounts.
