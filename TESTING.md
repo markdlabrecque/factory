@@ -83,10 +83,14 @@ emits high reasoning without a configuration update, and is rejected by the
 API-key payload validator before transmission. The same existing copied
 adapter/journal matrix also covers the explicit subscription profile accepting
 that exact pinned login shape after real grant/worker authorization. Neither test
-resolves real auth or bypasses the production API-key precondition. New
-`supervisor-auth.test.mts` units cover bounded synthetic credential child output,
-selection, expiry-request argv, cancellation/deadline/malformed/oversize/sanitized
-failures and no fallback. Worker tests refuse bad auth before acquisition.
+resolves real auth or bypasses the production API-key precondition.
+`supervisor-auth.test.mts` uses synthetic pipes, a fake deadline and mocked group
+signals to cover the fixed handoff failure stages, output redaction and fail-closed
+cleanup. `supervisor-worker.test.mts` proves each fixed auth failure code and the
+unknown fallback reach public projection without paid acquisition or reservation;
+`supervisor-command.test.mts` checks both JSON formats, exact legacy reason matching,
+redaction of arbitrary output, exception text and unrecognized metadata, and
+preservation of the safe auth hold if the disposable journal cannot be read.
 Known usage and overrun/charge/human-stop policy are cheap receipt/state units.
 The existing normal-producer known-custody case uses synthetic subscription auth
 to prove receipt-backed runtime/exclusion release and auth-free same/fresh-host
@@ -94,7 +98,7 @@ reuse; its unknown-usage variant keeps API-key coverage. No new E2E matrix or
 real login, remote acceptance, usage, invoice or operational success is implied. Run the focused suite:
 
 ```sh
-node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-openai-request.test.mts
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-{auth,worker,command,openai-request}.test.mts
 ```
 
 The four mandatory shards, separate browser lifecycle and docs checks above remain

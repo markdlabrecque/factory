@@ -1,6 +1,7 @@
 // Passive supervisor inspection, audited fences/resolution and explicit named-ticket advisory diagnosis.
 // Only diagnose composes the trusted host; no activation, scheduling, action or cross-process PID cancellation.
 import { SUBSCRIPTION_PROFILE_ID } from '../supervisor-advisory-contract.mts';
+import { piLoginFailureReason } from '../supervisor-auth.mts';
 import { userInfo } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readSupervisor, commitSupervisor, supervisorHumanHold } from '../supervisor-state.mts';
@@ -17,7 +18,7 @@ import type { Paths } from '../paths.mts';
 import { resolveProject, runStateDir, findRun } from '../runs.mts';
 import { tomlIdentity } from '../../../orchestrator/project-config.mts';
 import { resolveSupervisorRequest } from '../supervisor-escalation.mts';
-import { prepareSupervisorHost } from '../supervisor-host.mts';
+import { prepareSupervisorHost, supervisorHostPreflightReason } from '../supervisor-host.mts';
 import { commandContextSource } from '../../../orchestrator/ticket-context-source.mts';
 import type { DiagnosisResult } from '../supervisor-worker.mts';
 import type { ScheduleBackend } from '../platform/scheduler.mts';
@@ -67,19 +68,29 @@ export function retainedAccounting(s: SupervisorState, r: Reservation | undefine
     known: r ? r.actual !== null : null, provenance: !r || r.actual === null ? 'unknown' : settlement ? 'provider-usage-derived' : 'legacy-component-reported',
     providerInvoice: false, refunds: false, meaning: subscription ? 'API invoice not applicable; zero monetary debit is not measured zero usage. Token targets admit calls, not remotely cap them; known overruns increase charge, unknown stays reserved.' : 'Reserved charge is retained; known resource usage and derived charge are not a provider invoice or refund.' };
 }
+function projectPiLoginFailure(result: DiagnosisResult) {
+  const failure = result.state === 'held' ? result.piLoginFailure : undefined;
+  if (!failure) return undefined;
+  const piLoginFailure = {stage:failure.stage,cleanupUnconfirmed:failure.cleanupUnconfirmed === true};
+  const reason = piLoginFailureReason(piLoginFailure);
+  return reason ? {piLoginFailure,reason} : undefined;
+}
 /** Redacted terminal result: retain only selected identities, accounting and bounded advice, never worker bodies. */
 export function supervisorDiagnosisProjection(s: SupervisorState, ticket: number, invocationId: string, result: DiagnosisResult, runId: string | null = null) {
   const diagnostic = 'diagnosticId' in result ? s.diagnostics?.[result.diagnosticId] ?? Object.values(s.diagnostics ?? {}).find(d => d.id === result.diagnosticId) : undefined;
   const reservation = Object.values(s.reservations).find(r => r.id === (diagnostic?.reservationId ?? invocationId));
   const incident = diagnostic ? s.incidents[diagnostic.incidentId] : undefined;
+  const auth = projectPiLoginFailure(result);
   return {version:1,authority:'advice-only',state:result.state,
     project:{root:safeReference(s.project.root),tracker:{kind:s.project.tracker.kind,host:safeExcerpt(s.project.tracker.host),project:safeExcerpt(s.project.tracker.project)}},
     ticket,runId:incident ? safeExcerpt(incident.facts.runId) : runId ? safeExcerpt(runId) : null,invocationId:safeExcerpt(invocationId),
     incidentId:diagnostic?.incidentId ?? null,diagnosticId:diagnostic?.id ?? null,
-    reason:result.state === 'held' ? (result.reason.includes('quiescence has not been established')
+    ...(auth ? {piLoginFailure:auth.piLoginFailure} : {}),
+    reason:result.state === 'held' ? (auth?.reason ?? (result.reason.includes('quiescence has not been established')
       ? 'Independent older-runtime and unmanaged-work quiescence evidence is unavailable; no exclusion was acquired.'
       : result.reason === 'Bounded explicit OpenAI API-key handoff required for a new diagnosis'
-      ? result.reason : 'Diagnosis held by current selection, authorization, ownership or provider prerequisites; inspect local originals.')
+        || result.piLoginFailure === undefined && result.reason === 'Pi login handoff unavailable; no fallback or reservation'
+      ? result.reason : 'Diagnosis held by current selection, authorization, ownership or provider prerequisites; inspect local originals.'))
       : result.state === 'human-required' ? 'Retained human decision required; inspect exact diagnostic and accounting before any further work.' : 'Retained advice; not execution authority',
     recommendation:retainedRecommendation(diagnostic?.decision ?? ('decision' in result ? result.decision : null)),
     basis:diagnostic ? {basisHash:diagnostic.basisHash,snapshotHash:diagnostic.snapshotHash} : null,
@@ -108,19 +119,29 @@ export async function supervisorDiagnose(p: Paths, extra: string[], o: Superviso
   const ticket = parseSupervisorDiagnosis(extra,o), output=services.output ?? console.log, invocationId=randomUUID();
   p={...p,state:runStateDir(p)};
   let project: SupervisorState['project'] | undefined, runId: string | null = null;
+  const missingRun = Error('Supervisor host held: exact current saved execution required');
   try {
     const ctx=resolveProject(p,{project:o.project});
     project={root:realpathSync(ctx.root),tracker:tomlIdentity(ctx.scaffold)};
     runId=findRun(p,ctx,String(ticket)).run?.executionId ?? null;
-    if (!runId) throw Error('Supervisor host held: exact current saved execution required');
+    if (!runId) throw missingRun;
     const host=await (services.prepare ?? prepareSupervisorHost)({paths:p,project,ticket,invocationId,backend:services.backend,tracker:commandContextSource(project.tracker),auth:o.auth});
     const result=await host.invoke(services.apiKey ?? '',services.signal);
-    const state=readSupervisor(runStateDir(p),project);
+    let state: SupervisorState;
+    try { state=readSupervisor(runStateDir(p),project); }
+    catch (e) {
+      // Auth failed before acquisition. Keep its known evidence without fabricating a journal projection.
+      const auth=projectPiLoginFailure(result);
+      if (!auth) throw e;
+      output(JSON.stringify({version:1,authority:'advice-only',state:'held',ticket,invocationId,runId:safeExcerpt(runId),...auth},null,o.json ? undefined : 2));
+      return 1;
+    }
     output(JSON.stringify(supervisorDiagnosisProjection(state,ticket,invocationId,result,runId),null,o.json ? undefined : 2));
     return result.state === 'human-required' ? 2 : ['proposed','reused'].includes(result.state) ? 0 : 1;
   } catch (e) {
-    // Never echo arbitrary exception bodies (tracker/provider errors may contain credentials or raw output).
-    const reason=e instanceof Error && /^(Supervisor host held:|Advisory held:)/.test(e.message) ? safeExcerpt(e.message) : 'Diagnosis held: project, saved run, controls, policy or supported runtime unavailable; inspect local originals.';
+    // Prefixes are not provenance; tracker/provider errors may contain credentials or raw output.
+    const reason=e === missingRun ? missingRun.message : supervisorHostPreflightReason(e)
+      ?? 'Diagnosis held: project, saved run, controls, policy or supported runtime unavailable; inspect local originals.';
     let state: SupervisorState | null = null;
     try { if (project) state=readSupervisor(runStateDir(p),project); } catch { /* invalid journals are never repaired */ }
     output(JSON.stringify(state ? {...supervisorDiagnosisProjection(state,ticket,invocationId,{state:'held',reason},runId),reason} : {version:1,authority:'advice-only',state:'held',ticket,invocationId,runId:null,reason}));

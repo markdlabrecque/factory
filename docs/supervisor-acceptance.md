@@ -37,12 +37,10 @@ preflight hold and no supervisor reservation or exclusion acquired.
 reuse remain NOT RUN.** The real implementation call does not prove that advisory
 provider boundary.
 
-The current goal is [ticket 286](https://github.com/markdlabrecque/factory/issues/286):
-prove and, if compatible, implement the existing OpenAI provider's Pi login-backed
-authentication with the explicitly revised subscription target/accounting contract
-and retained ownership guarantees. The pinned Pi serializer omits output-cap/cache fields for ChatGPT
-login requests; accepting a bearer token alone is not sufficient. The chosen next
-step is supported login-backed source work, not obtaining a separate API key.
+[Ticket 286](https://github.com/markdlabrecque/factory/issues/286) investigated the
+existing OpenAI provider's Pi login-backed authentication. The pinned Pi serializer
+omits output-cap/cache fields for ChatGPT login requests; accepting a bearer token
+alone is not sufficient.
 The [original investigation](research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17)
 recorded **BLOCKED under the original hard-bound contract**. The owner then
 explicitly approved a revised subscription contract: 4,096-output-token best-effort
@@ -54,18 +52,21 @@ The [provider contract](design/supervisor-provider-contract.md#owner-approved-su
 details its limitations. Known overruns remain known and require a human rather
 than publishing advice; unknown usage/cleanup retains charge/exclusion/pins.
 
-New evidence is **synthetic/offline only**: actual pinned login serializer and
-journal permission; bounded fake auth and failures; known subscription settlement,
-original-receipt runtime/exclusion release and auth-free reuse in the existing
-normal producer; unknown subscription/no-replay in copied public journey B.
-Journey A continues to exercise known API-key behavior. No live login, token export,
-backend acceptance, real usage or cleanup was tested. Historical acceptance JSON
-stays immutable; this change does not install, activate, consume/reset an
-operational allowance or authorize evaluation resumption. After final source
-review/checks and separately approved controlled installation, recheck the retained run,
-policy, controls and truthful rollout attestation before resuming the approved
-one-call evaluation. Changed profile/spend premises require owner review; no
-ambiguous replay, new allowance or implementation rerun is implied.
+Subscription source verification is **synthetic/offline**: actual pinned login
+serializer and journal permission; bounded fake auth and failures; known
+subscription settlement, original-receipt runtime/exclusion release and auth-free
+reuse in the existing normal producer; unknown subscription/no-replay in copied
+public journey B. Journey A continues to exercise known API-key behavior.
+
+The [separately approved public Pi-login invocation already ran and held before
+acquisition or reservation](research/supervisor-openai-boundary.md#held-operational-invocation-and-diagnostic-masking-2026-11-18).
+No advisory allowance was charged, but the earlier approval does not authorize
+another attempt. The run remains parked. A later auth or diagnosis attempt needs
+**fresh, explicit owner approval**, plus current retained-run, policy, control,
+ownership/accounting and rollout-attestation checks. The held result did not
+prove bearer export, backend acceptance, real usage or cleanup. The source
+diagnostic follow-up does not install or activate anything, renew an allowance,
+permit replay or rerun implementation. Historical acceptance JSON stays immutable.
 
 At the 2026-11-17 22:13 UTC handoff, the global scheduler timer was enabled/active;
 Factory, the evaluation project, Convoke and R2 were paused, and Island Health was

@@ -22,8 +22,12 @@ acquisition, outside Factory locks, with a 20-second parent deadline and bounded
 secret-safe output/cancellation/group handling. Pi may refresh its own login;
 Factory does not read auth files or persist/export credentials to agent mounts.
 Retained unchanged advice needs no auth. Current controls/policy/originals are
-rebuilt after auth and before reservation. No actual auth or live request ran as
-part of this source implementation.
+rebuilt after successful auth and before reservation. Failed auth does not
+acquire exclusion, pins or a reservation and never falls back. Only fixed stage
+codes and reasons from the bounded handoff cross the worker into the [public held result](factory-cli.md#explicit-subscription-diagnosis);
+unknown errors are not classified from their messages. A zero exit and a valid
+bearer do not suffice without confirmed group absence; a kill request is not
+confirmation. No actual auth or live request ran as part of this source implementation.
 
 Subscription calls have a **4,096-output-token best-effort local/post-response
 target, no guaranteed remote output cap and no API-dollar ceiling**. The pinned
