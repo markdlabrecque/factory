@@ -1,5 +1,6 @@
-// Scan stopped candidates once in numeric order; only a typed read-only ticket refusal permits continuation. Recheck
-// cancellation, generation, budget, review and run state for every candidate. Local follow-up observations refresh after
+// Scan stopped candidates once in numeric order. An exhausted ticket, typed read-only refusal or saved triage human
+// hold permits continuation. Recheck cancellation, generation, budget, review and run state for every candidate.
+// Local follow-up observations refresh after
 // settlement and every launch/refusal. Only fresh successful-pass reports, never snapshots, can confirm/admit recovery.
 // Optional host supervisor advice narrows candidates inside this same scan; it never bypasses confirmation, preparation or admission.
 // Jam confirmation after normal dispatch (slice four self-recovery, #61). The scheduler's tick (commands/tick.mts) gives
@@ -17,16 +18,20 @@
 //    work of their own to repair; their stopped prerequisite is the target) and, only when the project's copy has the
 //    recovery workflow, reviewed as it is (recovery-review.mts recoveryCopyProblem, #63; otherwise recovery stays inactive
 //    and the jam is only recorded), and the
-//    caller still allows new work (`mayLaunch`: not cancelled, scheduler still on), launches one attempt
-//    (launchRecovery), which rechecks everything under the admission lock.
+//    caller still allows new work (`mayLaunch`: not cancelled, scheduler still on), runs opt-in triage before
+//    preparation and may launch one attempt (launchRecovery), which rechecks everything under the admission lock.
 // A missing report (a dispatcher copy older than #61; nothing is logged), one for another pass or project, or a malformed
 // one is not counted.
 // Errors are logged and never fail the pass. The report file is the caller's to remove.
 import {join} from 'node:path';
 import type { BrokerOutcome, BrokerAdmissionOutcome, RepairCandidate } from './supervisor-policy.mts';
 import { requireProjectLayout } from '../../orchestrator/project-layout.mts';
-import {prepareRecovery} from './recovery-prepare.mts';
-import {mutateRecovery} from './recovery-state.mts';
+import { preparationOwnerFile, prepareRecovery } from './recovery-prepare.mts';
+import { TRIAGE_TEXT_LIMIT } from '../../orchestrator/recovery-triage-contract.mts';
+import { triageOwnershipProblem, triageRecovery } from './recovery-triage.mts';
+import type { TriageOutcome } from './recovery-triage.mts';
+import { projectWorkflow } from './workflow.mts';
+import type { TriageObservation } from './recovery-state.mts';
 import { appendFileSync,mkdirSync,existsSync, readFileSync } from 'node:fs';
 import { generationOf, readAdmission } from '../../board/admission.mts';
 import type { Paths } from './paths.mts';
@@ -36,7 +41,7 @@ import { recoveryCopyProblem } from './recovery-review.mts';
 // Await both analysis preparation and image readiness before atomic claim-and-charge.
 import { inspectRecoveryCandidate, launchRecovery, settleRecovery } from './recovery-run.mts';
 import { readRecoveryRuns } from './recovery-claim.mts';
-import { attemptProblem, deliveryMarker, observePass, observeTicket, readRecovery, remainingAttempts, runningAttempt } from './recovery-state.mts';
+import { attemptProblem, deliveryMarker, describeTriage, mutateRecovery, observePass, observeTicket, readRecovery, remainingAttempts, runningAttempt } from './recovery-state.mts';
 
 export type JamReport = { version: 1; pass: string; project: string; at: string; tickets: number[]; reasons?: Record<string, string>;
   none?: string; observed: { iid: number; content: string; labels: string[] }[] };
@@ -59,13 +64,22 @@ export function readJamReport(file: string, pass: string, project: string): JamR
 export type AfterPassOptions = { root: string; tracker: string; name: string; pass: string; report: string; dir: string;
   mayLaunch: () => Promise<boolean>; log: (line: string) => void; now?: () => Date;
   signal?: AbortSignal; node?: string; path?: string; workflowEnv?: NodeJS.ProcessEnv;
-  inspect?: typeof inspectRecoveryCandidate; prepare?: typeof prepareRecovery;
+  inspect?: typeof inspectRecoveryCandidate; prepare?: typeof prepareRecovery; triage?: typeof triageRecovery;
+  selectTriageWorkflow?: typeof projectWorkflow;
   /** Optional host-only advice, evaluated inside the existing successful two-pass scan. Undefined preserves automation.
    * record must durably retain host outcomes separately from model claims; failures hold, never authorize or retry. */
   supervisor?: { select(ticket: number, runId: string | undefined): BrokerOutcome | undefined;
     record(outcome: BrokerOutcome | BrokerAdmissionOutcome): void };
   settle?: typeof settleRecovery; pauseReason?: () => string | undefined;
   launch?: (...args: Parameters<typeof launchRecovery>) => ReturnType<typeof launchRecovery> | Awaited<ReturnType<typeof launchRecovery>> };
+
+function triageObservation(result: TriageOutcome, at: string): TriageObservation {
+  const line = (text: string) => Buffer.from(text.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').trim())
+    .subarray(0, TRIAGE_TEXT_LIMIT).toString().replace(/\uFFFD$/, '').trim() || 'Not available';
+  const common = { at, reason: line(result.reason) };
+  return result.state === 'human' ? { ...common, state: 'human', action: result.action, cause: line(result.cause), delivery: result.delivery }
+    : { ...common, state: result.state };
+}
 
 /** Settle, observe, confirm and maybe launch for one completed pass; see the file comment. Never throws. */
 export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
@@ -113,6 +127,8 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
       }
       const copy = recoveryCopyProblem(p, o.root);
       if (copy) return say(`jam on ${jam} confirmed; not repairing: ${copy}`);
+      const ownership = triageOwnershipProblem(p, o.root);
+      if (ownership) return say(`project-stopped triage ownership: ${ownership}; no attempt charged`);
       const inspected=(o.inspect??inspectRecoveryCandidate)(p,{root:o.root,tracker:o.tracker,ticket:target,dir:o.dir});
       if(!inspected.ok){
         if(inspected.kind==='ticket-refused'){say(`#${target} ticket-refused ${inspected.code}: ${inspected.reason}`);continue;}
@@ -126,7 +142,42 @@ export async function afterPass(p: Paths, o: AfterPassOptions): Promise<void> {
         candidate = advice.candidate;
         if (candidate.ticket !== target || candidate.runId !== current.executionId || !candidate.authorize()) return say('supervisor candidate fenced or foreign; no attempt charged');
       }
-      const prepared=await (o.prepare??prepareRecovery)(p,{root:o.root,tracker:o.tracker,ticket:target,base:current.base??'',dir:o.dir,signal:o.signal,node:o.node,path:o.path,workflowEnv:o.workflowEnv});
+      const options = { root: o.root, tracker: o.tracker, ticket: target, base: current.base ?? '', dir: o.dir,
+        signal: o.signal, node: o.node, path: o.path, workflowEnv: o.workflowEnv };
+      const workflow = (o.selectTriageWorkflow ?? projectWorkflow)(p, o.root, o.workflowEnv);
+      if (workflow.config.recovery?.triage && workflow.entrypoints.triage && existsSync(workflow.entrypoints.triage)) {
+        const preparationOwner = preparationOwnerFile(p, o.root);
+        if (existsSync(preparationOwner)) return say(`project-stopped preparation ownership: confirm cleanup before removing ${preparationOwner}`);
+        const result = await (o.triage ?? triageRecovery)(p, { ...options, workflow });
+        const observation = triageObservation(result, now());
+        const detail = describeTriage(observation);
+        try {
+          mutateRecovery(p, o.root, s => {
+            (s.triage ??= {})[target] = observation;
+            return { write: true, value: undefined };
+          });
+        } catch { say(`#${target} could not save the triage observation`); }
+        try {
+          mkdirSync(join(o.root, '.factory/logs'), { recursive: true });
+          appendFileSync(join(o.root, '.factory/logs', `recover-${target}.log`), `${observation.at} triage ${detail}\n`);
+        } catch { say(`#${target} could not append to the recovery log`); }
+        if (result.state === 'ownership') return say(`project-stopped triage ${detail}; no attempt charged`);
+        if (result.state === 'unavailable' || result.state === 'human') say(`#${target} triage ${detail}`);
+        // Only a cached human result can move the scan past triage, so at most one candidate can make a new call.
+        if (result.state === 'human' && result.fresh) return;
+        if (o.signal?.aborted || !(await o.mayLaunch()) || o.signal?.aborted) return say(`jam on ${jam} confirmed; scheduled work stopped during triage; no attempt charged`);
+        if (generationOf(readAdmission(o.dir), o.tracker) !== generation) return say('project-stopped generation-changed: normal admission changed the confirmed generation');
+        const latest = readRecoveryRuns(o.dir).find(r => r.project === o.tracker && r.iid === String(target));
+        if (!latest || latest.stage !== 'stopped' || latest.executionId !== current.executionId || latest.stageSince !== current.stageSince ||
+          latest.note !== current.note || latest.branch !== current.branch || latest.base !== current.base)
+          return say(`project-stopped candidate-changed: #${target} no longer has the same stopped run`);
+        const latestState = readRecovery(p, o.root);
+        if (latestState.episode?.id !== episode.id) return say('project-stopped episode-changed: confirmed jam changed during triage');
+        const changed = attemptProblem(latestState, target, generation) ?? recoveryCopyProblem(p, o.root);
+        if (changed) return say(`project-stopped recovery-held: ${changed}`);
+        if (result.state === 'human') continue;
+      }
+      const prepared=await (o.prepare??prepareRecovery)(p,options);
       mutateRecovery(p,o.root,s=>{s.preparation={at:now(),ticket:target,state:prepared.state,code:prepared.code,reason:prepared.reason,scope:prepared.scope};return {write:true,value:undefined};});
       if(prepared.state!=='ready'){
         mkdirSync(join(o.root,'.factory/logs'),{recursive:true});

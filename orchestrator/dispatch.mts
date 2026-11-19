@@ -19,6 +19,7 @@ import type { BoardRun } from "./board.mts";
 import { context, effectiveConfig, AGENT, allLabels, GRAPH, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
 import { resolveTicketModel } from "./models.mts";
 import { retainRuntime } from './context.mts';
+import { claimManagedEntry, releaseManagedEntry } from './admission.mts';
 import { freezeTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { contentHash, decide, edgesOf, expandUnits, findJam, staleReason } from "./graph.mts";
 import type { Note } from "./graph.mts";
@@ -63,6 +64,10 @@ import type { Ticket } from "./tracker.mts";
 // passes are not asked for one. The report changes nothing here; the tick decides what to do with it.
 
 // All filters and launch limits come from validated v2 data. --max overrides only the cap.
+const entryTracker = context.config.TRACKER;
+const managedEntry = claimManagedEntry(stateDir(), { root: context.projectRoot, tracker: {
+  kind: entryTracker.kind, host: entryTracker.gitlabHost ?? entryTracker.host!, project: entryTracker.project } });
+process.on('exit', code => { if (code === 0) releaseManagedEntry(stateDir(), managedEntry); });
 const runtimeLease = await retainRuntime(context);
 const SELECT = { ...effectiveConfig.selection, ...effectiveConfig.dispatch };
 

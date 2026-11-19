@@ -102,7 +102,7 @@ test('host-owned original child/parent/human context is complete, separate from 
     notes(iid, page) { return { bytes: 20, value: { notes: [{ id: `${iid}:${page}`, body: `Original decision ${iid}:${page}`, system: false, author: 'owner', createdAt: at, updatedAt: at, url: `https://github.com/owner/repo/issues/${iid}#issuecomment-${page}` }], nextPage: page === 1 ? 2 : null } }; },
   };
   const { input, sources } = collectSupervisorTicketInput(source, 7);
-  assert.deepEqual(calls, ['ticket:7','ticket:1']); assert.match(input.text, /Original decision 1:2/);
+  assert.deepEqual(calls, ['ticket:7','ticket:1','ticket:7','ticket:1']); assert.match(input.text, /Original decision 1:2/);
   assert.match(sources.find(s => s.role === 'human-planning')!.text, /Original decision 7:2/);
   assert.match(sources.find(s => s.role === 'parent')!.text, /Requirements 1/);
   const failing = { ...source, notes() { throw Error('offline'); } };

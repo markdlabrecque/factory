@@ -18,6 +18,21 @@ Without `--project`, export includes every locally recorded project, even projec
 
 Export snapshots directory entries without writer locks, creates no directories, reconciles no records and emits no telemetry about itself. Files published after a directory's snapshot may appear only on a later export. Missing telemetry yields an empty report and exit 0. Unknown versions, corrupt events, foreign stream identities, sequence anomalies and unrecoverable reads yield diagnostics and exit 1, alongside any valid selected events. Diagnostics contain categories and safe stream hashes, not raw file contents or exceptions. Invalid events are excluded, never repaired or overwritten. A project-only filter may report unreadable data in another stream because corrupt data cannot establish its project identity.
 
+## Advisory host preparation coverage
+
+The source-only `prepareSupervisorHost` and `inspectSupervisorHost` APIs do not
+publish supervisor send/completion events. Preparation creates private original
+snapshots; exact exclusion and protected pins are deferred until after cache reuse
+and before a new paid reservation. Its read-only cutpoint projection is local actionable
+inspection, not terminal usage, no-send evidence or permission to release. The
+worker invocation uses the existing committed journal observations for reservation,
+registration, send and branded T05 terminal settlement, not fabricated completion
+events. Settlement telemetry selects known actual usage from the finished reservation,
+with observed retained-advice or pending human disposition; raw output and secrets
+are not telemetry. Retained typed advice grants no execution authority. Final-send IPC observations are data, not a second
+permission store or telemetry-derived authorization. Absence of telemetry can never reconstruct a grant, prove cleanup, refund a reservation
+or confirm that an authorized request was remotely cancelled.
+
 ## Coverage and attribution
 
 Coverage is always `observed-only`, including a new installation with no diagnostics. A process can crash after an authoritative write but before publishing its event. Recorder errors warn on stderr and leave the command's authoritative result unchanged. Missing events never prove that an action did not happen.
@@ -97,7 +112,13 @@ kind. IDs correlate retained originals without exporting prompts, before/after
 bodies, model prose, raw evidence, receipts, exception strings or credentials.
 A null usage is UNKNOWN, never zero. Full reserved ceilings stay charged in the
 journal; known actual usage is separate, does not refund budgets, and is attributed
-only to completion events. Role/project totals are displayed from that same journal,
+only to completion events. Under explicit subscription diagnosis, known token
+usage remains known even above the soft output target; cumulative journal token
+charge increases to `max(reserved, actual)`. Monetary `cost: 0` is a not-applicable
+API debit, not a provider invoice or measured zero resource use. The journal's
+profile-bound receipt and CLI accounting projection retain the explicit
+`subscription-api-invoice-not-applicable` meaning; the compact telemetry allowlist
+is unchanged and cannot independently reconstruct that price/auth contract. Role/project totals are displayed from that same journal,
 not reconstructed from incomplete telemetry. Refused review/diagnosis outcomes
 retain host outcome IDs; an observed-not-applied intent is not invented as a refusal.
 
@@ -125,6 +146,33 @@ operator work; source tests do not claim delivery, paid-call enforcement or bene
 
 The [Board supervisor view](supervisor.md#board-observation-and-outcome-costs) reads
 these observations only and never triggers delivery, review, repair or resolution.
+The shared CLI/Board retained projection separates reserved resources from nullable
+actual usage in tokens/micro-USD. `provider-usage-derived` denotes a retained host
+settlement; `legacy-component-reported` is only a component report, never proof of
+a provider invoice. Missing/ambiguous actual usage and absent known-usage sums are
+null, not zero. Full cumulative reservation charges remain retained without refunds.
+Proposal, diagnosis, human request and delivery counts are not execution progress
+or proof; admission exclusions and stop-pending owners remain separately visible.
+
+### Raw advisory accounting is not telemetry or invoice reconciliation
+
+The source [provider receipt helper](supervisor.md#raw-provider-usage-and-private-receipts)
+retains bounded selected raw terminal metadata plus a validated scalar receipt in
+private host state. It does not itself emit telemetry, finish a reservation or
+release exclusion. Telemetry must never read a normalized/default-zero Pi counter
+as known usage, use missing/corrupt receipts as zero, or authorize work from a
+receipt/event. Known token totals come from complete matching raw provider
+counters; reasoning is included in output, not counted twice.
+
+The fixed advisory profile's micro-USD result is explicitly a **conservative derived
+upper charge**, not measured account dollars or provider-invoice reconciliation.
+It uses the versioned worst-allowed profile prices with exact upward integer
+rounding. Full reservations/call charges remain monotonic even when known tokens
+or derived cost are smaller. Missing identity/terminal/service/cache/counter or
+persistence evidence stays unknown. Scalar receipts contain identity hashes/IDs,
+status, numeric counters and price provenance, not prompts, originals, model
+output/hidden reasoning, API keys, auth headers or raw error prose. The original
+provider metadata is private evidence, not a new telemetry producer or authority.
 
 ## Publication and lock order
 

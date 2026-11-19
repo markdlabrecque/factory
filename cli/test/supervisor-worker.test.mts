@@ -8,14 +8,18 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diagnoseProject } from '../src/supervisor-worker.mts';
-import type { DiagnosisBoundary, WorkerOptions } from '../src/supervisor-worker.mts';
+import { resolvePiLogin, type PiLoginFailure } from '../src/supervisor-auth.mts';
+import { supervisorDiagnosisProjection } from '../src/commands/supervisor.mts';
+import { supervisorDecisionSources } from '../src/supervisor-input.mts';
+import { SUBSCRIPTION_PROFILE_ID } from '../src/supervisor-advisory-contract.mts';
+import type { ComponentDiagnosisBoundary as DiagnosisBoundary, WorkerOptions } from '../src/supervisor-worker.mts';
 import { readSupervisor, supervisorFile, commitSupervisor } from '../src/supervisor-state.mts';
 import { supervisorHash, proposalIdentity } from '../../orchestrator/supervisor-contract.mts';
 import { modelForRole } from '../../orchestrator/model-policy.mts';
 import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
 import { supervisorFixture, AT } from './supervisor-fixture.mts';
 
-test('bounded proposal worker reserves before fixed-role Pi, fences cancellation/restart and retains diagnostics without actions', async () => {
+test('bounded proposal worker reserves before fixed-role Pi, fences cancellation/restart and retains diagnostics without actions', async t => {
   const home = mkdtempSync(join(tmpdir(), 'factory-supervisor-worker-'));
   try {
     let seq = 0;
@@ -55,9 +59,72 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
         run: (f: typeof run) => { run = f; }, timeOut: () => { clock += 30000; wake(); },
         advance: (ms: number) => { clock += ms; }, accounting: (value: typeof actual) => { actual = value; }, cleanup: (value: boolean) => { gone = value; }, spawned: () => spawned };
     }
+    const missingAuth=fixture('missing-auth');
+    let acquired=false;
+    const owned={kind:'owned-openai',model:missingAuth.b.model,reservation:missingAuth.b.reservation,start:async()=>{throw Error('must not start');}} as any;
+    for (const apiKey of [undefined,'','synthetic key','synthetic\nkey','x'.repeat(16385)]) {
+      assert.equal((await diagnoseProject({...missingAuth.options(),boundary:owned,apiKey,beforeReserve:async()=>{acquired=true;}})).state,'held');
+      assert.equal(acquired,false);assert.deepEqual(missingAuth.state().reservations,{});
+    }
+    const login=fixture('login-failure');
+    const loginCurrent=() => ({...structuredClone(login.a),advisory:{policy:{host:{profile:SUBSCRIPTION_PROFILE_ID}}}} as any);
+    const cancelLogin=new AbortController();
+    const fromChild = (stage: PiLoginFailure['stage']): WorkerOptions['resolveCredential'] => signal=>resolvePiLogin(signal,{
+      start:()=>{
+        if (stage==='spawn') throw Error('PRIVATE spawn error');
+        const pid = stage==='cleanup' || stage==='exit' ? undefined : 1234;
+        const child=Object.assign(new EventEmitter(),{pid,stdout:new PassThrough(),stderr:new PassThrough()});
+        if (stage==='cleanup' || stage==='exit' || stage==='malformed-bearer') queueMicrotask(()=>{
+          child.stdout.write(stage==='malformed-bearer' ? 'sk-PRIVATE' : 'PRIVATE.bearer');
+          child.emit('close',stage==='exit' ? 1 : 0,null);
+        });
+        if (stage==='output-limit') queueMicrotask(()=>child.stderr.write('PRIVATE'.repeat(2000)));
+        if (stage==='cancelled') queueMicrotask(()=>cancelLogin.abort('PRIVATE abort'));
+        return child as unknown as ChildProcess;
+      },
+      timer:f=>{
+        if (stage==='setup') throw Error('PRIVATE setup error');
+        if (stage==='timeout') queueMicrotask(f);
+        return ()=>{};
+      },
+    });
+    const loginCases = [
+      {resolveCredential: undefined, stage:'unknown', reason:'failure stage unknown'},
+      {resolveCredential: async()=>{throw Object.assign(Error('Pi login handoff held: PRIVATE'),{stage:'spawn'});}, stage:'unknown', reason:'failure stage unknown'},
+      {resolveCredential: async()=> 'bad token', stage:'malformed-bearer', reason:'bearer missing or malformed'},
+      ...([
+        ['setup','child setup failed'],['spawn','child could not be started'],['timeout','child deadline expired'],
+        ['exit','child exited unsuccessfully; auth-process cleanup unconfirmed',true],['output-limit','child output limit exceeded'],
+        ['malformed-bearer','bearer missing or malformed'],['cleanup','auth-process cleanup unconfirmed',true],['cancelled','cancelled'],
+      ] as const).map(([stage,reason,cleanupUnconfirmed])=>({resolveCredential:fromChild(stage),stage,reason,cleanupUnconfirmed})),
+    ] satisfies {resolveCredential: WorkerOptions['resolveCredential']; stage: PiLoginFailure['stage']; reason: string; cleanupUnconfirmed?: boolean}[];
+    const kill=t.mock.method(process,'kill',(pid:number,signal:number)=>{
+      assert.equal(pid,-1234);assert.equal(signal,0);
+      throw Object.assign(Error('PRIVATE fixture group absent'),{code:'ESRCH'});
+    });
+    try {
+      for (const {resolveCredential,stage,reason,cleanupUnconfirmed=false} of loginCases) {
+        const options=login.options();
+        const result=await diagnoseProject({...options,current:loginCurrent,boundary:owned,apiKey:'sk-no-fallback',signal:cancelLogin.signal,
+          resolveCredential,beforeReserve:async()=>{acquired=true;}});
+        assert.equal(result.state,'held'); assert.equal(acquired,false);
+        const state=login.state(), projected=supervisorDiagnosisProjection(state,236,options.invocationId,result);
+        assert.deepEqual(state.reservations,{});
+        assert.equal(state.charged.diagnosis.tokens,0);
+        assert.equal(Object.values(state.incidents)[0].incident.diagnosisCalls,0);
+        assert.deepEqual(projected.piLoginFailure,{stage,cleanupUnconfirmed});
+        assert.equal(projected.reason,`Pi login handoff held: ${reason}; no fallback or reservation`);
+        assert.equal(projected.accounting.reserved,null);
+        assert.equal(projected.recommendation,null);
+        assert.doesNotMatch(JSON.stringify([result,projected,state]),/PRIVATE|sk-no-fallback/);
+      }
+    } finally {kill.mock.restore();}
     const f = fixture('observe');
-    const result = await diagnoseProject(f.options()); assert.equal(result.state, 'proposed');
+    const asyncOptions = f.options(), syncCurrent = asyncOptions.current;
+    const result = await diagnoseProject({...asyncOptions,current:async () => syncCurrent()}); assert.equal(result.state, 'proposed');
     const saved = f.state(); assert.equal(saved.charged.diagnosis.tokens, 100); assert.equal(Object.values(saved.reservations)[0].state, 'finished');
+    assert.deepEqual(supervisorDecisionSources(readFileSync(supervisorFile(f.stateDir),'utf8'),f.a.snapshot.project,236,'2026-11-17T12:01:00.000Z'),
+      supervisorDecisionSources(null,f.a.snapshot.project,236,AT),'own real retained diagnostic output is not an authoritative prior decision');
     const d = Object.values(saved.diagnostics!)[0]; assert.equal(d.outcome, 'proposed'); assert.match(d.stderr, /retained worker/);
     assert.deepEqual(saved.intents, {}); assert.deepEqual(saved.reviews, {}); assert.deepEqual(saved.proposals, {});
     assert.ok(readFileSync(d.inputRef, 'utf8').includes('original human-planning'));
@@ -66,6 +133,7 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
     f.a.snapshot.observedAt = '2026-11-17T12:01:00.000Z';
     f.b.start = () => { throw Error('unchanged wait must not launch a process'); };
     assert.equal((await diagnoseProject(f.options())).state, 'reused'); assert.deepEqual(f.state().charged, saved.charged);
+    assert.equal((await diagnoseProject({...f.options(),boundary:owned,resolveCredential:async()=>{throw Error('cache must not resolve auth');},beforeReserve:async()=>{throw Error('cache must not acquire');}})).state,'reused');
     const preCancelledReuse = new AbortController(); preCancelledReuse.abort();
     assert.equal((await diagnoseProject({ ...f.options(), signal: preCancelledReuse.signal })).state, 'held');
     const corruptedInput = JSON.parse(readFileSync(d.inputRef, 'utf8')); corruptedInput.snapshot.material.settings = 'f'.repeat(64);

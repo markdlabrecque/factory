@@ -86,6 +86,14 @@ The manifest identifies source bytes, modes and Node metadata and separately rec
 
 Factory's host-owned project filesystem gate still runs before selected custom run/dispatch and explicit analysis-refresh entrypoints, including scheduled paths. This is not evidence that an override collects complete child/parent input or probes its actual sandbox user/mounts. Those internals remain opaque. Standard workflows freeze structured ticket input and probe after setup before implementation/repair; an override that retains those helper calls can retain that behavior, but Factory neither supplies missing helpers from the installed runtime nor imposes a new override protocol. Passive status/doctor/Board readers do not execute an override to test it. See [readiness coverage and safe recovery](../docs/ticket-readiness.md#runtime-and-coverage-boundary).
 
+For overrides adapting the standard verifier, `BASE_SHA` still names the original
+implementation base and `TIP_SHA` the exact candidate. `RECOVERY_START_SHA` is
+`(none)` in ordinary verification; the standard recovery runner supplies an exact
+host-validated attempt start only for behavioral reproduction. Adopt the updated
+handoff and prompt together; prompt text and additive instructions cannot authorize
+another comparison or change the proof base. Complete overrides stay independently
+reviewed; this does not add a required asset or change the evidence schema.
+
 ## Operation
 
 Version 2 TOML is required. Missing or v1 configuration is unsupported and does not fall back to executable configuration.

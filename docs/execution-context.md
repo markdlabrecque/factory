@@ -6,6 +6,127 @@ bundle contains the workflow, Board helpers, TOML parser, Factory templates and
 private locked dependencies. A project does not supply individual executable or
 template overrides to this workflow.
 
+## Host preparation and current originals
+
+The source-only `prepareSupervisorHost` API in `cli/src/supervisor-host.mts` creates
+a validated read-only runtime context and rebuilds current originals before exact
+cache comparison. A new paid call then acquires custody-backed exclusion and
+runtime pins before reservation; cached reuse acquires neither. Its asynchronous
+`current()` rereads the existing scheduler backend and
+registry opt-in, validates private host policy and exact hold ownership, and
+rebuilds the complete saved-run originals outside locks. Each private collection
+gets its own host-only destination; generated freezes and observations do not
+become authoritative prior decisions or recursively change the basis. The actual
+normal producer's `no-commit.json` is a supported complete failure original.
+
+Preparation does not start a child, reserve paid work or grant a request. A failure
+after acquisition retains exclusion/pins, including when controls become off.
+The prepared object's explicit `invoke` delegates to the existing diagnosis worker
+using the pinned owned boundary. Pins transfer to the actual ready child before
+grant registration/handoff. Final-send IPC rebuilds current controls, policy,
+complete basis, exact hold and runtime, then the child uses the same journal-lock
+authorization as stop. A second asynchronous rebuild precedes local terminal closure.
+Known raw usage and fresh owned whole-group cleanup permit branded atomic terminal
+publication: typed non-executing advice bound to actual output/frozen input/grant,
+or a durable actionable HumanRequest. Current journal stop/human/denial/material
+fences refuse usable late output. Exact cache reuse precedes paid hold/pin acquisition,
+so exhausted new-call budgets do not strand cached advice. Original terminal receipts
+permit exact runtime/admission release and idempotent restart reconciliation; unknown
+or successor ownership remains held without resend/refund. Prepared-host observations
+cannot be replaced by static controls; legacy component fixtures are not authority.
+This is not activation, mount isolation or a confirmed remote cancellation claim.
+
+## Protected advisory runtime selection
+
+`cli/src/supervisor-runtime.mts` supplies a source-only trusted composition API,
+`createSupervisorRuntime`. It resolves the existing complete workflow and loads its
+actual execution context only **after** comparing every inventoried source/artifact
+byte with the trusted factory's inventory and positively importing the existing
+four-archive Pi/OpenAI public SDK closure offline. A regenerated project manifest,
+ABI shim, model/TOML value or capability callback is not positive adapter proof.
+The current advisory compatibility set is exact byte-compatible complete copies;
+other complete project overrides remain valid for normal Factory but hold here
+without executing their JavaScript. The saved-run collector separately still holds
+all project-mode overrides; this module does not broaden that contract.
+
+Before starting a child it acquires one protected version-2 runtime-store lease
+binding canonical host and selected paths, both source/dependency identities,
+project, invocation, fence, state directory and fixed provider profile. Identical
+host/selected paths deduplicate; distinct paths with equal content IDs retain both
+pins. Ordinary version-1 lease readers (including older GC/removal) reject version
+2 rather than interpreting dead PID ownership as permission to prune. There is no
+exit-hook release or dead-owner adoption. Selection/settings/source/dependencies
+are checked again before start and handoff; no fallback or repair occurs.
+
+After actual T04 readiness the lease transfers once to the exact worker PID/start
+identity and retains the complete original process evidence. Unknown cleanup,
+no-send, failed startup/handoff, death or missing accounting retain the pin. Release
+reads actual T05 durable local-human terminal settlement, original known T03 usage
+and fresh T04 whole-group absence outside the runtime lock, then removes only an
+exact matching token/record under that lock. It cannot release a successor, kill a
+reconstructed PID/group, reset charges, or turn retained advice into authority.
+
+This runtime API is not activation authority. The explicit public advisory host now reads
+an expiring private [operator rollout attestation](factory-cli.md#operator-rollout-attestation)
+bound to the canonical project/tracker plus `identity.host`, `hostDependencies`, `selected`
+and `dependencies`. These are actual verified complete-runtime/dependency identities, not
+operator-selected substitute ABI values. Compatibility checks above and raw custody/claims
+remain required; a human assertion cannot bypass them. Public acquisition requires the full
+configured timeout remaining. Fresh record reads before authorization/publication must match
+the policy/grant pin; changes or expiry invalidate usable output, not accounting obligations.
+No record data enters diagnosis basis, and renewal never resets history. The component-only
+host prerequisite booleans are not public source proof or installed quiescence evidence.
+Mount/resource isolation and actual older-runtime/unmanaged-work quiescence remain the future
+operator's responsibility, not an automated conclusion. Auth remains an explicit trusted
+handoff parameter, never discovered from user configuration.
+
+## Explicit saved-run diagnosis collector
+
+The source-only `cli/src/supervisor-input.mts` collector consumes an already selected
+`ExecutionContext`, checks current selection before and after collection, and
+requires one explicit ticket in a uniquely registered canonical checkout. It
+reuses the selected config/instruction/template/runtime identities without
+credential discovery, user auth/settings reads or project executable imports.
+Complete project-mode overrides currently hold as unsupported by this collector;
+standard Factory source is never substituted for an override.
+
+Its frozen `originals.json` contains the complete snapshot, incident facts, current
+frozen ticket input and exact material `bindings`. The snapshot policy digest binds
+those original run/attempt/receipt/config/saved-input bytes, normalized settings,
+current base SHA and ownership along with Factory model policy; runtime/dependency,
+baseline/tip and current ticket hashes remain explicit snapshot material. Originals
+are read with bounded stable no-alias reads and written 0600 in a new 0700 host
+directory outside project/runtime mounts. Finished recovery inputs use the exact
+validated attempt-scoped current evidence, never an older implementation verdict.
+Own-hold exclusion requires an explicit exact identity, matched against both
+read-only admission observations; conflicting foreign holds still refuse even
+without a generation increment. Neither a selected context nor a fixture
+runtime proves actual installed mount or cleanup authority. Refer to the
+[complete input contract](supervisor.md#complete-saved-run-input-collection) for
+source roles, authoritative decisions, cache stability and refusal conditions.
+
+## Normal payload custody and terminal handoff
+
+The standard launcher inventories `payload-custody.mts` with the exact selected
+source/dependency identity. Actual normal main saves a fresh private journal nonce
+on its current run before payload creation, durably writes pending custody before
+calling Sandcastle, registers its actual returned exact container and records absence
+only through the real close helper's independent Docker observation. This journal
+is separate from branch/worktree ownership receipts and mutable readiness reports.
+
+A lexical normal scope owns implementation, verification and host delivery. Its
+terminal seal is appended only after that scope has actually unwound and every
+registered payload is absent with no pending creation; only then may its cleanup
+entry and runtime lease release on exit. Ambiguous construction/registration, failed
+close and controller loss retain ownership. Early no-payload failure does not mint
+closure. A successor scope receives a fresh nonce; normal/recovery admission clears
+old pointers, and delivery continuation's changed claim cannot inherit authority.
+The admission exception validates only an explicitly selected current saved run
+against its complete immutable source-bound chain; all legacy/foreign raw records
+remain held. See [the exclusion protocol](supervisor.md#shared-admission-exclusion).
+No full advisory host, credentials, installed activation or runtime policy change is
+introduced by this source protocol.
+
 ## Launcher contract
 
 A trusted launcher selects a prepared runtime once and supplies:
@@ -46,6 +167,21 @@ Git and `.env` use the checkout. Sandbox image/setup settings come from its TOML
 Logs, evidence, recovery artifacts, diagnostic sessions, SDK patches and implementation worktrees use the shared `.factory` layout. New private runtime preparation applies the pinned [Sandcastle patch](sandcastle-patch.md) after npm with scripts disabled and before dependency hashing. Failed preparation leaves prior bundles and descriptor bytes intact. Analysis worktrees and shared records retain their shared
 state layout. `.factory/sandbox` is an explicitly mounted project helper
 directory; an empty project receives no installed sample image or Drupal setup. Repository source examples live under `.factory/`, but executable runtime assembly reads the canonical `orchestrator/`, `board/` and CLI template inventories. The retired project workflow copies are not runtime inputs.
+Saved-layout assertions inspect every top-level state JSON before project filtering
+and all selected-project ownership receipts with canonical, stable regular-file
+reads bounded to 8 MiB each. Aliases and special files refuse before opening;
+NOFOLLOW/NONBLOCK and descriptor checks prevent a replacement FIFO from blocking.
+Receipt validation uses the same bounded bytes, not a second unrestricted read.
+Initial context loading and `assertCurrent` also bound every project config and
+instruction read through the same canonical regular-file descriptor primitive:
+256 KiB per file, 128 configured instruction paths total, and 1 MiB composed text
+per role (six roles), including separators. Invalid text and unstable reads refuse.
+Ordinary contained instruction aliases remain supported; supervisor collection
+calls `assertCurrent({strictOriginals:true})` at both freshness checks to reject
+aliases before any inherited instruction read. NOFOLLOW/NONBLOCK and descriptor
+checks apply here too, not merely in the collector's later original reads.
+Selected immutable runtime manifest/template validation remains unchanged.
+Malformed unrelated JSON remains under its normal schema reader's authority.
 `codePath` and `projectPath` reject lexical traversal between these roots. Existing old-layout run/ownership paths are never rewritten into `.factory` authority. Exact saved-container settlement may proceed while a layout hold blocks new launches; that maintenance does not authorize repair or adopt a branch. Already-running processes keep their immutable selected runtime, even after a new descriptor is published.
 
 ## Frozen inputs and proof
@@ -82,6 +218,114 @@ The additive roles `supervisor` and `gateReview` use the same contained Markdown
 This context supplies only runtime/config/instruction identity. It does not collect or synthesize a supervisor snapshot or review input. The explicit [diagnosis worker](supervisor.md#bounded-diagnosis-and-retained-memory) retains the original sources and separate guidelines/Factory constraints required by committed `supervisor-contract.mts`; summaries and additive hashes alone cannot replace them. Its prompt and pure parser ship with the complete runtime. No independent review worker or action authority is supplied by execution context. The explicit scoped gate-input consumer below validates previously retained host authority; it cannot create an approval.
 
 `supervisor-policy.mts` and `supervisor-contract.mts` ship through the single complete runtime inventory, including copied fixture installs and explicit project overrides. Assembly, manifest regeneration, selection and override recovery review already consume that inventory; a missing/changed supervisor module cannot borrow installed code. Future modules/entrypoints/prompts must be added when their actual files land, then receive new complete manifest identity and renewed override review. No absent future asset names or mixed-runtime fallback are supported.
+
+### Direct advisory provider artifact boundary
+
+The source-only direct request adapter requires a **validated complete selected
+runtime**, not source-tree or host-global Pi. It compares the selected runtime ID
+and dependency identity with the immutable grant, verifies that it is itself loaded
+from that exact flat runtime, revalidates at the final transport gate before
+authorization, and validates again after the response. The actual selected prompt
+bytes must match their manifest hash. Its fixed
+`supervisor-provider/` assets contain hash-pinned published Pi-AI/OpenAI public
+subpath archives and original manifest/license data, plus real provenance package
+and lock files. These files participate in the ordinary runtime inventory/source
+identity. The provenance lock records the upstream full dependency graph; runtime
+loading is deliberately only the complete selected OpenAI Responses subpath closure,
+not an all-provider install. No package manager or source/test fallback is used.
+Verified archive bytes are copied to private temporary scratch before extraction;
+immutable runtime contents are never modified. An enlarged import surface or
+changed artifact needs a new complete inventory/profile rather than a missing
+module workaround.
+
+The exact grant owner must be a separately registered worker PID/start. Frozen
+snapshot project/ticket/run, basis, runtime and dependencies must match the grant.
+The system prompt is selected-runtime-owned, and all original snapshot context is
+serialized into the user message. Explicit isolated worker configuration and
+Standard API auth are required; environment credential/log/proxy overrides cannot
+select the provider context. Final payload/profile/worker authorization uses the
+supervisor journal under its stop lock, then HTTP occurs outside every lock.
+Raw terminal evidence is not yet durable settlement or a proof artifact.
+[Request contract](design/supervisor-provider-contract.md) and
+[supervisor limits](supervisor.md#bounded-direct-pi-request-source-adapter) distinguish
+this request proof from the owned lifecycle composition below and later installed
+factory/public-command acceptance. No activation is implied.
+
+### Owned advisory runtime assets
+
+The complete inventory also ships `supervisor-openai.mts`, `supervisor-process.mts`,
+`supervisor-runner.mts` and `supervisor-guard.mjs`, unchanged in copied bundles.
+The trusted source factory must be loaded from that exact selected flat runtime;
+it accepts no caller executable, argv, environment or transport selector. Its fresh
+empty cwd/HOME and detached Node guard/worker have no project settings, tools,
+sessions or credential discovery. Explicit auth crosses owned IPC only at handoff,
+not the immutable grant or process evidence.
+
+The minimal guard owns its group and starts an absolute bounded deadline before
+waiting for the parent/worker. Parent loss, timeout and termination signal only
+that still-live anchor's own group. Bounded parent-side Linux `/proc` or Darwin
+ps capability evidence must establish exact start/group/session identity; unknown
+Darwin session evidence is explicitly held, not claimed supported. Private durable
+process association precedes journal registration and grant handoff. The actual
+T02 final transport gate remains the sole send permission and T03 publishes durable
+raw/scalar usage. Whole-group ESRCH observation, not anchor exit or pipe closure,
+is required for a private cleanup receipt; live/reused/unknown groups are never
+raw-killed on reopen. The worker also exits on anchor IPC disconnect and retains
+its own same-grant deadline; unexpected anchor loss is not permission for network
+work to wait indefinitely. This fallback is not a group cleanup receipt. Missing
+evidence holds ownership and full charge.
+
+These APIs do not acquire shared admission or runtime-store leases, construct
+complete current facts, settle advisory reservations, release exclusion, publish
+advice or provide public host wiring. Later trusted composition must supply those
+contracts and all agent-mount exclusions. The old injected print worker remains
+component-only. See the [owned boundary](supervisor.md#owned-short-lived-advisory-process-boundary)
+for lifecycle, strict evidence and explicit platform limitations.
+
+### Shared admission version compatibility
+
+The complete runtime inventory includes `supervisor-admission.mts` alongside the
+mandatory v2 `admission.mts` reader/writer. Validated v1 state migrates only on commit,
+preserving claims/generations/recovery pending and candidate accounting. Old actual
+v1 readers reject v2. No optional exclusion bypass or downgrade is supported. Complete
+copy/import fixtures must include both assets unchanged; never fall back to source
+code from a selected flat runtime.
+
+Managed CLI dispatch/manual/selected-issue, shell bootstrap, standard direct main/
+dispatch and recovery launch acquire durable entry ownership before effecting work.
+Normal/recovery/delivery admissions and claim adoption/transfer also refuse a
+conflicting supervisor hold. Tokenless manual adoption takes a real normal claim.
+Entries bind canonical root and tracker; aliases sharing the same root or sanitized
+tracker namespace conflict even when display names, hosts or roots differ. Entries
+have no generation/recovery charge and orphan entries are not pruned by owner death.
+Existing normal/delivery claim pruning remains unchanged; supervisor holds are never
+pruned by owner death. Raw run records without definitive ownership/payload cleanup
+prevent new holds regardless of stage, starting/claim metadata or controller death;
+no shipped legacy raw producer provides that proof.
+
+This is source exclusion, not public advisory finalization. A separate source-only
+`settleAdvisory` journal primitive validates actual registered grant/authorization,
+immutable known T03 usage and exact T04 whole-group cleanup outside locks, then uses
+a private one-use frozen event and journal CAS to retain a finished reservation,
+full reserved charge and a terminal receipt. Owned-host publication also validates
+actual bounded output/frozen input and atomically retains typed advice or a pending
+local HumanRequest; no notification is sent. Exact release reads validated durable
+closure before taking the admission lock and rechecks the full current hold identity;
+replay cannot resend or clear a successor. Strict old journal readers refuse the new
+settlements field; three-field old advisory records remain explicitly readable.
+No-send, absence-only or caller-callback cleanup authority is supplied. Journal send
+authorization remains the sole one-use permission under its own lock; no nested
+supervisor/admission locks or network/process waits under either lock are added.
+Runtime compatibility checks occur before admission locking. Quiescence of all old
+runtimes and unmanaged work plus complete compatible active-runtime selection are
+explicit rollout gates, not a claim of exclusion against nonparticipating code.
+See [shared admission exclusion](supervisor.md#shared-admission-exclusion) and its
+[entrypoint-to-guard trace](supervisor.md#managed-entrypoint-audit-trace). The trace
+distinguishes preflight entries from exact-token implementation/recovery/delivery
+claims; neither layer replaces frozen proof, continuation or send-authorization
+checks. Direct main/dispatch and shell bootstrap are guarded independently of the
+CLI wrapper, so supported selected-issue entry does not rely on its caller behaving
+correctly. No runtime module or dependency is added by this audit.
 
 ### Exact scoped gate-input corrections
 
@@ -179,7 +423,7 @@ configuration. Standalone Board installation uses the same bundle builder and
 records `~/.local/share/sandcastle-board-runtime/runtime.json`; Factory installation
 supplies its own `runtime.json`. Missing descriptors and missing/ambiguous checkouts
 publish token-fenced assessment failures. Board never falls back to local dispatch
-files. Refresh remains read-only with respect to runs, admission and tracker mutation,
+files. Refresh remains read-only with respect to runs, charged admission and tracker mutation,
 with bounded process groups and existing request coalescing.
 
 ### Maintaining a complete code override

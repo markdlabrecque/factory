@@ -23,6 +23,7 @@ import { tick, runRefreshOnly } from '../src/commands/tick.mts';
 import { setProjectSchedule, writeScheduleConfig } from '../src/schedule.mts';
 import { FakeSchedule } from '../src/platform/fake.mts';
 import { readStoredReadiness } from '../../board/readiness.mts';
+import { emptyAdmission, ownerOf, readAdmission, withAdmission } from '../../board/admission.mts';
 import { symlinkSync, readdirSync } from 'node:fs';
 
 function fixture(t: TestContext) {
@@ -47,7 +48,7 @@ function fixture(t: TestContext) {
 const stub = (exit = 0) => `#!/usr/bin/env bash\n# takes --issue N\nprintf '%s\\n' "$PWD" "$SANDCASTLE_STATE_DIR" "$*" > "$PWD/called"\nexit ${exit}\n`;
 const called = (root: string) => readFileSync(join(root, 'called'), 'utf8').split('\n').slice(0, 3);
 
-test('manual run, dispatch and scheduled tick share the host gate before opaque overrides, without queue or admission', async t => {
+test('manual run, dispatch and scheduled tick share the host gate before opaque overrides, without queue or run charges', async t => {
   const { p, project, home } = fixture(t); const root = project('held', stub());
   execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: root });
   execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '--allow-empty', '-m', 'fixture'], { cwd: root });
@@ -69,11 +70,25 @@ test('manual run, dispatch and scheduled tick share the host gate before opaque 
   assert.deepEqual(saved.report.identity, manual.report.identity); assert.notEqual(saved.report.owner.generation, manual.report.owner.generation);
   assert.ok(saved.report.checks.some(c => c.scope === 'project' && c.path === join(root, '.factory/logs') && c.status !== 'ready'));
   assert.equal(existsSync(join(root, 'called')), false);
-  assert.equal(existsSync(join(p.state, 'admission')), false);
+  assert.deepEqual(readAdmission(p.state), emptyAdmission(), 'preflight entry is released without a run charge');
   assert.deepEqual(readdirSync(outside), []);
   assert.equal(readdirSync(join(p.state, 'readiness')).filter(n => n.endsWith('.json')).length, 1);
   rmSync(join(root, '.factory/logs'));
   assert.equal(await run(p, '7', { cwd: root }), 0);
+});
+
+test('manual and dispatch CLI routes refuse supervisor exclusion before readiness or an opaque workflow starts', async t => {
+  const { p, project } = fixture(t); const root = project('supervised', stub());
+  withAdmission(p.state, tx => {
+    // Synthetic persisted input exercises actual CLI mediation, not finalization authority.
+    tx.state.supervisorHolds.fixture = { id: 'fixture', project: { root, tracker: { kind: 'github', host: 'github.com', project: 'me/supervised' } },
+      owner: ownerOf(process.pid), invocationId: 'fixture', fence: 'fixture-fence', pending: [], settled: [] };
+    tx.commit();
+  });
+  assert.equal(await run(p, '7', { cwd: root }), 1);
+  assert.equal(await dispatch(p, { cwd: root }), 1);
+  assert.equal(existsSync(join(root, 'called')), false); assert.equal(existsSync(join(p.state, 'readiness')), false);
+  assert.deepEqual(readAdmission(p.state).generations, {}); assert.deepEqual(readAdmission(p.state).claims, {});
 });
 
 test('scheduled policy is rechecked after host readiness before spawning', async t => {
@@ -90,7 +105,7 @@ test('cancellation during the asynchronous host gate cannot spawn a dispatcher a
   const pending = runDispatchSh(p, resolveProject(p, { cwd: root }), [], { signal: signal.signal, onSpawn: () => { spawned = true; } });
   signal.abort();
   assert.equal(await pending, 1); assert.equal(spawned, false); assert.equal(existsSync(join(root, 'called')), false);
-  assert.equal(existsSync(join(p.state, 'admission')), false);
+  assert.deepEqual(readAdmission(p.state), emptyAdmission(), 'cancelled preflight releases only its managed entry');
 });
 
 test('runs dispatch.sh --issue <n> from the project root with Factory\'s state folder; the exit code comes back', async t => {

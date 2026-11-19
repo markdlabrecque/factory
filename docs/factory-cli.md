@@ -21,14 +21,189 @@ Dispatch and recovery enforce [image and sandbox readiness](image-readiness.md) 
 
 The [structured ticket-context contract](ticket-readiness.md#structured-ticket-context) defines complete child and immediate-parent input, bounded collection holds, provenance, hashing and untrusted rendering. Standard launch/analysis gates refuse incomplete structured input before work starts and publish typed ticket-only holds alongside project checks. Standard workflows freeze one complete snapshot per invocation for prompts and evidence, then compare fresh included-source hashes at the existing analysis/proof/delivery boundaries.
 
-The [ticket-readiness contract](ticket-readiness.md) also defines the shared filesystem probe/report API and its passive-reader boundary. The CLI consumes these reports passively and offers explicit doctor probes. The standard normal and recovery workflows probe the prepared workspace, Git metadata and evidence mount as the actual agent UID/GID after setup/browser preflight and before invoking an implementer or repair agent. Required failures or unknown results invoke zero agents and preserve both readiness and cleanup causes. A post-container recovery failure still spends the existing admitted attempt. Exact-container teardown must be confirmed; normal uncertainty retains the runtime cleanup lease/ownership receipt, and recovery uncertainty retains its cleanup-pending claim until settlement. Complete custom workflows remain internally opaque unless their implementation calls the shared sandbox helper. No new CLI command or override handshake is introduced by this gate. Saved readiness is never launch authority.
+The [ticket-readiness contract](ticket-readiness.md) also defines the shared filesystem probe/report API and its passive-reader boundary. The CLI consumes these reports passively and offers explicit doctor probes. The standard normal and recovery workflows probe the prepared workspace, Git metadata and evidence mount as the actual agent UID/GID after setup/browser preflight and before invoking an implementer or repair agent. Required failures or unknown results invoke zero agents and preserve both readiness and cleanup causes. A post-container recovery failure still spends the existing admitted attempt. Exact-container teardown must be confirmed; normal uncertainty retains the runtime cleanup lease/managed entry and private run-indexed payload custody, and recovery uncertainty retains its cleanup-pending claim until settlement. Standard normal main durably records pending custody before actual sandbox construction, registers its exact returned container, and seals closure only after platform-observed absence and the entire normal delivery/launch scope has unwound. Branch/worktree receipts and readiness cleanup booleans are not payload closure authority. Complete custom workflows remain internally opaque unless their implementation calls the shared sandbox helper. No new CLI command or override handshake is introduced by this gate. Saved readiness is never launch authority.
 
-Normal implementer stops with zero commits now retain [an attributed no-commit explanation](ticket-readiness.md#no-commit-explanations) in the execution note and bounded execution evidence. Factory's zero-commit, worktree and push facts remain separate from the agent's claim. If capture is unavailable, cause stays unknown. Inspect ticket context and evidence before choosing a relaunch; there is no new automatic retry or success authority. Existing blocked-report dependency handling and opt-in recovery policy are unchanged. The owned sandbox closes before a no-commit exit; teardown failures retain the explanation and do not confirm cleanup.
-The [host launch gate](ticket-readiness.md#host-launch-ordering) applies fresh filesystem/input checks to manual run, dispatch, scheduled starts and recovery preparation/admission. A shared project failure stops before ticket analysis, new queue/run/admission records or containers. It leaves tracker selection and existing parked/stopped history intact, with one shared report rather than per-ticket failures, tracker comments or needs-human labels. A ticket input or branch/worktree conflict holds only that ticket. Neither an ordinary dirty checkout nor an unrelated valid worktree is a blanket failure. Factory preserves conflicts for inspection; it does not repair, delete or adopt them.
+Normal implementer stops with zero commits retain [an attributed no-commit explanation](ticket-readiness.md#no-commit-explanations) in the execution note and bounded evidence. A standard noninteractive implementer that explicitly reports `incomplete` may get one host-authorized continuation within the same session, execution, claim and remaining time. Missing or unreadable evidence, a blocker, a dirty or unknown worktree, lost ownership or exhausted time cannot authorize continuation. There is no automatic redispatch and no outcome can substitute for a real commit and independent verification. After refusal or exhaustion, inspect the saved work before deciding whether to relaunch. Existing dependency handling and opt-in recovery policy are unchanged. Owned cleanup still precedes exit; an unconfirmed teardown retains ownership.
+The [host launch gate](ticket-readiness.md#host-launch-ordering) applies fresh filesystem/input checks to manual run, dispatch, scheduled starts and recovery preparation/admission. A shared project failure stops before ticket analysis, new queue/run/charged-admission records or containers. A short-lived durable managed entry already owns preflight and is released on known exit; uncertain handoff/cleanup retains it. It leaves tracker selection and existing parked/stopped history intact, with one shared report rather than per-ticket failures, tracker comments or needs-human labels. A ticket input or branch/worktree conflict holds only that ticket. Neither an ordinary dirty checkout nor an unrelated valid worktree is a blanket failure. Factory preserves conflicts for inspection; it does not repair, delete or adopt them.
 
 The same host-owned project gate precedes explicit complete overrides, including Board reassessment and never-opted scheduled refresh, without importing their code into diagnostics or claiming coverage of opaque internal behavior. Board polling remains passive. A fresh pass may resume normal selection after success, but never implicitly retries a stopped run. Ticket-specific checks repeat before protected creation/admission, and final filesystem/Git operations remain authoritative. Saved readiness never authorizes launch.
 
 Recovery host checks run within the existing preparation/pre-charge flow and repeat after image readiness. Complete input must still match the existing preparation before charge, including parent planning comments. A failed source or changed hash publishes a ticket-input hold without replacing the preparation. Host-known failure charges no attempt. Capacity, activity-generation, ownership and admission-time local checks still apply; no budget is refunded or reset. After a container starts, existing charged-attempt and exact-container cleanup rules remain. Settlement and scheduled local maintenance run independently of the new-launch gate, including during project holds or pauses under the existing global-off/unknown/cancellation policy. Unconfirmed cleanup continues to hold ownership, and report state-write failures are reported directly.
+
+## Local persistence durability
+
+Authority and receipt writes use atomic private files with strict file/directory
+synchronization. Newly created containing directories are synchronized as well;
+visibility after a rename is not a successful durable acknowledgment. Unsupported
+or failed directory syncing is an I/O hold/error, not a best-effort success.
+A failure after rename may leave a visible record: inspect retained journal and
+ownership/evidence before deciding the next step. Do not erase it, reset charges,
+retry a generation from absence or assume it was unsent. Private provider-receipt
+reopen also requires successful synchronization before returning known resources;
+uncertainty is null/unknown, never a zero bill or cleanup permission. No command
+repairs unsupported storage or changes filesystem configuration automatically.
+
+## Shared admission compatibility and supervisor exclusion
+
+Admission state is version 2. Validated v1 claims, generations, recovery pending
+charges and consumed candidates migrate without reinterpretation on the next commit;
+read-only access does not migrate on disk. Actual older v1 readers reject v2. Missing
+mandatory exclusions, corrupt stores and unknown versions hold without overwrite.
+Downgrade and optional exclusion-field rollback are unsupported.
+
+Managed run/dispatch, standard direct entrypoints, recovery launch and delivery
+admission honor durable supervisor exclusion before effecting work. Tokenless manual
+starts acquire normal ownership, rather than bypassing admission. Durable preflight
+entries are not implementation runs and do not advance generations/repair charges.
+Orphan entries and supervisor holds are retained, including dead owners. A canonical
+root match **or** colliding tracker/run-state namespace conflicts; exact ownership
+checks bind root **and** structured tracker, invocation/fence and PID/start.
+
+These are source primitives used by the explicit diagnosis command below, not execution authority. `settleAdvisory` can
+close an actual registered/authorized invocation only with revalidated immutable known
+provider usage and confirmed whole-group cleanup. Journal CAS atomically finishes the
+reservation and retains full reserved charge plus a local human-required disposition,
+without usable advice or a pending notification. Exact release reads that validated
+closure before taking the separate admission lock, then rechecks the current hold's
+project/invocation/fence/controller owner before deletion. No nested locks are used.
+No-send closure is unsupported: absent authorization, exited controller, reference
+strings or callbacks do not prove no-send/cleanup. Unknown evidence stays held.
+See [the exclusion protocol](supervisor.md#shared-admission-exclusion) for strict
+journal compatibility, source-only boundaries and the journal's sole send authority.
+The [managed entrypoint audit trace](supervisor.md#managed-entrypoint-audit-trace)
+maps each CLI/direct/recovery/delivery start to its guard, genuine ownership and
+first protected effect. A dispatched handoff retains its exact token; a refused
+handoff cannot silently become a fresh manual start. Recovery refusal occurs before
+pending-charge replay or consuming an advisory candidate, not after charging it.
+
+Before any future activation, quiesce older runtimes and unmanaged work and select a
+complete compatible runtime everywhere. The guarantee does not cover mixed old or
+arbitrary nonparticipating code. The initial claim also requires conservative
+shared-store quiescence; all legacy raw records without definitive ownership/payload
+cleanup hold regardless of queued/waiting/done/stopped labels or controller death. The
+source admission API may exempt only one explicitly named current modern saved run
+with a complete source/runtime/claim-bound immutable normal custody seal; new
+attempts and recovery/delivery ownership cannot inherit it. It never deletes or
+filters other raw records, and active entries/claims still hold. This prerequisite
+adds no public quiescence-attestation command or automatic cleanup/recovery. No real installation,
+rollout, paid probe or pilot acceptance is implied by offline copied-runtime tests.
+
+For the exact source acceptance matrix, immutable baseline evidence and future
+paid-approval prerequisites, see the [operator-held acceptance runbook](supervisor-acceptance.md).
+Status/explain are passive observations, **not readiness/provider probes**; diagnose
+is **not a dry run** and can spend once eligible. Never enable services, opt in or
+unpause a project merely to diagnose. A separate advisory authorization switch is deferred.
+
+## Explicit advisory diagnosis
+
+```sh
+factory supervisor diagnose <ticket> --project <name|path> [--auth api-key|pi-login] [--json]
+```
+
+This explicit request selects exactly one registered canonical project and its current
+saved execution. Positive decimal ticket numbers only; no historical run, model,
+actor, capability, budget-reset or authentication flags. The actual command calls
+`prepareSupervisorHost` and its `invoke`/existing `diagnoseProject`; it does not
+create a second host or enable act. Observe permits explicit advisory diagnosis
+within existing controls; global off/unknown, never-opted-in/paused projects,
+stopped mode, unsupported/opaque complete overrides, missing originals/policy,
+and unresolved human/denial holds still refuse. Ordinary complete overrides are
+unchanged for non-advisory work.
+
+The supported API-key route accepts only an already supplied bounded non-secret-in-output
+`OPENAI_API_KEY` environment handoff. It never discovers credentials, reads auth
+files, resolves vault references or probes a token/model. Missing/invalid auth or
+unsupported family is held before new paid acquisition; exact retained reuse needs
+no new paid call or key. The private host/project cumulative ceilings, owned worker,
+one-use send gate, receipt settlement and exact cleanup/reconciliation are unchanged.
+
+### Explicit subscription diagnosis
+
+`--auth pi-login` selects Pi's existing OpenAI **Sign in with ChatGPT** login;
+`--auth api-key` (the default) retains the hard-bound API-key contract above.
+There is **no fallback** between them. The private host policy must select the
+matching [profile](project-config.md#advisory-host-policy-source-foundation), or
+the command holds before auth/reservation. Project TOML and ticket text cannot
+select a credential, endpoint or profile. The model remains fixed OpenAI Mid/high.
+
+For a new subscription call only, the host invokes supported
+`pi auth print-bearer-token --min-expiry 50m --provider openai` from a disposable
+non-project working directory. Pi may refresh its own login. The parent imposes a
+20-second deadline, bounded stdout/stderr, cancellation and owned-group termination.
+A classified Pi-login hold adds `piLoginFailure: { stage, cleanupUnconfirmed }`
+to the existing version-1 JSON, in both output formats. `stage` is a stable code:
+
+| `stage` | Observed condition |
+| --- | --- |
+| `setup` | The temporary working directory or bounded child setup failed. |
+| `spawn` | The child could not be started. |
+| `timeout` | The parent deadline expired. |
+| `cancelled` | The handoff was cancelled. |
+| `exit` | The child exited nonzero or by signal. |
+| `output-limit` | Child stdout or stderr exceeded its byte limit. |
+| `malformed-bearer` | No valid bearer was returned. |
+| `cleanup` | The child closed successfully, but group absence was not confirmed. |
+| `unknown` | The handoff failed and its stage could not be classified, including unrecognized resolver exceptions. |
+
+`cleanupUnconfirmed` is `true` when group absence could not be confirmed; it can
+accompany another failure stage. A group kill request is not proof of cleanup.
+The existing `reason` field carries fixed operator prose. Other held results and
+successful results omit `piLoginFailure`; the unclassified legacy Pi-login reason
+is not assigned a stage retroactively. The codes describe local observations,
+not why Pi refused, whether a login expired, or whether any remote work stopped.
+Raw exception text and child output are never printed. If the journal cannot be
+read after a classified auth hold, a minimal held result preserves the reason and
+`piLoginFailure` without reporting journal-derived accounting. Held results still
+exit 1 (absent the usual signal exit override) and do not authorize retries.
+
+No auth values are written to Factory files, logs, basis hashes or agent mounts.
+Auth resolution precedes exclusion/runtime pins/reservation and runs outside their
+locks; on success the host rebuilds current authorization. A failed handoff
+neither falls back nor acquires paid ownership or reserves a call. Exact retained
+advice reuse needs no auth. The API-key environment is ignored for this selection.
+Do not place bearer tokens in `OPENAI_API_KEY`.
+
+Under the owner's revised contract, subscription output has a **4,096-token
+best-effort target, not a remote ceiling**. The pinned serializer omits remote
+output/cache controls and emits top-level high reasoning. True usage may arrive
+only at terminal completion, so the target is checked locally at settlement;
+it cannot stop hidden reasoning at token 4,096 or cap generation after local
+process death. Existing wall-clock/process/output-byte guards still apply.
+Over-target advice is withheld with a durable human stop; known usage is logged
+as known, even above the target. Cumulative token charge is the larger of the
+admission reservation and known actual usage, with no refund/reset. Missing usage
+or unconfirmed cleanup retains the charge/exclusion/pins and forbids replay.
+
+Subscription calls reserve the existing 1,054,096-token admission target and **zero
+API monetary debit**, not a larger API-price-derived reservation. Projections label
+`costKind: subscription-api-invoice-not-applicable` and `apiInvoice: not-applicable`;
+zero debit is not measured zero resource use or an invoice. Positive finite legacy
+USD configuration and prior API charges remain intact, but no API-rate charge is
+invented for this route. See the [revised provider contract](design/supervisor-provider-contract.md#owner-approved-subscription-profile).
+Source/offline support does not install/activate anything or authorize a live call.
+
+**Default held rollout prerequisite:** new paid acquisition reads the private operator
+record `Paths.config/supervisor-rollout.json`. Absence or any unsafe/invalid binding holds
+before exclusion/pins. This is expiring **human attestation**, not automated proof that
+older runtimes or unmanaged work stopped. Actual runtime compatibility and raw saved-run
+custody/claims checks still apply, including legacy/unknown records. Component-only host
+callers retain their explicit prerequisite API; the public CLI cannot inject it. See the
+[manual maintenance-window contract](#operator-rollout-attestation). No installed journey,
+live pilot permission, policy provisioning, scheduling, review, recovery, gate edit,
+delivery or notification is implied.
+Do not enable/mutate a project merely to get past a hold.
+
+Output is version-1 JSON (`--json` compact, otherwise pretty) with advice-only authority,
+`held|proposed|reused|human-required`, safe project/ticket/current-run identity,
+invocation/diagnostic/incident IDs where present, bounded reason/recommendation kind,
+reservation, known/unknown actual accounting, cumulative charges and safe local evidence
+references. No raw prompt, stdout/stderr, provider stream, reasoning or secret is printed.
+Advice grants no execution authority. Exits: 0 proposed/reused, 2 retained human-required,
+1 held/invalid/failed. Status/explain still exit 0 for successful observations of holds.
+SIGINT/SIGTERM request owned cancellation and await its bounded settlement, then exit
+130/143 respectively; they do not claim immediate termination. Pending/unknown accounting
+retains full charge and exclusion. Separate `stop` writes only its durable fence and
+reports pending cancellation, never kills a raw PID.
 
 ## Supervisor inspection and project controls
 
@@ -52,11 +227,11 @@ worker owners, incident/evidence hashes, proposals, host refusal, human requests
 notification receipts, reviews, configured and cumulative budgets, retained execution
 observations, confirmed merge progress and next observation. Review approval is not
 execution, verifier PASS or completion; notification delivery is not approval.
-Original prompts and raw model stdout/stderr are excluded. Proposals include redacted bounded before/after display excerpts and the exact retained proposal ID; these excerpts are not complete original review context.
+Original prompts, hidden reasoning, raw model stdout/stderr, full gate patches and follow-up draft bodies are excluded. Proposals include exact retained proposal IDs, category/path and bounded rationale/alternatives/risks, not before/after code. `diagnostics` include diagnostic/invocation/run identity, basis/snapshot references and the same bounded non-authorizing recommendation as diagnose: rationale, alternatives and typed wait/observe/request-repair/gate-change/follow-up-draft/escalate next steps. No recommendation routes to the legacy action broker, creates a ticket or grants execution authority; future execution still requires all original gates.
 Display text/references are bounded/redacted; inspect originals separately under the
 host-user trust boundary. No tracker refresh/write, model, review, repair, service
 probe, reconciliation, charge, report publication or journal creation occurs on read.
-An absent journal displays observe and empty supervisor history, not an error.
+An absent journal displays observe with explicit `journal.state: none`, not finished work or an error. Passive admission inspection independently reports paged exclusion owners and complete totals, including orphan holds before a journal exists. Dead/unknown owners never release holds; missing/corrupt admission is unknown, not zero. Reservation accounting distinguishes reserved resources, nullable actual usage, provider-usage-derived versus legacy-component-reported provenance, and unknown usage. Units are tokens and micro-USD derived charge, never provider invoice dollars or refunds. No known usage is `null`, not zero.
 Corrupt/foreign state refuses with a secret-safe actionable error; it is never repaired.
 
 Mode/stop record an OS-user audit in the host journal only. Observe fences new review
@@ -91,6 +266,76 @@ scoped execution-owner capabilities remain blockers, regardless of merged child
 PRs or passing component tests. Release/install approval and any future one-project
 pilot are separate decisions. Preserve all work, proof, denials, history and budgets
 on observe/stop; cancellation pending is not confirmed termination or settlement.
+
+## Operator rollout attestation
+
+This source contract is for a **future separately authorized operator maintenance window**,
+not permission to configure or activate a live installation. During that window the operator
+must independently stop/quiesce older Factory runtimes and unmanaged work sharing the run
+store, establish host-only mount/resource isolation, and inspect ownership/custody. A human
+assertion cannot bypass unknown legacy records, live claims, unsupported artifact ABI,
+changed selected dependencies, policies or controls. No automated quiescence proof is claimed.
+
+Only after those checks, a future authorized operator may manually write UTF-8 JSON at
+`Paths.config/supervisor-rollout.json` with this exact schema (placeholders are not valid IDs):
+
+```json
+{
+  "version": 1,
+  "project": {"root": "/canonical/project", "tracker": {"kind": "github", "host": "github.com", "project": "owner/repo"}},
+  "host": "<host complete-runtime SHA-256>",
+  "hostDependencies": "<host dependency-manifest SHA-256>",
+  "selected": "<selected complete-runtime SHA-256>",
+  "dependencies": "<selected dependency-manifest SHA-256>",
+  "recordedAt": "2026-11-17T00:00:00.000Z",
+  "expiresAt": "2026-11-17T01:00:00.000Z",
+  "olderRuntimesQuiesced": true,
+  "unmanagedWorkQuiesced": true
+}
+```
+
+Use actual current complete-runtime identities, not arbitrary source commit IDs. The directory
+must be canonical, current-UID-owned mode **0700**, outside project/runtime mounts; the record
+must be a current-UID-owned mode **0600** regular file with one link, at most 16 KiB. Aliases,
+links, special files, invalid UTF-8, unknown fields/versions, foreign structured tracker/project
+or either runtime/dependency identity, future recording time and expired/stale windows hold.
+Times are canonical UTC ISO strings; the entire attested window is at most 24 hours. No
+secrets, keys, budgets, enable/mode or approval fields belong in this record. No command creates,
+renews or edits it, and there are no rollout/debug/actor/capability flags.
+
+A new call needs the **full configured diagnosis timeout** remaining at registration; otherwise
+it is refused rather than silently extending expiry. Fresh reads before authorization and
+publication must match the pinned record identity. Expiry, replacement or content changes
+invalidate inflight new authorization/usable output; cleanup/accounting still remain required.
+The immutable grant and registered policy pin its identity, transitively binding receipts.
+Renewal requires repeating the operator checks; renewal alone does not change diagnosis basis,
+resend unchanged advice, replenish incident allowance, reset cumulative history or raise spending
+authority. The separate finite enabled host policy, all project/role caps, global ON and project
+opt-in remain mandatory. Status/explain do not read this record or refresh platform/provider
+state, acquire leases or write. Offline tests use disposable synthetic operator assertions only.
+
+## Advisory host policy foundation
+
+The advisory source foundation defines a private host policy at
+`Paths.config/supervisor.json` (normally `~/.config/factory/supervisor.json`),
+separate from project TOML. Its [strict schema](project-config.md#advisory-host-policy-source-foundation)
+requires explicit enabled state, the exact shipped fixed OpenAI profile, capacity
+one and finite cumulative token/micro-USD/call ceilings. There are **no defaults**,
+reset/refund command, automatic provisioning or policy upgrade. The config
+directory and policy file must be owner-only, outside all agent/project mounts;
+missing, unreadable, linked, malformed, unknown or insufficient policy holds.
+
+The explicit diagnosis command above consumes this foundation; no host-policy
+provisioning/inspection command is shipped. The separate rollout record above is read-only.
+Existing status/explain remain passive journal
+observations, not validation of current host spending permission. The source host
+loader can inspect and validate policy without writing it; a later explicitly
+approved installation/configuration step must establish the private directory and
+compatible complete runtime. Do not create policy or enable scheduling merely to
+make a diagnosis pass. Current global-off/unknown, project pause, stop and retained
+human/denial holds still win. The [one-use authorization contract](supervisor.md#advisory-grants-finite-host-policy-and-one-use-send-permission)
+records send/stop ordering and legacy uncertainty. This change performs no real
+policy installation, service/registry/project/scheduler mutation or paid probe.
 
 ## Supervisor scheduler lifecycle boundary
 
@@ -485,6 +730,7 @@ loop, scheduler change or historical record migration is included.
 A repaired branch goes through the same hand-off as an implemented one (#58, `orchestrator/handoff.mts` in the selected runtime). `main.mts` calls it after its implementer, and `main.mts --recover` (#60) after its repair agent.
 
 - **`runVerifier`** runs the independent verifier in the run's sandbox: `prompt.verify.md`, `AGENT.model`, one iteration, `TIP_SHA` set to the tip being verified. A verifier that commits, moves `HEAD` or leaves the worktree dirty is refused before anything is posted or pushed. First, `beginVerification` deletes an earlier `verdict.md` from the ticket's evidence folder and clears the record's `verdict`, `mr` and `mergedAt`, so on a reused record and evidence folder only this run's verdict counts and a stale PASS never reads as delivery (`deliveryMarker`). Other evidence is kept.
+- **Behavioral comparison after repair.** `BASE_SHA` is the original recorded implementation base for full ticket scope, frozen proof and delivery. It is also the ordinary bugfix comparison. If it does not reproduce the reported defect during recovery, the verifier may use only the admitted attempt's saved `startSha` for the before check. Factory confirms exact commit objects, base → start → tip ancestry and the repaired HEAD in the private verifier workspace; a missing or inconsistent identity stops verification. Git replacement refs block the handoff before and after verification, and Factory checks the worktree against the raw repaired tip. The verifier reads the repair reports for the symptom, not as proof or revision authority. A reported code defect still needs independent before/after evidence even when the original ticket was a feature. The verifier records the exact before and after SHAs, explains its choice, runs the same assertion at both and restores the clean repaired tip. Missing files or unrelated failures are not reproduction; neither candidate reproducing the defect means non-PASS. The saved comparison does not narrow ticket scope, change any verification or delivery gate, or rewrite earlier verdicts.
 - **`postAndDeliver`** posts the verdict and before/after media to the ticket, then only on PASS pushes the branch, lists conflicts with other live branches and calls the tracker's normal `deliver` with the same CI limits (`CONFIG.ciWaitMinutes`, `noPipelineMinutes`) and merge policy (`MERGE.auto`). It leaves the record `done` with verdict and PR, or returns the reason it stopped (no verdict, not PASS, push or delivery failed), which the caller records as `stopped`. A repaired branch (`origin: {kind: "repaired", attempt}`) says `Repaired by Factory recovery attempt N, then verified independently.` in the evidence comment and the PR; otherwise the text is unchanged.
 - Host calls (board, tracker, git) are passed in, so the module imports no config, tracker or board file and is tested with fakes (`orchestrator/handoff.test.mts`). A custom project workflow owns the complete selected inventory.
 - **Prerequisite recheck** (#75, `prerequisiteHold`). A recovery run calls it before verification and again before delivery with the dispatcher's analysis of the ticket (its manifest under `<state>/graph/`): every analysed requirement and implementer-reported blocker that names another ticket must be closed or merged into its base, so a prerequisite with a run in flight or an open PR holds the ticket (the attempt ends `unresolved`, nothing delivered). A missing or out-of-date analysis, or a tracker lookup that fails, is unknown and holds too. Normal runs do not call it.
@@ -534,12 +780,76 @@ analysis/verification; generated Factory comments do not invalidate their own pr
 Current source checks before verification/delivery never rewrite a running prompt
 or an old proof. Existing claim, eligibility, base/tip, budget and cleanup gates remain.
 
+# Recovery triage
+
+Triage is off by default. Set `[recovery]` with `triage = true` in
+[`.factory/factory.toml`](project-config.md#optional-recovery-triage) to enable it.
+On a successful scheduled pass with a confirmed jam, Factory runs the selected
+workflow's triage helper after local candidate screening, just before recovery
+preparation would start. Disabled or omitted settings and a selected workflow
+without a triage entrypoint skip this step. Complete workflow validation and
+review still apply; Factory never borrows a helper from a different workflow.
+
+The helper submits one bounded evidence bundle on stdin to the fixed Mid analysis
+model with tools disabled. It reads the saved execution, frozen ticket context,
+local Git data, logs and text evidence; it never fetches or changes the checkout,
+saved work or evidence. Factory keeps one private result per ticket under
+`<state>/recovery/triage/`. The stop key binds the execution and stop details, saved
+branch tip, frozen ticket input, triage prompt and model. An unchanged stop reuses
+advice or a cached failure. There is at most one new model call per unchanged stop
+and at most one per project per scheduled pass. Changed input during the call
+invalidates the reply. Unreadable or corrupt saved results are preserved.
+
+Triage diagnoses the stop and advises whether a change to saved code can plausibly
+fix it. The bundle identifies worktree status and uncommitted diffs, prior recovery
+evidence and recovery logs as supplemental diagnostics. Missing or unreadable
+supplemental artifacts alone do not warrant human review, and do not imply a
+clean worktree, available budget or valid custody. Missing evidence needed for
+diagnosis, contradictory evidence that prevents a sound diagnosis, or a genuine
+human prerequisite still warrants escalation. The host alone decides eligibility
+and rechecks it after triage; advice never bypasses preparation, admission or
+independent verification.
+
+| Result | What Factory does |
+| --- | --- |
+| `repair` | Recommends a source repair; the host continues to ordinary preparation and admission only if its checks allow it. |
+| `human` | Prepares nothing and spends no attempt for this ticket. A fresh result ends the scan; a saved result lets the next stopped candidate in the jam be considered. |
+| `released` | A human removed the label after delivery. Continues to ordinary preparation and admission. |
+| `unavailable` | Logs the failure and continues to ordinary preparation if the project, jam and run are still eligible. |
+
+Every non-repair recommendation adds the configured needs-human label and posts
+one managed comment on the ticket for that stop. The comment explains the cause
+and what needs a decision. A suggested gate change is not applied. Incomplete
+delivery stays pending and can retry without another model call on a later
+eligible pass. By default the needs-human label excludes the ticket from later
+jam reports, so a pending comment may not retry while that label keeps the ticket
+out of selection. After delivery, remove the label to let Factory try a repair
+under the usual eligibility and jam-confirmation rules. Edit the ticket or add a
+human comment to provide new input for triage; remove the label as well if it
+excludes the ticket. The managed comment and label alone do not renew budgets.
+
+The host uses saved scheduler Node/PATH, shared state and a dedicated process
+group. The helper has a 16 KiB stdout limit and a deadline of the configured
+analysis timeout plus 60 seconds. Malformed output, failure, timeout or
+cancellation is unavailable; stopped scheduling still prevents preparation.
+Factory confirms group cleanup before accepting output. If cleanup cannot be
+confirmed, recovery holds the project and launches nothing, even on later passes
+with triage off. Confirm the recorded process group is gone and reconcile the
+retained managed entry before clearing `<state>/recovery/triage-<root-hash>.json`.
+
+`factory recovery status` (including `--json`) shows the latest observation per
+ticket. Factory also appends it to `.factory/logs/recover-<ticket>.log` and shows
+an applicable human hold as `operator-required` with a next action on the
+comment. Triage never charges, renews or resets a budget and never authorizes
+admission, proof reuse, gate changes or delivery.
+
 # Recovery execution-analysis preparation
 
 A current Board assessment does not authorize recovery. After a confirmed jam,
-read-only local candidate screening can skip proven ticket refusals. Once one target
-passes that screening, the host runs the selected `recovery-analysis.mts` through
-`cli/src/recovery-prepare.mts` and rechecks scheduling authorization. Nothing scans
+read-only local candidate screening can skip proven ticket refusals. Once a target
+passes screening and any [opt-in triage](#recovery-triage) lets it proceed, the host
+runs the selected `recovery-analysis.mts` through `cli/src/recovery-prepare.mts`
+and rechecks scheduling authorization. Nothing scans
 past that target after analysis starts. Preparation is not a repair attempt and
 never renews or charges a budget.
 
@@ -610,7 +920,7 @@ After normal dispatch, the scheduler decides whether a project is jammed (#61): 
 - **The rule** (`findJam`). No jam while any of the project's runs is in flight, the pass launched work, a candidate still waits for analysis, or the shared cap has no free slot: normal work and shared capacity come first. Otherwise the jam is every ready, not excluded ticket whose run record is `stopped` (and whose PR is not open), plus every candidate held only by prerequisites that are themselves in the jam, to any depth (`decide` now names a held ticket's open prerequisites, `waitingOn`). A hold on a prerequisite outside the jam (outside the agent queue, with an open PR, or progressing) is respected and not counted. Explicit exclusion labels, excluded assignees and tickets waiting for a model label are never demand.
 - **The report.** The tick gives every scheduled pass a pass id and its own file, `<state>/scheduler/jam/<pass id>.json` (`FACTORY_PASS_ID`, `FACTORY_JAM_REPORT`). A dispatcher pass that is not a dry run writes there, after the board update and before launching, `{version:1, pass, project, at, tickets, reasons | none, observed}`: the jammed tickets with why, or why there is none, and for each jammed or still-ready ticket with a stopped or done run its `unitHash` and labels minus `ready`, `needs-human` and the done stage. Manual passes are not asked for one. The tick removes the file after the pass, and removes any a dead tick left behind.
 - **Counting** (`afterPass`). Only a pass that exited 0 and was not cancelled is handed on, after its result and timing are recorded. First `settleRecovery`: while the project's attempt runs, or its container is unconfirmed, the pass is not counted (the attempt holds the project). Then each reported ticket is observed (`observeTicket` with `deliveryMarker` of its run record, so a person's change or verified delivery renews a spent budget), and the pass is counted with `observePass` at the project's admission generation. The same jam on two consecutive completed passes, with no normal admission between them, is confirmed; a pass with no jam ends the episode. A missing report (a dispatcher copy older than #61) is not counted, quietly; one for another pass or project, or a malformed one, is logged and not counted.
-- **Launching.** For a confirmed jam, scan its initially stopped candidates once in ascending numeric ticket order. Skip a ticket only when its own attempt budget is exhausted under the current rules. A dependency-held ticket has no work of its own; its stopped prerequisite is repaired. If the selected workflow is invalid or a project override lacks a current review (`recoveryCopyProblem`, #63), the jam is only recorded and logged. Before every candidate, recheck scheduling/cancellation, reread the run, recovery episode, activity generation and review. Read-only `inspectRecoveryCandidate` continues only after `ticket-refused`, logging the ticket, stable code and reason. The first locally viable target gets execution-analysis preparation, then scheduling authorization is rechecked before launch. A preparation hold or any later outcome ends the scan without trying another target. Stop on `project-stopped`, `admitted-failed`, the first `started` result or any exception. `launchRecovery` rechecks admission under the shared lock, so at most one candidate can be admitted per pass. All-local-refusal passes spend no budget. There is no refusal cache; a later eligible pass rechecks local facts. No labels, requirements, saved work, evidence or receipts are deleted to advance the scan. After it settles, the next pass with the same unchanged jam can start the ticket's second attempt; then the budget stops it until verified progress, a requirement change or a reset.
+- **Launching.** For a confirmed jam, scan its initially stopped candidates once in ascending numeric ticket order. Skip a ticket only when its own attempt budget is exhausted under the current rules. A dependency-held ticket has no work of its own; its stopped prerequisite is repaired. If the selected workflow is invalid or a project override lacks a current review (`recoveryCopyProblem`, #63), the jam is only recorded and logged. Before every candidate, recheck scheduling/cancellation, reread the run, recovery episode, activity generation and review. Read-only `inspectRecoveryCandidate` continues only after `ticket-refused`, logging the ticket, stable code and reason. A locally viable target gets [opt-in triage](#recovery-triage) before execution-analysis preparation. A saved human hold permits scanning the next target; a fresh one ends the scan. Scheduling authorization and the confirmed stop are rechecked after triage, and scheduling authorization is checked again before launch. A preparation hold or any later outcome ends the scan without trying another target. Stop on `project-stopped`, `admitted-failed`, the first `started` result or any exception. `launchRecovery` rechecks admission under the shared lock, so at most one candidate can be admitted per pass. All-local-refusal passes spend no budget. There is no refusal cache; a later eligible pass rechecks local facts. No labels, requirements, saved work, evidence or receipts are deleted to advance the scan. After it settles, the next pass with the same unchanged jam can start the ticket's second attempt; then the budget stops it until verified progress, a requirement change or a reset.
 - Logged to the tick's output as `recovery <project>: …`. What it recorded is shown by `factory recovery status`, summarized in `factory status`, and the repair logs by `factory logs --recovery`; see "Slice four: recovery status and reset". Errors here are logged and never fail the pass or the tick.
 - Tests: `orchestrator/graph.test.mts` (the rule), `orchestrator/jam-report.test.mts` (the real scaffolded dispatcher writing a report against a stubbed `gh`), `cli/test/jam-detect.test.mts` (confirmation, inactive copies, stopped scheduling, running attempts, generations, budgets) and `cli/test/scheduler.test.mts` (one report per pass, removed afterwards; failed and cancelled passes not counted).
 
@@ -630,7 +940,7 @@ Status reprojects current local facts rather than treating the snapshot as truth
 
 Operator view and explicit reset (#62, `cli/src/commands/recovery.mts`).
 
-- **`factory recovery status [--project <name|path>] [--json]`.** Read-only. Whether recovery is active in the project (`recoveryCopyProblem`: the reviewed workflow, #63), the current jam (its tickets, how many of the two passes have seen it, or when it was confirmed), the last preparation code/scope/reason, the running attempt and any recovery claim in the admission record, each ticket's budget (attempts left of two, and the last renewal: `progress`, `requirement-change` or `reset`), the last ten attempts newest first (outcome, start and finish, branch, reason, repair log and retained `recovery-report.md`, each marked `(missing)` if the file is gone), renewals and ended jams. `--json` prints `{version:1, project, recovery}`. A malformed recovery record (never overwritten) is shown as a problem and exits 1.
+- **`factory recovery status [--project <name|path>] [--json]`.** Read-only. Whether recovery is active in the project (`recoveryCopyProblem`: the reviewed workflow, #63), the current jam (its tickets, how many of the two passes have seen it, or when it was confirmed), the last preparation code/scope/reason, the latest triage observation per ticket, the running attempt and any recovery claim in the admission record, each ticket's budget (attempts left of two, and the last renewal: `progress`, `requirement-change` or `reset`), the last ten attempts newest first (outcome, start and finish, branch, reason, repair log and retained `recovery-report.md`, each marked `(missing)` if the file is gone), renewals and ended jams. `--json` prints `{version:1, project, recovery}`. A malformed recovery record (never overwritten) is shown as a problem and exits 1.
 - **`factory recovery reset [--project <name|path>]`.** Under the admission lock, so it cannot interleave with a launch, it refuses (exit 1, nothing changed) while recovery is active: a running attempt or one whose container is not yet confirmed gone (the next globally enabled tick settles it locally, even while the project is paused), a recovery claim, or an admitted attempt whose charge is still pending. Otherwise `resetRecovery`: the jam episode ends (`reset`), so confirmation starts over on later completed passes, and every ticket's budget is renewed. It launches nothing; the normal scheduled passes re-evaluate the project. Ticket branches, worktrees, run records, logs, reports and evidence are untouched, and recovery history is kept. It is separate from `factory retry`, which clears one stopped run.
 - Follow-up state, reason and next action appear in both status formats as described in [Persistent deferred recovery follow-through](#persistent-deferred-recovery-follow-through).
 - **`factory status`** adds a `Recovery:` line after the project's schedule (active or inactive, and the jam), the running attempt, the last finished attempt and its outcome, and tickets with spent budget; `--json` adds `recovery` (the same summary as `recovery status --json`).
@@ -681,12 +991,12 @@ The cap from each project's `dispatch.max_concurrent` configuration is counted f
 - **Reservation.** As it spawns each run, `dispatch.mts` calls `reserveRun()` (`board/board.mts`): the record gets stage `setup`, note `starting`, `starting: true` and the child's pid. It counts against the cap and holds the ticket and its files like any run in flight.
 - **Hand-over.** `main.mts`'s first write clears `starting` and takes over the record with its own pid; from then on a dead process means a stopped run, as before. Since #75 it first adopts the launch claim the record carries (`adoptClaim`), refusing to start if that claim was superseded.
 - **Unstarted launch.** If the reserved pid exits while `starting` is still set (the run failed before it began), `readRuns()` deletes the record and `factory status` skips it, so the next pass retries the ticket as it did before reservations.
-- **Admission record** (#75, `board/admission.mts`, shipped with `board.mts` in the complete selected runtime). `<state>/admission/state.json` (folder 0700, file 0600, version 1; temp file, fsync, rename, folder fsync) holds every claim by run key (`{token, project, iid, kind: normal|recovery, owner: {pid, start}, at, attempt?}`), each project's activity `generations`, and per project the recovery attempts `admitted` and any `pending` charge. All changes run under one short lock across all projects, `<state>/admission/lock`, created complete (temp file hard-linked into place) with its holder's pid and start identity; it is taken over only when that exact process is gone (pid exited, including one left as an unreaped zombie since #64, or reused by a process started at another time), never by age or a live pid alone, and an unreadable lock is never taken over. A corrupt or unknown-version record fails closed: nothing is admitted, and it is never overwritten. Reading it (`readAdmission`, status, `factory retry`) never writes.
+- **Admission record** (#75, `board/admission.mts`, shipped with `board.mts` in the complete selected runtime). `<state>/admission/state.json` (folder 0700, file 0600, version 2; validated v1 migrates on commit only; temp file, fsync, rename, folder fsync) holds every claim by run key (`{token, project, iid, kind: normal|recovery, owner: {pid, start}, at, attempt?}`), each project's activity `generations`, and per project the recovery attempts `admitted` and any `pending` charge. All changes run under one short lock across all projects, `<state>/admission/lock`, created complete (temp file hard-linked into place) with its holder's pid and start identity; it is taken over only when that exact process is gone (pid exited, including one left as an unreaped zombie since #64, or reused by a process started at another time), never by age or a live pid alone, and an unreadable lock is never taken over. A corrupt or unknown-version record fails closed: nothing is admitted, and it is never overwritten. Reading it (`readAdmission`, status, `factory retry`) never writes.
 - **Atomic claim** (#57, through the admission record since #75). Before spawning, `dispatch.mts` claims each launch with `claimRun()` (`board/board.mts`). Under the admission lock it counts live claims and in-flight run records across every project, refuses when the cap is already reached, the ticket already has a claim or a run in flight, or a recovery claim holds the project, then commits a `normal` claim (owned by the pass's pid; the project's generation goes up by one) and only then writes the reservation, carrying the token as `claim`. `reserveRun` hands the claim to the spawned child, `main.mts` adopts it, and a launch that fails to spawn releases it (`removeRun`). A normal claim ends when its run reaches a terminal or parked stage, or when its owner is gone. A refused claim launches nothing: no capacity ends the pass's launches, an owned ticket is skipped. Custom workflow behavior remains the project owner's responsibility.
 - **Token fencing** (#75). A process that holds a claim (`adoptClaim`, `holdClaim`) writes its record only while the record still carries its token, so a stale heartbeat or exit handler never overwrites a newer claim's record, and it releases only its own token.
 - **Activity generation** (#75). Every normal admission advances its project's generation (`generationOf`). The jam confirmation (#61) passes it to `observePass`, so a normal launch between two passes breaks a pending confirmation, and `claimRecovery` refuses a jam confirmed at an older generation.
 - **Recovery claim** (#57, admission record since #75, `cli/src/recovery-claim.mts`). `claimRecovery` takes, under the same lock, a slot under the cap (default 3), the affected ticket and its whole project (refused while any other run of the project is in flight): first it replays any pending charge of the project, then after the shared checks and `attemptProblem` it commits the `recovery` claim (with the attempt UUID) and the charge (`admitted` + 1, a `pending` entry) in one replacement, then applies the charge with `beginAttempt` (idempotent by UUID) and clears `pending`, then writes the ticket's record. A crash between the replacement and `beginAttempt` is replayed by the next claim or settle without charging twice or refunding. A refusal changes neither the board, the admission record nor the recovery record. The record becomes a reservation with `recovery: {attempt, id, from: {stage, note, stageSince}}`, keeping its branch and evidence, and without `starting`. A recovery claim holds the ticket, a capacity slot and the whole project whatever its record's stage or process, and is released only by `settleRecovery` after the attempt's exact container is confirmed gone. Only the tick's jam confirmation (#61) launches a repair.
-- Manual starts through `factory run` take no reservation and are not held to the cap; they still count once running.
+- Manual starts through `factory run` acquire managed preflight ownership and normal admission; they honor supervisor exclusion and shared capacity rather than bypassing it. See [shared admission compatibility](#shared-admission-compatibility-and-supervisor-exclusion).
 
 Tests: `board/board.test.mts` ("a launched run counts as active before its child writes", "claims are atomic") and `cli/test/recovery-claim.test.mts` (claim plus charge with a crash in between, cross-process races, token fencing, the activity generation, lock takeover and fail-closed records).
 

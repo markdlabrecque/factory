@@ -46,6 +46,8 @@ function guarded<T>(fn: () => T, unreadable?: string): T {
       const original = (object as any)[name];
       patch(object, name, (path: unknown, flags: any, ...args: unknown[]) => {
         if (secret(path) || (typeof flags === 'string' ? /[wa+]/.test(flags) : typeof flags === 'number' && !!(flags & (fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_APPEND)))) return trap();
+        // Descriptor-based bounded readers must receive the same permission fault as whole-file readers.
+        if (name === 'openSync' && path === unreadable) { denied++; throw Object.assign(new Error('SECRET_ERROR unreadable'), { code: 'EACCES' }); }
         return original.call(object, path, flags, ...args);
       });
     }

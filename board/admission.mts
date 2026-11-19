@@ -1,14 +1,16 @@
+// Shared v2 exclusion covers managed launch entries and durable supervisor holds; neither is send authorization.
 // Persisted writers may defer observational callbacks until every admission critical section has exited.
 // Admission reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent.
+// Directory creation/replacement is strictly synced; unsupported or failed durability never returns successful publication.
 // Optional advisory candidate identities are consumed with the SAME recovery claim/charge, never a second scheduler.
 // #153: short-lived delivery ownership uses normal PID/start fencing and advances project activity without repair charges.
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 // The admission record (slice four, #75): the one durable source of run claims, shared by every project in a run-state
-// folder. `<stateDir>/admission/state.json` (folder 0700, file 0600, version 1) holds:
+// folder. `<stateDir>/admission/state.json` (folder 0700, file 0600, version 2; validated v1 migrates on the next commit) holds:
 // - `claims`, by run key (`<project>--<iid>`): a token, the project and ticket, the kind (`normal` for a dispatched
 //   launch, `recovery` for a repair attempt), the owning process (pid plus its start identity, so a reused pid is not
 //   mistaken for the owner) and, for recovery, the attempt's UUID. A normal claim lives while its owner does. A recovery
@@ -52,8 +54,18 @@ export interface AdmittedAttempt {
   container?: string;
   record?: string;
 }
+export interface AdmissionIdentity { root: string; tracker: { kind: 'github' | 'gitlab'; host: string; project: string } }
+export interface ManagedEntry { id: string; project: AdmissionIdentity; owner: Owner }
+export interface SupervisorHold extends ManagedEntry {
+  invocationId: string;
+  fence: string;
+  pending: string[];
+  settled: string[];
+}
 export interface AdmissionState {
-  version: 1;
+  version: 2;
+  supervisorHolds: Record<string, SupervisorHold>;
+  entries: Record<string, ManagedEntry>;
   claims: Record<string, AdmissionClaim>;
   generations: Record<string, number>;
   recovery: Record<string, { admitted: number; pending: AdmittedAttempt[]; candidates?: Record<string, string> }>;
@@ -62,7 +74,7 @@ export interface AdmissionState {
 export const keyFor = (iid: string, proj?: string) => (proj ? `${proj.replace(/[^A-Za-z0-9._-]+/g, "_")}--${iid}` : iid);
 export const admissionDir = (stateDir: string) => join(stateDir, "admission");
 export const admissionFile = (stateDir: string) => join(admissionDir(stateDir), "state.json");
-export const emptyAdmission = (): AdmissionState => ({ version: 1, claims: {}, generations: {}, recovery: {} });
+export const emptyAdmission = (): AdmissionState => ({ version: 2, supervisorHolds: {}, entries: {}, claims: {}, generations: {}, recovery: {} });
 export const newToken = () => randomUUID();
 
 // ---- process identity ------------------------------------------------------------------------------------------------
@@ -129,7 +141,16 @@ export function readAdmission(stateDir: string): AdmissionState {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return emptyAdmission();
     throw new Error(`Admission record is not valid JSON: ${file}. Nothing is admitted until it is fixed; Factory will not overwrite it.`);
   }
-  const ok = isObj(d) && d.version === 1
+  return migrateAdmission(d, file);
+}
+/** Pure compatible decode: v1's accounting collections are preserved; exclusion fields cannot hide in v1. */
+export function migrateAdmission(d: any, file = 'admission/state.json'): AdmissionState {
+  const ok = isObj(d) && (d.version === 1 || d.version === 2)
+    && Object.keys(d).sort().join() === (d.version === 1 ? ['version','claims','generations','recovery'] : ['version','claims','generations','recovery','entries','supervisorHolds']).sort().join()
+    && (d.version === 1 ? !('supervisorHolds' in d) && !('entries' in d) :
+      isObj(d.supervisorHolds) && Object.entries<any>(d.supervisorHolds).every(([id, h]) => validEntry(h) && id === h.id
+        && str(h.invocationId) && str(h.fence) && Array.isArray(h.pending) && h.pending.every(str) && Array.isArray(h.settled) && h.settled.every(str))
+      && isObj(d.entries) && Object.entries<any>(d.entries).every(([id, e]) => validEntry(e) && id === e.id))
     && isObj(d.claims) && Object.entries<any>(d.claims).every(([k, c]) => isObj(c) && str(c.token) && typeof c.project === "string" && str(c.iid)
       && k === keyFor(c.iid, c.project) && (c.kind === "normal" || c.kind === "recovery" || c.kind === "delivery") && validOwner(c.owner) && str(c.at)
       && optStr(c.attempt) && (c.kind !== "recovery" || str(c.attempt)))
@@ -139,12 +160,64 @@ export function readAdmission(stateDir: string): AdmissionState {
       && Array.isArray(r.pending) && r.pending.every((a: any) => isObj(a) && str(a.id) && str(a.iid) && str(a.root) && str(a.at)
         && optStr(a.branch) && optStr(a.log) && optStr(a.container) && optStr(a.record)));
   if (!ok) throw new Error(`Unsupported admission record: ${file}. Nothing is admitted until it is fixed; Factory will not overwrite it.`);
-  return d;
+  // Explicit compatible migration: preserve the original collections (including candidate and pending charges).
+  // Read-only callers do not publish a migration. Old readers reject the version on the next v2 commit.
+  return d.version === 1 ? { ...d, version: 2, supervisorHolds: {}, entries: {} } : d;
 }
 
-/** Write `text` to `file` atomically and durably: temp file (mode 0600), fsync, rename, fsync of the folder. */
+export function validAdmissionIdentity(p: any): p is AdmissionIdentity {
+  return isObj(p) && str(p.root) && resolve(p.root) === p.root && isObj(p.tracker)
+    && ['github', 'gitlab'].includes(p.tracker.kind) && str(p.tracker.host) && str(p.tracker.project);
+}
+const validEntry = (e: any): boolean => isObj(e) && str(e.id) && validAdmissionIdentity(e.project)
+  && validOwner(e.owner) && str(e.owner.start);
+/** Namespace collisions are conflicts even across tracker hosts or distinct checkout roots: board keys omit host/kind. */
+export function admissionConflict(a: AdmissionIdentity, b: AdmissionIdentity): boolean {
+  return a.root === b.root || keyFor('namespace', a.tracker.project) === keyFor('namespace', b.tracker.project);
+}
+/** Unknown identity never establishes that an existing hold belongs to somebody else. */
+export function supervisorExclusion(s: AdmissionState, tracker?: string, root?: string): string | undefined {
+  const hold = Object.values(s.supervisorHolds).find(h => !tracker || !root || h.project.root === root
+    || keyFor('namespace', h.project.tracker.project) === keyFor('namespace', tracker));
+  return hold ? `project held by supervisor ${hold.id} (${hold.invocationId}/${hold.fence})` : undefined;
+}
+/** Short synchronous admission transaction only; callers own subprocess lifetime outside this lock.
+ * Entries survive owner death: an exited controller does not prove its descendants or handoff settled. */
+export function claimManagedEntry(dir: string, project: AdmissionIdentity): string {
+  if (!validAdmissionIdentity(project)) throw Error('Managed entry identity unknown');
+  project = { root: realpathSync(project.root), tracker: { ...project.tracker, host: project.tracker.host.toLowerCase() } };
+  return withAdmission(dir, tx => {
+    const reason = supervisorExclusion(tx.state, project.tracker.project, project.root);
+    if (reason) throw Error(reason);
+    const owner = ownerOf(process.pid);
+    if (!owner.start) throw Error('Managed entry owner unknown');
+    const id = newToken(); tx.state.entries[id] = { id, project: structuredClone(project), owner }; tx.commit(); return id;
+  });
+}
+export function releaseManagedEntry(dir: string, id: string): boolean {
+  return withAdmission(dir, tx => {
+    const e = tx.state.entries[id], me = ownerOf(process.pid);
+    if (!e || e.owner.pid !== me.pid || !me.start || e.owner.start !== me.start) return false;
+    delete tx.state.entries[id]; tx.commit(); return true;
+  });
+}
+
+/** A successful return establishes directory durability; unsupported filesystems fail closed, not best effort. */
+export function syncDirectory(directory: string): void {
+  const fd = openSync(directory, 'r');
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+/** Sync the containing chain too: existing visible directories may be left by an earlier failed publication. */
+export function durableDirectory(directory: string): void {
+  let current = resolve(directory); mkdirSync(current, { recursive: true, mode: 0o700 });
+  for (;;) { syncDirectory(current); const parent = dirname(current); if (current === parent) break; current = parent; }
+}
+/** Write `text` atomically and durably: synced directory creation, 0600 temp, fsync, rename, strict folder fsync. */
 export function writeDurable(file: string, text: string): void {
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  durableDirectory(dirname(file)); writePrepared(file, text);
+}
+/** Internal only: the containing directory chain was synced by this same synchronous lock scope. */
+function writePrepared(file: string, text: string): void {
   const tmp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   const fd = openSync(tmp, "wx", 0o600);
   try {
@@ -162,12 +235,7 @@ export function writeDurable(file: string, text: string): void {
     rmSync(tmp, { force: true });
     throw e;
   }
-  try {
-    const dfd = openSync(dirname(file), "r");
-    try { fsyncSync(dfd); } finally { closeSync(dfd); }
-  } catch {
-    /* some platforms cannot fsync a folder; the rename is still atomic */
-  }
+  syncDirectory(dirname(file));
 }
 
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -189,13 +257,14 @@ function flushObservations(): void {
   const pending = observations; observations = [];
   for (const fn of pending) { try { fn(); } catch { observationFailure(); } }
 }
-export function withAdmissionLock<T>(stateDir: string, fn: () => T, waitMs = 10_000): T {
+export type DurableWriter = (file: string, text: string) => void;
+export function withAdmissionLock<T>(stateDir: string, fn: (write: DurableWriter) => T, waitMs = 10_000): T {
   const dir = admissionDir(stateDir);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  durableDirectory(dir);
   const lock = join(dir, "lock");
   const me = ownerOf(process.pid);
   const tmp = join(dir, `lock.${process.pid}.${randomUUID().slice(0, 8)}`);
-  writeDurable(tmp, JSON.stringify(me));
+  writePrepared(tmp, JSON.stringify(me));
   const deadline = Date.now() + waitMs;
   try {
     for (;;) {
@@ -239,9 +308,22 @@ export function withAdmissionLock<T>(stateDir: string, fn: () => T, waitMs = 10_
     rmSync(tmp, { force: true });
   }
   admissionDepth++;
+  let active = true;
   try {
-    return fn();
+    const stamp = (path: string) => { const st = statSync(path, { bigint: true });
+      if (!st.isDirectory()) throw Error('Durable writer directory identity is unknown'); return `${st.dev}:${st.ino}:${st.ctimeNs}`; };
+    const directories = new Map([resolve(stateDir), resolve(dir)].map(path => [path, stamp(path)]));
+    const write: DurableWriter = (file, text) => {
+      const destination = resolve(file), parent = dirname(destination);
+      if (!active || !directories.has(parent) || directories.get(parent) !== stamp(parent)) throw Error('Durable writer is outside its active owned lock scope');
+      // No repeated ancestor fsync is needed: this lock already synced that exact containing chain.
+      // Every write still fsyncs its new file and the containing directory after atomic replacement.
+      try { writePrepared(destination, text); directories.set(parent, stamp(parent)); }
+      catch (e) { active = false; throw e; }
+    };
+    return fn(write);
   } finally {
+    active = false;
     try { rmSync(lock, { force: true }); }
     finally { admissionDepth--; flushObservations(); }
   }
@@ -261,6 +343,8 @@ export function withAdmission<T>(stateDir: string, fn: (tx: AdmissionTx) => T): 
     const tx: AdmissionTx = {
       state,
       commit() {
+        if (state.version !== 2) throw Error('Admission downgrade is unsupported');
+        migrateAdmission(state); // Writers validate the complete mandatory exclusion schema too.
         for (const [k, c] of Object.entries(state.claims)) if (!claimLive(c)) delete state.claims[k];
         writeDurable(admissionFile(stateDir), JSON.stringify(state, null, 2) + "\n");
       },
@@ -274,6 +358,7 @@ export function transferClaim(stateDir: string, key: string, token: string, pid:
   return withAdmission(stateDir, (tx) => {
     const c = tx.state.claims[key];
     if (!c || c.token !== token || (from !== undefined && c.owner.pid !== from)) return false;
+    if (supervisorExclusion(tx.state, c.project, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()))) return false;
     c.owner = ownerOf(pid);
     tx.commit();
     return true;

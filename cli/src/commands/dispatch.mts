@@ -1,4 +1,5 @@
-// Shared host readiness precedes standard or opaque override execution; cap overrides remain validated before preflight.
+// A durable managed entry excludes supervisor holds across readiness, standard/override dispatch and foreground exit.
+// Shared host readiness precedes execution; cap overrides remain validated before preflight.
 // `factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]`: one dispatcher pass for one
 // project. Resolves one complete workflow and runs its dispatch.sh from the checkout root, preserving
 // preflight, argv, exit codes and project logs without project dependency installs. SANDCASTLE_STATE_DIR is set to
@@ -9,6 +10,7 @@
 // nested children and nothing else) and learn the pid at spawn; manual callers pass none and keep the inherited
 // environment, stdin and process group.
 import { spawn } from 'node:child_process';
+import { claimManagedEntry, releaseManagedEntry } from '../../../board/admission.mts';
 import { projectLaunchReadiness, readinessReason } from '../../../orchestrator/launch-readiness.mts';
 import { projectWorkflow } from '../workflow.mts';
 import type { Paths } from '../paths.mts';
@@ -48,18 +50,29 @@ export type SpawnOptions = { env?: NodeJS.ProcessEnv; group?: boolean; onSpawn?:
 export async function runDispatchSh(p: Paths, ctx: ProjectContext, args: string[], o: SpawnOptions = {}): Promise<number> {
   if (o.signal?.aborted) return 1;
   const workflow = projectWorkflow(p, ctx.root, o.env);
+  const dir = o.env?.SANDCASTLE_STATE_DIR ?? runStateDir(p), tracker = workflow.config.TRACKER;
+  let entry: string;
+  try { entry = claimManagedEntry(dir, { root: ctx.root, tracker: { kind: tracker.kind, host: tracker.gitlabHost ?? tracker.host!, project: tracker.project } }); }
+  catch (error) { console.error(`factory: admission held: ${(error as Error).message}`); return 1; }
+  let spawned = false, exited = false;
+  try {
   const reason = readinessReason(await projectLaunchReadiness({ projectRoot: ctx.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id, runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: o.env?.SANDCASTLE_STATE_DIR ?? runStateDir(p), signal: o.signal }));
   if (o.signal?.aborted) return 1;
   if (o.mayLaunch && !(await o.mayLaunch())) { console.error('factory: scheduled launch held after readiness; scheduling eligibility changed'); return 1; }
   if (o.signal?.aborted) return 1;
   if (reason) { console.error(`factory: project held: ${reason}`); return 1; }
   const child = spawn(workflow.entrypoints.dispatch, args, { cwd: ctx.root, stdio: 'inherit', detached: o.group, env: { ...(o.env ?? process.env), ...workflow.env, SANDCASTLE_STATE_DIR: o.env?.SANDCASTLE_STATE_DIR ?? runStateDir(p) } });
+  spawned = child.pid !== undefined;
   if (child.pid !== undefined && o.onSpawn) {
     try { o.onSpawn(child.pid); }
     catch (e) { try { process.kill(o.group ? -child.pid : child.pid, 'SIGKILL'); } catch { /* already gone */ } throw e; }
   }
-  return new Promise((done, fail) => {
+  return await new Promise((done, fail) => {
     child.on('error', fail);
-    child.on('exit', (code, signal) => done(code ?? (signal ? 128 : 1)));
+    child.on('exit', (code, signal) => { exited = true; done(code ?? (signal ? 128 : 1)); });
   });
+  } finally {
+    // An uncertain spawn/handoff retains ownership; owner death is not cleanup evidence.
+    if (!spawned || exited) releaseManagedEntry(dir, entry);
+  }
 }

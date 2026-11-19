@@ -17,7 +17,7 @@ node --test board/board-prototype.test.mjs
 
 It is not included in the three `.mts` globs above or the CI shard inventory. Run it when checking the prototype or its documented presentation contracts. Historical test counts in design and research reports describe those revisions, not the current suite.
 
-CI runs on pull requests targeting `main` or `develop`, with the same required jobs and deadlines for both integration targets. It runs four parallel jobs through `scripts/test-shard.sh`. Normal-entrypoint integration scenarios are partitioned by input, proof, sandbox and model routing across `orchestrator/verification-entrypoint*.test.mts`. They retain the same shared fixture and assertions; separate files distribute their process cost rather than leaving all scenarios serial in one shard. The runner expands exactly the three globs above, sorts paths with `LC_ALL=C`, and assigns zero-based file position modulo four to shards 1 through 4. New matching files enter the inventory automatically. Each shard retains `--test-concurrency=4`, the hard 180-second deadline and `--test-timeout=120000`. No test-name filters or exclusions apply.
+CI runs on pull requests targeting `main` or `develop`, with the same required jobs and deadlines for both integration targets. The copied refresh scenarios are partitioned by delivery, models, original input, Board, selection and ownership across `orchestrator/refresh*.test.mts`, sharing `refresh-fixture.mts`. All 45 existing registrations and their test bodies are retained; splitting the formerly serial file distributes process cost without reducing coverage or raising time limits. It runs four parallel jobs through `scripts/test-shard.sh`. Normal-entrypoint integration scenarios are partitioned by input, proof, sandbox and model routing across `orchestrator/verification-entrypoint*.test.mts`. They retain the same shared fixture and assertions; separate files distribute their process cost rather than leaving all scenarios serial in one shard. The runner expands exactly the three globs above, sorts paths with `LC_ALL=C`, and assigns zero-based file position modulo four to shards 1 through 4. New matching files enter the inventory automatically. Each shard retains `--test-concurrency=4`, the hard 180-second deadline and `--test-timeout=120000`. No test-name filters or exclusions apply.
 
 Reproduce CI from the repository root with Node 24 and GNU `timeout`:
 
@@ -35,6 +35,144 @@ The independent browser lifecycle job below remains mandatory. Its file also rem
 Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
+
+## Standard implementation continuation
+
+`orchestrator/implementation-outcome.test.mts` covers bounded execution/turn reports and fail-closed eligibility. `orchestrator/payload-custody.test.mts` verifies durable one-time reservation without treating it as cleanup. `orchestrator/verification-entrypoint-continuation.test.mts` exercises the flat normal runner with stubbed SDK, tracker and container boundaries and disposable real Git. It checks that a resumed commit keeps the original baseline and requires the independent verifier; second incompletion, a stalled or failed resume, false success, wrong checkout, an unexplained Git delta and superseded execution do not push. A stalled SDK resume or post-resume Git probe retains unsealed custody even when the container is gone. The fixture supplies the inspected Sandcastle resume contract, not a live Pi transport or a production rollout test.
+
+## Source acceptance release pack
+
+The [acceptance matrix and operator-held runbook](docs/supervisor-acceptance.md) and
+[sanitized machine index](docs/supervisor-acceptance.json) pin the T12 baseline.
+Current candidate counts/checks/review/merge are recorded separately in its PR/epic
+ledger after execution; historical counts never satisfy current gates. No tests,
+fixtures or shard configuration are added by this documentation-only acceptance step.
+Use Node **24.20.0**, existing checked-in offline provider archives and GNU timeout;
+no package install, real provider, auth discovery, service or Docker is required:
+
+```sh
+FACTORY_270_EVIDENCE=/tmp/factory-271-evidence node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-*.test.mts orchestrator/supervisor*.test.mts board/supervisor.test.mts
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/documentation*.test.mts
+bash scripts/test-shard.sh 1 4
+bash scripts/test-shard.sh 2 4
+bash scripts/test-shard.sh 3 4
+bash scripts/test-shard.sh 4 4
+timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
+git diff --check
+```
+
+`FACTORY_270_EVIDENCE` is only a harness artifact-output variable, not a production
+capability/authorization flag. Keep its raw synthetic prompts/stdout/base64 originals
+local; export only the runbook's metadata allowlist, never headers, fake/real keys or
+hidden reasoning. Preserve the 15-second provider child, 120-second test, concurrency
+four and 180-second shard bounds, exact inventory and separate lifecycle gate. No
+browser E2E duplicates renderer/policy checks. No sleeps, retries or waivers: inspect
+shard timing/assignment and report infrastructure errors (including inode exhaustion)
+without deleting evidence. Independent safety review and all hosted checks on the
+actual final head, latest-base reconciliation and ordinary SHA-guarded merge remain
+parent release gates. No source gate establishes T14 paid permission or pilot success.
+
+## Login-backed advisory capability regression
+
+`cli/test/supervisor-openai-request.test.mts` reuses the network-denied provider
+fixture's `--login-serialization-spike` mode to load the actual digest-checked
+archived Pi serializer with a synthetic non-`sk-` credential shape. This is a
+local SDK integration test, not another transport stack or copied-install E2E.
+It proves the login branch omits the API-key profile's remote cap/cache fields,
+emits high reasoning without a configuration update, and is rejected by the
+API-key payload validator before transmission. The same existing copied
+adapter/journal matrix also covers the explicit subscription profile accepting
+that exact pinned login shape after real grant/worker authorization. Neither test
+resolves real auth or bypasses the production API-key precondition.
+`supervisor-auth.test.mts` uses synthetic pipes, a fake deadline and mocked group
+signals to cover the fixed handoff failure stages, output redaction and fail-closed
+cleanup. `supervisor-worker.test.mts` proves each fixed auth failure code and the
+unknown fallback reach public projection without paid acquisition or reservation;
+`supervisor-command.test.mts` checks both JSON formats, exact legacy reason matching,
+redaction of arbitrary output, exception text and unrecognized metadata, and
+preservation of the safe auth hold if the disposable journal cannot be read.
+Known usage and overrun/charge/human-stop policy are cheap receipt/state units.
+The existing normal-producer known-custody case uses synthetic subscription auth
+to prove receipt-backed runtime/exclusion release and auth-free same/fresh-host
+reuse; its unknown-usage variant keeps API-key coverage. No new E2E matrix or
+real login, remote acceptance, usage, invoice or operational success is implied. Run the focused suite:
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-{auth,worker,command,openai-request}.test.mts
+```
+
+The four mandatory shards, separate browser lifecycle and docs checks above remain
+unchanged. See the [blocked capability disposition](docs/research/supervisor-openai-boundary.md#pi-login-capability-disposition-ticket-286-2026-11-17).
+
+## Public copied-install advisory journeys
+
+```sh
+FACTORY_270_EVIDENCE=/tmp/factory-270-evidence node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-acceptance.test.mts
+```
+
+Exactly two end-to-end wiring cases reuse `normalEntrypointFixture`'s actual saved
+normal execution and sealed payload custody. They run the private copied
+`cli/bin/factory.mts`, production host/platform readers, selected flat runtime,
+worker, owned guard/child, and four digest-checked provider archives. The package
+installer remains synthetic; it is **not** the evidence that the real pinned
+provider SDK loaded. The production adapter's archive loader and actual serialized
+HTTP request provide that evidence. A test-only preload denies native outbound
+network and substitutes SSE below the provider boundary. It rejects original
+repository production imports after instrumentation loads and explicitly probes
+that rejection in each public CLI process. Test instrumentation itself is imported
+from test files; it is not a public CLI capability or runtime inventory asset.
+
+A proves known usage/owned cleanup settlement, useful non-executing retained advice
+in fresh status/explain processes and the production Board projection (fed fresh
+public status JSON), then exact unchanged diagnostic/basis reuse with the same
+authoritative prior-decision set and no second request, reservation, exclusion or pin.
+B uses native pipes at actual send, then runs public stop in another process.
+Already authorized work honestly remains pending, while replacement authorization
+is refused. After synthetic unknown terminal usage, another IPC barrier pauses the
+controller **after real parent-directory fsync** of its durable human request;
+the test kills that exact native child before CLI return. Restart retains the human
+request, full charge, exclusion and runtime pins and refuses managed manual work.
+The existing process/T04 units own controller loss while payload-live and both
+stop/authorization orderings; these two cases do not duplicate their fault matrix.
+
+Read-only `gh`/`gh-axi` and `systemctl` stubs record every public-phase call and
+reject mutations; Docker, Pi, npm and 1Password commands reject invocation.
+Journey A retains synthetic API-key environment auth. Journey B explicitly selects
+`--auth pi-login` and a matching host profile; an exact-argv fake Pi executable
+returns a synthetic bearer before reservation. Real Pi, auth stores and refresh
+are never used. Private finite policy and an explicitly
+user-approved synthetic expiring operator assertion use the production default
+record source, not injected host capabilities or emptied prerequisites. Dirty,
+staged, untracked and parked worktree content, index, refs and raw saved run are
+compared without reset/checkout/clean. Optional JSON evidence captures actual
+argv/output, request, journal, complete frozen originals, ownership/custody, pins,
+manifest identities and work-preservation snapshots before disposable cleanup.
+This proves local source/filesystem/process wiring, not real provider enforcement,
+actual billing, useful model judgment, installed quiescence or a pilot. All four
+mandatory shards, separate bounded browser lifecycle, docs checks and independent
+review remain required; this focused command replaces none of them.
+
+## Explicit diagnosis command boundary
+
+`cli/test/supervisor-command.test.mts` covers strict named-ticket parsing, redacted
+result/exit permutations and signal handoff through component command facades. It
+also exercises genuine host refusal using a disposable registry/current saved run
+and failing backend, and actual source-bin routing for invalid/no-run requests.
+`documentation-cli.test.mts` checks help and the documented no-run refusal. These
+are cheap units/local control boundaries, not installed transport or paid-provider
+proof. The public copied-install journey belongs to its dedicated acceptance task;
+this suite does not duplicate the host/SDK matrix. No real auth file/key retrieval,
+service mutation or paid call occurs. New public acquisition remains held without a
+valid private operator rollout record; component facades cannot establish public authority.
+`cli/test/supervisor-rollout.test.mts` covers strict schema/project/runtime/time permutations,
+full-timeout window refusal and one disposable filesystem boundary (canonical private
+permissions/UID, links, special files, bounded fatal UTF-8, replacement and expiry).
+The existing normal-producer host fixture now uses the default public record reader with a
+**synthetic disposable operator assertion**, reaches the same network-denied SDK boundary,
+proves renewal does not change basis/resend/reset charges, and invalidates late output when
+the record changes. This is not an installed quiescence or model-quality claim and does not
+duplicate the public copied-install journey. The new `supervisor-rollout.mts` module is in
+the complete runtime inventory/flat copy; no dependency archive or client stack is added.
 
 ## Documentation fixture checks
 
@@ -68,6 +206,145 @@ source-only reviewer/outbox implementation and remaining paid-runtime/applicatio
 prerequisites; contract fixtures alone do not activate downstream action. The complete runtime fixtures include
 the new import-safe contract module without enabling any supervisor execution.
 
+## Advisory host owned-worker boundary (partial)
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-host.test.mts cli/test/supervisor-input.test.mts cli/test/supervisor-worker.test.mts cli/test/supervisor-process.test.mts cli/test/supervisor-runtime.test.mts cli/test/runtime-bundle.test.mts cli/test/projects.test.mts cli/test/tick.test.mts orchestrator/verification-entrypoint-sandbox.test.mts
+```
+
+Cheap units prove fresh existing scheduler/registry controls (including absent
+opt-in, aliases, duplicate registration and failed backend query), early missing
+policy refusal, and observational restart cutpoints through one-use authorization.
+They do not manufacture terminal certificates. The reused actual flat normal
+producer fixture now imports the copied host module, claims exact custody-backed
+exclusion, verifies/pins the actual four-archive SDK closure, freezes complete
+saved-run originals including source-produced `no-commit.json`, rebuilds the same
+basis and refuses a later genuine fake-platform off observation without erasing
+the hold. SDK sandbox/Docker, tracker responses and scheduler observations are
+synthetic; source/flat imports, normal lifecycle, immutable custody, Git, admission,
+runtime artifacts/pins and collector I/O are real. Fake installed packages alone
+are not provider capability evidence.
+
+The SAME producer fixture now invokes the copied host's existing worker, actual
+owned process and pinned SDK using T04's network-denied synthetic SSE preload,
+then checks genuine raw accounting/cleanup, retained non-executing advice and durable local HUMAN settlement. A missing-terminal-usage variant proves a durable actionable human request survives reopen while the reservation remains ambiguous, fully charged and excluded with its runtime pins retained.
+The existing T04 process fixture adds deterministic last-send observation barriers:
+stop-before-auth, changed source and actual controller disconnect all leave no
+send and retain full charge/ownership. Existing journal units own both stop/auth
+orderings; no duplicate provider matrix was added. Worker units cover asynchronous
+observations while retaining synchronous component fixtures.
+
+Terminal advice composition, exact receipt-based release/reconciliation and spent-budget cache reuse are exercised through the copied host. Handled unknown accounting/cleanup records an unsettled human outcome, never a successful settlement or release. Complete mandatory and hosted acceptance remain separate gates.
+No paid/live probe or model semantics is claimed.
+The unchanged 15-second direct-child, 120-second test, four 180-second shard and
+concurrency-four limits still apply; complete mandatory/release gates are separate.
+
+## Complete saved-run input boundary
+
+```sh
+node --test cli/test/supervisor-input.test.mts cli/test/supervisor-facts.test.mts cli/test/supervisor-worker.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Cheap units prove authoritative decision selection and audited-human-resolution
+bytes. The existing worker boundary additionally proves its actual retained own
+diagnosis is not a prior-decision original. One disposable readiness-project
+fixture exercises real local Git/filesystem reads, private original freezing and
+independent basis/binding recomputation with controlled read-only tracker responses
+(including child/parent second pages and changed-page refusal). It compares dirty
+bytes, index hash and refs before/after success and refusal, and covers legacy/missing
+run identities, oversized/missing originals, aliases and unsupported overrides.
+Tracker transport, runtime package installation and saved-run inputs are synthetic;
+these tests establish no paid provider, installed mount, quiescence or cleanup
+authority. The fixture Git helper has per-call bounds; whole-test 120-second bounds
+and the unchanged four 180-second shards remain required.
+
+## Normal payload custody source prerequisite
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 orchestrator/payload-custody.test.mts orchestrator/no-commit.test.mts orchestrator/verification-entrypoint-sandbox.test.mts cli/test/supervisor-admission.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Cheap event-table units cover before creation, pending/ambiguous construction,
+registration, exact close, still-open handoff, terminal seal, multiple payloads and
+forbidden reuse of a sealed nonce. A private-filesystem case proves exclusive event
+publication and fresh attempt pointers; these synthetic events are not platform
+proof. The existing actual flat-main fixture additionally asserts durable pending
+custody *inside the SDK constructor*, actual returned-container registration before
+agent work, independent exact absence via controlled Docker-inspect responses, and
+terminal saved-record admission without altering the target raw record. Ambiguous
+create, missing returned identity and failed/unconfirmed close retain entries after
+actual controller exit. Foreign legacy records, stale claims/executions/nonces,
+recovery and delivery ownership refuse. The real producer, filesystem and admission
+code execute; SDK, tracker/auth and Docker transport are synthetic, not live platform
+or provider evidence. These tests prove no full advisory-host composition or rollout.
+The complete inventory and shared flat-copy fixtures carry the new module; no
+package, archive, dependency, concurrency or shard-deadline change is required.
+
+## Shared admission exclusion
+
+```sh
+node --test cli/test/supervisor-admission.test.mts cli/test/run.test.mts cli/test/recovery-claim.test.mts cli/test/recovery-run.test.mts cli/test/runtime-bundle.test.mts orchestrator/verification-entrypoint-sandbox.test.mts
+```
+
+Cheap schema/migration and namespace units cover mandatory v2 collections, explicit
+v1 migration and optional-exclusion refusal. One disposable filesystem boundary
+preserves corrupt bytes, verifies the frozen actual develop v1 reader refuses v2,
+checks accounting preservation, canonical symlink identity, exact fences, unknown
+raw ownership, managed-entry exclusion, tokenless adoption and existing dead normal/
+delivery pruning. Its one real two-child claim race uses ready/go/result/exit IPC
+barriers, with no sleeps, retry loops or timing tolerances. Both contenders invoke
+the real durable primitive against one store; exactly one wins. Actual winner exit
+proves supervisor holds survive owner death. The successor/pending-reference setup
+is synthetic stored input, not a produced settlement receipt. These admission-only
+cases prove refusal, **not** finalization or no-send authority. The reused
+`cli/test/supervisor-process.test.mts` normal integration proves the positive path:
+actual claim, policy/reservation/grant hold binding, real copied SDK/process boundary
+with network-denied synthetic SSE/auth, immutable known 35-token/220-derived-cost
+usage, whole-group ESRCH, actual journal-produced local-human terminal settlement,
+retained full charge, exact release, idempotent reopen and stale-release refusal
+against an actually claimed successor. Fabricated commit events and corrupted receipt
+bindings fail closed. Other lifecycle cases retain unknown usage/exclusion. Cheap raw
+filesystem permutations cover live parked/terminal records, dangling claims, starting
+handoffs and unresolved recovery payloads regardless of stage or controller death.
+The SAME `verification-entrypoint-sandbox.test.mts` actual normal-custody/copied
+runtime fixture additionally reaches owned host/worker/SDK, validates a synthetic
+typed wait against its real frozen input and retains it, then proves unchanged reuse
+with maxCalls=1 spent makes zero extra sends/charges/holds/pins. Original receipt
+reconciliation is idempotent. A second bounded call mutates the original human input
+after authorization and proves final publication retains a durable human request,
+not stale usable advice; both full reservations remain charged. Cheap host units own
+final stop/denial/supersession/deadline/malformed publication permutations. Existing
+T01/T04 units and IPC fixtures own both stop/authorization orderings and controller
+loss, rather than another transport matrix. Synthetic JSON establishes typed
+validation only, not model quality. Parent release gates still require all four
+bounded shards, separate browser lifecycle and independent review.
+No-send finalization and installed public host authority are not proved. Runtime
+pinning is separately covered by `cli/test/supervisor-runtime.test.mts`: cheap
+selection/source/dependency/override/dead-owner permutations and one reuse of the
+existing T04 process fixture in protected-runtime mode. The latter imports the
+actual copied-private module, positively loads the real pinned SDK closure offline,
+transfers exact ready worker evidence, rejects premature/generic release/removal,
+and releases only after real T05 durable settlement, known T03 usage and ESRCH.
+A stale release leaves a separate successor pin intact. Ordinary runtime package
+fixtures are synthetic; they are not the SDK capability evidence. HTTP/SSE, auth,
+policies and rollout controls remain synthetic with outbound network denied, not
+installed host or live-account proof. Run the focused boundary with:
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-runtime.test.mts cli/test/runtime-ownership.test.mts cli/test/runtime-bundle.test.mts cli/test/workflow-routing.test.mts
+```
+
+One reused
+standard-entrypoint fixture invokes the actual flat main, dispatch and shell bootstrap
+against a real durable hold, proving zero tracker/provider/readiness/container work.
+Actual recovery-claim refusal preserves synthetic pending accounting byte-for-byte
+before replay/candidate consumption. Complete flat inventory/import tests exercise
+the shipped helper without source fallback;
+fake private package installation is not new dependency or installed-host evidence.
+CLI preflight entries do not create run generations/repair charges. No live dispatch,
+provider/auth probe, installation, tracker, service or rollout occurs. The four
+mandatory shards, unchanged limits and separate browser lifecycle gate still apply.
+
 ## Supervisor durable state
 
 ```sh
@@ -83,6 +360,26 @@ after rename followed by stale-lock reclamation and exact-event replay. No sleep
 paid workers, tracker calls, recovery resets, notification adapters or actions run.
 The state asset joins the complete inventory; existing run/proof/recovery suites
 remain mandatory in all four commit shards and the separate lifecycle gate.
+
+## Advisory policy, grants and one-use authorization
+
+```sh
+node --test cli/test/supervisor-host-policy.test.mts cli/test/supervisor-state.test.mts cli/test/supervisor-worker.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Cheap units own fixed-profile all-in arithmetic, downward project USD ceiling
+conversion, overflow/unknown policy, cumulative host/project/role/call ceilings,
+review configuration preservation, grant/fence/worker corruption, legacy refusal,
+stop-before-send and send-before-stop, and replay without fresh permission. One
+private temporary filesystem/journal boundary validates permissions, symlink and
+corrupt-policy refusal/preservation and atomic durable receipt reopen. A local
+IPC-only child provides actual PID/start ownership; it makes no provider request
+and exits through its explicit IPC barrier, not sleeps or raw-PID killing. Complete
+bundle tests import the new inventoried modules unchanged without source fallback.
+Policy/controls in transition units are injected trusted observations, not proof of
+real admission, host authority, provider settlement or installed diagnosis. No real
+home policy, credentials, services, packages or provider operations run. The usual
+four full shards, separate lifecycle job and documentation checks remain mandatory.
 
 ## Bounded supervisor diagnosis
 
@@ -103,6 +400,114 @@ No live Pi, provider enforcement, notification adapter, tracker, Docker, service
 credential, install or paid probe is exercised. An absent demonstrated provider
 ceiling/accounting adapter holds paid work; stub evidence does not supply it.
 All four commit shards and the separate lifecycle gate remain mandatory.
+
+## Pinned advisory provider request gate
+
+```sh
+node --test cli/test/supervisor-openai-request.test.mts
+node cli/test/supervisor-provider-fixture.mts --offline-spike
+```
+
+One provider integration boundary exercises the actual request adapter loaded from
+a complete disposable copied runtime, with real immutable grant/registered IPC child
+and journal authorization. Unmodified published Pi-AI 1.5.2 / OpenAI 7.19.0 archives
+now ship as runtime assets under `cli/src/supervisor-provider/`, not test-only data.
+Their original package manifests/licenses and full upstream provenance lock are
+retained; the loader extracts only the complete selected public subpath closure
+into a private temporary tree. Root backend/tsx installation remains a fake fixture;
+**provider code/dependency availability is real**, verified by archive identity and
+actual selected-subpath load/request, not that fake installer. No npm, registry,
+user configuration or real installation runs in tests.
+
+Synthetic non-secret auth, a clean child environment, disabled global fetch and
+native socket/HTTP/TLS paths, and the SDK-supported HTTP seam with no fallback keep
+all responses offline. Deterministic IPC barriers exercise stop-first zero-send
+and authorization-first in-flight stop; real 429/503 SDK error paths and context
+overflow yield one transmission without retries/compaction; repeated requests refuse.
+Pure precondition units own changed frozen input and inherited debug/TLS configuration
+refusal before provider startup; copied-bundle validation owns corrupt selected
+artifacts. These cases do not need repeated SDK/process bootstraps. The same nine
+transport scenarios retain the real SDK/request/journal boundaries. Each independent
+fresh request scenario has a 15-second subprocess limit instead of sharing one
+aggregate subprocess budget; the complete matrix retains the standard 120-second
+test bound, four-way file concurrency and 180-second shard deadline. Every scenario
+keeps all original assertions; there is no production deadline change or retry.
+A fixture-side filesystem barrier mutates real copied prompt/dependency bytes after
+initial validation and input read; the final gate refuses with zero authorization
+and sends, without sleeps or a production callback/flag. Duplicate terminal events
+are explicitly marked ambiguous rather than exposing the first as known usage.
+Cheap payload permutations reject tools, background/continuation/cache-warm/extra
+fields, other service tiers and enlarged bounds. The actual raw terminal callback
+runs before normalized/default-zero usage. This is not a fake Pi SDK or a fake
+production `DiagnosisBoundary`. HTTP/SSE, request IDs/usage, current host controls
+and exclusion identity are synthetic; journal/ownership/copy/load/gate behavior is
+actual. No actual admission claim, watchdog/owned cleanup, durable usage settlement,
+installed host wiring, remote enforcement, billing or useful advice is proven.
+The [provider contract](docs/design/supervisor-provider-contract.md) records the
+conservative bound and limits. Extend this same suite, not a duplicate boundary matrix.
+It enters the unchanged four-shard inventory automatically; the independent
+browser lifecycle gate remains mandatory.
+
+## Owned advisory local process boundary
+
+```sh
+node --test cli/test/supervisor-process.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Pure evidence permutations own exact PID/start/session/group and schema refusal.
+One disposable process integration owns normal completion, original-endpoint
+termination, absolute child-owned deadline, **actual controller process death**
+and original-native-handle guard loss, with an IPC-ready real descendant inheriting
+the group. Worker IPC disconnect and its same-grant secondary deadline bound work
+if the anchor disappears unexpectedly. It executes unchanged
+inventoried/copied factory, guard, runner, T02 request gate and T03 raw/scalar
+publication. A test-only preload supplies the existing provider fixture's synthetic
+terminal HTTP/SSE and non-secret auth; all real native socket/HTTP/TLS transport is
+permanently denied. It also adds an inherited observation pipe and filesystem/IPC
+barriers. Filesystem barrier JSON is closed in a private temporary file and atomically
+renamed before the named watcher event; file creation alone is not a completed
+message. No production bypass flag or second SDK scenario matrix is introduced.
+The extra pipe is only an exit/observation barrier: test-only tracing records the
+actual native self-group SIGKILL attempt/error without interfering with signalling.
+That accepted signal is not cleanup proof. A separate kernel whole-group ESRCH
+observation is required; a still-present group remains held. Closed descriptors do
+not imply a particular instantaneous `/proc` state: an exiting task may still show
+R before Z/reaping. No cleanup is inferred from leader/pipe loss or a prior sample. No sleeps, polling/retries or timing tolerances establish outcomes. The
+three-second deadline is an actual bound, not an elapsed-time assertion.
+
+Linux actual process behavior is exercised; Darwin uses a bounded capability probe
+and explicitly holds unverifiable numeric session evidence, with no positive Darwin
+run claimed. Runtime tests verify imports and exact copied bytes for all four new
+assets. Legacy injected diagnosis/scheduler tests remain component evidence, not
+provider/host enforcement. No admission, runtime lease release, final settlement,
+refund/replay, installed host, live remote acceptance or paid activation is proven.
+The unchanged four shards, 180-second deadline/concurrency/coverage and separate
+bounded browser lifecycle gate remain mandatory.
+
+## Raw advisory usage receipts
+
+```sh
+node --test cli/test/supervisor-openai-usage.test.mts cli/test/runtime-bundle.test.mts cli/test/documentation*.test.mts
+```
+
+Cheap units own missing/explicit-zero/inconsistent/unsafe and over-reservation
+counter cases, reasoning inclusion, service/cache variants, wrong association,
+stream truncation and completed/incomplete/failed status, normalized-Pi-counter
+exclusion, conservative derived integer charge and strict scalar receipt identity.
+No retention-specific provider field is invented: explicit raw write=0 requires
+no retention breakdown; absent write count and any positive write are unknown.
+One private temporary filesystem/journal boundary owns atomic raw+scalar retention,
+reopen/idempotence, conflicting/corrupt records, permissions, hard/symlinks
+(including the lock-directory path), path-restricted/revoked prepared-writer scope,
+changed directory identity and unchanged reservations/charges. Cheap
+filesystem fault injection proves ancestor-sync refusal before publication and
+directory-sync failure after rename: visible bytes do not yield durable success
+or known resources while synchronization fails. This is not a power-loss experiment.
+An IPC-only registered local child supplies real PID/start identity; all provider metadata/control/exclusion data is synthetic.
+There are no network/provider calls or duplicated transport permutations. Copied
+bundle assertions import the inventoried helper unchanged. Later owned cleanup,
+final journal settlement/exclusion release and installed-host activation are not
+claimed by these tests. Full mandatory shards and separate lifecycle remain gates.
 
 ## Independent gate review and managed escalation
 
@@ -127,6 +532,16 @@ ceiling enforcement and live pilot remain unproved and disabled. All four commit
 shards and the separate lifecycle gate remain mandatory.
 
 ## Supervisor operator inspection and controls
+
+Retained advice permutations use cheap units in `cli/test/supervisor-command.test.mts`
+and `board/supervisor.test.mts`: all six typed categories share the diagnose/status
+projection, bounded rationale/alternatives omit private draft/gate/stream bodies,
+unknown usage stays null, legacy component usage is not provider invoicing, and
+orphan admission exclusions remain paged without pruning. The existing in-memory
+HTTP boundary traps filesystem mutations, provider/tracker network and child
+launches (allowing only canonical-root read-only Git identity probes), counting even
+caught calls. No listener/browser or second public install journey is needed for
+this display boundary; mandatory lifecycle/hosted gates remain separate.
 
 ```sh
 node --test cli/test/supervisor-command.test.mts cli/test/supervisor-worker.test.mts cli/test/supervisor-review.test.mts cli/test/supervisor-state.test.mts cli/test/runtime-bundle.test.mts
@@ -291,7 +706,7 @@ Init and update fixtures verify data-only assets and preserve project bytes and 
 
 ```sh
 node --test orchestrator/context.test.mts orchestrator/models.test.mts orchestrator/v2-contract.test.mts cli/test/runtime-bundle.test.mts cli/test/runtime-ownership.test.mts
-node --test orchestrator/verification-entrypoint*.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
+node --test orchestrator/verification-entrypoint*.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/refresh*.test.mts orchestrator/delivery-followup.test.mts cli/test/project-config.test.mts cli/test/run.test.mts
 ```
 
 `cli/test/shared-runtime.test.mts` exercises a copied install and data-only init
@@ -453,10 +868,23 @@ selected fixture runtime's ordinary entrypoint against real temporary Git reposi
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
 Recovery entrypoint/runner tests exercise the same proof lifecycle with isolated
-private Git metadata and teardown. Adapter tests assert fresh host authorization after
-CI and before SHA-guarded merge. These prove host integrity and command contracts;
-they do not classify semantic acceptance coverage, validate video codecs or promise
-atomicity between an external ticket edit and a tracker merge.
+private Git metadata and teardown. The runner's fixture verifier executes the same
+zero-count assertion on real disposable commits: a missing module on the original
+base is not the defect, the saved start can reproduce it, and the repaired tip passes.
+The runner gets the symptom from the repair report in a feature-shaped ticket and
+also covers original-base reproduction and non-delivery on INCONCLUSIVE. A real
+Git fixture confirms replacement refs left by either agent cannot publish proof
+or deliver a substituted tree. Handoff cases refuse missing, non-exact, unrelated
+or mismatched Git identities. The entrypoint checks the packaged prompt and original proof identity. For the
+smallest changed-boundary run:
+
+```sh
+node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
+```
+
+Adapter tests assert fresh host authorization after CI and before SHA-guarded merge.
+These tests do not validate live verifier judgment, video codecs or atomicity between
+an external ticket edit and a tracker merge. The full commit gates above still apply.
 
 ## Existing-delivery continuation tests
 
@@ -464,7 +892,7 @@ Run the changed boundary first:
 
 ```sh
 node --test board/delivery.test.mts orchestrator/delivery*.test.mts cli/test/delivery-followup-schedule.test.mts
-node --test orchestrator/refresh.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
+node --test orchestrator/refresh*.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
 ```
 
 Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
@@ -496,10 +924,44 @@ verification and delivery. Scheduled recovery fixtures inject synthetic preparat
 rather than running a real analyst. No test contacts live trackers, agents, Docker,
 credentials or a service manager.
 
+## Recovery triage helper tests
+
+```sh
+node --test orchestrator/recovery-triage.test.mts orchestrator/context.test.mts orchestrator/workflow.test.mts cli/test/runtime-bundle.test.mts
+```
+
+Triage policy tests inject Pi, tracker, Git and filesystem boundaries. They exercise
+strict advice, stop-key changes, cached failures, stale-result discard, bounded evidence,
+comment sanitization, idempotent escalation and release on label removal. The shipped
+prompt and bundle distinguish missing supplemental history and worktree diagnostics
+from missing cause evidence or a real human prerequisite. Offline fixtures contrast
+a reproduced unit failure, unavailable diagnosis and required operator approval.
+Stubbed replies exercise the advice contract, not live model routing. Runtime-bundle
+fixtures verify the helper, contract and template ship together and import without a
+project or credentials. No paid model, live tracker, installed runtime or service is used.
+
+## Recovery triage host tests
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/jam-detect.test.mts cli/test/recovery-{command,followup,prepare,state}.test.mts cli/test/documentation.test.mts
+```
+
+Jam tests inject triage, inspection, preparation and launch around disposable host
+records. They cover opt-in, result routing, one new call per pass, unchanged budgets
+on human holds, the dispatch selection rule for needs-human, and rechecks after the
+triage await. The recovery launch and claim tests in the commit-tier shards still
+cover budget, custody and admission refusals. Spawn and group cleanup are injected
+for triage protocol and ownership cases; a fake timer drives the deadline. The existing
+preparation tests exercise the shared subprocess runner with fixture-owned Node children.
+Status tests use private local records to check backward compatibility and show the
+cause, delivery state and ticket-comment next action. No live tracker, runtime
+installation, model, Docker or scheduler is used. Run the four commit-tier shards and the separate
+browser lifecycle gate after these focused tests.
+
 ## Host launch readiness tests
 
 ```sh
-node --test orchestrator/launch-readiness.test.mts orchestrator/refresh.test.mts cli/test/run.test.mts cli/test/recovery-prepare.test.mts cli/test/recovery-run.test.mts board/refresh-worker.test.mts board/install.test.mts
+node --test orchestrator/launch-readiness.test.mts orchestrator/refresh*.test.mts cli/test/run.test.mts cli/test/recovery-prepare.test.mts cli/test/recovery-run.test.mts board/refresh-worker.test.mts board/install.test.mts
 ```
 
 These fixtures use temporary projects/state and local Git with stubbed tracker, image, agent and process boundaries. They check project holds before tracker analysis or new queue/admission/container effects, explicit shared ticket attribution, input/workspace isolation, preserved dirty/unrelated worktrees and stale registrations, fresh success without stopped-run retry, late path/branch/image-readiness races, direct report-write failure and zero pre-charge recovery attempts. Recovery fixtures change or fail structured input after image readiness and assert typed ticket-only reports without charge. Manual, dispatch and real scheduled routing share the host hold identity; a late scheduler-policy refusal or cancellation cannot spawn after the asynchronous gate. Exact-owned-container settlement/cleanup remains exercised during a host hold. Explicit Board and scheduled read-only refresh guard opaque overrides too; standalone Board install/update fixtures execute the shipped host probe/store dependencies. Routing, pause/off/unknown policy and process-group cancellation regressions remain in the complete suite. No installed app, real registered project, service manager, Docker daemon or authentication is used.
@@ -508,7 +970,7 @@ These fixtures use temporary projects/state and local Git with stubbed tracker, 
 
 ```sh
 node --test cli/test/ticket-readiness.test.mts orchestrator/ticket-readiness.test.mts
-node --test --test-concurrency=4 orchestrator/refresh.test.mts cli/test/run.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/workflow-routing.test.mts board/readiness-view.test.mts
+node --test --test-concurrency=4 orchestrator/refresh*.test.mts cli/test/run.test.mts cli/test/recovery-run.test.mts cli/test/recovery-schedule.test.mts cli/test/workflow-routing.test.mts board/readiness-view.test.mts
 node --test --test-concurrency=4 orchestrator/*.test.mts board/*.test.mts cli/test/*.test.mts
 timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
 ```

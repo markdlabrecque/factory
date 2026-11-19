@@ -20,6 +20,10 @@ family = "openai" # openai|anthropic
 # analysis = []
 # recovery = []
 
+# Check why a run stopped before spending an automatic recovery attempt.
+# [recovery]
+# triage = false
+
 [labels]
 needs_human = "needs-human"
 done = "merged"

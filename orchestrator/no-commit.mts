@@ -53,7 +53,9 @@ export interface NoCommitDiagnostic {
   nextActor: 'operator' | 'factory';
   nextAction: string;
   automaticAction: string;
-  evidence: 'no-commit.json';
+  evidence: 'no-commit.json' | 'implementation-initial-diagnostic.json';
+  outcome?: import('./implementation-outcome.mts').ImplementationOutcome;
+  continuation?: string;
 }
 export function diagnostic(executionId: string, worktree: NoCommitDiagnostic['worktree'], dependencyReport: boolean, agentReply?: string, logFilePath?: string): NoCommitDiagnostic {
   const log = logFilePath && relative(resolve('.factory/logs'), resolve(logFilePath));
@@ -69,7 +71,8 @@ export function diagnostic(executionId: string, worktree: NoCommitDiagnostic['wo
 export function diagnosticText(d: NoCommitDiagnostic, evidenceSaved = true): string {
   return attentionText({ observed: `zero commits; worktree ${d.worktree}; phase ${d.phase}; push ${d.push}; dependency report ${d.dependencyReport}`,
     agentReported: d.agentReply, nextActor: d.nextActor, nextAction: d.nextAction,
-    automaticAction: d.automaticAction, evidence: `${evidenceSaved ? `${d.executionId}/${d.evidence}` : 'diagnostic unavailable'}; SDK log ${d.logReference}` }) + ' Agent claims are not verified success.';
+    automaticAction: d.automaticAction, evidence: `${evidenceSaved ? `${d.executionId}/${d.evidence}` : 'diagnostic unavailable'}; SDK log ${d.logReference}` })
+    + (d.continuation ? ` ${d.continuation}.` : '') + ' Agent claims are not verified success.';
 }
 /** Only writes this execution's fixed artifact. The caller's fenced stage write publishes its pointer. */
 export function saveDiagnostic(evidenceHost: string, d: NoCommitDiagnostic): void {

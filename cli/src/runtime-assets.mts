@@ -1,8 +1,8 @@
 // Authoritative source mapping for the flat runtime and shared project scaffold files.
-// Dispatch, preparation, supervisor context/state/diagnosis/review/outbox/broker/scoped application/lifecycle transport, delivery proof and recovery ship as one complete inventory.
-export const FROM_ORCHESTRATOR = ['recovery-analysis.mts', 'recovery-analysis-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
-  'host-launch.mts', 'launch-readiness.mts', 'readiness-identity.mts', 'ticket-context.mts', 'ticket-context-source.mts', 'ticket-input.mts', 'ticket-input-evidence.mts', 'delivery-followup.mts', 'verification.mts', 'readiness.mts', 'readiness-schema.mts', 'no-commit.mts', 'sandbox-readiness.mts',
-  'capabilities.mts', 'ci.mts', 'models.mts', 'model-policy.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'handoff.mts',
+// Dispatch, recovery triage and preparation, supervisor workflows, delivery proof and repair ship as one complete inventory.
+export const FROM_ORCHESTRATOR = ['recovery-analysis.mts', 'recovery-analysis-contract.mts', 'recovery-triage.mts', 'recovery-triage-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
+  'host-launch.mts', 'launch-readiness.mts', 'readiness-identity.mts', 'ticket-context.mts', 'ticket-context-source.mts', 'ticket-input.mts', 'ticket-input-evidence.mts', 'delivery-followup.mts', 'verification.mts', 'readiness.mts', 'readiness-schema.mts', 'no-commit.mts', 'implementation-outcome.mts', 'sandbox-readiness.mts', 'payload-custody.mts',
+  'capabilities.mts', 'ci.mts', 'models.mts', 'model-policy.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'prompt.triage.md', 'handoff.mts',
   'workflow.mts', 'context.mts', 'instructions.mts', 'context-process.mts', 'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
   'project-layout.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md', 'gate-review.mts', 'prompt.gate-review.md',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];
@@ -19,7 +19,9 @@ export const RUNTIME_ASSETS: readonly RuntimeAsset[] = Object.freeze([
   { source: 'board/supervisor.mts', destination: 'supervisor-view.mts' },
   // The flat runtime keeps the probe entrypoint and board store under distinct names.
   { source: 'board/readiness.mts', destination: 'readiness-store.mts' },
-  ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts', 'supervisor-facts.mts', 'supervisor-state.mts', 'supervisor-worker.mts', 'supervisor-schedule.mts', 'supervisor-review.mts', 'supervisor-escalation.mts', 'supervisor-gate-apply.mts', 'sandcastle-patch.mts', 'sandcastle-patch.json'].map(name => ({ source: `cli/src/${name}`, destination: name })),
+  ...['runtime-assets.mts', 'runtime-bundle.mts', 'runtime-ownership.mts', 'supervisor-runtime.mts', 'supervisor-host.mts', 'supervisor-auth.mts', 'project-registry.mts', 'scheduling-observation.mts', 'supervisor-input.mts', 'supervisor-facts.mts', 'supervisor-state.mts', 'supervisor-admission.mts', 'supervisor-advisory-contract.mts', 'supervisor-openai-request.mts', 'supervisor-openai-usage.mts', 'supervisor-openai.mts', 'supervisor-process.mts', 'supervisor-runner.mts', 'supervisor-guard.mjs', 'supervisor-host-policy.mts', 'supervisor-rollout.mts', 'supervisor-worker.mts', 'supervisor-schedule.mts', 'supervisor-review.mts', 'supervisor-escalation.mts', 'supervisor-gate-apply.mts', 'sandcastle-patch.mts', 'sandcastle-patch.json'].map(name => ({ source: `cli/src/${name}`, destination: name })),
+  ...['manifest.json', 'package.json', 'package-lock.json', 'pi-ai-1.5.2.tgz', 'pi-telemetry-1.5.2.tgz', 'openai-7.19.0.tgz', 'partial-json-0.1.7.tgz']
+    .map(name => ({ source: `cli/src/supervisor-provider/${name}`, destination: `supervisor-provider/${name}` })),
   // Host broker and pure paid-call preflight have distinct flat names; never overwrite either asset.
   { source: 'cli/src/supervisor-policy.mts', destination: 'supervisor-broker.mts' },
   { source: 'orchestrator/main.mts', destination: 'main.mts' },

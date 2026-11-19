@@ -48,7 +48,7 @@ import { acquireRuntimeLease, releaseRuntimeLease, transferRuntimeLease } from '
 import { ownerOf } from '../../board/admission.mts';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { claimLive, generationOf, keyFor, ownerState, readAdmission, releaseClaim, transferClaim, withAdmission } from '../../board/admission.mts';
+import { claimLive, claimManagedEntry, generationOf, keyFor, ownerState, readAdmission, releaseClaim, releaseManagedEntry, transferClaim, withAdmission } from '../../board/admission.mts';
 import type { AdmissionClaim } from '../../board/admission.mts';
 // Launcher patches share the persisted stage writer; settlement is observational, after charge/cleanup locks.
 import { observeEvent } from '../../board/execution-events.mts';
@@ -235,11 +235,14 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   const candidateAllowed = () => !o.candidate || o.candidate.ticket === o.ticket && o.candidate.authorize();
   const allowed = async () => !o.signal?.aborted && candidateAllowed() && (!o.mayLaunch || await o.mayLaunch()) && !o.signal?.aborted && candidateAllowed();
   let committed = false;
+  let entry: string | undefined;
   let admissionStarted = false;
   let id: string | undefined;
   try {
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped.');
   const workflow = projectWorkflow(p, o.root, o.workflowEnv);
+  const entryTracker = workflow.config.TRACKER;
+  entry = claimManagedEntry(dir, { root: o.root, tracker: { kind: entryTracker.kind, host: entryTracker.gitlabHost ?? entryTracker.host!, project: entryTracker.project } });
   const hostInput = { projectRoot: o.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id, runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: dir, base: o.preparation.base, signal: o.signal };
   const { projectLaunchReadiness, readinessReason, recordTicketInput } = await import('../../orchestrator/launch-readiness.mts');
   const config = workflow.config;
@@ -412,5 +415,8 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
       return { ok: false, kind: 'admitted-failed', admitted: true, attempt, reason };
     }
     return stop('launch-uncertain', reason);
+  } finally {
+    // After admission, the durable recovery claim owns all uncertain child/container cleanup.
+    if (entry) releaseManagedEntry(dir, entry);
   }
 }

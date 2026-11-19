@@ -43,6 +43,25 @@ Credentials remain in `.factory/.env` / the agent's existing auth store. Prompts
 script bodies, Dockerfiles, the machine registry (`projects.json`) and scheduler
 files stay separate. Never put secrets in TOML.
 
+### Local input bounds
+
+All configuration readers cap `factory.toml` at 256 KiB before allocation/parsing.
+Configuration and instruction readers use canonical regular-file descriptors with
+NOFOLLOW/NONBLOCK, identity and stability checks; special files and substituted
+FIFOs cannot supply bytes or block a read. Invalid UTF-8 and NUL text refuse.
+Across all `[instructions]` lists at most 128 configured paths are permitted
+(including duplicates). Each instruction original and scoped correction is at most
+256 KiB; each role's deduplicated common-plus-role text, including separators, is
+at most 1 MiB. These bounds apply during initial context loading and freshness
+validation, before any supervisor collection budget. Overflow refuses without
+truncation. The six role snapshots therefore have a finite 6 MiB combined text
+ceiling, even when common guidance is repeated across roles.
+
+Ordinary instruction loading still resolves and deduplicates aliases contained
+within the checkout. Supervisor collection requests strict original validation:
+configured aliases are refused even when their targets are contained and unchanged.
+See [execution context](execution-context.md#code-and-project-paths).
+
 ## Version 2 schema
 
 `version = 2` is required. Required tables/fields are marked **required**. Defaults
@@ -77,6 +96,7 @@ are schema defaults; profiles explicitly override some of them.
 | `merge.auto` | `false`, boolean |
 | `merge.method` | `squash`; `merge`, `squash`, `rebase` |
 | `merge.required_checks` | `[]`, exact check/job names |
+| `recovery.triage` | `false`, boolean; opt in to triage before an automatic recovery attempt |
 | `graph.max_analyses_per_pass` | `5`, positive safe integer |
 | `graph.analysis_timeout_minutes` | `10`, positive finite number |
 | `graph.conflict_ignore` | `[]`, existing footprint-ignore paths |
@@ -161,9 +181,67 @@ in the run record. Later refreshes change current assessments, not that attempt.
 Delivery proofs bind the model-policy and resolver files, so policy drift requires
 fresh verification.
 
+## Advisory host policy source foundation
+
+Project TOML is not host spending authority. The separate, host-owned
+`Paths.config/supervisor.json` has this strict version-1 shape (illustrative
+ceilings, not defaults or authorization to provision/activate):
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "profile": "b57ec2aeb364f69a70a3b0ef85f469b705c27eca0e6c46cdec23686eb5d97587",
+  "capacity": 1,
+  "cumulative": { "tokens": 10000000, "cost": 100000000, "calls": 10 }
+}
+```
+
+`cost` is integer **micro-USD**, not dollars. All ceilings must be finite positive
+safe integers, capacity must be one, and the profile must match the shipped fixed
+OpenAI advisory contract. Missing/disabled/unsupported/unknown-field/malformed
+policy holds; there is no unlimited default or reset interval. Existing project
+and diagnosis role ceilings must independently fit the complete 1,054,096-token /
+5,808,792-micro-USD reservation **for the API-key profile shown above**. Required
+review configuration stays unchanged; no review calls are consumed by diagnosis.
+Cumulative history includes legacy and uncertain reservations, never only measured
+actual usage. Increasing a ceiling cannot clear spent resources, stop or human/denial holds.
+
+For explicit `--auth pi-login`, the host instead selects subscription profile
+`0b7aba594431e7177b998d11e40c6f14c41ec778db583e110129813b990e5310`.
+The JSON schema and positive finite cumulative ceilings stay the same; selection
+mismatch refuses before auth. This owner-approved route reserves a **1,054,096-token
+admission target and zero API monetary debit**, not an API-price-derived exposure
+reservation. Its 4,096 output-token target is local/post-response best-effort, not
+a guaranteed remote ceiling. Known actual token usage above the reservation
+increases cumulative charge; smaller actual usage does not refund it. Legacy USD
+ceilings and historical API debits remain compatibility/accounting guards, not
+subscription prices or permission to erase prior spend. Missing usage/cleanup
+retains the full admission charge and ownership. See the
+[subscription contract](design/supervisor-provider-contract.md#owner-approved-subscription-profile).
+No project TOML auth/profile/endpoint override is introduced.
+
+The source loader requires a canonical private owner-owned directory/file outside
+all known agent/project mounts and refuses links or read uncertainty without
+rewriting anything. No command provisions this policy or activates a paid host
+through it yet. See the [journal authorization contract](supervisor.md#advisory-grants-finite-host-policy-and-one-use-send-permission)
+and [operator boundary](factory-cli.md#advisory-host-policy-foundation).
+
+## Optional recovery triage
+
+Recovery triage is off by default. To opt in, set `triage = true` under
+`[recovery]`. This changes automatic recovery: Factory checks why a run stopped
+before spending a repair attempt. If triage escalates instead of recommending a
+repair, Factory posts a ticket comment and adds the `labels.needs_human` label
+without spending an attempt.
+
+Adding `recovery.triage` to the schema changes the frozen settings identity even
+for projects that leave it off. After updating Factory, saved execution analysis
+is refreshed once per project.
+
 ## Optional supervisor policy
 
-Omission is `{ enabled: false }`; it adds no model calls or scheduler. Logical observation is free of paid diagnosis. `enabled = true` is only a policy prerequisite, **not action mode** or permission to start a worker. Mode belongs to explicit operator state, never ticket readiness or TOML. Disabled/unregistered projects and stopped mode cannot admit paid diagnosis/review. Observe can receive bounded diagnosis proposals only, with the same finite reservations and known provider enforcement/accounting; it cannot admit reviews or actions. The [supervisor contract](supervisor.md#configuration-model-and-paid-call-foundation) retains the notification/reviewer/application blockers.
+Omission is `{ enabled: false }`; it adds no model calls or scheduler. Logical observation is free of paid diagnosis. `enabled = true` is only a policy prerequisite, **not action mode** or permission to start a worker. Mode belongs to explicit operator state, never ticket readiness or TOML. Disabled/unregistered projects and stopped mode cannot admit paid diagnosis/review. Observe can receive diagnosis proposals only, with profile-specific admission/accounting (hard remote bounds for API-key, explicitly approved best-effort targets for subscription); it cannot admit reviews or actions. The [supervisor contract](supervisor.md#configuration-model-and-paid-call-foundation) retains the notification/reviewer/application blockers.
 
 This is an optional fragment for an otherwise complete configuration, not recommended production budgets:
 
@@ -187,7 +265,7 @@ timeout_seconds = 600
 
 Enabling policy or providing any limit requires **all** project/diagnosis/review token, cost and call limits. Tokens/calls are positive safe integers; cost is positive finite USD. Each role's limits must not exceed project limits. These are cumulative ceilings, not per-call allowances or rolling windows: settled usage plus outstanding worst-case reservations count against both project and role budgets, without an automatic reset. Omitted policy has no implicit paid allowance. Each role's `timeout_seconds` defaults to 600, is a positive safe integer and may only lower that ceiling. Two diagnoses per unchanged incident and one active project decision are nonconfigurable upper bounds. The project call cap is an additional total across incidents and roles.
 
-Unknown pricing, incomplete/unrecorded usage, failed accounting, missing global budget/capacity admission, or an unbounded/unreserved provider request holds new paid work. The explicit [diagnosis worker](supervisor.md#bounded-diagnosis-and-retained-memory) reserves all input/output tokens and worst-case provider charges atomically before spawning, enforces the fixed timeout and retains reservations on unknown completion. Without a demonstrated all-in provider enforcement/accounting adapter it holds paid work; a process timeout or stdout cap is not a token/cost ceiling. Mode/restart/model activity never renew budgets. This policy helper provides necessary checks, not the journal or global admission owner.
+For the API-key profile, unknown pricing, incomplete/unrecorded usage, failed accounting, missing global budget/capacity admission, or an unbounded/unreserved provider request holds new paid work. The explicit [diagnosis worker](supervisor.md#bounded-diagnosis-and-retained-memory) reserves all input/output tokens and worst-case provider charges atomically before spawning, enforces the fixed timeout and retains reservations on unknown completion. Without a demonstrated all-in provider enforcement/accounting adapter it holds paid work; a process timeout or stdout cap is not a token/cost ceiling. The explicitly selected subscription profile above is the owner-approved exception to API pricing/remote-bound prerequisites, not to known usage, reservation, capacity or ownership requirements. Mode/restart/model activity never renew budgets. This policy helper provides necessary checks, not the journal or global admission owner.
 
 Unknown supervisor keys (including `mode`, exact `model`, `provider`, fallback or escalation selectors) are rejected with secret-safe schema errors. Config does not clear denial, authorize Factory-wide changes or replace independent verification.
 

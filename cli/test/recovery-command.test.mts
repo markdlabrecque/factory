@@ -1,5 +1,5 @@
 // Follow-up status reprojects pause, ownership, budget and delivery facts without trusting stale snapshots or writing.
-// Preparation status is separate from preserved attempt history and budget counts.
+// Preparation and triage observations are separate from preserved attempt history and budget counts.
 // Missing/changed continuation dependencies require operator review.
 // #149: missing or edited shared dependency evaluation invalidates recovery review.
 // #150: proof and delivery dependency omissions/edits invalidate recovery review.
@@ -130,6 +130,33 @@ test('preparation refusal remains actionable in status without replacing histori
   await recovery(p,'status',{cwd:root,now});assert.match(out(),/Preparation: #12 unknown-dependency \(project\): Tracker read unavailable/);
   clear();await recovery(p,'status',{cwd:root,json:true});const summary=JSON.parse(out()).recovery;
   assert.equal(summary.preparation.code,'unknown-dependency');assert.deepEqual(readRecovery(p,root).attempts,before.attempts);assert.deepEqual(readRecovery(p,root).budgets,before.budgets);
+});
+
+test('status reads legacy state and reports the last human triage hold without changing the budget', async t => {
+  const { p, root, jam, out, clear } = fixture(t);
+  jam();
+  const before = readRecovery(p, root);
+  assert.equal(before.triage, undefined);
+  assert.equal(await recovery(p, 'status', { cwd: root, now }), 0);
+  assert.doesNotMatch(out(), /Triage:/);
+  writeFileSync(join(p.state, 'me_site--12.json'), JSON.stringify({ iid: '12', project: 'me/site', stage: 'stopped', branch: '12-fix' }));
+  const at = new Date(now).toISOString();
+  const observation = { at, state: 'human', action: 'gate-change', cause: 'Gate expects obsolete evidence', delivery: 'pending', reason: 'Comment not posted yet' } as const;
+  mutateRecovery(p, root, s => { s.triage = { '12': observation }; return { write: true, value: undefined }; });
+  clear();
+  assert.equal(await recovery(p, 'status', { cwd: root, now }), 0);
+  assert.match(out(), /Triage: #12 .*human \(gate-change, pending\): Gate expects obsolete evidence/);
+  assert.match(out(), /#12 operator-required/);
+  assert.match(out(), /Next: The recovery triage comment on #12 is pending/);
+  clear();
+  assert.equal(await recovery(p, 'status', { cwd: root, now, json: true }), 0);
+  const summary = JSON.parse(out()).recovery;
+  assert.deepEqual(summary.triage, { '12': observation });
+  assert.equal(summary.budgets[0].used, before.budgets[12].used);
+  assert.deepEqual(readRecovery(p, root).attempts, before.attempts);
+  const saved = readRecovery(p, root);
+  writeFileSync(recoveryFile(p, root), JSON.stringify({ ...saved, triage: { '12': { ...observation, cause: 'é'.repeat(1025) } } }));
+  assert.throws(() => readRecovery(p, root), /Unsupported recovery state/);
 });
 
 test('reset ends the jam and renews budgets without touching run records or launching', async t => {

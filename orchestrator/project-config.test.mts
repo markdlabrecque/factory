@@ -23,6 +23,14 @@ test('profiles normalize independently of executable legacy settings', () => {
     assert.equal(c.TRACKER.kind, profile === 'personal' ? 'github' : 'gitlab');
   });
 });
+test('configuration bytes and total instruction path count are bounded before consumers load files', () => {
+  const text=personal();
+  fixture(text+' '.repeat(256*1024-Buffer.byteLength(text)),dir=>assert.equal(loadTomlConfig(dir).source.mode,'toml'));
+  fixture(text+' '.repeat(256*1024+1-Buffer.byteLength(text)),dir=>assert.throws(()=>loadTomlConfig(dir),/oversized/));
+  const paths=Array(129).fill('"missing.md"').join(',');
+  fixture(text+`\n[instructions]\ncommon = [${paths}]\n`,dir=>assert.throws(()=>loadTomlConfig(dir),/128 configured paths/));
+});
+
 test('absent and v1 configuration fail closed without conversion', () => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-config-'));
   try { assert.throws(() => loadTomlConfig(dir), /missing version 2/); } finally { rmSync(dir, { recursive: true }); }
@@ -136,6 +144,28 @@ test('empty label axes and confidentiality false are preserved; setup is data', 
     assert.equal(c.selection.confidential, false); assert.deepEqual(c.LABELS.ready, []);
     assert.deepEqual(c.LABELS.exclude, []); assert.equal(c.warnings.length, 1);
     assert.equal(c.config.sandboxSetup[0].sudo, true); assert.equal(c.config.sandboxSetup[0].timeoutMs, undefined);
+  });
+});
+
+test('recovery triage defaults off in both profiles and tracks explicit boolean settings', () => {
+  for (const profile of ['personal', 'client']) fixture(readFileSync(new URL(`./factory.${profile}.toml`, import.meta.url), 'utf8'), dir => {
+    const c = loadTomlConfig(dir);
+    assert.equal(c.recovery.triage, false);
+    assert.equal(c.sources['recovery.triage'], 'default');
+  });
+  for (const triage of [false, true]) fixture(personal() + `\n[recovery]\ntriage = ${triage}\n`, dir => {
+    const c = loadTomlConfig(dir);
+    assert.equal(c.recovery.triage, triage);
+    assert.equal(c.sources['recovery.triage'], 'explicit');
+  });
+});
+
+test('recovery triage rejects non-booleans and unknown keys', () => {
+  fixture(personal() + '\n[recovery]\ntriage = "true"\n', dir => {
+    assert.throws(() => loadTomlConfig(dir), /recovery\.triage: expected a boolean/);
+  });
+  fixture(personal() + '\n[recovery]\nunknown = true\n', dir => {
+    assert.throws(() => loadTomlConfig(dir), /recovery\.unknown: unknown key/);
   });
 });
 

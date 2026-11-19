@@ -38,14 +38,57 @@ test('complete inventory, deterministic identity, private install and validation
   assert.equal(a.id, b.id); assert.deepEqual(validateRuntimeBundle(a.directory), a.manifest);
   assert.deepEqual(a.manifest.files.map(x => x.path), [...RUNTIME_ASSETS.map(x => x.destination)].sort());
   assert(!existsSync(join(a.directory, 'config.mts')));
+  for (const path of ['recovery-triage.mts', 'recovery-triage-contract.mts', 'prompt.triage.md'])
+    assert.ok(a.manifest.files.some(file => file.path === path), path);
+  const triage = await import(pathToFileURL(join(a.directory, 'recovery-triage.mts')).href);
+  assert.equal(typeof triage.triageRecovery, 'function');
   const layout = await import(pathToFileURL(join(a.directory, 'project-layout.mts')).href);
   assert.equal(layout.projectLayoutPaths('/fixture-project').assets, '/fixture-project/.factory');
+  const input = await import(pathToFileURL(join(a.directory, 'supervisor-input.mts')).href);
+  assert.equal(typeof input.collectSupervisorInput, 'function');
+  assert.deepEqual(readFileSync(join(a.directory,'supervisor-input.mts')),readFileSync(join(f.source,'cli/src/supervisor-input.mts')));
   const facts = await import(pathToFileURL(join(a.directory, 'supervisor-facts.mts')).href);
   assert.equal(facts.safeExcerpt('token=private'), '[REDACTED]');
   assert.equal(facts.observed('fixture', 'saved', '2026-11-16T00:00:00.000Z', []).status, 'known');
   const state = await import(pathToFileURL(join(a.directory, 'supervisor-state.mts')).href);
   assert.equal(state.emptySupervisor({ root: '/fixture/project', tracker: { kind: 'github', host: 'github.com', project: 'owner/repo' } }).revision, 0);
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-state.mts')), readFileSync(join(f.source, 'cli/src/supervisor-state.mts')), 'state ships unchanged');
+  const admission = await import(pathToFileURL(join(a.directory, 'supervisor-admission.mts')).href);
+  assert.equal(typeof admission.claimSupervisorHold, 'function');
+  assert.equal(typeof admission.releaseSupervisorHold, 'function');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-admission.mts')), readFileSync(join(f.source, 'cli/src/supervisor-admission.mts')), 'admission ships unchanged without source fallback');
+  const advisory = await import(pathToFileURL(join(a.directory, 'supervisor-advisory-contract.mts')).href);
+  assert.deepEqual(advisory.advisoryReservation(), { tokens: 1_054_096, cost: 5_808_792 });
+  const hostPolicy = await import(pathToFileURL(join(a.directory, 'supervisor-host-policy.mts')).href);
+  assert.equal(typeof hostPolicy.readHostAdvisoryPolicy, 'function');
+  const rollout = await import(pathToFileURL(join(a.directory, 'supervisor-rollout.mts')).href);
+  assert.equal(typeof rollout.readSupervisorRollout, 'function');
+  const request = await import(pathToFileURL(join(a.directory, 'supervisor-openai-request.mts')).href);
+  assert.equal(typeof request.requestAdvisory, 'function');
+  const usage = await import(pathToFileURL(join(a.directory, 'supervisor-openai-usage.mts')).href);
+  assert.equal(typeof usage.providerUsage, 'function'); assert.equal(typeof usage.persistProviderUsage, 'function');
+  assert.equal(typeof usage.providerResources, 'function');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-openai-usage.mts')), readFileSync(join(f.source, 'cli/src/supervisor-openai-usage.mts')), 'usage ships unchanged');
+  const provider = JSON.parse(readFileSync(join(a.directory, 'supervisor-provider/package-lock.json'), 'utf8'));
+  assert.equal(provider.packages['node_modules/@earendil-works/pi-ai'].version, '1.5.2');
+  assert.equal(provider.packages['node_modules/openai'].version, '7.19.0');
+  for (const path of ['supervisor-openai-request.mts', 'supervisor-provider/manifest.json', 'supervisor-provider/package.json', 'supervisor-provider/package-lock.json', 'supervisor-provider/pi-ai-1.5.2.tgz', 'supervisor-provider/openai-7.19.0.tgz'])
+    assert.ok(a.manifest.files.some(f => f.path === path), 'provider code, artifacts and dependency provenance are inventoried');
+  assert.equal(typeof state.authorizeAdvisorySend, 'function');
+  for (const name of ['supervisor-advisory-contract.mts', 'supervisor-host-policy.mts', 'supervisor-rollout.mts'])
+    assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'cli/src', name)), 'advisory assets ship unchanged');
+  const owned = await import(pathToFileURL(join(a.directory, 'supervisor-openai.mts')).href);
+  assert.equal(typeof owned.createOpenAIDiagnosisBoundary, 'function');
+  const runtime = await import(pathToFileURL(join(a.directory, 'supervisor-runtime.mts')).href);
+  assert.equal(typeof runtime.createSupervisorRuntime, 'function', 'trusted composition ships with all private imports');
+  assert.deepEqual(readFileSync(join(a.directory, 'supervisor-runtime.mts')), readFileSync(join(f.source, 'cli/src/supervisor-runtime.mts')));
+  assert.equal(typeof request.verifyPinnedProvider, 'function', 'same actual SDK closure verifier is available before child start');
+  const processBoundary = await import(pathToFileURL(join(a.directory, 'supervisor-process.mts')).href);
+  assert.equal(typeof processBoundary.confirmOwnedCleanup, 'function');
+  for (const name of ['supervisor-openai.mts', 'supervisor-process.mts', 'supervisor-runner.mts', 'supervisor-guard.mjs']) {
+    assert.ok(a.manifest.files.some(f => f.path === name), 'every actual owned process asset is inventoried');
+    assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'cli/src', name)), `${name} ships unchanged`);
+  }
   const worker = await import(pathToFileURL(join(a.directory, 'supervisor-worker.mts')).href);
   assert.equal(typeof worker.diagnoseProject, 'function', 'complete selected worker imports without source-tree dependencies');
   assert.deepEqual(readFileSync(join(a.directory, 'supervisor-worker.mts')), readFileSync(join(f.source, 'cli/src/supervisor-worker.mts')), 'worker ships unchanged');
@@ -67,6 +110,9 @@ test('complete inventory, deterministic identity, private install and validation
   for (const name of ['main.mts', 'model-policy.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md', 'gate-review.mts', 'prompt.gate-review.md']) {
     assert.deepEqual(readFileSync(join(a.directory, name)), readFileSync(join(f.source, 'orchestrator', name)), `${name} ships unchanged`);
   }
+  const providerArchive=join(a.directory,'supervisor-provider/pi-ai-1.5.2.tgz'), originalArchive=readFileSync(providerArchive);
+  writeFileSync(providerArchive,'corrupt'); assert.throws(()=>validateRuntimeBundle(a.directory),'pre-entry provider artifact drift is a bundle-validation case');
+  writeFileSync(providerArchive,originalArchive); validateRuntimeBundle(a.directory);
   assert(!readFileSync(join(a.directory, 'main.mts'), 'utf8').includes('sandcastle-islandhealth'));
   assert(existsSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs')));
   writeFileSync(join(a.directory, 'node_modules/tsx/dist/cli.mjs'), 'poison');

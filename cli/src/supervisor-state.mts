@@ -1,15 +1,27 @@
-// Host-owned supervisor journal: atomic CAS transitions, retained incidents/denials and separately charged resources.
-// Retains operator fences, completion, receipts, resolution audits and fenced application observations; emits redacted telemetry after commit, never executes effects or resets charges.
+// Host-owned supervisor journal: durably synced scoped CAS transitions, retained incidents/denials and separately charged resources.
+// Retains operator fences and local terminal advisory settlements grounded in immutable usage/whole-group cleanup; never executes effects, notifies or resets charges.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Owner } from '../../board/admission.mts';
-import type { ProjectIdentity, Scope, Incident, Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
-const { ownerState, withAdmissionLock, writeDurable } = await import(existsSync(new URL('./admission.mts', import.meta.url)) ? './admission.mts' : '../../board/admission.mts');
+import type { Snapshot, ProjectIdentity, Scope, Incident, Proposal, IndependentReview, Intent, HumanRequest } from '../../orchestrator/supervisor-contract.mts';
+const { ownerState, withAdmissionLock } = await import(existsSync(new URL('./admission.mts', import.meta.url)) ? './admission.mts' : '../../board/admission.mts');
 const { supervisorHash, validateProject, validateScope, validateIncident, validateProposal, validateIndependentReview, validateIntent, validateHumanRequest } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 
 import type { Diagnostic } from '../../orchestrator/supervisor.mts';
 import type { ProducerEvent } from '../../board/execution-events.mts';
-const { validateDiagnostic } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
+import { validateDiagnosisGrant, validateSendAuthorization, ADVISORY_PROFILE_ID, subscriptionProfile, advisoryReservation } from './supervisor-advisory-contract.mts';
+import type { DiagnosisGrant, SendAuthorization, ProviderUsageReceipt } from './supervisor-advisory-contract.mts';
+import { validateProviderUsageReceipt } from './supervisor-advisory-contract.mts';
+export type AdvisorySettlement = { grantId: string; holdId: string; invocationId: string; fence: string;
+  authorization: string; usage: ProviderUsageReceipt; process: string; cleanup: string; at: string; disposition: 'local-human-required' | 'retained-advice'; diagnosticId?: string };
+const settlementEvents = new WeakMap<object, { stateDir: string; project: string; revision: number }>();
+import { validateHostAdvisoryPolicy, hostAdvisoryPolicyIdentity, advisoryLimitHold } from './supervisor-host-policy.mts';
+import type { HostAdvisoryPolicy } from './supervisor-host-policy.mts';
+import type { SupervisorPolicy } from '../../orchestrator/supervisor-policy.mts';
+export type AdvisoryControls = { registered: boolean; global: 'on' | 'off' | 'unknown'; projectControl: 'enabled' | 'paused' | 'unknown' };
+import { validateRolloutPin, type RolloutPin } from './supervisor-rollout.mts';
+export type AdvisoryRegistration = { holdId: string; host: HostAdvisoryPolicy; project: SupervisorPolicy; at: string; rollout?: RolloutPin };
+const { validateDiagnostic, parseDiagnosis, diagnosisBasis } = await import(existsSync(new URL('./supervisor.mts', import.meta.url)) ? './supervisor.mts' : '../../orchestrator/supervisor.mts');
 
 const { observeEvent, eventIdFor } = await import(existsSync(new URL('./execution-events.mts', import.meta.url)) ? './execution-events.mts' : '../../board/execution-events.mts');
 
@@ -23,6 +35,10 @@ export type Reservation = {
   at: string; deadline: string; reserved: Resources; actual: Resources | null;
   state: 'active' | 'finished' | 'ambiguous'; reviewId: string | null;
 };
+/** Admission charge never refunds a reservation; known subscription overrun increases cumulative usage. */
+export function chargedResources(r: Reservation): Resources {
+  return { tokens: Math.max(r.reserved.tokens,r.actual?.tokens ?? 0), cost: Math.max(r.reserved.cost,r.actual?.cost ?? 0) };
+}
 export type IntentMemory = { intent: Intent; owner: Owner; outcome: 'pending' | 'observed-applied' | 'observed-not-applied' | 'unknown'; evidence: string[] };
 export type SupervisorState = {
   version: 1; project: ProjectIdentity; revision: number;
@@ -31,6 +47,9 @@ export type SupervisorState = {
   intents: Record<string, IntentMemory>; humans: Record<string, HumanRequest>; reservations: Record<string, Reservation>;
   /** Absent only in pre-diagnosis version-1 journals. Added without discarding any old safety indexes. */
   diagnostics?: Record<string, Diagnostic>;
+  /** Legacy reservations have no advisory policy/grant: absence is uncertainty, never reconstructed no-send. */
+  advisory?: { policies: Record<string, AdvisoryRegistration>; workers: Record<string, { grant: DiagnosisGrant; at: string }>;
+    sends: Record<string, SendAuthorization>; settlements?: Record<string, AdvisorySettlement> };
   reviewCompletions?: Record<string, { inputRef: string; policy: string; proposer: string }>;
   deliveries?: Record<string, { requestId: string; target: number; attemptedAt: string }>;
   resolutions?: Record<string, { requestId: string; proposalId: string; actor: string; reason: string; at: string; nextProposalId: string | null }>;
@@ -51,6 +70,11 @@ export type Event = { id: string; at: string } & (
   | { kind: 'notify-ack'; incidentId: string; requestId: string; target: number; channel: string; receipt: string }
   | { kind: 'resolve-human'; incidentId: string; requestId: string; proposalId: string; actor: string; reason: string; nextProposalId: string | null }
   | { kind: 'reserve'; reservation: Reservation; limits: Limits }
+  | { kind: 'reserve-advisory'; reservation: Reservation; limits: Limits; policy: AdvisoryRegistration; controls: AdvisoryControls }
+  | { kind: 'register-advisory-worker'; reservationId: string; fence: string; owner: Owner; grant: DiagnosisGrant }
+  | { kind: 'authorize-advisory-send'; grantId: string; reservationId: string; fence: string; worker: Owner; payload: string;
+      policy: AdvisoryRegistration; controls: AdvisoryControls }
+  | { kind: 'settle-advisory'; reservationId: string; settlement: AdvisorySettlement; diagnostic?: Diagnostic; request?: HumanRequest }
   | { kind: 'finish'; reservationId: string; fence: string; owner: Owner; actual: Resources }
   | { kind: 'diagnosis'; diagnostic: Diagnostic; owner: Owner; actual: Resources | null; processConfirmed: boolean; request: HumanRequest | null }
   | { kind: 'reconcile-worker'; reservationId: string }
@@ -67,6 +91,20 @@ const time = (x: any) => typeof x === 'string' && Number.isFinite(Date.parse(x))
 const same = (a: unknown, b: unknown) => supervisorHash(a) === supervisorHash(b);
 function resources(x: any): void { object(x, ['tokens','cost']); demand(count(x.tokens) && count(x.cost), 'finite integer token/cost units required'); }
 function owner(x: any): void { object(x, ['pid','start']); demand(Number.isSafeInteger(x.pid) && x.pid > 0 && text(x.start), 'PID/start identity required'); }
+function validateAdvisoryRegistration(p: AdvisoryRegistration): void {
+  object(p, ['holdId','host','project','at',...(p.rollout === undefined ? [] : ['rollout'])]); validateHostAdvisoryPolicy(p.host);
+  if (p.rollout !== undefined) { validateRolloutPin(p.rollout); demand(p.rollout.expiresAt > p.at, 'expired registered rollout'); }
+  object(p.project, ['enabled','limits']); object(p.project.limits, ['maxTokens','maxCostUsd','maxCalls','diagnosis','review']);
+  for (const role of ['diagnosis','review'] as const) object(p.project.limits![role], ['maxTokens','maxCostUsd','maxCalls','timeoutSeconds']);
+  const zero = { tokens: 0, cost: 0, calls: 0 };
+  const hold = advisoryLimitHold({ host: p.host, project: p.project, hostUsed: zero, projectUsed: zero, roleUsed: zero,
+    active: 0, incidentCalls: 0, registered: true, global: 'on', projectControl: 'enabled', mode: 'observe' });
+  demand(text(p.holdId) && p.holdId.length <= 200 && time(p.at) && !hold, hold ?? 'invalid advisory registration policy');
+}
+function validateAdvisoryControls(c: AdvisoryControls): void {
+  object(c, ['registered','global','projectControl']); demand(typeof c.registered === 'boolean' && ['on','off','unknown'].includes(c.global)
+    && ['enabled','paused','unknown'].includes(c.projectControl), 'unknown advisory controls');
+}
 function facts(x: any): void {
   object(x, ['scope','requirements','gate','runId','failure']); validateScope(x.scope);
   demand(hash(x.requirements) && hash(x.gate) && hash(x.failure) && text(x.runId), 'invalid incident facts');
@@ -85,7 +123,7 @@ function entries(x: any): [string, any][] {
 }
 /** Strict read validation; no recovery/reset from unknown versions, foreign identities or malformed owners. */
 export function validateSupervisor(s: any, project: ProjectIdentity): SupervisorState {
-  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history', ...['control','diagnostics','deliveries','resolutions','reviewCompletions'].filter(k => Object.hasOwn(s, k))]);
+  object(s, ['version','project','revision','incidents','proposals','reviews','intents','humans','reservations','events','charged','history', ...['control','diagnostics','deliveries','resolutions','reviewCompletions','advisory'].filter(k => Object.hasOwn(s, k))]);
   validateProject(s.project); demand(s.version === 1 && same(s.project, project) && count(s.revision), 'version/project/revision mismatch');
   if (s.control) {
     object(s.control, ['mode','actor','at','pilot']);
@@ -111,7 +149,13 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
     validateDiagnostic(d); const r = s.reservations[supervisorHash(d.reservationId)];
     demand(id === d.id && r?.kind === 'diagnosis' && r.incidentId === d.incidentId && r.fence === d.fence, 'foreign diagnostic');
     if (d.outcome !== 'proposed' || d.decision?.action.kind === 'escalate') demand(s.humans[d.incidentId] && s.incidents[d.incidentId].incident.state === 'human-required', 'lost diagnosis human stop');
-    if (d.decision?.action.kind === 'gate-change') demand(s.proposals[d.decision.action.proposal.id] && same(s.proposals[d.decision.action.proposal.id], d.decision.action.proposal), 'lost exact diagnosis proposal');
+    const advisory = s.advisory?.settlements?.[supervisorHash(d.reservationId)];
+    if (advisory?.diagnosticId) {
+      const g = s.advisory!.workers[supervisorHash(d.reservationId)].grant;
+      demand(advisory.diagnosticId === d.id && d.basisHash === g.basis && d.startedAt === r.at
+        && d.completedAt === advisory.at, 'foreign retained advisory diagnostic');
+    }
+    if (!advisory && d.decision?.action.kind === 'gate-change') demand(s.proposals[d.decision.action.proposal.id] && same(s.proposals[d.decision.action.proposal.id], d.decision.action.proposal), 'lost exact diagnosis proposal');
   }
   for (const [id, h] of entries(s.humans)) { validateHumanRequest(h); demand(id === h.incidentId && s.incidents[id] && same(h.project, project), 'foreign human request'); }
   for (const [id, c] of entries(s.reviewCompletions ?? {})) {
@@ -136,17 +180,49 @@ export function validateSupervisor(s: any, project: ProjectIdentity): Supervisor
   }
   for (const [id, r] of entries(s.reservations)) {
     object(r, ['id','incidentId','kind','owner','fence','at','deadline','reserved','actual','state','reviewId']); owner(r.owner); resources(r.reserved);
-    if (r.actual !== null) { resources(r.actual); demand(r.actual.tokens <= r.reserved.tokens && r.actual.cost <= r.reserved.cost, 'accounting overflow'); }
+    if (r.actual !== null) { resources(r.actual); demand((r.actual.tokens <= r.reserved.tokens || subscriptionProfile(s.advisory?.policies[id]?.host.profile ?? '') && !!s.advisory?.settlements?.[id]) && r.actual.cost <= r.reserved.cost, 'accounting overflow'); }
     demand(id === supervisorHash(r.id) && text(r.id) && text(r.fence) && s.incidents[r.incidentId] && ['diagnosis','review'].includes(r.kind)
       && time(r.at) && time(r.deadline) && r.deadline > r.at && (r.kind !== 'diagnosis' || Date.parse(r.deadline) - Date.parse(r.at) <= DIAGNOSIS_TIMEOUT_MS) && ['active','finished','ambiguous'].includes(r.state)
       && (r.state === 'finished' ? r.actual !== null : r.actual === null)
       && (r.reviewId === null || r.kind === 'review' && text(r.reviewId) && s.reviews[supervisorHash(r.reviewId)]?.invocationId === r.id), 'invalid reservation');
   }
+  if (s.advisory) {
+    // Explicit compatibility for the shipped three-field advisory journal. Never drop an unknown field.
+    object(s.advisory, ['policies','workers','sends', ...(Object.hasOwn(s.advisory, 'settlements') ? ['settlements'] : [])]);
+    for (const [key, p] of entries(s.advisory.policies)) {
+      validateAdvisoryRegistration(p);
+      const r = s.reservations[key]; demand(r?.kind === 'diagnosis' && p.at === r.at && same(r.reserved, advisoryReservation(p.host.profile)), 'orphan advisory policy');
+    }
+    for (const [key, w] of entries(s.advisory.workers)) {
+      object(w, ['grant','at']); const g = validateDiagnosisGrant(w.grant), r = s.reservations[key], p = s.advisory.policies[key];
+      demand(p && r && key === supervisorHash(g.invocationId) && g.incidentId === r.incidentId && g.fence === r.fence
+        && same(g.project, s.project) && s.incidents[g.incidentId].facts.scope.kind === 'ticket'
+        && s.incidents[g.incidentId].facts.scope.ticket === g.ticket && s.incidents[g.incidentId].facts.runId === g.runId
+        && g.profile === p.host.profile && g.policy === hostAdvisoryPolicyIdentity(p.host) && g.rollout === p.rollout?.identity
+        && (!p.rollout || g.deadline <= p.rollout.expiresAt) && g.holdId === p.holdId && g.deadline === r.deadline
+        && same(g.reserved, r.reserved) && !same(g.owner, r.owner) && time(w.at) && w.at >= r.at && w.at < r.deadline, 'foreign worker grant');
+    }
+    for (const [key, a] of entries(s.advisory.sends)) {
+      const w = s.advisory.workers[key]; demand(w && a.at >= w.at, 'send without registered worker'); validateSendAuthorization(a, w.grant);
+    }
+  }
+  for (const [key, v] of entries(s.advisory?.settlements ?? {})) {
+    object(v, ['grantId','holdId','invocationId','fence','authorization','usage','process','cleanup','at','disposition',...(Object.hasOwn(v,'diagnosticId') ? ['diagnosticId'] : [])]);
+    if (v.diagnosticId) demand(hash(v.diagnosticId) && s.diagnostics?.[v.diagnosticId], 'missing terminal diagnostic');
+    const g = s.advisory!.workers[key]?.grant, a = s.advisory!.sends[key], r = s.reservations[key];
+    demand(g && a && r && key === supervisorHash(v.invocationId) && v.grantId === g.id && v.holdId === g.holdId
+      && v.invocationId === g.invocationId && v.fence === g.fence && v.authorization === a.receipt
+      && hash(v.process) && hash(v.cleanup) && time(v.at) && v.at >= a.at && ['local-human-required','retained-advice'].includes(v.disposition), 'foreign settlement');
+    validateProviderUsageReceipt(v.usage, g, a);
+    demand(v.usage.state === 'known' && r.state === 'finished' && same(r.actual, v.usage.resources)
+      && (v.disposition === 'local-human-required' ? s.incidents[r.incidentId].incident.state === 'human-required'
+        : Object.values(s.diagnostics ?? {}).some(d => d.id === v.diagnosticId && d.reservationId === r.id && d.outcome === 'proposed' && d.decision)),  'settlement lost closure/accounting/disposition');
+  }
   demand(Object.values<any>(s.reservations).filter(r => r.state === 'active').length <= 1, 'multiple project decisions');
   object(s.charged, ['diagnosis','review']); resources(s.charged.diagnosis); resources(s.charged.review);
   for (const kind of ['diagnosis','review']) {
     const rs = Object.values<any>(s.reservations).filter(r => r.kind === kind);
-    demand(['tokens','cost'].every(unit => rs.reduce((n, r) => n + r.reserved[unit], 0) === s.charged[kind][unit]), 'lost charge');
+    demand(['tokens','cost'].every(unit => rs.reduce((n, r) => n + chargedResources(r)[unit], 0) === s.charged[kind][unit]), 'lost charge');
   }
   for (const m of Object.values<any>(s.incidents)) demand(m.incident.diagnosisCalls === Object.values<any>(s.reservations).filter(r => r.kind === 'diagnosis' && r.incidentId === m.incident.id).length, 'lost diagnosis counter');
   entries(s.events).forEach(([, v]) => demand(hash(v), 'invalid event digest'));
@@ -176,7 +252,7 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
   const key = supervisorHash(event.id), digest = supervisorHash(event);
   if (state.events[key]) { demand(state.events[key] === digest, 'event id reused with different bytes'); return state; }
   // An observation/stop fence must remain writable even when an old worker's ownership is unknown.
-  for (const projectState of event.kind === 'control' ? [] : [state, ...(environment.projects ?? [])]) {
+  for (const projectState of ['control','settle-advisory'].includes(event.kind) ? [] : [state, ...(environment.projects ?? [])]) {
     for (const r of Object.values(projectState.reservations)) if (r.state === 'active') demand(environment.ownerState(r.owner) !== 'unknown', 'unknown worker owner holds journal');
     for (const m of Object.values(projectState.intents)) if (m.outcome === 'pending') demand(environment.ownerState(m.owner) !== 'unknown', 'unknown intent owner holds journal');
   }
@@ -220,7 +296,29 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       if (p.change.category === 'factory-policy') m.incident.state = 'human-required';
       break;
     }
+    case 'reserve-advisory':
     case 'reserve': {
+      if (event.kind === 'reserve-advisory') {
+        validateAdvisoryRegistration(event.policy); validateAdvisoryControls(event.controls);
+        demand(Date.parse(event.reservation.deadline) - Date.parse(event.reservation.at) <= event.policy.project.limits!.diagnosis.timeoutSeconds * 1000,
+          'advisory role deadline exceeded');
+        demand(event.policy.at === event.at && event.reservation.kind === 'diagnosis'
+          && same(event.reservation.reserved, advisoryReservation(event.policy.host.profile)), 'advisory reservation must use fixed supported bounds');
+        const all = [state, ...(environment.projects ?? []).filter(p => !same(p.project, state.project))];
+        const usage = (ps: SupervisorState[], role?: 'diagnosis') => {
+          const rs = ps.flatMap(p => Object.values(p.reservations)).filter(r => !role || r.kind === role);
+          return { tokens: rs.reduce((n,r) => n + chargedResources(r).tokens, 0), cost: rs.reduce((n,r) => n + chargedResources(r).cost, 0), calls: rs.length };
+        };
+        const hold = advisoryLimitHold({ host: event.policy.host, project: event.policy.project, hostUsed: usage(all), projectUsed: usage([state]),
+          roleUsed: usage([state], 'diagnosis'), active: all.flatMap(p => Object.values(p.reservations)).filter(r => r.state !== 'finished').length,
+          incidentCalls: Object.values(state.reservations).filter(r => r.incidentId === event.reservation.incidentId && r.kind === 'diagnosis').length,
+          ...event.controls, mode: state.control?.mode ?? 'observe' });
+        demand(!hold, hold ?? 'advisory policy held');
+        s.advisory ??= { policies: {}, workers: {}, sends: {} };
+        s.advisory.policies[supervisorHash(event.reservation.id)] = structuredClone(event.policy);
+      }
+      if (event.kind === 'reserve') demand(![state, ...(environment.projects ?? [])].some(p => Object.keys(p.advisory?.policies ?? {}).some(key => p.reservations[key]?.state !== 'finished')),
+        'unsettled advisory reservation excludes legacy workers');
       demand(s.control?.mode !== 'stopped' && (event.reservation.kind !== 'review' || !s.control || s.control.mode === 'act'), 'operator mode fences new workers');
       const r = event.reservation; const m = current(r.incidentId); const l = event.limits;
       object(l, ['project','shared','capacity','reviewCalls','reviewTimeoutMs']); resources(l.project); resources(l.shared); resources(r.reserved); liveOwner(r.owner);
@@ -228,7 +326,7 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       demand(text(r.id) && text(r.fence) && !s.reservations[supervisorHash(r.id)] && r.state === 'active' && r.actual === null && r.reviewId === null && r.at === event.at && time(r.deadline), 'invalid new reservation');
       const elapsed = Date.parse(r.deadline) - Date.parse(r.at);
       demand(['diagnosis','review'].includes(r.kind) && elapsed > 0 && elapsed <= (r.kind === 'diagnosis' ? DIAGNOSIS_TIMEOUT_MS : l.reviewTimeoutMs), 'call deadline exceeded');
-      demand(r.reserved.tokens > 0 && r.reserved.cost > 0, 'unknown/zero paid reservation');
+      demand(r.reserved.tokens > 0 && (r.reserved.cost > 0 || event.kind === 'reserve-advisory' && subscriptionProfile(event.policy.host.profile) && r.reserved.cost === 0), 'unknown/zero paid reservation');
       demand(!Object.values(s.reservations).some(x => x.state === 'active' || x.state === 'ambiguous'), 'project decision unsettled');
       const peers = (environment.projects ?? [state]).filter(x => !same(x.project, state.project));
       peers.forEach(x => validateSupervisor(x, x.project)); const all = [...peers, state];
@@ -242,8 +340,61 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
       for (const unit of ['tokens','cost'] as const) s.charged[r.kind][unit] += r.reserved[unit];
       break;
     }
+    case 'register-advisory-worker': {
+      const r = owned(event.reservationId, event.fence, event.owner), g = validateDiagnosisGrant(event.grant);
+      current(r.incidentId); demand(s.control?.mode !== 'stopped', 'stop fences worker registration'); liveOwner(g.owner);
+      const key = supervisorHash(r.id), p = s.advisory?.policies[key];
+      demand(p && !s.advisory!.workers[key] && !s.advisory!.sends[key] && g.invocationId === r.id && g.fence === r.fence,
+        'legacy or duplicate worker registration held');
+      s.advisory!.workers[key] = { grant: structuredClone(g), at: event.at }; break;
+    }
+    case 'authorize-advisory-send': {
+      const key = supervisorHash(event.reservationId), r = s.reservations[key], w = s.advisory?.workers[key];
+      validateAdvisoryRegistration(event.policy); validateAdvisoryControls(event.controls);
+      demand(r?.kind === 'diagnosis' && r.state === 'active' && w && w.grant.id === event.grantId && w.grant.fence === event.fence
+        && r.fence === event.fence && same(w.grant.owner, event.worker) && !s.advisory!.sends[key]
+        && same(s.advisory!.policies[key], event.policy) && hash(event.payload) && event.at >= w.at && event.at < r.deadline,
+        'send permission is stale, foreign, consumed or unregistered');
+      liveOwner(event.worker); liveOwner(r.owner); current(r.incidentId);
+      demand(s.control?.mode !== 'stopped' && event.controls.registered === true && event.controls.global === 'on'
+        && event.controls.projectControl === 'enabled', 'stop or current host/project controls fence new authorization');
+      const receipt = { version: 1 as const, grantId: w.grant.id, invocationId: r.id, fence: r.fence, worker: event.worker,
+        profile: w.grant.profile, payload: event.payload, at: event.at };
+      s.advisory!.sends[key] = validateSendAuthorization({ ...receipt, receipt: supervisorHash(receipt) }, w.grant); break;
+    }
+    case 'settle-advisory': {
+      const key = supervisorHash(event.reservationId), r = s.reservations[key], v = event.settlement;
+      demand(r && r.state !== 'finished' && !s.advisory?.settlements?.[key] && v.at === event.at, 'stale advisory settlement');
+      const terminal = structuredClone(v), m = s.incidents[r.incidentId];
+      let d = event.diagnostic ? structuredClone(validateDiagnostic(event.diagnostic)) : undefined;
+      if (d) {
+        demand(d.reservationId === r.id && d.fence === r.fence && d.incidentId === r.incidentId && d.completedAt === event.at
+          && d.basisHash === s.advisory!.workers[key].grant.basis && d.startedAt === r.at,
+          'foreign terminal diagnostic');
+        const overrun = subscriptionProfile(v.usage.profile) && !!v.usage.usage && (v.usage.usage.output > 4096 || v.usage.resources!.tokens > r.reserved.tokens);
+        const usable = !overrun && d.outcome === 'proposed' && event.at < r.deadline && s.control?.mode !== 'stopped'
+          && !m.superseded && !m.denied && m.incident.state !== 'human-required' && !supervisorHumanHold(s) && !supervisorRevisionHold(s);
+        if (!usable && d.outcome === 'proposed') {
+          const {id, ...body} = d;
+          Object.assign(body,{outcome:'stale',decision:null,reason:'Current journal stop/human/denial/material fence or subscription target overrun refused usable publication'});
+          d = validateDiagnostic({id:supervisorHash(body),...body});
+        }
+        terminal.disposition = d.outcome === 'proposed' && d.decision?.action.kind !== 'escalate' ? 'retained-advice' : 'local-human-required';
+        terminal.diagnosticId = d.id;
+        s.diagnostics ??= {}; s.diagnostics[d.id] = d;
+      }
+      if (terminal.disposition === 'local-human-required') {
+        if (event.request && d) putHuman({...event.request,proposalId:d.id});
+        else m.incident.state = 'human-required';
+      }
+      s.advisory!.settlements ??= {}; s.advisory!.settlements[key] = terminal;
+      r.actual = structuredClone(v.usage.resources); r.state = 'finished';
+      for (const unit of ['tokens','cost'] as const) s.charged[r.kind][unit] += chargedResources(r)[unit] - r.reserved[unit];
+      break;
+    }
     case 'finish': {
       const r = owned(event.reservationId, event.fence, event.owner); resources(event.actual);
+      demand(!s.advisory?.policies[supervisorHash(r.id)], 'advisory settlement requires raw provider and owned cleanup receipts');
       demand(event.actual.tokens <= r.reserved.tokens && event.actual.cost <= r.reserved.cost, 'actual exceeds reserved ceiling');
       r.actual = event.actual; r.state = 'finished'; break; // No refund, including failed calls.
     }
@@ -264,6 +415,8 @@ export function transitionSupervisor(state: SupervisorState, event: Event, envir
         demand(!supervisorRevisionHold(s, p.id), 'diagnosis differs from exact operator-permitted revision');
         demand(!s.proposals[p.id] || same(s.proposals[p.id], p), 'proposal changed'); s.proposals[p.id] = p;
       }
+      demand(!s.advisory?.policies[supervisorHash(r.id)] || event.actual === null && event.processConfirmed === false && d.outcome !== 'proposed',
+        'advisory settlement requires raw provider and owned cleanup receipts');
       const needsHuman = d.outcome !== 'proposed' || d.decision?.action.kind === 'escalate';
       demand(needsHuman ? event.request !== null && event.request.proposalId === d.id && event.request.incidentId === d.incidentId : event.request === null, 'diagnosis and required human stop must publish atomically');
       if (event.request) putHuman(event.request);
@@ -377,18 +530,93 @@ export function readSupervisor(stateDir: string, project: ProjectIdentity): Supe
  * stateDir MUST be host-owned, outside project/agent mounts, as for admission/recovery. No async effects inside locks. */
 export function commitSupervisor(stateDir: string, project: ProjectIdentity, expectedRevision: number, event: Event): SupervisorState {
   validateProject(project);
-  const after = withAdmissionLock(join(stateDir, 'supervisor'), () => {
+  if (event.kind === 'settle-advisory') {
+    const brand = settlementEvents.get(event);
+    demand(brand && brand.stateDir === stateDir && brand.project === supervisorHash(project)
+      && brand.revision === expectedRevision && Object.isFrozen(event), 'unverified advisory settlement event');
+    settlementEvents.delete(event); // One use, including failed CAS/write attempts.
+  }
+  const after = withAdmissionLock(join(stateDir, 'supervisor'), write => {
     const j = readJournal(stateDir), key = supervisorHash(project.root);
     const before = j.projects[key] ? validateSupervisor(j.projects[key], project) : emptySupervisor(project);
     demand(before.revision === expectedRevision, 'revision CAS failed');
     const after = transitionSupervisor(before, event, { ownerState, projects: Object.values(j.projects) });
-    if (after !== before) { j.projects[key] = after; writeDurable(supervisorFile(stateDir), JSON.stringify(j) + '\n'); }
+    if (after !== before) { j.projects[key] = after; write(supervisorFile(stateDir), JSON.stringify(j) + '\n'); }
     return after;
   }, -1);
   // Best-effort observation is outside the authority lock. Replays share a stable event ID; telemetry cannot change the committed outcome.
   try { observeEvent(stateDir, supervisorObservation(after, event)); }
   catch { /* Telemetry failure never changes journal authority or a successful delivery receipt. */ }
   return after;
+}
+/** Only this API returns new send permission. Existing/replayed receipts are observational, never permission.
+ * Stop and this transition share commitSupervisor's lock/CAS. No request runs under that lock. */
+export function authorizeAdvisorySend(stateDir: string, project: ProjectIdentity, expectedRevision: number,
+  input: Omit<Extract<Event, { kind: 'authorize-advisory-send' }>, 'id' | 'kind'>): SendAuthorization {
+  const before = readSupervisor(stateDir, project), key = supervisorHash(input.reservationId);
+  demand(before.revision === expectedRevision && !before.advisory?.sends[key], 'send permission already consumed or stale revision');
+  const after = commitSupervisor(stateDir, project, expectedRevision, { ...input, kind: 'authorize-advisory-send',
+    id: `advisory-send:${input.grantId}` });
+  demand(after.revision === expectedRevision + 1 && after.advisory?.sends[key], 'replay is not new permission');
+  return structuredClone(after.advisory!.sends[key]);
+}
+/** Source-only final closure. Imports and immutable evidence I/O are OUTSIDE the journal lock.
+ * CAS rechecks grant/send and final journal fences. Typed retained advice/human requests grant no execution, refund or permission.
+ * Missing usage, unregistered/no-send and uncertain cleanup remain held. Reopen only observes closure. */
+export async function settleAdvisory(stateDir: string, project: ProjectIdentity, expectedRevision: number,
+  invocationId: string, publication?: { snapshot: Snapshot; policy: AdvisoryRegistration; controls: AdvisoryControls } | { refused: string }): Promise<SupervisorState> {
+  const before = readSupervisor(stateDir,project), key = supervisorHash(invocationId);
+  demand(before.revision === expectedRevision, 'revision CAS failed');
+  if (before.advisory?.settlements?.[key]) return before;
+  const g = before.advisory?.workers[key]?.grant, a = before.advisory?.sends[key];
+  demand(g && a, 'registered grant and durable send authorization required');
+  // Dynamic imports avoid the process/usage modules' journal-reader TLA cycle.
+  const { readProviderUsage } = await import('./supervisor-openai-usage.mts');
+  const { readOwnedCleanup, readOwnedProcess } = await import('./supervisor-process.mts');
+  const usage = readProviderUsage(stateDir,g!,a!);
+  demand(usage.state === 'known', 'known immutable provider usage required');
+  if (usage.state !== 'known') throw Error('Supervisor state held: usage unknown');
+  const process = readOwnedProcess(stateDir,g!), cleanup = readOwnedCleanup(stateDir,g!);
+  const at = new Date().toISOString();
+  let diagnostic: Diagnostic | undefined, request: HumanRequest | undefined;
+  if (publication) {
+    const { readSupervisorOriginal } = await import('./supervisor-input.mts');
+    const { validateSnapshot } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
+    const dir = join(stateDir,'supervisor',supervisorHash(project.root),supervisorHash(invocationId)), inputRef = join(dir,'input.json');
+    const frozen = JSON.parse(readSupervisorOriginal(inputRef)), snapshot = validateSnapshot(frozen.snapshot);
+    demand(diagnosisBasis(snapshot) === g.basis && frozen.basis === g.basis && frozen.incidentId === g.incidentId
+      && supervisorHash(snapshot.project) === supervisorHash(project), 'frozen input/grant mismatch');
+    const raw = JSON.parse(readSupervisorOriginal(join(dir,'raw-output.json')));
+    demand(raw.grantId === g.id && raw.inputRef === inputRef && typeof raw.stdout === 'string' && typeof raw.stderr === 'string', 'foreign owned output');
+    let outcome: Diagnostic['outcome'] = 'malformed', reason = 'Unusable bounded provider output', decision: Diagnostic['decision'] = null;
+    try {
+      demand(!('refused' in publication), 'refused' in publication ? publication.refused : 'publication refused');
+      if ('refused' in publication) throw Error(publication.refused);
+      demand(diagnosisBasis(publication.snapshot) === g.basis && same(publication.policy,before.advisory!.policies[key])
+        && publication.controls.registered && publication.controls.global === 'on' && publication.controls.projectControl === 'enabled', 'publication source/policy/controls changed');
+      demand(at < g.deadline, 'late output');
+      decision = parseDiagnosis(raw.stdout,snapshot,g.incidentId);
+      // Advice is retained only; no proposal/review/action authority is created here.
+      if (decision.action.kind === 'gate-change') demand(Date.parse(decision.action.proposal.change.expiresAt) > Date.parse(at), 'expired gate advice');
+      outcome = 'proposed'; reason = decision.rationale;
+    } catch (e) { reason = String(e).slice(0,4000); decision = null; outcome = 'refused' in publication ? 'stale' : 'malformed'; }
+    const body = {reservationId:invocationId,incidentId:g.incidentId,basisHash:g.basis,snapshotHash:supervisorHash(snapshot),fence:g.fence,
+      startedAt:before.reservations[key].at,completedAt:at,inputRef,outcome,reason,stdout:raw.stdout,stderr:raw.stderr,decision};
+    diagnostic = validateDiagnostic({id:supervisorHash(body),...body});
+    request = {version:1,id:`${invocationId}:human`,project,scope:snapshot.scope,incidentId:g.incidentId,proposalId:diagnostic.id,
+      reason:'authority-uncertain',question:`Inspect retained non-executing diagnosis: ${reason}`.slice(0,4000),
+      nextAction:'Inspect original input, raw output and terminal receipts; decide the next authorized step. No reset, automatic retry or execution is authorized.',
+      evidence:[inputRef,join(dir,'raw-output.json')],stop:'required',delivery:{state:'pending',attempts:0}};
+  }
+  const event: Event = { kind: 'settle-advisory', id: `advisory-settlement:${g!.id}`, at, reservationId: invocationId, ...(diagnostic ? {diagnostic,request} : {}),
+    settlement: { grantId:g!.id, holdId:g!.holdId, invocationId, fence:g!.fence, authorization:a!.receipt,
+      usage:structuredClone(usage.receipt), process:supervisorHash(process), cleanup:supervisorHash(cleanup), at,
+      disposition:'local-human-required' } };
+  const freeze = (v: any): void => { if (v && typeof v === 'object') { Object.values(v).forEach(freeze); Object.freeze(v); } };
+  freeze(event);
+  settlementEvents.set(event,{stateDir,project:supervisorHash(project),revision:expectedRevision});
+  try { return commitSupervisor(stateDir,project,expectedRevision,event); }
+  finally { settlementEvents.delete(event); }
 }
 /** Select scalar attribution from the committed state, never raw adapter usage or source text. */
 export function supervisorObservation(after: SupervisorState, event: Event): ProducerEvent {
@@ -399,8 +627,11 @@ export function supervisorObservation(after: SupervisorState, event: Event): Pro
     const incidentId = e.incidentId ?? e.proposal?.incidentId ?? e.request?.incidentId ?? e.diagnostic?.incidentId ?? reservation?.incidentId ?? intent?.incidentId
       ?? (e.facts ? incidentIdentity(project, e.facts) : undefined);
     const scope = incidentId ? after.incidents[incidentId]?.incident.scope : undefined;
-    const proposalId = e.proposal?.id ?? e.review?.proposalId ?? e.request?.proposalId ?? e.proposalId ?? diagnosisProposal?.id ?? intent?.proposalId;
-    const outcome = e.kind === 'notify-ack' ? 'notified' : e.kind === 'resolve-human' ? 'resolved'
+    const proposalId = (e.kind === 'settle-advisory' ? after.advisory?.settlements?.[supervisorHash(e.reservationId)]?.diagnosticId : undefined)
+      ?? e.proposal?.id ?? e.review?.proposalId ?? e.request?.proposalId ?? e.proposalId ?? diagnosisProposal?.id ?? intent?.proposalId;
+    const settled = e.kind === 'settle-advisory' ? after.advisory?.settlements?.[supervisorHash(e.reservationId)] : undefined;
+    const outcome = settled ? settled.disposition === 'retained-advice' ? 'observed' : 'pending'
+      : e.kind === 'notify-ack' ? 'notified' : e.kind === 'resolve-human' ? 'resolved'
       : e.review?.disposition === 'deny' || e.diagnostic && e.diagnostic.outcome !== 'proposed' ? 'refused'
       : e.kind === 'human' || e.request || e.kind === 'notify-attempt' ? 'pending'
       : e.review?.disposition === 'approve' ? 'approved'
@@ -410,5 +641,5 @@ export function supervisorObservation(after: SupervisorState, event: Event): Pro
       eventKind: 'supervisor-observed', to: event.kind, reasonCode: 'unspecified', origin: 'reconciliation',
       supervisor: { projectId: supervisorHash(project), ...(incidentId ? { incidentId } : {}), ...(proposalId ? { proposalId } : {}), ...(e.review ? { reviewId: supervisorHash(e.review.id) } : {}),
         hostOutcomeId: supervisorHash(event.id), outcome, ...(reservation ? { role: reservation.kind } : {}),
-        usage: ['finish','diagnosis','review-complete'].includes(e.kind) ? reservation?.actual ?? null : null, intervention: e.kind === 'resolve-human' } };
+        usage: ['finish','diagnosis','review-complete','settle-advisory'].includes(e.kind) ? reservation?.actual ?? null : null, intervention: e.kind === 'resolve-human' } };
 }

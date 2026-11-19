@@ -1,4 +1,4 @@
-// Host-only stopped-work preparation. Import-safe core; runtime/tracker/agent imports occur only in the CLI adapter.
+// Host-only stopped-work preparation. Import-safe core; the CLI adapter acquires managed admission before tracker/model work.
 // No assessments, run verdicts, saved implementation, ownership receipts or recovery budgets are written here.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -97,6 +97,11 @@ async function main(): Promise<Preparation> {
     return held('config','Expected numeric ticket and recorded base','project');
   const runtime = await import('./runtime-config.mts');
   const { retainRuntime } = await import('./context.mts');
+  const { claimManagedEntry, releaseManagedEntry } = await import('./admission.mts');
+  const rt = runtime.TRACKER, entry = claimManagedEntry(runtime.context.sharedState, { root: runtime.context.projectRoot,
+    tracker: { kind: rt.kind, host: rt.gitlabHost ?? rt.host!, project: rt.project } });
+  let entryCleanupConfirmed = true;
+  try {
   const lease = await retainRuntime(runtime.context);
   const tracker = await import('./tracker.mts');
   const store = await import('./manifests.mts');
@@ -137,6 +142,7 @@ async function main(): Promise<Preparation> {
     analyse:i => {
       workspace = {path:resolve(stateDir(),'worktrees',`recovery-${randomUUID()}`),sha:i.baseSha};
       console.error(`Invocation-owned analysis workspace: ${workspace.path}; preserve if this process does not finish cleanup`);
+      entryCleanupConfirmed = false;
       lease.pendingCleanup();
       workspace = analysisWorktree(project,base,workspace.path);
       return analyse({project,base,worktree:workspace,ticket:i.ticket,input:i.input,
@@ -145,8 +151,9 @@ async function main(): Promise<Preparation> {
     dependency:iid => { tracker.setDeliveryDeadline(Date.now()+20_000); return dependencyState(iid,{ticket:tracker.ticket,mergedInto:tracker.mergedInto,base,
       run:id => readRuns(stateDir(),false).find(r => r.project === project && Number(r.iid) === id)}); },
     cleanup:() => { if (!workspace) return; if (git(['status','--porcelain','--untracked-files=all'],workspace.path)) return `Analysis workspace is not clean; preserved at ${workspace.path}`;
-      git(['worktree','remove',workspace.path]); lease.confirmedCleanup(); },
+      git(['worktree','remove',workspace.path]); entryCleanupConfirmed = true; lease.confirmedCleanup(); },
   });
+  } finally { if (entryCleanupConfirmed) releaseManagedEntry(runtime.context.sharedState, entry); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   // The helper owns stdout exclusively. Runtime diagnostics go to stderr, never into the JSON protocol.

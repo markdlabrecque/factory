@@ -9,7 +9,8 @@ import { exportEvents } from '../board/execution-events.mts';
 // commands on the host with its mounts), the agent (a shell script per scenario), the tracker/push, and a fake clock
 // for the 900000 ms deadline. Unknown docker or host git calls throw. Prerequisite holds (#75) use the real
 // handoff.mts prerequisiteHold over a synthetic ticket analysis. The tracker boundary also covers posting failures.
-import { fixtureProvenance, verificationCommand, writeVerification } from './fixtures/verification.mts';
+import { fixtureProvenance, fixtureReport, verificationCommand, writeVerification } from './fixtures/verification.mts';
+import { readProof } from './verification.mts';
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -59,7 +60,8 @@ const COMMIT = `printf 'fixed\\n' > fix.txt && git add -A && git -c user.name=r 
 const PASS = `printf 'VERDICT: PASS\\nlooks right\\n' > "$EVIDENCE/verdict.md" && ${verificationCommand()}`;
 
 type Scenario = {
-  repair?: string; verify?: string; clean?: boolean; setup?: { command: string; timeoutMs?: number }[]; hooks?: Record<string, Hook>;
+  repair?: string; verify?: string | ((prompt: string) => string); clean?: boolean; setup?: { command: string; timeoutMs?: number }[]; hooks?: Record<string, Hook>;
+  behavior?: { base?: boolean; start: boolean };
   stuck?: boolean; runFails?: boolean; recheck?: (stage: "verify" | "deliver") => string | undefined; deliver?: () => Promise<{ url: string; merged: boolean }>;
   beforeImport?: (f: Fixture) => void; postFailure?: boolean;
 };
@@ -72,7 +74,8 @@ function fixture(t: TestContext, s: Scenario = {}) {
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
   writeFileSync(join(root, "app.txt"), "v1\n");
-  git(root, "add", "app.txt");
+  if (s.behavior?.base !== undefined) writeFileSync(join(root, 'behavior.mjs'), `export const accepts = count => count > 0 || ${s.behavior.base};\n`);
+  git(root, "add", ".");
   git(root, "commit", "-qm", "init");
   const baseSha = git(root, "rev-parse", "HEAD");
   git(root, "branch", "8-other");
@@ -82,7 +85,9 @@ function fixture(t: TestContext, s: Scenario = {}) {
   const worktree = join(root, ".factory/worktrees/7-fix-login");
   git(root, "worktree", "add", "-q", worktree, "7-fix-login");
   writeFileSync(join(worktree, "app.txt"), "v2\n");
-  git(worktree, "commit", "-qam", "half done");
+  if (s.behavior) writeFileSync(join(worktree, 'behavior.mjs'), `export const accepts = count => count > 0 || ${s.behavior.start};\n`);
+  git(worktree, "add", ".");
+  git(worktree, "commit", "-qm", "half done");
   if (!s.clean) {
     writeFileSync(join(worktree, "staged.txt"), "staged\n");
     git(worktree, "add", "staged.txt");
@@ -117,7 +122,7 @@ function fixture(t: TestContext, s: Scenario = {}) {
     return { env: {}, buildPrintCommand: ({ prompt }: { prompt: string }) => {
       const repair = prompt.startsWith("# Recover ticket");
       agentRuns.push(repair ? "repair" : "verifier");
-      return { command: repair ? (s.repair ?? `${COMMIT} && ${writeReport()}`) : (s.verify ?? PASS) };
+      return { command: repair ? (s.repair ?? `${COMMIT} && ${writeReport()}`) : (typeof s.verify === 'function' ? s.verify(prompt) : s.verify ?? PASS) };
     } };
   };
   const pushes: string[][] = [];
@@ -154,11 +159,12 @@ function fixture(t: TestContext, s: Scenario = {}) {
     run: () => runRecoveryAttempt(ctx, deps),
   };
   const ctx: RecoveryContext = {
-    root, record, model: REPAIR_MODEL, title: "Fix login", baseSha,
+    root, record, attempt: { id: ID, startSha }, model: REPAIR_MODEL, title: "Fix login", baseSha,
     proof: { state: join(home, 'state'), executionId: 'execution', requirementsHash: 'c'.repeat(64) },
     provenance: async () => fixtureProvenance, promptArgs: {
-      ISSUE_IID: "7", ISSUE_TITLE: "Fix login", TICKET: "ticket text", BASE_BRANCH: "main", BASE_SHA: baseSha, BRANCH: "7-fix-login",
+      ISSUE_IID: "7", ISSUE_TITLE: "Fix login", TICKET: s.behavior ? 'Add count validation for login.' : 'ticket text', BASE_BRANCH: "main", BASE_SHA: baseSha, BRANCH: "7-fix-login",
       EVIDENCE_DIR: "/home/agent/evidence/7", CATALOGUE: "(none)", ATTEMPT: "1", ATTEMPT_ID: ID, REPAIR_MINUTES: "15",
+      RECOVERY_START_SHA: 'untrusted-prompt-value',
     },
     previousRun: { iid: "7", stage: "stopped", note: "exited", implementerModel: TICKET_MODEL }, logs: [join(logs, "recover-7.log")],
     delivery: { ciWaitMinutes: 1, noCiMinutes: 1, autoMerge: false }, cancel: cancel.signal,
@@ -174,7 +180,7 @@ function fixture(t: TestContext, s: Scenario = {}) {
     workspace,
     recheck: s.recheck ?? (() => undefined),
     host,
-    setStage: () => {},
+    setStage: patch => { stages.push(patch); },
     agent,
     log: () => {},
   };
@@ -264,6 +270,96 @@ test("a committed repair is verified separately and the exact tip delivered; att
   // A record is never run twice.
   await assert.rejects(f.run(), /already started/);
 });
+
+for (const comparison of ['saved start', 'original base', 'neither'] as const) {
+  test(`behavioral reproduction on ${comparison} preserves the original proof baseline`, async t => {
+    const passing = comparison !== 'neither';
+    const verdict = passing ? 'PASS' : 'INCONCLUSIVE';
+    const artifacts = [
+      { path: 'before.txt', kind: 'command-output', phase: 'before' },
+      { path: 'after.txt', kind: 'command-output', phase: 'after' },
+    ];
+    const report = { ...fixtureReport(verdict, artifacts), changeKind: 'bugfix', criteria: [{
+      requirement: 'Accept zero', result: verdict.toLowerCase(), evidence: artifacts.map(a => a.path),
+    }] };
+    const f: Fixture = fixture(t, {
+      clean: true,
+      behavior: { base: comparison === 'original base' ? false : undefined, start: comparison === 'neither' },
+      repair: `printf 'export const accepts = count => count >= 0;\\n' > behavior.mjs && ${COMMIT} && ${writeReport({ cause: 'count 0 was rejected' })}`,
+      verify: prompt => {
+        const [, baseline, tip] = /Full ticket scope is always `([0-9a-f]+)` to `([0-9a-f]+)`/.exec(prompt)!;
+        const [, start] = /commit for behavioral comparison only is `([0-9a-f]+)`/.exec(prompt)!;
+        assert.equal(baseline, f.baseSha);
+        assert.equal(start, f.startSha);
+        assert.equal(tip, f.rec().tip);
+        assert.match(prompt, /first read `\/home\/agent\/evidence\/7\/recovery-report\.json` and `\/home\/agent\/evidence\/7\/recovery-report\.md`/);
+        // The feature ticket doesn't name the symptom. Get the input from the report, but prove it with real checks.
+        const { cause } = JSON.parse(readFileSync(join(f.rec().evidence, 'recovery-report.json'), 'utf8'));
+        const [, count] = /^count (\d+) was rejected$/.exec(cause)!;
+        return `set -eu
+printf '%s\\n' 'import assert from "node:assert/strict"; const { accepts } = await import(process.cwd() + "/behavior.mjs"); assert.equal(accepts(${count}), true); console.log("zero accepted");' > "$EVIDENCE/check.mjs"
+probe() {
+  git rev-parse HEAD > "$EVIDENCE/$1.txt"
+  node "$EVIDENCE/check.mjs" >> "$EVIDENCE/$1.txt" 2>&1
+}
+git checkout -q --detach ${baseline}
+if probe baseline; then exit 2; fi
+before=${baseline}
+if ! grep -q 'false !== true' "$EVIDENCE/baseline.txt"; then
+  grep -q ERR_MODULE_NOT_FOUND "$EVIDENCE/baseline.txt"
+  before=${start}
+  git checkout -q --detach "$before"
+fi
+if probe before; then observed=INCONCLUSIVE
+else grep -q 'false !== true' "$EVIDENCE/before.txt"; observed=PASS
+fi
+git checkout -q 7-fix-login
+test "$(git rev-parse HEAD)" = ${tip}
+probe after
+test "$observed" = ${verdict}
+printf 'VERDICT: %s\\nCompared %s (%s) to %s.\\n' "$observed" "$before" '${comparison}' ${tip} > "$EVIDENCE/verdict.md"
+printf '%s' '${JSON.stringify(report)}' > "$EVIDENCE/verification.json"`;
+      },
+    });
+    const result = await f.run();
+    const { record: { tip, evidence } } = result;
+    const before = comparison === 'original base' ? f.baseSha : f.startSha;
+    assert.equal(readFileSync(join(evidence, 'before.txt'), 'utf8').split('\n')[0], before);
+    assert.equal(readFileSync(join(evidence, 'after.txt'), 'utf8'), `${tip}\nzero accepted\n`);
+    assert.match(readFileSync(join(evidence, 'before.txt'), 'utf8'), passing ? /false !== true/ : /zero accepted/);
+    assert.equal(result.outcome, passing ? 'delivered' : 'failed', result.reason);
+    if (!passing) { assert.equal(f.stages.at(-1)?.verdict, 'INCONCLUSIVE'); assertPreserved(f); return; }
+    const proofId = (f.stages.find(stage => stage.verification)?.verification as { id: string }).id;
+    const { root } = readProof(join(f.home, 'state'), { project: 'proj', ticket: '7', executionId: 'execution', attemptId: ID,
+      branch: '7-fix-login', base: 'main', baseline: f.baseSha, tip: tip!, requirementsHash: 'c'.repeat(64) }, proofId);
+    assert.match(readFileSync(join(root, 'verdict.md'), 'utf8'), new RegExp(`Compared ${before} .* to ${tip}`));
+    assert.deepEqual(f.delivered, [{ sha: tip, branch: '7-fix-login' }]);
+  });
+}
+
+for (const phase of ['repair', 'verifier'] as const) {
+  test(`a Git replacement left by the ${phase} cannot publish proof or deliver a substituted tree`, async t => {
+    // Give the replacement the same parent as the actual tip but the pre-repair tree.
+    const replace = `substitute=$(git -c user.name=r -c user.email=r@r commit-tree HEAD^^{tree} -p HEAD^ -m substitute) && git replace HEAD "$substitute" && git reset --hard HEAD && test -z "$(git status --porcelain)"`;
+    const f = fixture(t, { clean: true,
+      repair: [COMMIT, phase === 'repair' ? replace : 'true', writeReport()].join(' && '),
+      verify: phase === 'verifier' ? `${replace} && ${PASS}` : PASS,
+    });
+    const refs = f.refs();
+    const result = await f.run();
+    const { gitDir, tip, evidence } = result.record;
+    assert.equal(result.outcome, 'failed', result.reason);
+    const log = join(evidence, `${phase}.log`);
+    assert.match(result.reason, /Git replacement refs are not allowed/, existsSync(log) ? readFileSync(log, 'utf8') : undefined);
+    assert.deepEqual(f.agentRuns, phase === 'repair' ? ['repair'] : ['repair', 'verifier']);
+    const gitArgs = ['--git-dir', gitDir];
+    assert.equal(git(f.root, ...gitArgs, 'rev-parse', 'HEAD'), tip);
+    assert.notEqual(git(f.root, ...gitArgs, 'rev-parse', 'HEAD^{tree}'), git(f.root, '--no-replace-objects', ...gitArgs, 'rev-parse', 'HEAD^{tree}'));
+    assert.equal(existsSync(join(f.home, 'state/verification')), false);
+    assert.deepEqual(f.comments, []);
+    assertPreserved(f, { refs });
+  });
+}
 
 test("the owned container mounts only this attempt's evidence writable and private Git with only the ticket's branch", async (t) => {
   const f = fixture(t);
@@ -471,6 +567,17 @@ test("an ambiguous delivery is recorded as failed and never retried", async (t) 
   assert.equal(out.outcome, "failed");
   assert.equal(calls, 1);
   assert.equal(f.rec().delivery?.ok, false);
+});
+
+test('a substituted attempt start is refused even if it matches the current worktree HEAD', async t => {
+  const f = fixture(t, { clean: true });
+  git(f.worktree, 'commit', '-q', '--allow-empty', '-m', 'substituted start');
+  writeAttemptRecord(f.record, { ...f.rec(), startSha: git(f.worktree, 'rev-parse', 'HEAD') });
+  const refs = f.refs();
+  await assert.rejects(f.run(), /Recovery attempt identity changed/);
+  assert.deepEqual(f.world.runs, []);
+  assert.equal(existsSync(join(f.home, 'state/verification')), false);
+  assertPreserved(f, { refs });
 });
 
 test("a worktree whose HEAD moved since the claim is refused before any container or Git side effect", async (t) => {

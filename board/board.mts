@@ -4,13 +4,13 @@ import { buildReadinessData } from './readiness-view.mts';
 export { buildReadinessData } from './readiness-view.mts';
 import { validDelivery } from './delivery.mts';
 import type { DeliveryCheckpoint } from './delivery.mts';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // Persisted transitions emit observations after authoritative locks, never on heartbeat writes.
 import { observeRun } from './execution-events.mts';
-import { claimLive, keyFor, newToken, ownerOf, releaseClaim, transferClaim, withAdmission, writeDurable } from "./admission.mts";
+import { claimLive, keyFor, newToken, ownerOf, releaseClaim, supervisorExclusion, withAdmission, writeDurable } from "./admission.mts";
 import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
 import { readAssessments, requestRefresh } from "./assessment.mts";
@@ -75,6 +75,7 @@ export interface RunState {
   stageSince: string;
   startedAt: string;
   executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
+  payloadCustody?: { version: 1; nonce: string }; // private source journal pointer; never readiness/projection authority
   implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
   delivery?: DeliveryCheckpoint; // host-only current pointer; never reconstructed from note prose
@@ -131,20 +132,31 @@ export function holdClaim(token: string | undefined): void {
 }
 
 /** Take over the claim the record of `iid` carries (the dispatcher's reservation) for this process and fence later
- *  writes with it. Returns the token, undefined when the record carries none (a manual start), or throws when the claim
- *  is no longer that record's (superseded or released). */
-export function adoptClaim(iid: string, dir = stateDir()): string | undefined {
-  const key = keyFor(iid, project);
-  let token: string | undefined;
-  try {
-    token = (JSON.parse(readFileSync(resolve(dir, `${key}.json`), "utf8")) as RunState).claim;
-  } catch {
-    return undefined;
-  }
-  if (!token) return undefined;
-  if (!transferClaim(dir, key, token, process.pid)) throw new Error(`#${iid}'s launch claim is no longer held; another run owns the ticket now`);
-  held = token;
-  return token;
+ *  writes with it. A tokenless manual start acquires a normal claim under the supplied cap (default one).
+ *  Throws when the record's claim was superseded/released or project exclusion/capacity refuses admission. */
+export function adoptClaim(iid: string, dir = stateDir(), cap = 1): string | undefined {
+  return withAdmission(dir, tx => {
+    const exclusion = supervisorExclusion(tx.state, project, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()));
+    if (exclusion) throw Error(exclusion);
+    const key = keyFor(iid, project), launch = process.env.FACTORY_LAUNCH_CLAIM;
+    let record: RunState | undefined;
+    try { record = JSON.parse(readFileSync(resolve(dir, `${key}.json`), 'utf8')); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    if (record !== undefined && (!record || typeof record !== 'object' || Array.isArray(record)
+      || record.iid !== iid || !['queued','waiting','setup','implementing','verifying','posting','pushing','ci','done','stopped'].includes(record.stage)))
+      throw Error('Run ownership is unknown; manual start held');
+    const token = record?.claim, claim = tx.state.claims[key];
+    if (token && claim?.token === token && (!launch || launch === token)) {
+      claim.owner = ownerOf(process.pid); tx.commit(); held = token; return token;
+    }
+    // A dispatched/recovery child cannot turn a failed handoff into a fresh manual launch.
+    // A genuine manual retry may replace only a terminal/parked historical token with no current ownership.
+    if (launch || token && (claim && claimLive(claim) || !record || ![...TERMINAL, ...PARKED].includes(record.stage)))
+      throw Error(`#${iid}'s launch claim is no longer held; another run owns the ticket now`);
+    const admitted = admitRun(tx, dir, { iid, project, pid: process.pid, cap });
+    if (!admitted.ok) throw Error(admitted.reason);
+    tx.commit(); writeRecord(dir, admitted.key, admitted.run); held = admitted.token; return held;
+  });
 }
 
 function write(file: string, text: string) {
@@ -198,6 +210,8 @@ export function setStage(iid: string, patch: Partial<RunState>): void {
 }
 
 function writeStage(tx: AdmissionTx, iid: string, patch: Partial<RunState>): void {
+  const exclusion = supervisorExclusion(tx.state, project, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()));
+  if (exclusion) throw Error(exclusion);
   const activeClaim = tx.state.claims[keyFor(iid, project)];
   if (activeClaim && claimLive(activeClaim) && activeClaim.token !== held) return;
   mkdirSync(stateDir(), { recursive: true });
@@ -284,9 +298,12 @@ export type Admitted = { ok: true; key: string; token: string; claim: AdmissionC
 /** The admission check, inside withAdmission (claimRun, and recovery's claim): adds the claim to `tx.state` and returns
  *  the record to write, or the reason. Commits and writes nothing itself. */
 export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitted {
+  if (!Number.isSafeInteger(o.cap) || o.cap <= 0) return { ok: false, reason: 'admission cap must be a positive safe integer' };
   const proj = o.project ?? project;
   const key = keyFor(o.iid, proj);
   const kind = o.kind ?? "normal";
+  const exclusion = supervisorExclusion(tx.state, proj, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()));
+  if (exclusion) return { ok: false, reason: exclusion };
   const runs = readRuns(dir);
   const claims = Object.entries(tx.state.claims).filter(([, c]) => claimLive(c));
   const current = runs.find((r) => r.key === key);
@@ -320,7 +337,7 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   }
   const run = trackStage(cur, { startedAt: at, ...cur, stage: "setup", note: "starting", starting: true, ...o.patch, ...extra,
     queueReasons: undefined, iid: o.iid, project: proj, pid: o.pid, claim: token,
-    verification: undefined, delivery: undefined, recovery: kind === 'normal' ? undefined : cur.recovery,
+    verification: undefined, delivery: undefined, payloadCustody: undefined, recovery: kind === 'normal' ? undefined : cur.recovery,
     executionId: kind === "normal" ? token : cur.executionId, updatedAt: at, stageSince: at } as RunState, at);
   return { ok: true, key, token, claim, current, run };
 }
@@ -406,6 +423,7 @@ export function markMergedOutside(iid: string, from: Stage, pr: { number: number
   dir = stateDir()): boolean {
   const key = keyFor(iid, project);
   const done = withAdmission(dir, (tx) => {
+    if (supervisorExclusion(tx.state, project, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()))) return false;
     const c = tx.state.claims[key];
     if (c && claimLive(c)) return false;
     let cur: RunState;

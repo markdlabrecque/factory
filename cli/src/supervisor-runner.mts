@@ -1,0 +1,42 @@
+// Fresh tool-free provider worker: registered handoff, anchor-loss exit and same-grant deadline. Final send authority remains the journal gate.
+import { requestAdvisory } from './supervisor-openai-request.mts';
+import { captureProviderEvidence, persistProviderUsage } from './supervisor-openai-usage.mts';
+import { validateDiagnosisGrant } from './supervisor-advisory-contract.mts';
+import { readSupervisor } from './supervisor-state.mts';
+import { readOwnedProcess } from './supervisor-process.mts';
+import { existsSync } from 'node:fs';
+const { supervisorHash } = await import(existsSync(new URL('./supervisor-contract.mts', import.meta.url)) ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
+if (!process.send || !process.connected) throw Error('Advisory held: owned IPC required');
+// A lost anchor must not leave a worker waiting on network input. No reconstructed group is signalled.
+process.once('disconnect', () => process.exit(1));
+process.once('message', async (m: any) => {
+  try {
+    if (m?.kind !== 'handoff') throw Error('Advisory held: explicit handoff required');
+    const o = m.request, g = validateDiagnosisGrant(o.grant);
+    const remaining = Date.parse(g.deadline) - Date.now();
+    if (remaining <= 0 || remaining > 600_000) throw Error('Advisory held: bounded worker deadline required');
+    setTimeout(() => process.exit(1), remaining); // Same immutable deadline also survives unexpected anchor loss.
+    readOwnedProcess(o.stateDir,g);
+    let result: any;
+    const observe = m.freshObservation === true ? () => new Promise<any>((accept, reject) => {
+      // Same immutable deadline bounds a lost/unresponsive controller. Observation is data, never send permission.
+      const timeout = setTimeout(() => reject(Error('Advisory held: current observation unavailable')), Math.max(1, Date.parse(g.deadline) - Date.now()));
+      process.once('message', (reply: any) => {
+        clearTimeout(timeout);
+        if (reply?.kind !== 'observation' || Object.keys(reply).length !== 2) reject(Error('Advisory held: invalid observation'));
+        else accept(reply.value);
+      });
+      process.send!({ kind: 'observe' }, e => { if (e) { clearTimeout(timeout); reject(e); } });
+    }) : undefined;
+    try { result = await requestAdvisory({ ...o, observe }); }
+    finally {
+      // An exception after authorization is spent too. Missing terminal metadata publishes UNKNOWN, never zero.
+      const a = readSupervisor(o.stateDir, g.project).advisory?.sends[supervisorHash(g.invocationId)];
+      if (a) persistProviderUsage(o.stateDir, g, a, captureProviderEvidence(result));
+    }
+    const text = result?.result?.content?.filter((v: any) => v.type === 'text').map((v: any) => v.text).join('') ?? '';
+    if (Buffer.byteLength(text) > m.maxOutputBytes) throw Error('Advisory held: output overflow');
+    process.stdout.write(text, () => { process.send!({ kind: 'complete' }, () => process.exit(0)); });
+  } catch { process.exit(1); }
+});
+process.send({ kind: 'ready' });
