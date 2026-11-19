@@ -11,7 +11,7 @@ import type { ModelFamily } from '../../orchestrator/model-policy.mts';
 import type { Diagnostic, DiagnosisDecision, DiagnosisMemory } from '../../orchestrator/supervisor.mts';
 import type { Facts, Resources, Limits, SupervisorState, Event } from './supervisor-state.mts';
 import { diagnosisGrant, subscriptionProfile } from './supervisor-advisory-contract.mts';
-import { validPiBearer } from './supervisor-auth.mts';
+import { piLoginFailureOf, piLoginFailureReason, validPiBearer, type PiLoginFailure } from './supervisor-auth.mts';
 import { hostAdvisoryPolicyIdentity } from './supervisor-host-policy.mts';
 import { readSupervisor, commitSupervisor, settleAdvisory, incidentIdentity, supervisorHumanHold, supervisorRevisionHold } from './supervisor-state.mts';
 const flat = existsSync(new URL('./supervisor-contract.mts', import.meta.url));
@@ -54,11 +54,13 @@ export type WorkerOptions = {
   subscriptionExtension?: string;
   timer?: (callback: () => void, ms: number) => () => void;
 };
-export type DiagnosisResult = { state: 'held'; reason: string } | { state: 'proposed' | 'reused'; decision: DiagnosisDecision; diagnosticId: string }
+export type DiagnosisResult = { state: 'held'; reason: string; piLoginFailure?: PiLoginFailure } | { state: 'proposed' | 'reused'; decision: DiagnosisDecision; diagnosticId: string }
   | { state: 'human-required'; reason: string; diagnosticId: string };
 const money = (usd: number) => Math.floor(usd * 1_000_000);
 const resources = (x: Resources) => x && Number.isSafeInteger(x.tokens) && x.tokens > 0 && Number.isSafeInteger(x.cost) && x.cost > 0;
 const held = (reason: string): DiagnosisResult => ({ state: 'held', reason });
+const loginHeld = (piLoginFailure: PiLoginFailure = {stage:'unknown'}): DiagnosisResult =>
+  ({state:'held',reason:piLoginFailureReason(piLoginFailure)!,piLoginFailure});
 const capped = (b: Buffer, bytes: number) => { const value = b.toString('utf8'); return Buffer.byteLength(value) <= bytes ? value : b.subarray(0, bytes - 3).toString('utf8'); };
 const same = (a: unknown, b: unknown) => supervisorHash(a) === supervisorHash(b);
 function usage(s: SupervisorState, kind?: 'diagnosis') {
@@ -143,10 +145,11 @@ export async function diagnoseProject(o: WorkerOptions): Promise<DiagnosisResult
       // Exact cached reuse above needs no auth. Refuse an obviously impossible NEW call before exclusion/pins.
       if (a.family !== 'openai') return held('Explicit OpenAI advisory family required; no fallback');
       if (subscriptionProfile(a.advisory?.policy.host.profile ?? '')) {
-        if (!o.resolveCredential) return held('Pi login handoff unavailable; no fallback or reservation');
+        if (!o.resolveCredential) return loginHeld();
         try { o = {...o,apiKey:await o.resolveCredential(o.signal)}; }
-        catch { return held('Pi login handoff unavailable; no fallback or reservation'); }
-        if (!validPiBearer(o.apiKey) || o.signal?.aborted) return held('Pi login handoff unavailable; no fallback or reservation');
+        catch (e) { return loginHeld(piLoginFailureOf(e)); }
+        if (o.signal?.aborted) return loginHeld({stage:'cancelled'});
+        if (!validPiBearer(o.apiKey)) return loginHeld({stage:'malformed-bearer'});
       }
       if (o.signal?.aborted || !o.apiKey || o.apiKey.length > 16384 || /[\s\x00-\x1f\x7f]/.test(o.apiKey)) return held('Bounded explicit OpenAI API-key handoff required for a new diagnosis');
       await o.beforeReserve?.();

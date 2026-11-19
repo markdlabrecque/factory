@@ -56,6 +56,30 @@ prerequisite is **superseded for the explicitly approved subscription mode**, no
 for the API-key route and not for any future hard-bound claim. No dependency
 upgrade, provider/model change, budget reset or operational rerun is implied.
 
+## Held operational invocation and diagnostic masking (2026-11-18)
+
+The [evaluation ledger](https://github.com/markdlabrecque/factory-advisory-eval/blob/main/EVALUATION.md)
+records one separately approved invocation on the revised subscription profile.
+It returned a generic hold after recording an incident observation, but before
+exclusion, runtime pins, reservation or provider launch. The earlier no-send
+preflight did not invoke auth. The saved public result therefore establishes
+neither successful authentication nor which prerequisite stopped the invocation.
+
+At the installed revision, the bounded auth helper discarded child output and
+collapsed its failure branches into one refusal. The worker reduced missing or
+failed resolution and invalid bearer to one fixed reason; the public projection
+masked that reason along with other possible holds. This masking defect is
+reproducible offline. An earlier synthetic Node child passed the ordinary
+child-close/group-absence path, which does not validate the live Pi handoff.
+
+The [source follow-up](https://github.com/markdlabrecque/factory/issues/290) adds
+[fixed failure codes and prose](../factory-cli.md#explicit-subscription-diagnosis)
+for future observed handoffs. Synthetic child and worker tests cover propagation
+and redaction without capturing authentic output. The original underlying cause
+is **unknown**: the saved result cannot recover discarded auth-child observations
+or establish that auth, rather than another prerequisite, stopped the invocation.
+No replay, live-provider acceptance, or operational authority follows from this fix.
+
 ## Pi-login capability disposition (ticket 286, 2026-11-17)
 
 **BLOCKED: the pinned OpenAI Sign in with ChatGPT route does not supply the

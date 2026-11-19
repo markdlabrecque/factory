@@ -24,6 +24,17 @@ const flat = existsSync(new URL('./supervisor-contract.mts', import.meta.url));
 const { supervisorHash } = await import(flat ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
 const { keyFor } = await import(flat ? './admission.mts' : '../../board/admission.mts');
 
+// Only this host's fixed controls/profile refusals may cross the public exception boundary.
+const preflightRefusals = new WeakMap<object,string>();
+function preflightRefusal(detail: string): Error {
+  const reason = `Supervisor host held: ${detail}`, error = Error(reason);
+  preflightRefusals.set(error,reason);
+  return error;
+}
+export function supervisorHostPreflightReason(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null ? preflightRefusals.get(error) : undefined;
+}
+
 /** Every call queries the real backend interface and rereads the existing registry. No advisory-specific opt-in bypass. */
 export async function readSupervisorHostControls(paths: Paths, root: string, backend: Pick<ScheduleBackend, 'status'>): Promise<AdvisoryControls> {
   const canonical = realpathSync(root);
@@ -58,13 +69,13 @@ export async function prepareSupervisorHost(o: SupervisorHostOptions) {
   const assertControls = async () => {
     const controls = await readSupervisorHostControls(p,project.root,o.backend);
     if (!controls.registered || controls.global !== 'on' || controls.projectControl !== 'enabled')
-      throw Error(`Supervisor host held: registration=${controls.registered}, global=${controls.global}, project=${controls.projectControl}`);
+      throw preflightRefusal(`registration=${controls.registered}, global=${controls.global}, project=${controls.projectControl}`);
     return controls;
   };
   await assertControls();
   // Missing/unsafe host policy is refused before claiming ownership. No directory/policy provisioning here.
   if (readHostAdvisoryPolicy(p.config,[project.root]).policy.profile !== profile)
-    throw Error('Supervisor host held: explicit auth selection differs from host profile');
+    throw preflightRefusal('explicit auth selection differs from host profile');
   const runKey = keyFor(String(o.ticket),project.tracker.project);
   const saved = JSON.parse(readSupervisorOriginal(join(p.state,`${runKey}.json`)));
   if (saved.project !== project.tracker.project || saved.iid !== String(o.ticket) || typeof saved.executionId !== 'string')

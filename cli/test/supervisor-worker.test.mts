@@ -8,6 +8,8 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diagnoseProject } from '../src/supervisor-worker.mts';
+import { resolvePiLogin, type PiLoginFailure } from '../src/supervisor-auth.mts';
+import { supervisorDiagnosisProjection } from '../src/commands/supervisor.mts';
 import { supervisorDecisionSources } from '../src/supervisor-input.mts';
 import { SUBSCRIPTION_PROFILE_ID } from '../src/supervisor-advisory-contract.mts';
 import type { ComponentDiagnosisBoundary as DiagnosisBoundary, WorkerOptions } from '../src/supervisor-worker.mts';
@@ -17,7 +19,7 @@ import { modelForRole } from '../../orchestrator/model-policy.mts';
 import { diagnosisBasis } from '../../orchestrator/supervisor.mts';
 import { supervisorFixture, AT } from './supervisor-fixture.mts';
 
-test('bounded proposal worker reserves before fixed-role Pi, fences cancellation/restart and retains diagnostics without actions', async () => {
+test('bounded proposal worker reserves before fixed-role Pi, fences cancellation/restart and retains diagnostics without actions', async t => {
   const home = mkdtempSync(join(tmpdir(), 'factory-supervisor-worker-'));
   try {
     let seq = 0;
@@ -66,11 +68,57 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
     }
     const login=fixture('login-failure');
     const loginCurrent=() => ({...structuredClone(login.a),advisory:{policy:{host:{profile:SUBSCRIPTION_PROFILE_ID}}}} as any);
-    for (const resolveCredential of [undefined,async()=>{throw Error('secret auth failure');},async()=> 'sk-not-oauth',async()=> 'bad token',async()=> '']) {
-      const result=await diagnoseProject({...login.options(),current:loginCurrent,boundary:owned,apiKey:'sk-no-fallback',resolveCredential,beforeReserve:async()=>{acquired=true;}});
-      assert.equal(result.state,'held'); assert.equal(acquired,false); assert.deepEqual(login.state().reservations,{});
-      assert.match(JSON.stringify(result),/Pi login handoff unavailable/); assert.equal(JSON.stringify(result).includes('secret'),false);
-    }
+    const cancelLogin=new AbortController();
+    const fromChild = (stage: PiLoginFailure['stage']): WorkerOptions['resolveCredential'] => signal=>resolvePiLogin(signal,{
+      start:()=>{
+        if (stage==='spawn') throw Error('PRIVATE spawn error');
+        const pid = stage==='cleanup' || stage==='exit' ? undefined : 1234;
+        const child=Object.assign(new EventEmitter(),{pid,stdout:new PassThrough(),stderr:new PassThrough()});
+        if (stage==='cleanup' || stage==='exit' || stage==='malformed-bearer') queueMicrotask(()=>{
+          child.stdout.write(stage==='malformed-bearer' ? 'sk-PRIVATE' : 'PRIVATE.bearer');
+          child.emit('close',stage==='exit' ? 1 : 0,null);
+        });
+        if (stage==='output-limit') queueMicrotask(()=>child.stderr.write('PRIVATE'.repeat(2000)));
+        if (stage==='cancelled') queueMicrotask(()=>cancelLogin.abort('PRIVATE abort'));
+        return child as unknown as ChildProcess;
+      },
+      timer:f=>{
+        if (stage==='setup') throw Error('PRIVATE setup error');
+        if (stage==='timeout') queueMicrotask(f);
+        return ()=>{};
+      },
+    });
+    const loginCases = [
+      {resolveCredential: undefined, stage:'unknown', reason:'failure stage unknown'},
+      {resolveCredential: async()=>{throw Object.assign(Error('Pi login handoff held: PRIVATE'),{stage:'spawn'});}, stage:'unknown', reason:'failure stage unknown'},
+      {resolveCredential: async()=> 'bad token', stage:'malformed-bearer', reason:'bearer missing or malformed'},
+      ...([
+        ['setup','child setup failed'],['spawn','child could not be started'],['timeout','child deadline expired'],
+        ['exit','child exited unsuccessfully; auth-process cleanup unconfirmed',true],['output-limit','child output limit exceeded'],
+        ['malformed-bearer','bearer missing or malformed'],['cleanup','auth-process cleanup unconfirmed',true],['cancelled','cancelled'],
+      ] as const).map(([stage,reason,cleanupUnconfirmed])=>({resolveCredential:fromChild(stage),stage,reason,cleanupUnconfirmed})),
+    ] satisfies {resolveCredential: WorkerOptions['resolveCredential']; stage: PiLoginFailure['stage']; reason: string; cleanupUnconfirmed?: boolean}[];
+    const kill=t.mock.method(process,'kill',(pid:number,signal:number)=>{
+      assert.equal(pid,-1234);assert.equal(signal,0);
+      throw Object.assign(Error('PRIVATE fixture group absent'),{code:'ESRCH'});
+    });
+    try {
+      for (const {resolveCredential,stage,reason,cleanupUnconfirmed=false} of loginCases) {
+        const options=login.options();
+        const result=await diagnoseProject({...options,current:loginCurrent,boundary:owned,apiKey:'sk-no-fallback',signal:cancelLogin.signal,
+          resolveCredential,beforeReserve:async()=>{acquired=true;}});
+        assert.equal(result.state,'held'); assert.equal(acquired,false);
+        const state=login.state(), projected=supervisorDiagnosisProjection(state,236,options.invocationId,result);
+        assert.deepEqual(state.reservations,{});
+        assert.equal(state.charged.diagnosis.tokens,0);
+        assert.equal(Object.values(state.incidents)[0].incident.diagnosisCalls,0);
+        assert.deepEqual(projected.piLoginFailure,{stage,cleanupUnconfirmed});
+        assert.equal(projected.reason,`Pi login handoff held: ${reason}; no fallback or reservation`);
+        assert.equal(projected.accounting.reserved,null);
+        assert.equal(projected.recommendation,null);
+        assert.doesNotMatch(JSON.stringify([result,projected,state]),/PRIVATE|sk-no-fallback/);
+      }
+    } finally {kill.mock.restore();}
     const f = fixture('observe');
     const asyncOptions = f.options(), syncCurrent = asyncOptions.current;
     const result = await diagnoseProject({...asyncOptions,current:async () => syncCurrent()}); assert.equal(result.state, 'proposed');

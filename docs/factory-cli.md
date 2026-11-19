@@ -129,13 +129,39 @@ select a credential, endpoint or profile. The model remains fixed OpenAI Mid/hig
 For a new subscription call only, the host invokes supported
 `pi auth print-bearer-token --min-expiry 50m --provider openai` from a disposable
 non-project working directory. Pi may refresh its own login. The parent imposes a
-20-second deadline, bounded stdout/stderr, cancellation and owned-group termination;
-failures return fixed secret-safe prose, never credential output. No auth values
-are written to Factory files, logs, basis hashes or agent mounts. Auth resolution
-precedes exclusion/runtime pins/reservation and runs outside their locks; the host
-then rebuilds current authorization. Exact retained advice reuse needs no auth.
-An expired/missing/malformed login holds; the API-key environment is ignored for
-this selection. Do not place bearer tokens in `OPENAI_API_KEY`.
+20-second deadline, bounded stdout/stderr, cancellation and owned-group termination.
+A classified Pi-login hold adds `piLoginFailure: { stage, cleanupUnconfirmed }`
+to the existing version-1 JSON, in both output formats. `stage` is a stable code:
+
+| `stage` | Observed condition |
+| --- | --- |
+| `setup` | The temporary working directory or bounded child setup failed. |
+| `spawn` | The child could not be started. |
+| `timeout` | The parent deadline expired. |
+| `cancelled` | The handoff was cancelled. |
+| `exit` | The child exited nonzero or by signal. |
+| `output-limit` | Child stdout or stderr exceeded its byte limit. |
+| `malformed-bearer` | No valid bearer was returned. |
+| `cleanup` | The child closed successfully, but group absence was not confirmed. |
+| `unknown` | The handoff failed and its stage could not be classified, including unrecognized resolver exceptions. |
+
+`cleanupUnconfirmed` is `true` when group absence could not be confirmed; it can
+accompany another failure stage. A group kill request is not proof of cleanup.
+The existing `reason` field carries fixed operator prose. Other held results and
+successful results omit `piLoginFailure`; the unclassified legacy Pi-login reason
+is not assigned a stage retroactively. The codes describe local observations,
+not why Pi refused, whether a login expired, or whether any remote work stopped.
+Raw exception text and child output are never printed. If the journal cannot be
+read after a classified auth hold, a minimal held result preserves the reason and
+`piLoginFailure` without reporting journal-derived accounting. Held results still
+exit 1 (absent the usual signal exit override) and do not authorize retries.
+
+No auth values are written to Factory files, logs, basis hashes or agent mounts.
+Auth resolution precedes exclusion/runtime pins/reservation and runs outside their
+locks; on success the host rebuilds current authorization. A failed handoff
+neither falls back nor acquires paid ownership or reserves a call. Exact retained
+advice reuse needs no auth. The API-key environment is ignored for this selection.
+Do not place bearer tokens in `OPENAI_API_KEY`.
 
 Under the owner's revised contract, subscription output has a **4,096-token
 best-effort target, not a remote ceiling**. The pinned serializer omits remote

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths } from '../src/paths.mts';
 import { addProject } from '../src/projects.mts';
@@ -44,6 +44,19 @@ test('diagnosis accepts only an explicit ticket/project and projects no arbitrar
   const view=supervisorDiagnosisProjection(s,7,'invocation',{state:'held',reason:'raw stdout prompt token=ghp_never_display'},'run-current');
   assert.equal(view.runId,'run-current'); assert.equal(view.authority,'advice-only'); assert.equal(view.accounting.known,null);
   assert.doesNotMatch(JSON.stringify(view),/raw stdout|ghp_never_display/);
+  const legacy = 'Pi login handoff unavailable; no fallback or reservation';
+  const fixed = supervisorDiagnosisProjection(s,7,'invocation',{state:'held',reason:legacy});
+  assert.equal(fixed.reason,legacy);
+  assert.equal(Object.hasOwn(fixed,'piLoginFailure'),false);
+  for (const piLoginFailure of [undefined,{stage:'__proto__'},{stage:'PRIVATE'},{stage:['timeout']}]) {
+    for (const reason of [`${legacy}; PRIVATE`,`PRIVATE: ${legacy}`]) {
+      const forged=supervisorDiagnosisProjection(s,7,'invocation',{
+        state:'held',reason,piLoginFailure,
+      } as Parameters<typeof supervisorDiagnosisProjection>[3]);
+      assert.equal(forged.reason,view.reason);
+      assert.equal(Object.hasOwn(forged,'piLoginFailure'),false);
+    }
+  }
 });
 
 test('diagnosis source handler uses genuine held host and component facade only for exit/output permutations', async () => {
@@ -59,13 +72,40 @@ test('diagnosis source handler uses genuine held host and component facade only 
     let calls=0;
     assert.equal(await supervisorDiagnose(p,['7'],{project:root,json:true},{...services,backend:{status:async()=>{calls++;throw Error('synthetic backend unavailable');}}} as any),1);
     assert.equal(calls,1);assert.equal(existsSync(supervisorFile(p.state)),false);
+    assert.match(JSON.parse(output.at(-1)!).reason,/global=unknown/);
+    assert.doesNotMatch(output.at(-1)!,/synthetic backend unavailable/);
+    for (const prefix of ['Supervisor host held:', 'Advisory held:', '']) {
+      const prepare=async()=>{throw Error(`${prefix} PRIVATE raw child output`);};
+      assert.equal(await supervisorDiagnose(p,['7'],{project:root,json:true},{...services,prepare} as any),1);
+      assert.match(JSON.parse(output.at(-1)!).reason,/^Diagnosis held: project, saved run, controls, policy or supported runtime unavailable/);
+      assert.doesNotMatch(output.at(-1)!,/PRIVATE/);
+    }
+    const authHold={state:'held',reason:'PRIVATE',piLoginFailure:{stage:'timeout',cleanupUnconfirmed:true,raw:'\u001b[31mPRIVATE'}};
+    const prepare=async()=>({invoke:async()=>authHold});
+    const expectedAuthHold={reason:'Pi login handoff held: child deadline expired; auth-process cleanup unconfirmed; no fallback or reservation',
+      piLoginFailure:{stage:'timeout',cleanupUnconfirmed:true}};
+    for (const json of [true,false]) {
+      assert.equal(await supervisorDiagnose(p,['7'],{project:root,auth:'pi-login',json},{...services,prepare} as any),1);
+      const view=JSON.parse(output.at(-1)!);
+      assert.equal(view.state,'held');assert.equal(view.reason,expectedAuthHold.reason);
+      assert.deepEqual(view.piLoginFailure,expectedAuthHold.piLoginFailure);
+      assert.equal(view.accounting.reserved,null);assert.doesNotMatch(output.at(-1)!,/PRIVATE/);
+    }
     for (const [state,code] of [['held',1],['human-required',2],['proposed',0],['reused',0]] as const) {
       let invoked=false;
       const prepare=async (options:any)=>{assert.equal(options.ticket,7);assert.equal(options.project.root,root);assert.equal(options.rollout,undefined);return {invoke:async(key:string,signal:AbortSignal)=>{invoked=true;assert.equal(key,'synthetic-non-secret-key');assert.equal(signal,abort.signal);return {state,reason:'raw provider stderr token=hidden',diagnosticId:'synthetic',decision:{classification:'expectation',rationale:'Wait for exact evidence',alternatives:['Inspect originals'],action:{kind:'wait',expectation:'Exact evidence'}}};}};};
       const abort=new AbortController();
       assert.equal(await supervisorDiagnose(p,['7'],{project:root,json:true},{...services,prepare,signal:abort.signal} as any),code);
-      assert.equal(invoked,true);const view=JSON.parse(output.at(-1)!);assert.equal(view.state,state);assert.equal(view.runId,'current-execution');assert.doesNotMatch(output.at(-1)!,/provider stderr|token=hidden|synthetic-non-secret-key/);
+      assert.equal(invoked,true);const view=JSON.parse(output.at(-1)!);assert.equal(view.state,state);assert.equal(view.runId,'current-execution');assert.equal(Object.hasOwn(view,'piLoginFailure'),false);assert.doesNotMatch(output.at(-1)!,/provider stderr|token=hidden|synthetic-non-secret-key/);
     }
+    const journal=supervisorFile(p.state), invalid='PRIVATE invalid journal';
+    mkdirSync(dirname(journal),{recursive:true});
+    const prepareThenLoseJournal=async()=>({invoke:async()=>{writeFileSync(journal,invalid);return authHold;}});
+    assert.equal(await supervisorDiagnose(p,['7'],{project:root,auth:'pi-login',json:true},{...services,prepare:prepareThenLoseJournal} as any),1);
+    const {invocationId,...minimal}=JSON.parse(output.at(-1)!);
+    assert.match(invocationId,/^[a-f0-9-]{36}$/);
+    assert.deepEqual(minimal,{version:1,authority:'advice-only',state:'held',ticket:7,runId:'current-execution',...expectedAuthHold});
+    assert.equal(readFileSync(journal,'utf8'),invalid);
   } finally {rmSync(home,{recursive:true,force:true});}
 });
 
