@@ -259,6 +259,14 @@ No automatic release/refund/retry follows. Do not interpret stop as implementati
 container, tracker POST or admitted gate-operation cancellation. Resolve remains the
 exact separate command below, never a blanket approve/resume.
 
+The [final offline acceptance audit and observe-first runbook](supervisor.md#final-offline-acceptance-audit)
+distinguish copied public controls from injected source APIs. The current release
+must **STOP before action opt-in**: missing host/provider/capacity/cancellation and
+scoped execution-owner capabilities remain blockers, regardless of merged child
+PRs or passing component tests. Release/install approval and any future one-project
+pilot are separate decisions. Preserve all work, proof, denials, history and budgets
+on observe/stop; cancellation pending is not confirmed termination or settlement.
+
 ## Operator rollout attestation
 
 This source contract is for a **future separately authorized operator maintenance window**,

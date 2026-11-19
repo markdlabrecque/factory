@@ -1770,6 +1770,151 @@ unchanged charges. Existing worker/state/recovery/proof tests retain the shared 
 capacity, denial, admission and independent-proof matrices. Clocks/processes/owners
 are injected; no sleeps, services, live agents or tracker delivery are used.
 
+## Final offline acceptance audit
+
+This audit covers action activation and its original offline refusal boundary, not
+advisory-only diagnosis. The later [copied public advisory journeys](#offline-public-copied-install-evidence)
+and advisory source acceptance above extend the same fixture file without lifting
+the action hold. Configured-family model contracts here do not claim that both
+families support the separately constrained advisory provider path.
+
+**Result: safety refusal evidenced; integrated action acceptance BLOCKED.** Merged
+component tasks are not evidence of installed activation. The copied-install fixture
+uses the production installer against a disposable home with fixture packages and a
+fake service backend, the copied public `cli/bin/factory.mts`, and the resolver's
+complete selected runtime. It never substitutes an activation-prerequisite callback.
+No new runtime asset or dependency is introduced by this acceptance fixture.
+
+```sh
+node --test cli/test/supervisor-acceptance.test.mts
+```
+
+The following evidence levels are deliberately different. A passing source API test
+cannot upgrade a BLOCKED installed journey to PASS. Existing component fixtures are
+reused rather than cloning their refusal matrices or creating a test-only supervisor.
+
+| Required journey | Actual copied/public or source evidence | Acceptance / missing prerequisite |
+| --- | --- | --- |
+| Observe has no supervisor effects | New copied CLI status/explain create no journal or external calls; dirty work/index/refs remain identical. Selected `supervisorWakeups` without binding holds with no journal. `tick.mts` constructs exactly that unbound default. Existing scheduler fixture proves real tick's post-unlock handoff, not installed paid diagnosis | PASS for inert public observation; automatic observe proposals are not shipped |
+| Both configured families; disabled legacy; complete overrides | New fixture loads actual selected config/policy for OpenAI and Anthropic: fixed Mid diagnosis/Large review, omitted policy disabled. Complete override selects its own full inventory; removing lifecycle helper refuses without Factory fallback. Opaque override act refuses. Existing afterPass/scheduler suites retain disabled legacy recovery behavior | PASS for these contracts; no inference about arbitrary custom override behavior or live model semantics |
+| Explicit opted-in action reaches one existing recovery owner/attempt/charge | Public CLI refuses even finite enabled limits plus pilot confirmation. `commands/supervisor.mts` has no default activation adapter; `tick.mts` has no binding; `jam-detect.mts` receives advisory candidates only via optional host hook. Existing jam/recovery race fixture proves one real claim/charge with injected host candidate/preparation/process boundaries | **BLOCKED installed journey:** host activation/broker binding, provider ceilings/accounting and joint mixed-workload lease absent. Prior ticket charge/incomplete history still holds; no retry entitlement inferred |
+| Exact fresh review → one scoped correction → new analysis/verifier/proof/delivery | Existing `supervisor-review.test.mts` proves fresh isolated tool-free fixed-Large process/UUIDs, complete originals and host `reviewCompletions`, with injected provider/accounting. `supervisor-gate-apply.test.mts` uses real Git/applicator, `loadExecutionContext({gate})`, analysis via stub Pi, separate verifier boundary, local evidence command, new host proof and normal exact-SHA delivery APIs. Old same-SHA PASS is refused, historical FAIL and dirty/index/branches retained | **BLOCKED installed journey:** no default scoped execution-owner selector/transport. This source route is not a CLI action path or semantic reviewer approval |
+| Denial / Factory-wide → durable actionable human request, work preserved | Existing review fixture invokes actual journal/outbox with injected tracker receipts and exact managed gh-axi/glab command-construction tests. `supervisor-escalation.mts` durably attempts before POST, never repeats uncertain POST, receipt is not approval. Exact local OS-user resolution is publicly tested | PASS at explicit source bridge boundary; **BLOCKED automatic installed journey:** no default authorized host notification consumer/target. Observe/unauthorized writes remain forbidden; no live notification claimed |
+| Crash/restart cannot duplicate effects | Existing state interruption and gate artifact reconciliation fixtures observe absent/exact/partial without replay; outbox lost-response fixture never repeats POST; broker candidate identity shares atomic recovery charge. New copied CLI restart reads retain reservation and bytes unchanged | PASS for those source boundaries; **BLOCKED installed action-crash journey** until actual host binding exists. No orphan-provider cost enforcement proved |
+| Stop/off/paused/unknown refuse late results | New public stop commits stopped but exits 1 for seeded exact unsettled worker, preserving reservation/charge/work; fresh CLI process reports pending. Existing worker/scheduler unit and process fixtures prove current fences and late-result refusal with injected clocks/owned termination. Retained live host can cancel only its own controller | PASS for refusal/fencing; **BLOCKED cross-process cancellation confirmation:** authenticated channel absent. Stop is not proof a provider/descendant/container has stopped |
+
+The new fixture's seeded reservation is a real journal transition using synthetic
+original facts and the test process PID/start, **not evidence that the installed CLI
+launched a worker**. Its selected event hook has no host binding; it is not a
+replacement scheduler. Existing diagnosis/review process adapters assert enforcement
+and supply synthetic usage; none proves provider enforcement after controller death.
+Direct CLI/module Node children have finite output/deadline bounds and no model
+stdin; existing worker fixtures own bounded model stdin/output/cancellation clocks.
+The reused local Git helper has no per-command timeout; the mandatory shard deadline
+bounds the overall fixture. No sleeps, live paid agents, trackers, service managers,
+credentials, Docker or browser E2E are involved.
+Board/telemetry evidence remains the passive no-store/sanitized/known-versus-unknown
+component boundary above; agent activity or a receipt is not confirmed progress.
+
+### Acceptance disposition and owner decision
+
+The task's integrated observe/action/review/FlagAHuman/crash/cancel done-when is
+**incomplete**, despite passing offline component and refusal tests. The runbook and
+no-live-rollout criteria can be delivered independently. Do not close the task or
+epic as fully accepted merely because this bounded audit PR merges.
+
+An owner must decide whether to authorize separately scoped implementation and
+independent evidence for (1) all-in provider-enforced paid ceilings and final
+accounting surviving controller death for each fixed family/role, (2) atomic shared
+implementation/recovery/supervisor capacity ownership, (3) authenticated exact-owner
+cross-process cancellation with honest cleanup/accounting settlement, and (4) the
+trusted default host binding, notification target/authorization and scoped execution
+owner carrying amendment identity through analysis/verifier/new proof/delivery.
+No callback returning success, manual journal edit or offline provider stub
+substitutes for those primitives. This audit does not implement a new provider or
+host authority stack or authorize dependent action/runtime work.
+
+## Observe-first one-project runbook (activation held)
+
+This is a manual protocol for a future separately authorized release, **not evidence
+of a live pilot**. No step here authorizes an install, service/registry/project edit,
+paid call or notification in the source/offline task.
+
+1. **Release/install approval, separate from source merge.** Obtain explicit owner
+   approval for the exact release/runtime identity, installation and one named
+   project. Keep other projects disabled/observe; retain the previous runtime and
+   all saved work/proof/history. A green PR is not rollout permission. Complete
+   overrides require their own full inventory review; opaque code is not presumed
+   to follow the standard workflow.
+2. **Record a same-project baseline before intervention.** Choose an explicit finite
+   observation window and incident inclusion rule before collecting results. Save
+   canonical project/runtime/policy identity, incident scope and first-observed
+   timestamp, problem/evidence/expectation classification, saved run/ticket,
+   interventions (who/why/time), time to host-confirmed merged progress, repeated
+   failures, false escalations and known actual diagnosis/review cost separately
+   from charged ceilings and unknown cleanup/accounting. Retain no-progress cases
+   as censored/unknown, not zero elapsed or success. Use the same window/rule and
+   workload mix for comparison; report counts and sample size, not just averages.
+3. **Finite budget design, no activation.** Select explicit cumulative project and
+   separate diagnosis/review token, cost, call and timeout ceilings plus finite host
+   global budgets/capacity. See [policy schema](project-config.md#optional-supervisor-policy).
+   The sample fragment is not a recommendation or provider limit. No resets/refunds,
+   model/provider fallback or role escalation. Unknown usage/ownership holds. Review
+   complete original input and fixed configured-family Mid/Large mappings.
+4. **Observe and compare, without pretending there is a default proposal worker.**
+   Public status/explain and Board are passive observations. Record actual host
+   decisions/refusals against any retained proposals, exact input/proposal/policy
+   identity and rationale. The current default event hook produces no diagnosis.
+   Paid proposal collection itself needs separately demonstrated enforcement and
+   explicit host authority; do not bypass CLI refusal to create an observation
+   sample. Mark unavailable proposal/cost data unknown. Review disagreements with
+   the owner, never auto-approve a denial or shop for another reviewer.
+5. **STOP — capability/evidence review before any action opt-in.** The current release
+   cannot pass the four prerequisite groups in the acceptance disposition above.
+   Do not run act as a pilot instruction, force an empty prerequisites callback,
+   edit durable mode, register a test host, or use application artifacts as proof.
+   Retain the baseline/audit and request the explicit owner scope decision. A future
+   review must independently show real installed CLI/event/broker/reviewer/outbox/
+   execution-owner wiring, exact cancellation/settlement and all source safety
+   regressions, then obtain a *new* explicit one-project operator opt-in. This
+   document does not grant that approval or prescribe an unusable activation command.
+6. **Future pilot measurement, only after that hold is independently resolved.**
+   Predetermine the observation window, workload/exclusions and threshold for
+   intervention reduction with the owner, rather than moving the target after
+   results. Compare proposals to host admissions/refusals, exact independent
+   review outcomes, local correction/renewed analysis/verifier/new proof, durable
+   requests/receipts versus human resolutions and host-confirmed progress. Success
+   requires **zero unauthorized actions, duplicate actions and lost-work events**,
+   finite known spend within all ceilings, and measured friction reduction versus
+   the same-project baseline without weakening any gate. Insufficient samples,
+   unknown accounting or no host-confirmed progress are inconclusive, not success.
+   Wider opt-in is a separate explicit decision even after a successful pilot.
+7. **Reversible stop/rollback, preserving evidence.** On unexpected effects, denial,
+   uncertainty or exhausted limits, fence new supervisor work with the existing
+   project controls below. Observe forbids reviews/actions; stop also forbids new
+   diagnosis. Inspect pending owners and use only their trusted termination and
+   settlement boundary. CLI exit 1/cancellation pending means the fence was saved,
+   not confirmed cleanup. Keep branches, index/dirty work, proof including old FAIL,
+   artifact intents, denials, receipts, history and cumulative budgets. Do not
+   clear journals, blindly replay POST/artifact creation, reset counters, or signal
+   implementation groups. Global schedule-off and project pause retain their own
+   contracts; neither substitutes for exact supervisor ownership reconciliation.
+   A prior binary must not resume paid/action work against unknown newer records;
+   leave controls conservative and request supported rollback review first.
+
+After a separately approved installation, inspection/fencing commands are:
+
+```sh
+factory supervisor status --project <name-or-path> --json
+factory supervisor explain --project <name-or-path> --json
+factory supervisor mode observe --project <name-or-path>
+factory supervisor stop --project <name-or-path>
+```
+
+These are not executed by this audit against a real project. Do not interpret a
+successful mode change as human resolution or budget renewal. Preserve exact
+request/proposal IDs and originals for any separately explicit audited `resolve`.
+
 ## Reproduce offline evidence
 
 ```sh
