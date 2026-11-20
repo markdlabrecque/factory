@@ -320,6 +320,53 @@ if no changed executable behavior is concealed. For mixed work, retain `C-featur
 and `C-preserve` exactly as separate obligations. Tests exercise both the mixed
 example and the evidence-only variant.
 
+## Standard role ownership and bootstrap prompts
+
+The standard sequence remains analysis → implementer → independent verifier;
+recovery is repair → independent verifier. There is no standard runtime test-writer.
+The generic implementer/verifier prompts ship from `cli/templates/project/prompt.md`
+and `prompt.verify.md` through `cli/src/runtime-assets.mts`; recovery ships from
+`orchestrator/prompt.recover.md`. The Drupal examples are not these runtime prompts.
+The same instructions apply to both standard model families and GitHub/GitLab.
+Full custom overrides remain opaque: their owners must identify their roles and
+explicitly adopt the host protocol; a template or manifest alone does not establish
+compliance. Additive project instructions remain subordinate to Factory policy.
+
+- **Preparation/reviewer:** freeze probes and fixtures and independently approve
+  their exact identity and semantic adequacy. Inadequate acceptance returns here for
+  review; neither implementation nor verification may rewrite it to fit a candidate.
+- **Implementer/repair:** own behavior and the cheapest appropriate implementation
+  tests. Demonstrate changed behavioral red→green with the same assertion IDs;
+  satisfy preservation green→green and exact reviewed non-transition evidence
+  obligations per criterion. Already-green changed criteria stop for review. Build,
+  import, dependency and harness failures, timeouts, skips and unknowns are not red.
+  Implementation tests supplement, never replace, frozen acceptance.
+- **Trusted runner/host:** own frozen-probe execution, independent clean/reset replay
+  and authenticated receipts for the exact candidate. Prompts do not implement this
+  authority or permit tracker commands on the host.
+- **Independent verifier:** evaluate every original requirement and the adequacy of
+  the evidence, reconcile authoritative criterion/assertion IDs and supplied trusted
+  receipt identities, and inspect required browser/manual/semantic evidence.
+  Trusted replay is necessary under the protocol, not sufficient for PASS; structural
+  validity and green output cannot prove English adequacy. Feature labels do not
+  waive changed criteria's baseline transition. Recovery keeps the original baseline
+  and full scope; the host-validated saved pre-repair start only supplements defect
+  reproduction. Historical verdicts are diagnostic, never reusable PASS authority.
+
+These prompts use existing frozen task data and existing producer placeholders,
+not unwired receipt variables. Bootstrap tickets can use checkable criteria and
+current independent verification before the future runner/admission/proof layers
+exist. Missing typed receipts are not evidence that those gates are enforced, and
+agents must not fabricate approvals, receipts or evidence. Unavailable required
+evidence blocks a success claim. This prompt update alone does not activate the
+future host protocol or migrate existing tickets.
+
+Cheap mapped-template contracts cover roles, exceptions, bootstrap honesty and the
+existing placeholder sets; existing copied-runtime fixtures cover one-pass literal
+substitution and additive instructions. Manual rendered-prompt review remains
+necessary to check that the instructions agree, especially feature transitions and
+recovery comparisons.
+
 ## Verification
 
 ```sh
