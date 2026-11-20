@@ -99,7 +99,8 @@ test('copied public supervisor refuses activation; selected runtime and complete
   assert.deepEqual(after.reservations, before.reservations); assert.deepEqual(after.charged, before.charged);
   const bytes = readFileSync(supervisorFile(f.p.state), 'utf8');
   const restarted = cli(['supervisor', 'status', '--json']); assert.equal(restarted.status, 0, restarted.stderr);
-  assert.equal(JSON.parse(restarted.stdout).cancellation.pendingTotal, 1);
+  const legacy = JSON.parse(restarted.stdout); assert.equal(legacy.cancellation.pendingTotal, 1);
+  assert.deepEqual(legacy.owners[0].transport,{state:'unknown',reason:'missing-or-invalid-transport-observation'});
   assert.equal(readFileSync(supervisorFile(f.p.state), 'utf8'), bytes);
   assert.deepEqual(work(), original);
   assert.equal(existsSync(join(f.fake, 'unexpected.jsonl')), false);
@@ -167,18 +168,38 @@ console.log('synthetic-chatgpt-not-a-token');
     if(!unknown){
       const r=command('diagnose','7','--json'); assert.equal(r.status,0,r.stdout+r.stderr);
       const first=JSON.parse(r.stdout);assert.equal(first.state,'proposed');assert.equal(first.recommendation.authority,'advice-only');
+      assert.deepEqual(first.transport,{state:'observed',observation:{outcome:'http-response',status:200,requestId:'req_offline'}});
+      assert.doesNotMatch(r.stdout,/sk-synthetic-offline-not-a-secret|synthetic-secret/);
       assert.equal(first.recommendation.nextStep.kind,'wait');assert.match(first.recommendation.rationale,/Synthetic typed wait/);
       const terminal=readSupervisor(state,project), charge=structuredClone(terminal.charged);
       const reservation=Object.values(terminal.reservations)[0];assert.equal(reservation.state,'finished');assert.deepEqual(reservation.actual,{tokens:35,cost:220});
       assert.equal(Object.values(terminal.advisory!.settlements!)[0].disposition,'retained-advice');
       assert.equal(Object.keys(readAdmission(state).supervisorHolds).length,0);
       const leases=join(p.runtimes,'.leases');assert.equal(existsSync(leases)?readdirSync(leases).length:0,0);
-      for(const action of ['status','explain']) {const r=command(action,'--json');assert.equal(r.status,0,r.stdout+r.stderr);assert.deepEqual(JSON.parse(r.stdout).proposedNextAction.recommendation,first.recommendation);}
+      const journalBytes=readFileSync(supervisorFile(state));
+      const transportFile=join(state,'supervisor','usage',supervisorHash(project),supervisorHash(first.invocationId),'transport.json');
+      const transportBytes=readFileSync(transportFile);
+      for(const action of ['status','explain']) {
+        const r=command(action,'--json');assert.equal(r.status,0,r.stdout+r.stderr);const view=JSON.parse(r.stdout);
+        assert.deepEqual(view.proposedNextAction.recommendation,first.recommendation);
+        assert.deepEqual(view.owners.find((v:any)=>v.id===first.invocationId).transport,first.transport);
+        assert.deepEqual(view.diagnostics.find((v:any)=>v.invocationId===first.invocationId).transport,first.transport);
+      }
+      assert.deepEqual(readFileSync(supervisorFile(state)),journalBytes);assert.deepEqual(readFileSync(transportFile),transportBytes);
+      writeFileSync(transportFile,'{malformed');
+      for(const action of ['status','explain']) {
+        const r=command(action,'--json');assert.equal(r.status,0,r.stdout+r.stderr);const view=JSON.parse(r.stdout);
+        assert.deepEqual(view.owners.find((v:any)=>v.id===first.invocationId).transport,{state:'unknown',reason:'missing-or-invalid-transport-observation'});
+        assert.deepEqual(view.diagnostics.find((v:any)=>v.invocationId===first.invocationId).transport,{state:'unknown',reason:'missing-or-invalid-transport-observation'});
+      }
+      assert.equal(readFileSync(transportFile,'utf8'),'{malformed');assert.deepEqual(readFileSync(supervisorFile(state)),journalBytes);
+      writeFileSync(transportFile,transportBytes);
       const {buildSupervisorData}=await import(pathToFileURL(join(p.app,'board/supervisor.mts')).href);
       const board=await buildSupervisorData(state,0,{registry:p.projects,read:async()=>JSON.parse(command('status','--json').stdout)});
       assert.deepEqual(board.projects[0].status!.proposedNextAction!.recommendation,first.recommendation);
       const again=command('diagnose','7','--json');assert.equal(again.status,0,again.stdout+again.stderr);
       const reused=JSON.parse(again.stdout);assert.equal(reused.state,'reused');assert.equal(reused.diagnosticId,first.diagnosticId);assert.deepEqual(reused.basis,first.basis);
+      assert.deepEqual(reused.transport,{state:'unknown',reason:'missing-or-invalid-transport-observation'},'a new invocation cannot inherit the prior request observation');
       assert.deepEqual(readSupervisor(state,project).charged,charge);assert.equal(Object.keys(readAdmission(state).supervisorHolds).length,0);
       assert.equal(existsSync(leases)?readdirSync(leases).length:0,0,'unchanged fresh diagnosis creates no runtime pin');
       assert.equal(Object.keys(readSupervisor(state,project).reservations).length,1,'unchanged fresh diagnosis creates no reservation');
@@ -200,6 +221,8 @@ console.log('synthetic-chatgpt-not-a-token');
       evidence.commands.push({argv,signal:child.signalCode,stdout,stderr,barrier:'after real parent-directory fsync of human journal'});
       const retained=readSupervisor(state,project), reservation=Object.values(retained.reservations)[0];
       assert.equal(reservation.actual,null);assert.notEqual(reservation.state,'finished');assert.deepEqual(retained.charged,sent.charged);
+      assert.equal(retained.charged.diagnosis.tokens,reservation.reserved.tokens,'unknown usage retains the full token debit');
+      assert.equal(retained.charged.diagnosis.cost,reservation.reserved.cost,'unknown usage retains the full cost debit');
       assert.equal(Object.keys(readAdmission(state).supervisorHolds).length,1);
       assert.ok(readdirSync(join(p.runtimes,'.leases')).length>0);
       assert.equal(Object.keys(retained.humans).length,1);assert.equal(Object.values(retained.humans)[0].delivery.attempts,0);

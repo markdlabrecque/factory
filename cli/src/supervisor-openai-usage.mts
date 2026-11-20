@@ -1,4 +1,4 @@
-// Validate actual provider metadata independently of Pi counters; retain one private atomic record. No refund, cleanup or execution authority.
+// Validate provider metadata and retain separate private immutable usage and transport records. No refund, cleanup or execution authority.
 import { existsSync, constants, openSync, closeSync, fstatSync, readSync, lstatSync, realpathSync, mkdirSync, fsyncSync } from 'node:fs';
 import { join, dirname, resolve, relative, sep } from 'node:path';
 import { ADVISORY_PROFILE, advisoryProfile, subscriptionProfile, validateDiagnosisGrant, validateSendAuthorization, validateProviderUsageReceipt,
@@ -155,6 +155,74 @@ export function readProviderUsage(stateDir: string, g: DiagnosisGrant, a: SendAu
     return value.receipt.state === 'known' ? { state: 'known', file, receipt: value.receipt } : { state: 'unknown', reason: value.receipt.reason, receipt: value.receipt };
   } catch { return { state: 'unknown', reason: 'missing-or-invalid-provider-receipt' }; }
 }
+export type TransportObservation =
+  | { outcome: 'fetch-rejected'; status: null; requestId: null }
+  | { outcome: 'http-response'; status: number; requestId: string | null };
+
+/** Only bounded transport facts; rejection does not mean the request was not sent. */
+export function captureTransportResponse(status: unknown, id: unknown): TransportObservation {
+  advisoryDemand(typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599, 'invalid HTTP status');
+  return { outcome: 'http-response', status, requestId: requestId(id) ? id : null };
+}
+
+function validateTransport(value: unknown): TransportObservation {
+  advisoryRecord(value, ['outcome','status','requestId']);
+  const v = value as TransportObservation;
+  if (v.outcome === 'fetch-rejected') {
+    advisoryDemand(v.status === null && v.requestId === null, 'invalid rejection observation');
+    return { outcome: 'fetch-rejected', status: null, requestId: null };
+  }
+  advisoryDemand(v.outcome === 'http-response' && (v.requestId === null || requestId(v.requestId)), 'invalid transport observation');
+  return captureTransportResponse(v.status, v.requestId);
+}
+
+function reopenTransport(file: string, g: DiagnosisGrant, a: SendAuthorization): TransportObservation {
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const st = fstatSync(fd);
+    advisoryDemand(st.isFile() && st.nlink === 1 && st.uid === process.getuid!() && (st.mode & 0o077) === 0
+      && st.size > 0 && st.size <= 4096, 'unsafe transport record');
+    const b = Buffer.alloc(4097), count = readSync(fd, b, 0, b.length, 0), after = fstatSync(fd);
+    advisoryDemand(count === st.size && st.size === after.size && st.mtimeMs === after.mtimeMs && st.ctimeMs === after.ctimeMs, 'transport record changed during read');
+    const value = JSON.parse(b.subarray(0, count).toString('utf8'));
+    advisoryRecord(value, ['version','grantHash','authorizationHash','observation']);
+    advisoryDemand(value.version === 1 && value.grantHash === supervisorHash(g) && value.authorizationHash === supervisorHash(a), 'foreign transport record');
+    const observation = validateTransport(value.observation);
+    // A visible post-rename record is not durable until both synchronizations succeed.
+    fsyncSync(fd); syncDirectory(dirname(file));
+    return observation;
+  } finally { closeSync(fd); }
+}
+
+/** Publish once under the receipt lock; conflicting or unsafe existing evidence is never replaced. */
+export function persistTransportObservation(stateDir: string, g: DiagnosisGrant, a: SendAuthorization, raw: TransportObservation) {
+  journalBinding(stateDir, g, a);
+  const observation = validateTransport(raw), { dir } = location(stateDir, g, true), file = join(dir, 'transport.json');
+  const record = { version: 1, grantHash: supervisorHash(g), authorizationHash: supervisorHash(a), observation };
+  const text = JSON.stringify(record) + '\n';
+  return withAdmissionLock(dir, write => {
+    let present = false;
+    try { lstatSync(file); present = true; } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    if (present) {
+      const previous = reopenTransport(file, g, a);
+      advisoryDemand(supervisorHash(previous) === supervisorHash(observation), 'existing transport record differs; no replacement');
+      return { file, observation: previous };
+    }
+    write(file, text);
+    return { file, observation: reopenTransport(file, g, a) };
+  }, -1);
+}
+
+/** Absent, unsafe, foreign or unreadable evidence is unknown, not proof of no transmission. */
+export function readTransportObservation(stateDir: string, g: DiagnosisGrant, a: SendAuthorization):
+  { state: 'observed'; observation: TransportObservation } | { state: 'unknown'; reason: 'missing-or-invalid-transport-observation' } {
+  try {
+    journalBinding(stateDir, g, a);
+    const { dir } = location(stateDir, g, false);
+    return { state: 'observed', observation: reopenTransport(join(dir, 'transport.json'), g, a) };
+  } catch { return { state: 'unknown', reason: 'missing-or-invalid-transport-observation' }; }
+}
+
 export function providerResources(stateDir: string, g: DiagnosisGrant, a: SendAuthorization) {
   const value = readProviderUsage(stateDir,g,a); return value.state === 'known' ? structuredClone(value.receipt.resources) : null;
 }

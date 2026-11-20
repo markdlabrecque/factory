@@ -2,6 +2,7 @@
 // Only diagnose composes the trusted host; no activation, scheduling, action or cross-process PID cancellation.
 import { SUBSCRIPTION_PROFILE_ID } from '../supervisor-advisory-contract.mts';
 import { piLoginFailureReason } from '../supervisor-auth.mts';
+import { readTransportObservation } from '../supervisor-openai-usage.mts';
 import { userInfo } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readSupervisor, commitSupervisor, supervisorHumanHold } from '../supervisor-state.mts';
@@ -75,8 +76,15 @@ function projectPiLoginFailure(result: DiagnosisResult) {
   const reason = piLoginFailureReason(piLoginFailure);
   return reason ? {piLoginFailure,reason} : undefined;
 }
+const unknownTransport = () => ({state:'unknown' as const, reason:'missing-or-invalid-transport-observation' as const});
+/** Reopen only this invocation's journal-bound transport evidence; no evidence implies no accounting or retry conclusion. */
+function diagnosisTransport(stateDir: string, s: SupervisorState | null, invocationId: string) {
+  const key = supervisorHash(invocationId), grant = s?.advisory?.workers[key]?.grant, authorization = s?.advisory?.sends[key];
+  if (!grant || !authorization || grant.invocationId !== invocationId) return unknownTransport();
+  return readTransportObservation(stateDir, grant, authorization);
+}
 /** Redacted terminal result: retain only selected identities, accounting and bounded advice, never worker bodies. */
-export function supervisorDiagnosisProjection(s: SupervisorState, ticket: number, invocationId: string, result: DiagnosisResult, runId: string | null = null) {
+export function supervisorDiagnosisProjection(s: SupervisorState, ticket: number, invocationId: string, result: DiagnosisResult, runId: string | null = null, transport: ReturnType<typeof diagnosisTransport> = unknownTransport()) {
   const diagnostic = 'diagnosticId' in result ? s.diagnostics?.[result.diagnosticId] ?? Object.values(s.diagnostics ?? {}).find(d => d.id === result.diagnosticId) : undefined;
   const reservation = Object.values(s.reservations).find(r => r.id === (diagnostic?.reservationId ?? invocationId));
   const incident = diagnostic ? s.incidents[diagnostic.incidentId] : undefined;
@@ -95,6 +103,7 @@ export function supervisorDiagnosisProjection(s: SupervisorState, ticket: number
     recommendation:retainedRecommendation(diagnostic?.decision ?? ('decision' in result ? result.decision : null)),
     basis:diagnostic ? {basisHash:diagnostic.basisHash,snapshotHash:diagnostic.snapshotHash} : null,
     accounting:{...retainedAccounting(s,reservation),cumulativeCharged:s.charged},
+    transport,
     evidence:diagnostic ? [safeReference(diagnostic.inputRef)] : [],
     cancellation:{pending:!!reservation && reservation.state !== 'finished',meaning:'Owned cancellation may remain pending; no immediate termination or raw PID kill is claimed.'}};
 }
@@ -136,7 +145,7 @@ export async function supervisorDiagnose(p: Paths, extra: string[], o: Superviso
       output(JSON.stringify({version:1,authority:'advice-only',state:'held',ticket,invocationId,runId:safeExcerpt(runId),...auth},null,o.json ? undefined : 2));
       return 1;
     }
-    output(JSON.stringify(supervisorDiagnosisProjection(state,ticket,invocationId,result,runId),null,o.json ? undefined : 2));
+    output(JSON.stringify(supervisorDiagnosisProjection(state,ticket,invocationId,result,runId,diagnosisTransport(runStateDir(p),state,invocationId)),null,o.json ? undefined : 2));
     return result.state === 'human-required' ? 2 : ['proposed','reused'].includes(result.state) ? 0 : 1;
   } catch (e) {
     // Prefixes are not provenance; tracker/provider errors may contain credentials or raw output.
@@ -144,7 +153,8 @@ export async function supervisorDiagnose(p: Paths, extra: string[], o: Superviso
       ?? 'Diagnosis held: project, saved run, controls, policy or supported runtime unavailable; inspect local originals.';
     let state: SupervisorState | null = null;
     try { if (project) state=readSupervisor(runStateDir(p),project); } catch { /* invalid journals are never repaired */ }
-    output(JSON.stringify(state ? {...supervisorDiagnosisProjection(state,ticket,invocationId,{state:'held',reason},runId),reason} : {version:1,authority:'advice-only',state:'held',ticket,invocationId,runId:null,reason}));
+    const transport=diagnosisTransport(runStateDir(p),state,invocationId);
+    output(JSON.stringify(state ? {...supervisorDiagnosisProjection(state,ticket,invocationId,{state:'held',reason},runId,transport),reason} : {version:1,authority:'advice-only',state:'held',ticket,invocationId,runId:null,reason,transport}));
     return 1;
   }
 }
@@ -174,7 +184,7 @@ export function supervisorActRefusal(policy: SupervisorPolicy, o: SupervisorOpti
   return prerequisites.length ? prerequisites.join(' ') : null;
 }
 /** Deliberately select display fields: never expose original prompts, substitutions, raw stdout/stderr or arbitrary journal bodies. */
-export function supervisorProjection(s: SupervisorState, facts: ReturnType<typeof readSupervisorFacts>, policy: SupervisorPolicy | null, refusal: string | null, offset = 0, admission: ReturnType<typeof retainedAdmission> = {state:'unknown',holds:[],total:null}) {
+export function supervisorProjection(s: SupervisorState, facts: ReturnType<typeof readSupervisorFacts>, policy: SupervisorPolicy | null, refusal: string | null, offset = 0, admission: ReturnType<typeof retainedAdmission> = {state:'unknown',holds:[],total:null}, stateDir?: string) {
   const omitted: Record<string, { total: number; before: number; after: number }> = {};
   const page = <T>(name: string, index: Record<string,T>, priority: (v: T) => boolean = () => false): T[] => {
     const entries = Object.entries(index).sort(([ak,a],[bk,b]) => Number(priority(b))-Number(priority(a)) || ak.localeCompare(bk));
@@ -182,7 +192,7 @@ export function supervisorProjection(s: SupervisorState, facts: ReturnType<typeo
     return entries.slice(offset,offset+SUPERVISOR_PAGE_SIZE).map(([,v])=>v);
   };
   const workers = page('workers', s.reservations, r => r.state !== 'finished').map(r => ({ id: safeExcerpt(r.id), kind: r.kind, owner: { pid: r.owner.pid, start: safeExcerpt(r.owner.start) }, state: r.state,
-    deadline: r.deadline, reserved: r.reserved, actual: r.actual, accounting: retainedAccounting(s,r), ownership: ownerState(r.owner) }));
+    deadline: r.deadline, reserved: r.reserved, actual: r.actual, accounting: retainedAccounting(s,r), transport: stateDir ? diagnosisTransport(stateDir,s,r.id) : unknownTransport(), ownership: ownerState(r.owner) }));
   const latest = Object.values(s.diagnostics ?? {}).reduce<Diagnostic | undefined>((last,d) => !last || d.completedAt > last.completedAt || d.completedAt === last.completedAt && d.id > last.id ? d : last, undefined);
   const humanHold = supervisorHumanHold(s);
   const identity = { root: safeReference(s.project.root), tracker: { ...s.project.tracker, host: safeExcerpt(s.project.tracker.host), project: safeExcerpt(s.project.tracker.project) } };
@@ -200,7 +210,8 @@ export function supervisorProjection(s: SupervisorState, facts: ReturnType<typeo
     diagnostics: page('diagnostics', s.diagnostics ?? {}).map(d => ({ id:d.id, incidentId:d.incidentId, invocationId:safeExcerpt(d.reservationId),
       runId:s.incidents[d.incidentId] ? safeExcerpt(s.incidents[d.incidentId].facts.runId) : null, basisHash:d.basisHash, snapshotHash:d.snapshotHash,
       input:safeReference(d.inputRef), outcome:d.outcome, reason:safeExcerpt(d.reason), completedAt:d.completedAt,
-      recommendation:retainedRecommendation(d.decision), accounting:retainedAccounting(s,Object.values(s.reservations).find(r=>r.id===d.reservationId)) })),
+      recommendation:retainedRecommendation(d.decision), accounting:retainedAccounting(s,Object.values(s.reservations).find(r=>r.id===d.reservationId)),
+      transport:stateDir ? diagnosisTransport(stateDir,s,d.reservationId) : unknownTransport() })),
     hostDecision: { humanRequired: humanHold, actionAuthorized: false, latestDiagnosis: latest ? { id: latest.id, outcome: latest.outcome, reason: safeExcerpt(latest.reason), completedAt: latest.completedAt } : null, refusal: refusal ? safeExcerpt(refusal) : 'Mode is not execution authority; fresh host admission and proof remain required.' },
     humanRequests: page('humanRequests', s.humans, h => !s.resolutions?.[h.incidentId]).map(h => ({ id: safeExcerpt(h.id), incidentId: h.incidentId, proposalId: h.proposalId, scope: h.scope,
       reason: safeExcerpt(h.reason), question: safeExcerpt(h.question), nextAction: safeExcerpt(h.nextAction), evidence: h.evidence.map(e => safeReference(e)),
@@ -257,7 +268,7 @@ export async function supervisorCommand(p: Paths, action: string | undefined, ex
   ])];
   if (command === 'status' || command === 'explain') {
     const facts = readSupervisorFacts(p, ctx, { project, scope: { kind: 'project' }, now: () => new Date((services.now ?? Date.now)()).toISOString() });
-    const projection = supervisorProjection(s, facts, policy, supervisorActRefusal(policy!, { pilot: true, confirm: true }, prerequisites), Number(o.offset ?? 0), retainedAdmission(runStateDir(p),project,Number(o.offset ?? 0)));
+    const projection = supervisorProjection(s, facts, policy, supervisorActRefusal(policy!, { pilot: true, confirm: true }, prerequisites), Number(o.offset ?? 0), retainedAdmission(runStateDir(p),project,Number(o.offset ?? 0)), runStateDir(p));
     output(o.json ? JSON.stringify(projection) : JSON.stringify(projection, null, 2));
     return 0;
   }

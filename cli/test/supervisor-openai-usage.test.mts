@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
-import { providerUsage, captureProviderEvidence, persistProviderUsage, readProviderUsage, providerResources } from '../src/supervisor-openai-usage.mts';
+import { providerUsage, captureProviderEvidence, persistProviderUsage, readProviderUsage, providerResources, captureTransportResponse, persistTransportObservation, readTransportObservation } from '../src/supervisor-openai-usage.mts';
 import { SUBSCRIPTION_PROFILE_ID, validateProviderUsageReceipt } from '../src/supervisor-advisory-contract.mts';
 import { commitSupervisor, authorizeAdvisorySend, readSupervisor } from '../src/supervisor-state.mts';
 import { ownerOf, withAdmissionLock } from '../../board/admission.mts';
@@ -108,7 +108,45 @@ test('one atomic private raw/scalar publication reopens idempotently, rejects co
       assert.equal(existsSync(expected),true,'rename visibility is not successful durability');
       assert.equal(providerResources(stateDir,g,a),null,'directory sync failure cannot yield known resources');
     } finally { fs.fsyncSync=originalSync; syncBuiltinESMExports(); }
+    const missingTransport = { state:'unknown', reason:'missing-or-invalid-transport-observation' };
+    assert.deepEqual(readTransportObservation(stateDir,g,a),missingTransport);
+    for (const id of [null, '', 'req_bad secret', 'sk-synthetic-secret', 'req_' + 'a'.repeat(181)])
+      assert.equal(captureTransportResponse(401,id).requestId,null);
+    for (const status of [99,600,200.5,NaN]) assert.throws(()=>captureTransportResponse(status,'req_ok'));
+    const observation=captureTransportResponse(401,'req_valid');
+    const transportFile=join(dirname(expected),'transport.json'), transportDirInode=lstatSync(dirname(expected)).ino;
+    fs.fsyncSync=((fd:any)=>{ const st=fs.fstatSync(fd); if(st.isDirectory() && st.ino===transportDirInode && existsSync(transportFile)) throw Object.assign(Error('injected post-rename fsync failure'),{code:'EIO'}); return originalSync(fd); }) as any;
+    syncBuiltinESMExports();
+    try {
+      assert.throws(()=>persistTransportObservation(stateDir,g,a,observation),/post-rename fsync failure/);
+      assert.equal(existsSync(transportFile),true,'rename occurred before the failing directory sync');
+      const visible=readFileSync(transportFile,'utf8');
+      assert.deepEqual(readTransportObservation(stateDir,g,a),missingTransport,'visible evidence is not trusted while durability fails');
+      assert.throws(()=>persistTransportObservation(stateDir,g,a,observation),/post-rename fsync failure/);
+      assert.equal(readFileSync(transportFile,'utf8'),visible,'failed reopen does not replace the record');
+    } finally { fs.fsyncSync=originalSync; syncBuiltinESMExports(); }
+    assert.throws(()=>authorizeAdvisorySend(stateDir,g.project,readSupervisor(stateDir,g.project).revision,{at:f.at,reservationId:g.invocationId,fence:g.fence,grantId:g.id,worker:g.owner,payload:f.h,policy:f.registration,controls:f.controls}));
+    assert.deepEqual(readSupervisor(stateDir,g.project),before,'failed publication does not authorize a replacement send');
+    const recoveredBytes=readFileSync(transportFile,'utf8');
+    assert.deepEqual(readTransportObservation(stateDir,g,a),{state:'observed',observation},'successful reopen establishes durability');
+    assert.equal(readFileSync(transportFile,'utf8'),recoveredBytes,'reopen does not rewrite evidence');
+    const transport=persistTransportObservation(stateDir,g,a,observation), transportBytes=readFileSync(transport.file,'utf8');
+    assert.deepEqual(readTransportObservation(stateDir,g,a),{state:'observed',observation});
+    assert.deepEqual(persistTransportObservation(stateDir,g,a,observation),transport);
+    assert.throws(()=>persistTransportObservation(stateDir,g,a,captureTransportResponse(503,'req_valid')),/differs/);
+    assert.equal(readFileSync(transport.file,'utf8'),transportBytes);
+    for (const mutate of [(v:any)=>{v.grantHash='b'.repeat(64);}, (v:any)=>{v.authorizationHash='b'.repeat(64);},
+      (v:any)=>{v.observation.requestId='synthetic-secret';}, (v:any)=>{v.observation.extra='synthetic-secret';}, (v:any)=>{v.observation.status=999;}]) {
+      const bad=JSON.parse(transportBytes); mutate(bad); writeFileSync(transport.file,JSON.stringify(bad));
+      assert.deepEqual(readTransportObservation(stateDir,g,a),missingTransport);
+      assert.throws(()=>persistTransportObservation(stateDir,g,a,observation));
+    }
+    writeFileSync(transport.file,'{bad'); assert.deepEqual(readTransportObservation(stateDir,g,a),missingTransport);
+    writeFileSync(transport.file,transportBytes); chmodSync(transport.file,0o644);
+    assert.deepEqual(readTransportObservation(stateDir,g,a),missingTransport); chmodSync(transport.file,0o600);
     const {file,receipt}=persistProviderUsage(stateDir,g,a,f.raw), original=readFileSync(file,'utf8');
+    rmSync(transport.file); assert.deepEqual(readTransportObservation(stateDir,g,a),missingTransport);
+    assert.equal(readProviderUsage(stateDir,g,a).state,'known'); assert.equal(readFileSync(file,'utf8'),original,'legacy receipt is not rewritten');
     assert.equal(receipt.state,'known'); assert.equal(lstatSync(file).mode&0o777,0o600); assert.deepEqual(providerResources(stateDir,g,a),{tokens:35,cost:220});
     assert.deepEqual(persistProviderUsage(stateDir,g,a,f.raw).receipt,receipt); assert.equal(readFileSync(file,'utf8'),original);
     let retainedWriter:any;
