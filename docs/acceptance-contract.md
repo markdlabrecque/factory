@@ -147,7 +147,42 @@ matches the 256-record result evidence ceiling, so every declared obligation can
 have its own record. A total of 256 is valid within the other bounds; 257 fails as
 `invalid-contract` before approval, even if each criterion's list is individually
 within bounds. Strings are bounded (argv arguments may be empty, but argv[0] may
-not); structural checks impose an overall 1 MiB JSON ceiling.
+not). Contract, approval and public canonical/hash inputs retain the **1 MiB**
+canonical UTF-8 JSON ceiling. Result snapshots alone have a separate fixed **2 MiB**
+ceiling (`ACCEPTANCE_LIMITS.resultBytes`); they retain the same JSON/depth checks,
+256-entry collection limits and exact identity/approval reconciliation. Callers cannot
+raise either ceiling. Probe stdout remains independently capped at 1 MiB; the host
+runner assembles the result envelope from observations and retained references, not
+by treating the whole envelope as one probe's stdout.
+
+### Result capacity argument
+
+Every admitted inventory has a structurally satisfying representation in **both**
+phases, assuming the expected outcomes and genuine evidence are available. Choose
+one nonempty reference per assertion and criterion obligation (for sizing, `"x"`),
+all declared criterion obligations even in baseline, and each assertion's expected
+status and exact failure ID (or null). This is a capacity argument, not permission
+to fabricate references or outcomes. Candidate has one more phase-name byte;
+baseline's named failure status/ID is larger, so both are bounded independently:
+
+- All serialized requirement strings together are a subset of the contract's
+  canonical bytes, hence at most 1,048,576 bytes. This accounts for UTF-8, quotes,
+  backslashes, control escapes and lone-surrogate escapes, not just string length.
+- At most 256 criterion records add at most 160 bytes each **excluding** the
+  serialized requirement string: an 80-character ASCII ID, keys, punctuation and
+  the one-character reference, including record separators.
+- At most 256 assertion records use at most 320 bytes each, including an
+  80-character assertion ID, 80-character failure ID, the longest successful status
+  (`expected-behavioral-fail`), one-character evidence, keys and separators.
+- Version, phase, three 64-character digests, identity/envelope keys and collection
+  delimiters fit in 512 bytes. Even allowing 1,024 additional accounting bytes,
+  the total is below **1 MiB + 128 KiB**, comfortably below the 2 MiB result cap.
+
+Thus maximum IDs, aggregate counts and mandatory serialized overhead cannot strand
+an approved inventory. Optional/longer references still consume the fixed result
+budget and can overflow; that fails closed as `invalid-results`, never a pass.
+The 256/257 aggregate admission rule remains necessary independently of byte sizing.
+
 Enforcement, cancellation, overflow handling and resource/cleanup ownership belong
 to the future runner. Exceeding a bound cannot yield expected behavioral red. Runner
 receipts must additionally bind exact baseline/candidate SHA, frozen byte identity,
@@ -293,7 +328,10 @@ node --test orchestrator/acceptance-contract.test.mts
 
 Pure units cover schema, identity/approval and failure taxonomy using the documented
 example, including 256 aggregate criterion evidence obligations reconciling in both
-phases and rejection of 257 before approval. A bounded denied-capability Node import
+phases and rejection of 257 before approval. Long-ID/4000-unit requirement regressions
+cover results larger than 1 MiB, maximum criterion/assertion inventories in both
+phases, ASCII/escaped/UTF-8/lone-surrogate serialization and fail-closed result
+budget overflow. A bounded denied-capability Node import
 smoke check checks that import does not write, launch children, contact a tracker or
 print output. This is not a live
 sandbox acceptance test or a deterministic substitute for independent review.

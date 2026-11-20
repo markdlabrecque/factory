@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { acceptanceHash, acceptanceIdentity, canonicalAcceptanceJSON, validateAcceptanceContract, checkAcceptanceApproval, checkAcceptanceResults, type AcceptanceContract, type ApprovalRecord, type AssertionStatus, type ResultEnvelope, type Check, type HoldCode } from './acceptance-contract.mts';
+import { ACCEPTANCE_LIMITS, acceptanceHash, acceptanceIdentity, canonicalAcceptanceJSON, validateAcceptanceContract, checkAcceptanceApproval, checkAcceptanceResults, type AcceptanceContract, type ApprovalRecord, type AssertionStatus, type ResultEnvelope, type Check, type HoldCode } from './acceptance-contract.mts';
 
 const markdown = readFileSync(new URL('../docs/acceptance-contract.md', import.meta.url), 'utf8');
 const example = JSON.parse(markdown.match(/```json\n([\s\S]*?)\n```/)![1]) as AcceptanceContract;
@@ -59,6 +59,54 @@ test('aggregate criterion evidence fits the 256-record result envelope or fails 
   }
   held(checkAcceptanceApproval(c, { lookup: () => assert.fail('oversized contract must not consult authority') }), 'invalid-contract');
 });
+
+test('maximum-length requirements and criterion ID fit both result phases beyond the contract byte ceiling', () => {
+  const c = fixture();
+  c.criteria = [c.criteria[2]]; c.assertions = []; c.probes = []; c.fixtures = [];
+  c.criteria[0].id = 'C' + 'x'.repeat(79);
+  c.criteria[0].evidenceRequirements = Array.from({ length: 256 }, (_, i) => String(i).padStart(3, '0') + 'x'.repeat(3997));
+  assert.equal(validateAcceptanceContract(c).status, 'valid');
+  const trusted = ingress(c);
+  assert.equal(checkAcceptanceApproval(c, trusted).status, 'valid');
+  for (const phase of ['baseline', 'candidate'] as const) {
+    const r = observed(c, phase); r.evidence.forEach(e => { e.reference = 'x'; });
+    const bytes = Buffer.byteLength(JSON.stringify(r));
+    assert.ok(bytes > ACCEPTANCE_LIMITS.bytes && bytes < ACCEPTANCE_LIMITS.resultBytes);
+    assert.equal(checkAcceptanceResults(c, trusted, r, phase).status, 'valid');
+    // Schema-bounded references can still exceed the separate fixed result ceiling.
+    r.evidence.forEach(e => { e.reference = '\u0001'.repeat(4000); });
+    const oversized = checkAcceptanceResults(c, trusted, r, phase);
+    held(oversized, 'invalid-results');
+    if (oversized.status === 'hold') assert.equal(oversized.reason, 'content byte limit');
+  }
+  assert.throws(() => canonicalAcceptanceJSON('x'.repeat(ACCEPTANCE_LIMITS.bytes)), /content byte limit/);
+});
+
+for (const [name, character] of [['ASCII', 'x'], ['escaped quote', '"'], ['escaped control', '\u0001'], ['UTF-8', '界'], ['lone surrogate', '\ud800']] as const) {
+  test(`maximum inventories and IDs with 4000-unit ${name} strings reconcile both phases`, () => {
+    const c = fixture();
+    const stableId = (prefix: string, i: number) => (prefix + String(i).padStart(3, '0')).padEnd(80, 'x');
+    const changed = c.assertions[0], preserved = c.assertions[1], manual = c.criteria[2];
+    c.assertions = Array.from({ length: 256 }, (_, i) => ({ ...structuredClone(i < 128 ? changed : preserved), id: stableId('A', i), failureId: i < 128 ? stableId('F', i) : null }));
+    c.criteria = Array.from({ length: 256 }, (_, i) => ({
+      ...structuredClone(i < 2 ? c.criteria[i] : manual), id: stableId('C', i),
+      assertionIds: i < 2 ? c.assertions.slice(i * 128, (i + 1) * 128).map(a => a.id) : [],
+      evidenceRequirements: [String(i).padStart(3, '0') + (i < 32 ? character.repeat(3997) : 'review')],
+    }));
+    c.criteria[0].behavior = character.repeat(4000);
+    c.assertions[0].input = character.repeat(4000);
+    assert.equal(validateAcceptanceContract(c).status, 'valid');
+    const trusted = ingress(c);
+    assert.equal(checkAcceptanceApproval(c, trusted).status, 'valid');
+    for (const phase of ['baseline', 'candidate'] as const) {
+      const r = observed(c, phase);
+      r.assertions.forEach(a => { a.evidence = ['x']; }); r.evidence.forEach(e => { e.reference = 'x'; });
+      assert.equal(r.assertions.length, 256); assert.equal(r.evidence.length, 256);
+      assert.ok(Buffer.byteLength(JSON.stringify(r)) <= ACCEPTANCE_LIMITS.resultBytes);
+      assert.equal(checkAcceptanceResults(c, trusted, r, phase).status, 'valid');
+    }
+  });
+}
 
 test('canonical identities are deterministic, key-order independent and exact-content bound', () => {
   assert.equal(acceptanceHash({ b: 2, a: [true, null, 'x'] }), 'ab9b02db7ec2d94733f11a399281a3d28694f36b21ca88311ec4fe27679cefd5');

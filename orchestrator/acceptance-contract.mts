@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 
 export const ACCEPTANCE_VERSION = 1;
-export const ACCEPTANCE_LIMITS = Object.freeze({ bytes: 1024 * 1024, items: 256, timeoutMs: 300_000, outputBytes: 1024 * 1024, memoryMiB: 8192, cpus: 8 });
+export const ACCEPTANCE_LIMITS = Object.freeze({ bytes: 1024 * 1024, resultBytes: 2 * 1024 * 1024, items: 256, timeoutMs: 300_000, outputBytes: 1024 * 1024, memoryMiB: 8192, cpus: 8 });
 export type Digest = string;
 export interface Artifact { id: string; path: string; sha256: Digest }
 export interface Probe {
@@ -69,9 +69,13 @@ const hold = (code: HoldCode, e: unknown): AcceptanceHold => ({ status: 'hold', 
 /** Canonical JSON: object keys sorted by UTF-16 code units; array order and exact text significant.
  * Reject cycles, non-JSON values, sparse arrays, accessors and excessive depth/bytes. */
 export function canonicalAcceptanceJSON(value: unknown): string {
+  return canonicalJSON(value, ACCEPTANCE_LIMITS.bytes);
+}
+/** Result snapshots have their own fixed ceiling; callers cannot relax either public boundary. */
+function canonicalJSON(value: unknown, byteLimit: number): string {
   const seen = new Set<object>();
   let bytes = 0;
-  const add = (s: string) => { bytes += Buffer.byteLength(s); need(bytes <= ACCEPTANCE_LIMITS.bytes, '$', 'content byte limit'); return s; };
+  const add = (s: string) => { bytes += Buffer.byteLength(s); need(bytes <= byteLimit, '$', 'content byte limit'); return s; };
   const encode = (v: any, depth: number): string => {
     need(depth <= 32, '$', 'content depth limit');
     if (v === null || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number' && Number.isFinite(v)) return add(JSON.stringify(v));
@@ -87,12 +91,12 @@ export function canonicalAcceptanceJSON(value: unknown): string {
     seen.delete(v); return result;
   };
   const result = encode(value, 0);
-  need(Buffer.byteLength(result) <= ACCEPTANCE_LIMITS.bytes, '$', 'content byte limit');
+  need(Buffer.byteLength(result) <= byteLimit, '$', 'content byte limit');
   return result;
 }
 export const acceptanceHash = (value: unknown): Digest => createHash('sha256').update(canonicalAcceptanceJSON(value)).digest('hex');
 /** Snapshot into inert JSON before validation so returned content cannot share mutable input aliases. */
-const snapshot = (value: unknown): any => JSON.parse(canonicalAcceptanceJSON(value));
+const snapshot = (value: unknown, byteLimit = ACCEPTANCE_LIMITS.bytes): any => JSON.parse(canonicalJSON(value, byteLimit));
 const artifact = (a: any, p: string) => {
   record(a, ['id', 'path', 'sha256'], p); id(a.id, p); digest(a.sha256, p);
   text(a.path, p, 1024);
@@ -197,7 +201,9 @@ export function checkAcceptanceResults(value: unknown, ingress: TrustedApprovalI
   const { contract, identity } = approved.value;
   let r: ResultEnvelope;
   try {
-    r = snapshot(observed); record(r, ['version', 'phase', 'identity', 'assertions', 'evidence'], '$.results');
+    // 2 MiB covers the 1 MiB contract's exact requirement strings plus bounded
+    // repeated IDs, assertion observations and envelope overhead (see protocol docs).
+    r = snapshot(observed, ACCEPTANCE_LIMITS.resultBytes); record(r, ['version', 'phase', 'identity', 'assertions', 'evidence'], '$.results');
     need(r.version === 1 && ['baseline', 'candidate'].includes(phase) && r.phase === phase, '$.results.phase', 'unsupported version or phase');
     checkIdentity(r.identity); need(acceptanceHash(r.identity) === acceptanceHash(identity), '$.results.identity', 'different content identity');
     list(r.assertions, '$.results.assertions', true); unique(r.assertions.map(a => a.assertionId), '$.results.assertions');
