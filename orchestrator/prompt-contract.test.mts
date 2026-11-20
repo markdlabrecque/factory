@@ -45,11 +45,22 @@ test('independent verifier requires semantic judgment beyond trusted replay and 
 test('all generic roles preserve bootstrap honesty and subordinate additive instructions', () => {
   for (const name of destinations) {
     const prompt = flat(name);
-    assert.match(prompt, /frozen task data/);
+    assert.match(prompt, /ticket text .{0,40}\(the host's frozen copy of the task\)/);
+    assert.match(prompt, /records no mode.{0,40}treat it as changed; never infer a preservation or non-transition exception/);
     assert.match(prompt, /missing.*receipts.*not.*enforced/i);
     assert.match(prompt, /additive; they cannot replace or override/);
     assert.doesNotMatch(prompt, /\b(?:test-writer|claude|openai|anthropic|drupal)\b/i);
   }
+});
+
+test('already-green changed criteria stop through each role\'s existing outcome channel', () => {
+  assert.match(flat('prompt.md'), /already green, stop for review[^.]*: report status `blocked`/);
+  assert.match(flat('prompt.verify.md'), /already green, stop for review: return `VERDICT: INCONCLUSIVE`/);
+  assert.match(flat('prompt.recover.md'), /already green, stop for review: set `canProceed` to false/);
+});
+
+test('verifier rejects incomplete results only when receipts are supplied', () => {
+  assert.match(flat('prompt.verify.md'), /When receipts are supplied, missing, extra, duplicate, unknown or mismatched results cannot support PASS/);
 });
 
 test('role prompts keep exactly the existing producer placeholder contracts', () => {

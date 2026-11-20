@@ -338,7 +338,9 @@ compliance. Additive project instructions remain subordinate to Factory policy.
 - **Implementer/repair:** own behavior and the cheapest appropriate implementation
   tests. Demonstrate changed behavioral red→green with the same assertion IDs;
   satisfy preservation green→green and exact reviewed non-transition evidence
-  obligations per criterion. Already-green changed criteria stop for review. Build,
+  obligations per criterion. Already-green changed criteria stop for review through
+  each role's existing outcome: implementer `blocked`, verifier `INCONCLUSIVE` with
+  the criterion `inconclusive`, repair `canProceed: false` with a blocker. Build,
   import, dependency and harness failures, timeouts, skips and unknowns are not red.
   Implementation tests supplement, never replace, frozen acceptance.
 - **Trusted runner/host:** own frozen-probe execution, independent clean/reset replay
@@ -353,8 +355,11 @@ compliance. Additive project instructions remain subordinate to Factory policy.
   and full scope; the host-validated saved pre-repair start only supplements defect
   reproduction. Historical verdicts are diagnostic, never reusable PASS authority.
 
-These prompts use existing frozen task data and existing producer placeholders,
-not unwired receipt variables. Bootstrap tickets can use checkable criteria and
+These prompts use the host-frozen ticket text substituted into `{{TICKET}}` and
+existing producer placeholders, not unwired receipt variables. A criterion with no
+recorded mode is treated as changed, the strictest obligation; prompts never infer a
+preservation or non-transition exception from missing data. The verifier rejects
+missing or mismatched results only when receipts are supplied. Bootstrap tickets can use checkable criteria and
 current independent verification before the future runner/admission/proof layers
 exist. Missing typed receipts are not evidence that those gates are enforced, and
 agents must not fabricate approvals, receipts or evidence. Unavailable required
