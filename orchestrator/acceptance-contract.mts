@@ -130,12 +130,16 @@ function parseContract(x: any): AcceptanceContract {
     else need(a.failureId === null, '$.assertions.failureId', 'preservation cannot name red');
   }
   const used = new Set<string>();
+  let evidenceObligations = 0;
   for (const c of x.criteria) {
     record(c, ['id', 'behavior', 'mode', 'assertionIds', 'evidenceRequirements', 'exception'], '$.criteria');
     text(c.behavior, '$.criteria.behavior');
     need(['changed', 'preservation', 'non-transition'].includes(c.mode), '$.criteria.mode', 'unknown mode');
     refs(c.assertionIds, '$.criteria.assertionIds', c.mode === 'non-transition');
     list(c.evidenceRequirements, '$.criteria.evidenceRequirements'); c.evidenceRequirements.forEach((r: any) => text(r, '$.criteria.evidenceRequirements')); unique(c.evidenceRequirements, '$.criteria.evidenceRequirements');
+    // Each criterion/requirement pair needs its own record in the bounded result envelope.
+    evidenceObligations += c.evidenceRequirements.length;
+    need(evidenceObligations <= ACCEPTANCE_LIMITS.items, '$.criteria.evidenceRequirements', 'aggregate evidence obligation limit');
     if (c.mode === 'non-transition') {
       need(c.assertionIds.length === 0, '$.criteria.assertionIds', 'non-transition has evidence, not executable transitions');
       record(c.exception, ['kind', 'rationale', 'approver'], '$.criteria.exception');

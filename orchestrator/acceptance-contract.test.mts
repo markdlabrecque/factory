@@ -31,6 +31,35 @@ test('documented mixed contract and evidence-only variants have explicit valid t
   }
 });
 
+test('aggregate criterion evidence fits the 256-record result envelope or fails before approval', () => {
+  const c = fixture();
+  const manual = c.criteria[2];
+  c.criteria = [
+    { ...structuredClone(manual), id: 'C-first', evidenceRequirements: Array.from({ length: 255 }, (_, i) => `review-${i}`) },
+    { ...structuredClone(manual), id: 'C-second', evidenceRequirements: ['review-0'] },
+  ];
+  c.assertions = []; c.probes = []; c.fixtures = [];
+  assert.equal(validateAcceptanceContract(c).status, 'valid');
+  const trusted = ingress(c);
+  assert.equal(checkAcceptanceApproval(c, trusted).status, 'valid');
+  for (const phase of ['baseline', 'candidate'] as const) {
+    const r = observed(c, phase);
+    assert.equal(r.evidence.length, 256);
+    assert.equal(checkAcceptanceResults(c, trusted, r, phase).status, 'valid');
+    r.evidence.pop();
+    held(checkAcceptanceResults(c, trusted, r, phase), 'missing-evidence');
+  }
+  // Both individual lists remain valid (256 + 1); obligations are criterion/requirement pairs.
+  c.criteria[0].evidenceRequirements.push('review-255');
+  const invalid = validateAcceptanceContract(c);
+  held(invalid, 'invalid-contract');
+  if (invalid.status === 'hold') {
+    assert.equal(invalid.path, '$.criteria.evidenceRequirements');
+    assert.match(invalid.reason, /aggregate evidence obligation limit/);
+  }
+  held(checkAcceptanceApproval(c, { lookup: () => assert.fail('oversized contract must not consult authority') }), 'invalid-contract');
+});
+
 test('canonical identities are deterministic, key-order independent and exact-content bound', () => {
   assert.equal(acceptanceHash({ b: 2, a: [true, null, 'x'] }), 'ab9b02db7ec2d94733f11a399281a3d28694f36b21ca88311ec4fe27679cefd5');
   const c = fixture();

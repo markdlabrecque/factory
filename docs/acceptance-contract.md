@@ -140,8 +140,14 @@ candidate's own reports cannot be substituted for independently observed results
 
 Each probe requires positive integer timeout, output, memory and CPU limits. Current
 ceilings: 300,000 ms, 1,048,576 output bytes, 8192 MiB, 8 CPUs. Collections and argument
-vectors have at most 256 entries. Strings are bounded (argv arguments may be empty,
-but argv[0] may not); structural checks impose an overall 1 MiB JSON ceiling.
+vectors have at most 256 entries. Contracts additionally allow at most **256 aggregate
+criterion evidence obligations**, counted as criterion/requirement pairs across all
+criteria and modes (the same requirement text in two criteria counts twice). This
+matches the 256-record result evidence ceiling, so every declared obligation can
+have its own record. A total of 256 is valid within the other bounds; 257 fails as
+`invalid-contract` before approval, even if each criterion's list is individually
+within bounds. Strings are bounded (argv arguments may be empty, but argv[0] may
+not); structural checks impose an overall 1 MiB JSON ceiling.
 Enforcement, cancellation, overflow handling and resource/cleanup ownership belong
 to the future runner. Exceeding a bound cannot yield expected behavioral red. Runner
 receipts must additionally bind exact baseline/candidate SHA, frozen byte identity,
@@ -286,6 +292,8 @@ node --test orchestrator/acceptance-contract.test.mts
 ```
 
 Pure units cover schema, identity/approval and failure taxonomy using the documented
-example. A bounded denied-capability Node import smoke check checks that import does
-not write, launch children, contact a tracker or print output. This is not a live
+example, including 256 aggregate criterion evidence obligations reconciling in both
+phases and rejection of 257 before approval. A bounded denied-capability Node import
+smoke check checks that import does not write, launch children, contact a tracker or
+print output. This is not a live
 sandbox acceptance test or a deterministic substitute for independent review.
