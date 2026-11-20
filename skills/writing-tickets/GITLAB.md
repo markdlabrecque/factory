@@ -73,10 +73,22 @@ In each blocked ticket's description, add this section at the end (Task tickets:
 
 Each entry names the blocker and the technical reason: the file, function, or output involved. Write it into the body file before `create`, or update an existing body with `glab issue update <N> -d "$(cat body.md)"`. Keep the `Depends on` line in sync with this list.
 
-## Ready
+## Acceptance and ready
+
+After filing hierarchy, dependencies and estimate, attach the [acceptance preparation](ACCEPTANCE.md) summary to each runnable work item. Link its immutable package revision/digests, trusted human/independent approval record and bounded baseline receipt or reviewed non-transition evidence. A note or description is an index, not approval/custody authority. Review mixed work per criterion; missing approval, already-green changed behavior or invalid/unavailable execution leaves the item held without the ready label.
 
 ```
-glab issue update <N> -l ready-for-agent
+glab issue note <N> -m "$(cat acceptance.md)"
+glab issue view <N> --comments
+```
+
+Read back scope, plan, model metadata, acceptance identities, native child relationships and description-only blockers. Verify referenced bytes and approval/evidence, not just the presence of a note. Use implementation Model tier and distinct actual Planning model; emit an exact implementation selector only if the target runtime supports it. No Factory installation is needed.
+
+Apply readiness last, only for reviewed runnable units. A split parent's readiness must not dispatch held children. For changed scope or acceptance on an existing ready item, remove the label before editing, then refreeze/reapprove and repeat evidence review before restoring it. Keep other labels intact.
+
+```
+glab issue update <N> --unlabel ready-for-agent   # before changing existing ready acceptance
+glab issue update <N> -l ready-for-agent           # only after all readiness checks pass
 ```
 
 Link format for the report: `[#N](https://<host>/<group>/<project>/-/issues/N)`.
