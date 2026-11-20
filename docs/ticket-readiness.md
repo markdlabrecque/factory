@@ -2,6 +2,15 @@
 
 Readiness is an observation, not permission to execute, verify or deliver. A saved healthy report never authorizes launch. Existing admission fencing, image/browser gates, independent verification, exact-SHA delivery, cleanup and recovery accounting remain in force.
 
+## Acceptance contract foundation
+
+The [versioned portable acceptance contract](acceptance-contract.md) defines exact-content
+identity, trusted approval ingress and changed/preservation/reviewed non-transition policy.
+Its pure validators establish structure and record binding, **not** English adequacy or
+launch authority. The module ships in the runtime inventory; custody, bounded execution,
+admission and proof integration are separate work and are not enabled by this foundation.
+Existing readiness observations do not claim to enforce that future protocol.
+
 ## Start with the observation, not a retry
 
 Tracker selection says which tickets match the project's policy. Factory admission separately decides whether a selected ticket may start. A project hold can exist with zero runs. It does not remove tracker selection, manufacture a queued/stopped execution, or label every ticket needs-human. A ticket-input or workspace hold affects that ticket, not unrelated eligible work.
