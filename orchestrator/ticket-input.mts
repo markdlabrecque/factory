@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { collectTicketContext, renderTicketContext } from './ticket-context.mts';
+import { collectTicketContext, renderTicketContext, ticketContextHash, TICKET_CONTEXT_LIMITS } from './ticket-context.mts';
 import type { ReadinessCheck } from './readiness-schema.mts';
 import type { TicketContext, TicketContextHold, TicketContextSource } from './ticket-context.mts';
 
@@ -22,6 +22,14 @@ export function ticketInputCheck(hold: TicketContextHold, observedAt = new Date(
     reason: hold.reason, nextActor: hold.nextActor, nextAction: hold.nextAction, automaticRecheck: 'next-launch' };
 }
 export interface FrozenTicketInput { context: TicketContext; text: string; hash: string; textHash: string }
+/** Recompute the exact original content/rendered identities for host custody consumers. */
+export function frozenTicketIdentity(input: FrozenTicketInput): { contentHash: string; renderedSha256: string } {
+  if (Buffer.byteLength(JSON.stringify(input)) > 2 * TICKET_CONTEXT_LIMITS.maxBytes
+    || input.hash !== ticketContextHash(input.context) || input.context.contentHash !== input.hash
+    || input.text !== renderTicketContext(input.context)
+    || input.textHash !== createHash('sha256').update(input.text).digest('hex')) throw Error('Invalid frozen ticket identity');
+  return { contentHash: input.hash, renderedSha256: input.textHash };
+}
 export function freezeTicketInput(source: TicketContextSource, iid: number): FrozenTicketInput {
   const result = collectTicketContext(source, iid);
   if (result.status === 'hold') throw new TicketInputHold(result);
