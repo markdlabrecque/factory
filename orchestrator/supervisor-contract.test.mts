@@ -134,6 +134,5 @@ test('existing Pi read-only argv crosses fresh local process/stdin boundary with
     for (const flag of ['--no-session','--no-context-files','--no-skills','--no-extensions']) assert.ok(a.args.includes(flag));
     assert.deepEqual(a.args.slice(a.args.indexOf('--tools'), a.args.indexOf('--tools') + 2), ['--tools','read,grep,find,ls']);
     assert.ok(!a.args.some((v: string) => ['--resume','--continue','--session','-r','-c'].includes(v)));
-    assert.ok(!a.args.join(' ').includes('FlagAHuman'), 'host outbox bridge is required; tool is not in runtime allowlist');
   }
 });

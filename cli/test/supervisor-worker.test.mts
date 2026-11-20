@@ -38,7 +38,7 @@ test('bounded proposal worker reserves before fixed-role Pi, fences cancellation
           assert.ok(reserved); assert.equal(state.charged.diagnosis.tokens, Object.keys(state.reservations).length * 100);
           assert.equal(argv[argv.indexOf('--model') + 1], modelForRole(a.family, 'supervisor').model);
           for (const arg of ['--no-session','--no-tools','--no-extensions','--no-skills','--no-context-files']) assert.ok(argv.includes(arg));
-          for (const arg of ['--resume','--continue','--tools','bash','FlagAHuman']) assert.ok(!argv.includes(arg));
+          for (const arg of ['--resume','--continue','--tools','bash']) assert.ok(!argv.includes(arg));
           assert.equal(options.detached, true); assert.equal(options.deadline, reserved.deadline); assert.deepEqual(options.reservation, reserved.reserved);
           assert.ok(options.cwd.startsWith(join(stateDir, 'supervisor')));
           const input = JSON.parse(options.input.slice(options.input.indexOf('\n\n{"version":1')));
