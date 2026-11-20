@@ -429,8 +429,7 @@ and authorization-first in-flight stop; real 429/503 SDK error paths and context
 overflow yield one transmission without retries/compaction; repeated requests refuse.
 Pure precondition units own changed frozen input and inherited debug/TLS configuration
 refusal before provider startup; copied-bundle validation owns corrupt selected
-artifacts. These cases do not need repeated SDK/process bootstraps. The same nine
-transport scenarios retain the real SDK/request/journal boundaries. Each independent
+artifacts. These cases do not need repeated SDK/process bootstraps. The transport scenarios retain the real SDK/request/journal boundaries. Each independent
 fresh request scenario has a 15-second subprocess limit instead of sharing one
 aggregate subprocess budget; the complete matrix retains the standard 120-second
 test bound, four-way file concurrency and 180-second shard deadline. Every scenario
@@ -450,6 +449,28 @@ The [provider contract](docs/design/supervisor-provider-contract.md) records the
 conservative bound and limits. Extend this same suite, not a duplicate boundary matrix.
 It enters the unchanged four-shard inventory automatically; the independent
 browser lifecycle gate remains mandatory.
+
+### Bounded transport outcome regression
+
+```sh
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/supervisor-openai-request.test.mts cli/test/supervisor-openai-usage.test.mts
+node --test --test-concurrency=4 --test-timeout=120000 cli/test/documentation*.test.mts
+git diff --check
+```
+
+The existing network-denied copied-runtime fixture uses synthetic credentials and
+injected fetch with the digest-checked pinned SDK and real journal authorization.
+It covers rejected fetch, HTTP 401/429/503, empty and interrupted SSE, absent or
+invalid request IDs and publication failure, alongside the existing one-send and
+stop cases. It reopens bounded transport evidence before stream completion in the
+stream cases and checks unknown usage and retained reservation charges. The usage
+filesystem boundary checks missing, malformed, foreign, conflicting and unsafe
+records, idempotence and legacy receipt compatibility. Synthetic secret-like data
+must not enter transport records. These are offline adapter and private-filesystem
+boundaries, not proof of live provider behavior, public CLI end-to-end projection,
+settlement, cleanup or replay safety. A failed publication is not a fetch rejection.
+Focused commands do not replace the four mandatory shards, separate browser
+lifecycle, documentation checks, independent review or hosted checks above.
 
 ## Owned advisory local process boundary
 
@@ -507,7 +528,7 @@ filesystem fault injection proves ancestor-sync refusal before publication and
 directory-sync failure after rename: visible bytes do not yield durable success
 or known resources while synchronization fails. This is not a power-loss experiment.
 An IPC-only registered local child supplies real PID/start identity; all provider metadata/control/exclusion data is synthetic.
-There are no network/provider calls or duplicated transport permutations. Copied
+There are no live network/provider calls or duplicated SDK transport permutations. Copied
 bundle assertions import the inventoried helper unchanged. Later owned cleanup,
 final journal settlement/exclusion release and installed-host activation are not
 claimed by these tests. Full mandatory shards and separate lifecycle remain gates.

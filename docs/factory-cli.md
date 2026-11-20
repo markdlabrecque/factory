@@ -198,7 +198,19 @@ Output is version-1 JSON (`--json` compact, otherwise pretty) with advice-only a
 `held|proposed|reused|human-required`, safe project/ticket/current-run identity,
 invocation/diagnostic/incident IDs where present, bounded reason/recommendation kind,
 reservation, known/unknown actual accounting, cumulative charges and safe local evidence
-references. No raw prompt, stdout/stderr, provider stream, reasoning or secret is printed.
+references. Diagnosis results that reach the journal projection also include `transport`:
+`{state: "observed", observation: {outcome: "http-response", status, requestId}}`,
+`{state: "observed", observation: {outcome: "fetch-rejected", status: null, requestId: null}}`,
+or `{state: "unknown", reason: "missing-or-invalid-transport-observation"}`.
+The HTTP status is an integer from 100 through 599; an absent or invalid allowed
+`x-request-id` is null. Early validation or classified authentication holds may omit
+this field. Reopening validates private evidence against this invocation's grant and
+send authorization; legacy, missing, unsafe or invalid evidence is unknown. A fetch
+rejection does not prove no transmission, and an HTTP status alone does not diagnose
+authentication or prove provider acceptance, usage, cleanup or safe retry. Local
+publication failure holds the request; a record visible after a failed sync is not
+by itself a durable acknowledgment. See [transport evidence](supervisor.md#bounded-transport-observations).
+No raw prompt, stdout/stderr, provider stream, reasoning or secret is printed.
 Advice grants no execution authority. Exits: 0 proposed/reused, 2 retained human-required,
 1 held/invalid/failed. Status/explain still exit 0 for successful observations of holds.
 SIGINT/SIGTERM request owned cancellation and await its bounded settlement, then exit

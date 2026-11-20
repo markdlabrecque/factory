@@ -154,6 +154,17 @@ null, not zero. Full cumulative reservation charges remain retained without refu
 Proposal, diagnosis, human request and delivery counts are not execution progress
 or proof; admission exclusions and stop-pending owners remain separately visible.
 
+### Advisory transport is not telemetry or accounting
+
+The separate private [transport observation](supervisor.md#bounded-transport-observations)
+is reopened for the explicit diagnosis result, not emitted as a telemetry event or
+inferred from telemetry export. It can report a bounded HTTP status and validated
+request ID, a rejected fetch, or unknown evidence; absence is not proof of no send.
+It does not establish terminal usage, authentication failure, cleanup, settlement
+or retry permission. Existing telemetry coverage and nullable usage semantics are
+unchanged, and a legacy receipt without a transport record remains readable without
+inventing an outcome.
+
 ### Raw advisory accounting is not telemetry or invoice reconciliation
 
 The source [provider receipt helper](supervisor.md#raw-provider-usage-and-private-receipts)

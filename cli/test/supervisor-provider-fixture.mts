@@ -73,7 +73,9 @@ if (process.argv[2] === '--request-worker') {
         syncBuiltinESMExports();
       }
       const { requestAdvisory, validateAdvisoryPayload } = await import(pathToFileURL(join(o.runtimeRoot, 'supervisor-openai-request.mts')).href);
-      let transmissions = 0, serialized = '', payload: any;
+      let transmissions = 0, serialized = '', payload: any, duringStream: any;
+      const { readTransportObservation } = await import(pathToFileURL(join(o.runtimeRoot, 'supervisor-openai-usage.mts')).href);
+      const originalFsync = fs.fsyncSync;
       const terminal = providerTerminal(), subscription = o.scenario === 'subscription';
       const transport: typeof fetch = async (url, init) => {
         assert.equal(String(url), 'https://api.openai.com/v1/responses'); assert.equal(init!.method, 'POST'); assert.equal(init!.redirect, 'error');
@@ -94,26 +96,41 @@ if (process.argv[2] === '--request-worker') {
         }
         transmissions++;
         if (o.scenario === 'inflight-stop') { process.send!({ inflight: true }); await once(process, 'message'); }
-        const status = o.scenario === 'retry-429' ? 429 : o.scenario === 'retry-503' ? 503 : o.scenario === 'overflow' ? 400 : 200;
+        if (o.scenario === 'fetch-rejected') throw Error('synthetic-secret-exception');
+        if (o.scenario === 'publication-failure') { fs.fsyncSync = (() => { throw Error('synthetic-secret-disk'); }) as any; syncBuiltinESMExports(); }
+        const status = o.scenario === 'http-401' ? 401 : o.scenario === 'retry-429' ? 429 : o.scenario === 'retry-503' ? 503 : o.scenario === 'overflow' ? 400 : 200;
         if (status !== 200) return new Response(JSON.stringify({ error: { message: status === 400 ? 'context_length_exceeded' : 'synthetic retryable failure',
           type: 'invalid_request_error', code: status === 400 ? 'context_length_exceeded' : 'synthetic' } }),
-          { status, headers: { 'content-type': 'application/json', 'retry-after': '0' } });
+          { status, headers: { 'content-type': 'application/json', 'retry-after': '0', 'x-request-id': 'req_offline', 'x-secret': 'synthetic-secret-header' } });
+        if (['empty-sse','interrupted-sse','invalid-id','missing-id','publication-failure'].includes(o.scenario)) {
+          const body = new ReadableStream({ pull(controller) {
+            const state = readSupervisor(o.stateDir, o.grant.project);
+            const authorization = Object.values(state.advisory!.sends)[0] as any;
+            duringStream = readTransportObservation(o.stateDir, o.grant, authorization);
+            if (o.scenario === 'interrupted-sse') controller.error(Error('synthetic-secret-stream'));
+            else controller.close();
+          } }, { highWaterMark: 0 });
+          const headers: Record<string,string> = { 'content-type': 'text/event-stream', 'x-secret': 'synthetic-secret-header' };
+          if (o.scenario !== 'missing-id') headers['x-request-id'] = o.scenario === 'invalid-id' ? 'synthetic-secret-invalid' : 'req_offline';
+          return new Response(body, { status: 200, headers });
+        }
         return new Response(sse(terminal) + (o.scenario === 'duplicate-terminal' ? sse(terminal) : ''), { status: 200, headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_offline' } });
       };
       const options = { ...o, apiKey: subscription ? 'synthetic-chatgpt-not-a-token' : 'sk-synthetic-offline-not-a-secret', fetch: transport };
       let result: any, refused: string | undefined;
       try { result = await requestAdvisory(options); } catch (e) { refused = String(e); }
+      finally { fs.fsyncSync = originalFsync; syncBuiltinESMExports(); }
       let extraRequestDenied = false;
       if (!['stop-first','mid-load-prompt','mid-load-dependencies'].includes(o.scenario)) {
         try { await requestAdvisory(options); } catch (e) { extraRequestDenied = /consumed/.test(String(e)); }
       }
-      process.send!({ transmissions, serialized, payload, ...result, refused, extraRequestDenied, driftApplied }, () => process.disconnect());
+      process.send!({ transmissions, serialized, payload, ...result, refused, extraRequestDenied, driftApplied, duringStream }, () => process.disconnect());
     } catch (e) { process.send!({ error: String(e) }, () => process.disconnect()); }
   });
   process.send!({ ready: true });
 }
 
-export const providerScenarios = ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','mid-load-prompt','mid-load-dependencies','subscription'] as const;
+export const providerScenarios = ['complete','stop-first','inflight-stop','retry-429','retry-503','overflow','duplicate-terminal','mid-load-prompt','mid-load-dependencies','subscription','fetch-rejected','http-401','empty-sse','interrupted-sse','invalid-id','missing-id','publication-failure'] as const;
 export async function runProviderSpike(selected?: string) {
   if (selected && !providerScenarios.includes(selected as any)) throw Error('Unknown offline provider scenario');
   denyNetwork();
@@ -171,6 +188,25 @@ export async function runProviderSpike(selected?: string) {
         if (scenario === 'inflight-stop') assert.equal(journal.control!.mode, 'stopped');
         if (scenario === 'duplicate-terminal') assert.match(outcome.terminalProblem, /ambiguous/);
         assert.deepEqual(journal.charged.diagnosis, advisoryReservation(profile), 'no refund/settlement is claimed');
+        if (sends.length) {
+          const { readTransportObservation, readProviderUsage } = await import('../src/supervisor-openai-usage.mts');
+          const transport = readTransportObservation(stateDir, grant, sends[0]);
+          const usage = readProviderUsage(stateDir, grant, sends[0]);
+          if (scenario === 'publication-failure') assert.equal(transport.state, 'unknown');
+          else if (scenario === 'fetch-rejected') assert.deepEqual(transport, { state: 'observed', observation: { outcome: 'fetch-rejected', status: null, requestId: null } });
+          else {
+            const status = scenario === 'http-401' ? 401 : scenario === 'retry-429' ? 429 : scenario === 'retry-503' ? 503 : scenario === 'overflow' ? 400 : 200;
+            assert.deepEqual(transport, { state: 'observed', observation: { outcome: 'http-response', status, requestId: ['invalid-id','missing-id'].includes(scenario) ? null : 'req_offline' } });
+          }
+          assert.equal(usage.state, 'unknown');
+          assert.equal(journal.reservations[supervisorHash(grant.invocationId)].state, 'active');
+          if (['empty-sse','interrupted-sse','invalid-id','missing-id'].includes(scenario)) assert.deepEqual(outcome.duringStream, transport);
+          assert.equal(JSON.stringify(transport).includes('synthetic-secret'), false);
+          if (transport.state === 'observed') {
+            const file = join(stateDir,'supervisor','usage',supervisorHash(grant.project),supervisorHash(grant.invocationId),'transport.json');
+            assert.equal(readFileSync(file,'utf8').includes('synthetic-secret'), false);
+          }
+        }
         scenarios.push({ scenario, ...outcome, authorizations: sends.length });
         await closed;
       } finally { if (child.connected) child.send({ abort: true }, () => {}); await closed; }

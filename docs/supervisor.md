@@ -596,6 +596,39 @@ This request module alone supplies no watchdog or settlement. The owned source
 boundary below composes this gate with durable usage and local lifecycle evidence;
 public host/admission composition and paid activation remain absent.
 
+## Bounded transport observations
+
+After the journal authorizes the one owned fetch and before the SDK consumes its
+response body, the adapter publishes a separate private immutable `transport.json`
+bound to the exact grant and send authorization. It records only `fetch-rejected`
+with null status and request ID, or `http-response` with an integer status from
+100–599 and a strictly validated `x-request-id` (otherwise null). It retains no
+exception prose, response body, arbitrary headers or credentials. Reopen checks
+journal binding, schema, bounded size and private file safety. Both publication and
+passive reopen synchronize the existing file and its directory before trusting it:
+visibility after a failed post-rename sync is not durability. A synchronization
+failure projects unknown; a later successful reopen can establish durability. Passive
+reads create no paths, change no record bytes and do not repair evidence.
+Conflicting or unsafe existing records are not replaced. Identical publication is
+idempotent. Terminal usage receipts remain separate and legacy receipts are neither
+rewritten nor migrated.
+
+The [diagnosis result](factory-cli.md#explicit-advisory-diagnosis) and passive
+status/explain project validated observations for the exact invocation. Passive
+inspection includes transport on each paginated reservation owner and diagnostic,
+including unfinished reservations without a diagnostic; it never substitutes a
+previous invocation's observation. Missing, unreadable, malformed, unsafe or foreign evidence,
+including a legacy invocation without this record, is unknown. Publication failure
+holds processing and is not relabelled as fetch rejection. A crash or failed sync
+before durable publication can leave no trustworthy observation, even if a file is
+visible; a successfully published record can survive later stream failure. The
+record does not reconstruct past unobserved HTTP outcomes. Fetch rejection does not
+prove no transmission; status alone proves neither authentication failure nor remote
+acceptance. None of these observations establishes terminal usage, zero cost, cleanup,
+settlement, release or permission to retry. Unknown usage retains the existing full
+charge, exclusion and runtime pins; the one-use send gate remains unchanged. Known
+usage and confirmed cleanup must still satisfy the existing settlement predicates.
+
 ## Owned short-lived advisory process boundary
 
 `createOpenAIDiagnosisBoundary` in `supervisor-openai.mts` is the trusted **source**

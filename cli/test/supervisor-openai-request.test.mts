@@ -68,5 +68,6 @@ test('copied pinned Pi adapter consumes real journal permission before one bound
     assert.throws(() => validateAdvisoryPayload({ ...evidence.payload, ...change }, system, user));
   assert.deepEqual(evidence.scenarios.map((s: any) => [s.scenario, s.transmissions, s.authorizations]), [
     ['complete',1,1], ['stop-first',0,0], ['inflight-stop',1,1], ['retry-429',1,1], ['retry-503',1,1], ['overflow',1,1], ['duplicate-terminal',1,1], ['mid-load-prompt',0,0], ['mid-load-dependencies',0,0], ['subscription',1,1],
+    ['fetch-rejected',1,1], ['http-401',1,1], ['empty-sse',1,1], ['interrupted-sse',1,1], ['invalid-id',1,1], ['missing-id',1,1], ['publication-failure',1,1],
   ]);
 });

@@ -1,9 +1,10 @@
-// Load the pinned, inventoried Pi subpath closure; consume journal permission at the final bounded HTTP gate. No action/settlement authority.
+// Load the pinned Pi closure; authorize one HTTP attempt and durably observe its transport outcome. No action/settlement authority.
 import { ADVISORY_PROFILE, ADVISORY_PROFILE_ID, subscriptionProfile, validateDiagnosisGrant } from './supervisor-advisory-contract.mts';
 import type { DiagnosisGrant } from './supervisor-advisory-contract.mts';
 import { authorizeAdvisorySend, readSupervisor } from './supervisor-state.mts';
 import type { AdvisoryControls, AdvisoryRegistration } from './supervisor-state.mts';
 import { validateRuntimeBundle } from './runtime-bundle.mts';
+import { captureTransportResponse, persistTransportObservation } from './supervisor-openai-usage.mts';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -124,7 +125,18 @@ export async function requestAdvisory(o: AdvisoryRequest) {
       authorization = authorizeAdvisorySend(o.stateDir, grant.project, current.revision, { at: new Date().toISOString(),
         grantId: grant.id, reservationId: grant.invocationId, fence: grant.fence, worker, payload: sha(init.body), policy: observation.policy, controls: observation.controls });
       // No network under the journal lock. Authorization-first remains owned in-flight if stop now commits.
-      return network(url, { ...init, redirect: 'error' });
+      let received: Response;
+      try { received = await network(url, { ...init, redirect: 'error' }); }
+      catch (error) {
+        try { persistTransportObservation(o.stateDir, grant, authorization, { outcome: 'fetch-rejected', status: null, requestId: null }); }
+        catch { throw Error('Advisory held: transport observation publication failed'); }
+        throw error;
+      }
+      // Publication is deliberately outside the fetch catch: a disk error is not a rejection.
+      try {
+        persistTransportObservation(o.stateDir, grant, authorization, captureTransportResponse(received.status, received.headers.get('x-request-id')));
+      } catch { throw Error('Advisory held: transport observation publication failed'); }
+      return received;
     };
     const result = await stream(model, { messages: [{ role: 'system', content: system, timestamp: 0 },
       { role: 'user', content: user, timestamp: 0 }] }, {
