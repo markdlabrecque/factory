@@ -105,6 +105,37 @@ runtime proves actual installed mount or cleanup authority. Refer to the
 [complete input contract](supervisor.md#complete-saved-run-input-collection) for
 source roles, authoritative decisions, cache stability and refusal conditions.
 
+## Reviewed acceptance originals
+
+The selected runtime includes the host-only `acceptance-custody.mts` APIs alongside
+`acceptance-contract.mts`. They bind exact frozen ticket content/rendered hashes,
+authoritative criterion inventory, reviewed contract/probe/fixture bytes and trusted
+approval into a content-addressed sealed original. `ticket-input.mts` exports the
+shared `frozenTicketIdentity` recomputation; payload journals and existing proof
+formats are unchanged. No standard entrypoint, admission or replay gate is activated
+by adding these APIs.
+
+A trusted host supplies an authenticated approval ingress scoped to both ticket and
+acceptance identities, a canonical private store, and the complete inventory of
+**all** agent mounts. Originals must be outside every mount, including mutable
+evidence, project and runtime code; ancestor/equality/alias overlaps refuse. Probe
+bytes are digest-pinned local bytes, never remote fetch or host shell instructions.
+Exclusive publication and a complete seal permit only rehashed exact originals;
+partial, unknown, missing and tampered state holds without replacement or deletion.
+Resume/repair must retain their original saved bundle pointer, not refreeze current
+tracker inputs or replace historical proof. New requirements or approval create a
+new reviewed identity for a separately authorized execution.
+
+Only the trusted independent runner may obtain a new private execution copy outside
+implementer mounts. It reads expected results from the original contract, not candidate
+code, and must never mount the original store. The implementer receives requirements
+and diagnostics only. These APIs do not themselves establish runner reset, execution
+authorization, mount completeness, candidate replay or delivery proof; downstream
+host integration owns those boundaries. Filesystem permissions assume trusted host
+code and an isolated implementer, not protection against malicious same-UID host
+processes. See [the custody API contract](acceptance-contract.md#host-owned-frozen-acceptance-custody)
+for bounds, publication/retention and caller responsibilities.
+
 ## Normal payload custody and terminal handoff
 
 The standard launcher inventories `payload-custody.mts` with the exact selected

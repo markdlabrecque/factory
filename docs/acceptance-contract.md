@@ -5,7 +5,8 @@ hashing, structural checks, approval binding and assertion transition policy. It
 imports only Node crypto, never project configuration, trackers, processes or models.
 It does not execute argv, read files, authenticate reviewers, freeze bundles, admit
 work, publish receipts or grant delivery authority. The flat runtime includes this
-module now; custody, runner, admission and exact-candidate proof are later layers.
+module now. The host-only custody APIs below freeze reviewed originals; runner,
+admission and exact-candidate proof remain later layers.
 No existing ticket is automatically migrated or made ready by these functions.
 
 ## Trust and identity
@@ -372,11 +373,116 @@ substitution and additive instructions. Manual rendered-prompt review remains
 necessary to check that the instructions agree, especially feature transitions and
 recovery comparisons.
 
+## Host-owned frozen acceptance custody
+
+`orchestrator/acceptance-custody.mts` supplies explicit source APIs, shipped in the
+complete flat runtime. They do **not** activate a gate, run probes, fetch tracker
+instructions, admit implementation or publish replay/delivery proof. Existing
+standard entrypoints are not yet wired to consume these bundles.
+
+### Preparation and trusted review
+
+`prepareAcceptanceBundle({ ticket, contract, artifacts, approvals })` is a pure
+bounded preparation API. `ticket` is the full `FrozenTicketInput` produced by
+`freezeTicketInput`; `frozenTicketIdentity` recomputes the source content hash,
+rendered text and rendered SHA-256 rather than trusting declared hashes. The full
+original input is retained, not just a summary. `artifacts` supplies exact byte
+arrays indexed by the contract's portable paths. Missing/extra/duplicate artifacts,
+conflicting file/directory paths, mismatched digests and oversized inputs hold.
+Repeated identical paths across probes/fixtures may share the same exact bytes.
+
+`TrustedCustodyApprovalIngress.lookup({ ticket, acceptance })` must be implemented
+by the authenticated, access-controlled **host** review store. It returns the v1
+`ApprovalRecord` only when that review covers both the exact frozen requirements
+(`contentHash`, `renderedSha256`) and the exact acceptance identity. This stronger
+lookup scope prevents a valid contract review from silently approving changed ticket
+requirements. The returned review still passes the existing contract approval
+validator. There is no caller-supplied approval JSON parameter, tracker self-approval
+or checksum-only approval path. As with the pure contract ingress, this callback is
+an explicit trust boundary: a malicious caller implementing a lying ingress is not
+authenticated by JavaScript or by a reviewer name string.
+
+`resolveAcceptanceArtifacts(sourceRoot, contract)` optionally reads local files
+using the reviewed SHA-256 as the immutable selector. It does not accept remote
+URLs, branch names, fetch instructions or commands. There is no moving-revision
+resolution: a preparer must supply bytes matching the reviewed digest. Every path
+ancestor must be canonical, files must be regular single-link files, and symlinks,
+hard links, traversal, special files, size overflow and unstable reads hold. Descriptor
+reads are bounded even if a file grows between stat and read. No newline or encoding
+normalization changes probe/fixture bytes.
+
+Custody adds fixed bounds: 256 distinct artifacts, 1 MiB per artifact, 16 MiB total
+artifact bytes, 8 MiB serialized frozen ticket, 1 MiB per contract/approval/manifest
+record. These do not relax the portable contract's existing ceilings. Large probe
+inventories require smaller reviewed bundles, not an automatic bound increase.
+
+### Store, publication and resume
+
+`freezeAcceptanceBundle({ root, agentMounts, ...preparation })` requires an existing
+canonical host-owned private root (0700 recommended). It returns a saved
+`{ version: 1, id }` pointer. The content-addressed bundle identity hashes a canonical
+manifest binding both ticket hashes, the complete acceptance identity, authoritative
+criterion inventory digest, exact approval digest, and every original file's size
+and byte hash. A new review, changed requirements, contract, probe or fixture yields
+a new identity after fresh approval; nothing edits a historical identity in place.
+
+The caller must enumerate **every** agent mount, including project/code/runtime,
+evidence, helper, file mounts and any future mounts. Root/mount equality, either
+ancestor relationship, aliases and unknown mount paths refuse. Check again before
+any later mount is exposed. The private root must not live in repository code,
+mutable execution evidence, or any directory an agent can mount. The API cannot
+discover omitted mounts or defend against a malicious same-UID host process: host
+API access and mount construction remain trusted responsibilities, not a claim that
+0400 files alone isolate an implementer running on the host.
+
+Publication exclusively reserves the final identity directory, writes each original
+0400 with exclusive creation and fsync, and atomically links a completed seal only
+after all originals and manifest are complete. Concurrent publishers may reuse only
+a fully validated identical original; a loser observing partial publication holds.
+A partial marker, unknown file, incomplete inventory, unsafe file or invalid hash
+cannot yield a usable bundle. There is no overwrite, retry-repair, automatic deletion
+or garbage collection. Interrupted/unknown directories are retained for investigation.
+
+`readAcceptanceBundle(root, agentMounts, savedPointer)` is the resume/repair path.
+It validates the private canonical store and exact closed inventory, rehashes all
+original bytes, recomputes ticket/contract/criteria/approval bindings, and reestablishes
+directory durability before returning independent byte copies. Reads never fetch
+replacement probes, call current tracker approval, or rewrite historical proof.
+Missing or tampered originals throw `AcceptanceCustodyHold` with a preparer/reviewer
+next actor and remain held. Re-running freeze cannot repair an existing identity.
+Save the original pointer with the execution/attempt; resume and repair must keep
+using it rather than selecting the latest freshly prepared bundle. Binding that
+pointer into execution/proof records belongs to the downstream runner/proof work.
+
+### Independent runner copies
+
+`copyAcceptanceForRunner(root, agentMounts, pointer, destination)` rehashes originals
+and creates a new private, exclusive directory of exact probe/fixture files with
+0400 permissions. Its private parent and destination must be outside all implementer
+mounts and must not overlap originals. Candidate code never supplies expected results.
+The trusted independent runner obtains the authoritative contract through the host
+read API, not a candidate file. It may mount its copy read-only into its own trusted
+execution context, **never mount originals** or share that context with implementation.
+Copies are disposable and cannot mutate original bytes; failed/partial copies remain
+for explicit investigation. This API does not authorize execution or prove clean
+checkout/site/database reset. Those guarantees belong to the independent runner.
+
+Keep every custody return value host-private. The implementer receives requirements
+and diagnostic summaries, not these authoritative artifacts or an ingress capability.
+No current prompt, CLI or scheduler gains a new authority path from these APIs.
+
 ## Verification
 
 ```sh
-node --test orchestrator/acceptance-contract.test.mts
+node --test orchestrator/acceptance-contract.test.mts orchestrator/acceptance-custody.test.mts orchestrator/ticket-input.test.mts
 ```
+
+Custody uses pure preparation/binding tests plus a disposable filesystem boundary
+covering exclusive publication, rehash, mount exclusions, private copies, missing and
+tampered originals, symlink/hard-link/size refusal, retained interrupted publication,
+and two concurrent native Node publishers synchronized with IPC. No live tracker,
+agent, Docker, credentials, service manager or browser is used. Full commit-tier
+shards and the independent browser-lifecycle gate remain mandatory.
 
 Pure units cover schema, identity/approval and failure taxonomy using the documented
 example, including 256 aggregate criterion evidence obligations reconciling in both
