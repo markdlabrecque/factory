@@ -681,7 +681,8 @@ unperformed acceptance evidence, not inferred from synthetic success.
 ## Current host preparation reference
 
 `acceptance-admission.mts` supplies the active static reader used by the standard
-`recovery-analysis.mts` adapter. Before launching preparation, an authorized preparer
+analysis, dispatch, direct main, assessment refresh and recovery-analysis adapters.
+Before launching preparation, an authorized preparer
 uses the custody API's exact-ticket trusted approval ingress and immutable publication.
 The host's current reference lives at
 `<state>/acceptance/prepared-<included-source-content-hash>.json`; bundle directories
@@ -714,8 +715,15 @@ post-I/O rechecks. It publishes safe `validate-prepared-acceptance` observations
 status/Board/readiness reads never invoke this active custody reader (which includes
 durability fsync), models or probes.
 
-**Partial integration only:** the common analysis consumer, dispatch, direct main,
-explicit refresh and preclaim/recovery-launch baseline admission still need integration.
+Dispatch checks even cached candidates before selection, live/stale analysis and fresh
+pre-claim input; assessment refresh checks its input before cache reuse. Direct main
+checks before normal/recovery claim adoption and subsequent input boundaries. Common
+analysis independently checks at entry, immediately before the model and after its I/O.
+No caller callback or tracker declaration can approve acceptance. Static refusals remain
+ticket-scoped preparation/migration holds, not stopped implementation runs.
+
+**Partial integration only:** authorized baseline lifecycle/preclaim/charge/adoption
+admission and full baseline diagnostics still need integration.
 Static preparation `ready` does not attest to runner/reset capability, explicit execution
 authorization, a baseline reservation or an authenticated matching baseline receipt.
 No baseline is executed or claimed here. Original full-scope baseline, saved work,

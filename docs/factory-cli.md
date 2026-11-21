@@ -30,7 +30,8 @@ The same host-owned project gate precedes explicit complete overrides, including
 
 Recovery host checks run within the existing preparation/pre-charge flow and repeat after image readiness. Complete input must still match the existing preparation before charge, including parent planning comments. A failed source or changed hash publishes a ticket-input hold without replacing the preparation. Host-known failure charges no attempt. Capacity, activity-generation, ownership and admission-time local checks still apply; no budget is refunded or reset. After a container starts, existing charged-attempt and exact-container cleanup rules remain. Settlement and scheduled local maintenance run independently of the new-launch gate, including during project holds or pauses under the existing global-off/unknown/cancellation policy. Unconfirmed cleanup continues to hold ownership, and report state-write failures are reported directly.
 
-Standard recovery preparation additionally requires a [current host acceptance
+Standard dispatch, direct run, explicit assessment refresh, `refreshProject`, common
+analysis and recovery preparation require a [current host acceptance
 preparation reference](acceptance-contract.md#current-host-preparation-reference).
 Missing legacy preparation, malformed state, changed requirements or unavailable/tampered
 original approval/bundle returns ticket-scoped `acceptance-static` before fresh analysis
@@ -40,9 +41,15 @@ next action. Passive status, ticket and Board reads only display the saved obser
 they never prepare approval, run acceptance probes or invoke an analyst. Existing saved
 work, original baseline, budgets and ownership fences remain intact.
 
-This is **partial source integration**, not the complete acceptance guarantee. Dispatch,
-direct implementation and explicit assessment-refresh static gating, as well as authorized
-baseline-before-claim admission, remain outstanding. Recovery preparation `ready` is not
+Static checks also cover cached execution/assessment selection and direct/adopted main
+before claim adoption. Analyses use the original full child/parent rendering from custody,
+not a newly timestamped rendering rebound to old approval. Common analysis rechecks
+custody immediately before and after model I/O; recovery's existing rechecks remain.
+
+This is **partial source integration**, not the complete acceptance guarantee. Authorized
+baseline lifecycle/preclaim/charge/adoption admission and full baseline diagnostics
+remain outstanding. Static validity alone does not block all approved valid launches as
+a substitute for that missing work. Recovery preparation `ready` is not
 baseline receipt authority. There is no new CLI publication command, automatic migration
 or compliance claim for arbitrary complete overrides in this slice.
 

@@ -92,7 +92,8 @@ node --test orchestrator/acceptance-admission.test.mts orchestrator/recovery-ent
 ```
 
 The approved analysis/implementation admission seam is exercised through the actual
-selected recovery-preparation helper with disposable Git and fixture-owned rejecting
+selected common analysis, dispatch, direct, explicit-refresh, `refreshProject` and
+recovery-preparation entrypoints with disposable Git and fixture-owned rejecting
 tracker/Pi boundaries. Missing preparation covers both trackers and configured families;
 malformed references/contracts, unapproved/tampered originals and changed input stop
 before analysis or implementation records. An authentic custody publication reaches the
@@ -104,8 +105,8 @@ launch, never production authority or baseline execution. The existing recovery 
 also prepares its exact complete child/parent input before its analysis pass.
 
 These are focused filesystem/process integrations, not helper-only schema tests, browser
-E2E or installed release acceptance. Dispatch/direct/refresh static and authorized
-baseline-before-claim wiring remain unproved/unimplemented in this partial slice. No
+E2E or installed release acceptance. Authorized baseline lifecycle/preclaim/charge/adoption
+wiring and full baseline diagnostics remain unproved/unimplemented in this partial slice. No
 real provider, tracker, credentials, Docker, shared daemon or package install runs.
 The four full shards, documentation and independent lifecycle gates remain unchanged.
 

@@ -5,6 +5,7 @@
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
+import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
 import { beginPayloadCustody } from './payload-custody.mts';
 import { ownerOf } from './admission.mts';
 import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup } from './sandbox-readiness.mts';
@@ -82,7 +83,7 @@ process.on('exit', () => { if (entryCleanupConfirmed) releaseManagedEntry(stateD
 
 // Sandbox and CI settings are data, never executable project configuration.
 const runtimeLease = await retainRuntime(context);
-const { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordTicketInput, ticketWorkspaceProblem, ticketBranch } = await import('./launch-readiness.mts');
+const { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordTicketInput, recordReadinessCheck, ticketWorkspaceProblem, ticketBranch } = await import('./launch-readiness.mts');
 const hostReadinessInput = { projectRoot: context.projectRoot, runtimeRoot: context.runtimeRoot, runtimeIdentity: context.manifest.id, runtimeDependencies: context.manifest.dependencies, config: effectiveConfig, stateRoot: stateDir() };
 const hostReport = await projectLaunchReadiness(hostReadinessInput);
 let inputReport = hostReport;
@@ -176,9 +177,20 @@ if (!iid) {
 }
 // A Task gets its parent issue as context; whole tickets have none.
 // Collection is host-only and fails before a run/agent is created. Later authority checks recollect.
+let observedInitialAcceptance = false;
 const currentTicketInput = (): FrozenTicketInput => {
-  try { return freezeTicketInput(tracker.contextSource, Number(iid)); }
-  catch (error) {
+  let input: FrozenTicketInput | undefined;
+  try {
+    input = freezeTicketInput(tracker.contextSource, Number(iid));
+    const approved = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], input).ticket;
+    if (!observedInitialAcceptance) recordReadinessCheck(stateDir(), inputReport, acceptanceStaticCheck(approved));
+    observedInitialAcceptance = true;
+    return approved;
+  } catch (error) {
+    if (input && error instanceof AcceptanceAdmissionHold) {
+      try { recordReadinessCheck(stateDir(), inputReport, acceptanceStaticCheck(input, error)); }
+      catch (writeError) { console.error(`Ticket readiness report write failed: ${(writeError as Error).message}`); }
+    }
     if (error instanceof TicketInputHold) {
       try { recordTicketInput(stateDir(), inputReport, error); }
       catch (writeError) { console.error(`Ticket readiness report write failed: ${(writeError as Error).message}`); }
@@ -338,6 +350,7 @@ if (recovering) {
         invocationId: rec.id, ticket: iid, baseline: baseSha, tip: rec.startSha, evidence: evidenceBox,
         uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
         files: { ...context.additive.recovery.hashes }, signal: cancel.signal });
+      inputReport = recoveryReport;
       return sandboxReadinessHold(recoveryReport);
     },
     sandboxCleanup: (confirmed) => { if (recoveryReport) recordSandboxCleanup(stateDir(), recoveryReport, confirmed); },
@@ -532,6 +545,7 @@ try {
     invocationId: executionId, ticket: iid, baseline: baseSha, tip: baseSha, evidence: evidenceBox,
     uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
     files: { ...context.additive.implementation.hashes }, signal: sandboxCancel.signal });
+  inputReport = sandboxReport;
   const sandboxHold = sandboxReadinessHold(sandboxReport);
   if (sandboxHold) throw Error(sandboxHold);
   sandboxCancel.signal.throwIfAborted();

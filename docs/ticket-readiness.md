@@ -8,18 +8,21 @@ The [versioned portable acceptance contract](acceptance-contract.md) defines exa
 identity, trusted approval ingress and changed/preservation/reviewed non-transition policy.
 Its pure validators establish structure and record binding, **not** English adequacy or
 launch authority. Contract, custody and the bounded runner ship in the runtime inventory.
-Standard **recovery preparation** now reads current host preparation and rehashes original
-acceptance before fresh analysis, cached-analysis reuse and post-I/O rechecks. Missing,
+Standard dispatch, direct run, explicit assessment refresh, `refreshProject`, common
+analysis and recovery preparation read current host preparation and rehash original
+acceptance before analysis or cached-analysis reuse. Common analysis repeats the check
+immediately before model invocation and after model I/O; recovery retains its post-I/O checks. Missing,
 malformed, unapproved/tampered or changed preparation returns ticket-scoped
 `acceptance-static`, without an analysis invocation, implementation record or recovery
 charge. Its `validate-prepared-acceptance` observation uses `ticket-input` scope and names
 the preparer/reviewer action; CLI/Board readers only display it.
 
 This is a partial admission integration, **not the complete acceptance guarantee**:
-Dispatch now validates current preparation before candidate selection, stale/live analysis
+Dispatch validates current preparation before candidate selection, stale/live analysis
 selection and the fresh pre-claim input read, so cached execution analysis cannot bypass
-static refusal. Direct implementation, explicit assessment refresh and preclaim baseline
-admission are not yet gated by this static adapter. The preparation result's `ready`
+static refusal. Direct main checks before claim/adoption and on subsequent input reads.
+Authorized baseline lifecycle/preclaim/charge/adoption admission and full baseline
+diagnostics are still outstanding; static validation does not substitute for them. The preparation result's `ready`
 means current analysis/prerequisites, not a trusted baseline receipt or permission to
 implement. Full overrides remain opaque, not compliant merely because their manifests
 validate. See [current host preparation](acceptance-contract.md#current-host-preparation-reference).

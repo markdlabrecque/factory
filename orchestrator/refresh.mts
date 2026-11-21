@@ -9,7 +9,9 @@
 // #149: assessment uses the same fail-closed dependency evaluator as execution.
 import { freezeTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
-import { recordTicketInput } from './launch-readiness.mts';
+import { recordTicketInput, recordReadinessCheck } from './launch-readiness.mts';
+import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
+import { resolve } from 'node:path';
 import type { ReadinessReport } from './readiness-schema.mts';
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { readRuns, stateDir } from "./board.mts";
@@ -54,6 +56,13 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
         try { input = freezeTicketInput(tracker.contextSource, iid); }
         catch (error) { if (error instanceof TicketInputHold && o.readiness) recordTicketInput(dir, o.readiness, error); throw error; }
         if (o.readiness) recordTicketInput(dir, o.readiness, input);
+        try {
+          input = readPreparedAcceptance(dir, [context.projectRoot, context.runtimeRoot, resolve(dir, 'worktrees')], input).ticket;
+          if (o.readiness) recordReadinessCheck(dir, o.readiness, acceptanceStaticCheck(input));
+        } catch (error) {
+          if (error instanceof AcceptanceAdmissionHold && o.readiness) recordReadinessCheck(dir, o.readiness, acceptanceStaticCheck(input, error));
+          throw error;
+        }
         inputs.set(iid, input);
         const t = { ...tracker.ticket(iid), title: input.context.child.title, description: input.context.child.description }, parent = input.context.parent?.iid;
         if (parent === undefined) return t;

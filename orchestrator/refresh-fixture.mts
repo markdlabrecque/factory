@@ -57,7 +57,7 @@ export function fixture(t: any, kind = "github", prepareAcceptance = true) {
   writeFileSync(extension, 'throw new Error("Fixture extension must not execute");\n');
   const env = { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: dir, FAKE_STATE: fake, FAKE_TRACKER: kind,
     FACTORY_PI_SUBSCRIPTION_EXTENSION: extension, PATH: `${bin}:/usr/bin:/bin` };
-  const runtime = bindExecution(root, env, { install: dir => {
+  const runtime = bindExecution(root, env, { sdk: join(FIXTURES, 'sandcastle'), install: dir => {
     writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {appendFileSync,writeFileSync} from 'node:fs'; writeFileSync(process.env.FAKE_STATE+'/launch-context',JSON.stringify({project:process.env.FACTORY_PROJECT_ROOT,runtime:process.env.FACTORY_RUNTIME_ROOT,id:process.env.FACTORY_RUNTIME_ID})); appendFileSync(process.env.FAKE_STATE+'/launches',process.argv.slice(2).join(' ')+'\\n'); await new Promise(r=>setTimeout(r,1000));`);
   } });
   Object.assign(env, runtime.env);

@@ -1,6 +1,6 @@
 // Shared recovery lifecycle fixture: copied-install acceptance and legacy regression scenarios use isolated fake external boundaries.
 import { bindExecution } from '../cli/test/execution-fixture.mts';
-import { prepareFixtureAcceptance } from './fixtures/acceptance-preparation.mts';
+import { prepareFixtureAcceptance, prepareFixtureFromRuntime } from './fixtures/acceptance-preparation.mts';
 import {preparedFixture} from '../cli/test/prepared-fixture.mts';
 import { commandContextSource } from './ticket-context-source.mts';
 import {prepareRecovery} from '../cli/src/recovery-prepare.mts';
@@ -200,7 +200,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   if (scenario !== 'pass') {
     assert.notEqual(code, 0, log);
     assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
-    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'parent-plan':/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
+    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/Acceptance static hold: missing-preparation/,'parent-plan':/Acceptance static hold: missing-preparation/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
     assert.match(log, scenario.startsWith('sandbox-') ? /[Ss]andbox readiness/ : expected);
     const calls = existsSync(join(fake, 'docker.jsonl')) ? readFileSync(join(fake, 'docker.jsonl'), 'utf8') : '';
     if (scenario === 'missing-baseline') assert.ok(!calls.includes('"run"'), log);
@@ -321,6 +321,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   // (here the stubbed Sandcastle docker() throws, as a crash right after the receipt would leave it); stopping releases the claim.
   const pre = claimRun({ dir: state, project: "owner/repo", iid: "9", pid: process.pid, cap: 99 });
   assert.equal(pre.ok, true);
+  prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state }, 9);
   const n9 = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "9", "--base", "main"],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
   assert.notEqual(n9.status, 0);
@@ -338,6 +339,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     [12, "Model tier: small\nModel tier: large", "conflicting"]] as const) {
     const pending = claimRun({ dir: state, project: "owner/repo", iid: String(n), pid: process.pid, cap: 99 });
     assert.equal(pending.ok, true);
+    prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: body }, n);
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", String(n), "--base", "main"],
       { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: body,
         FACTORY_LAUNCH_CLAIM: pending.ok ? pending.run.claim : '' } });
@@ -351,10 +353,12 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.equal(readAdmission(state).claims[`owner_repo--${n}`], undefined);
     assert.equal(git(root, "branch", "--list", `${n}-*`), "");
   }
+  prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: large' }, 10);
   const fixed = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "10", "--base", "main"],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: large' } });
   assert.match(fixed.stderr, /docker\(\) must not be used/);
   assert.equal(readRuns(state).find(r => r.iid === '10')?.implementationModel, 'pi-claude-subscription/claude-opus-5-5');
+  prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'No model tier declaration' }, 13);
   const defaulted = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '13', '--base', 'main'],
     { cwd: root, encoding: 'utf8', env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'No model tier declaration' } });
   assert.match(defaulted.stderr, /docker\(\) must not be used/);

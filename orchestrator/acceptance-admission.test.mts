@@ -31,6 +31,39 @@ test('dispatch missing preparation holds before analysis, queue record or claim'
   assert.equal(existsSync(join(f.dir, 'owner_repo--7.json')), false);
 });
 
+test('explicit refresh missing preparation preserves the old card without analyst spend', t => {
+  const f = fixture(t, 'github', false);
+  const prior = f.record(7, 'stopped');
+  f.pass(['--refresh-only', '--ticket', '7']);
+  assert.equal(existsSync(join(f.fake, 'analysis.jsonl')), false, 'no assessment analyst invocation');
+  assert.match(f.assessment().error!, /Acceptance static hold: missing-preparation/);
+  assert.equal(readFileSync(join(f.dir, 'owner_repo--7.json'), 'utf8'), prior);
+});
+
+test('direct run missing preparation holds before adoption, model auth or implementation record', t => {
+  const f = fixture(t, 'github', false);
+  f.save();
+  writeFileSync(join(f.home, 'bin/docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs', import.meta.url).pathname)}; const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE); if(out===undefined) process.exit(90); console.log(out);\n`, {mode:0o755});
+  const result = spawnSync(f.node, [join(f.runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {cwd:f.root, env:f.env, encoding:'utf8', timeout:20_000});
+  assert.match(result.stderr, /Acceptance static hold: missing-preparation/, result.stdout + result.stderr);
+  assert.equal(existsSync(join(f.dir, 'owner_repo--7.json')), false, 'no manufactured implementation record');
+  assert.equal(existsSync(join(f.fake, 'models.log')), false);
+  assert.equal(existsSync(join(f.fake, 'analysis.jsonl')), false);
+});
+
+test('common analysis entry refuses missing preparation independently of its caller', t => {
+  const f = fixture(t, 'github', false);
+  f.save();
+  const result = spawnSync(f.node, ['--input-type=module', '-e', `
+    const t=await import(${JSON.stringify(join(f.runtime.directory,'tracker.mts'))});
+    const {freezeTicketInput}=await import(${JSON.stringify(join(f.runtime.directory,'ticket-input.mts'))});
+    const {analyse}=await import(${JSON.stringify(join(f.runtime.directory,'analyze.mts'))});
+    analyse({project:'owner/repo',base:'main',worktree:{path:process.cwd(),sha:'a'.repeat(40)},ticket:t.ticket(7),input:freezeTicketInput(t.contextSource,7),notes:[],catalogue:[],manifests:new Map(),keepImplementerBlockers:false});
+  `], {cwd:f.root,env:f.env,encoding:'utf8',timeout:20_000});
+  assert.equal(existsSync(join(f.fake, 'analysis.jsonl')), false, 'common entry cannot bypass admission');
+  assert.match(result.stderr, /Acceptance static hold: missing-preparation/);
+});
+
 for (const kind of ['github', 'gitlab']) for (const family of ['openai', 'anthropic']) {
   test(`recovery preparation refuses missing acceptance before analysis (${kind}/${family})`, t => {
     const f = fixture(t, kind, false);
