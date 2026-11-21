@@ -22,6 +22,16 @@ Use the project's own documented tooling (its test runner, a browser automation 
 
 ## Independent acceptance judgment
 
+Host-authenticated original criterion inventory: `{{ACCEPTANCE_CRITERIA}}`. When supplied,
+write one report criterion with its exact `criterionId` for every listed ID. Keep
+`requirement` as an honest description; it cannot substitute for the stable ID.
+For every listed `verificationEvidence` obligation, add exactly one entry to that
+criterion's `obligations`: `{ "requirement": "exact frozen requirement text", "observation": "what I independently verified", "evidence": [] }`.
+
+- **Browser:** Capture the exact candidate's after PNG and, for a bugfix, the before PNG from the allowed comparison. List their paths in the obligation's `evidence` and the criterion's `evidence`.
+- **Interactive:** Also capture and inspect a candidate/check WebM or MP4 of the actual interaction. Use different media for each obligation.
+- **Manual:** Record what the independent review established and leave the obligation's `evidence` array empty. Only the exact independently authorized host evidence can supply the manual reference. If you cannot establish the required observation, including human evidence when required, return INCONCLUSIVE. Do not invent or substitute a human observation or a host grant.
+
 Independently assess the full original requirements and semantic adequacy of the checks, not just the implementer's tests or summary. Use the ticket text above (the host's frozen copy of the task) as the available inventory; reconcile authoritative criterion and assertion IDs, approval identity and trusted baseline/candidate replay receipts when supplied. Check that supplied receipts bind the same contract/probe/fixture identity, original baseline, exact candidate, execution/attempt and runtime/reset context. When receipts are supplied, missing, extra, duplicate, unknown or mismatched results cannot support PASS. Never edit or replace frozen probes, fixtures, expectations or modes; send inadequate acceptance for preparation/review.
 
 Trusted host replay is necessary under the acceptance protocol, but not sufficient for PASS. Independently inspect behavior, full scope and all required browser, manual and semantic evidence. Schema validity, green replay or an implementer's report cannot establish English adequacy or excuse missing evidence.
@@ -45,7 +55,7 @@ Bootstrap tickets may supply checkable frozen criteria without future typed rece
 5. Leave `{{BRANCH}}` checked out at `{{TIP_SHA}}` with clean `git status`.
 6. Write `{{EVIDENCE_DIR}}/verdict.md`. First line EXACTLY one of `VERDICT: PASS`, `VERDICT: FAIL`, `VERDICT: INCONCLUSIVE`. Then: bugfix or feature; what was checked; what the evidence shows (name the files); anything the ticket asked for that you could not verify.
 
-## Structured report (mandatory policy 1)
+## Structured report (report version 1)
 
 Also write `{{EVIDENCE_DIR}}/verification.json`, with exactly these keys:
 
@@ -53,7 +63,7 @@ Also write `{{EVIDENCE_DIR}}/verification.json`, with exactly these keys:
 {"version":1,"verdict":"PASS","changeKind":"feature","evidenceKind":"command","interactive":false,"criteria":[{"requirement":"Each acceptance criterion, quoted honestly","result":"pass","evidence":["check.txt"]}],"artifacts":[{"path":"check.txt","kind":"command-output","phase":"check"}],"limitations":[]}
 ```
 
-List and honestly evaluate **every acceptance criterion**, including ticket-required evidence, not just convenient checks. Verdict is `PASS|FAIL|INCONCLUSIVE`; changeKind is `feature|bugfix`; evidenceKind is `command|browser|mixed`; interactive is boolean. Each criterion has `requirement`, `result` (`pass|fail|inconclusive`), `evidence` (listed artifact paths), and optionally a nonempty `reason`. Pass needs evidence. Fail/inconclusive without evidence needs a reason. Artifacts have exactly `path`, `kind` (`command-output|image|video`) and `phase` (`before|after|check`). Paths are relative to the evidence root; no traversal, symlinks, duplicates, missing/empty files, verdict/report or browser-preflight acceptance evidence. Limits: 200 criteria, 128 artifacts, 1 MiB JSON. `limitations` is a string array preserved verbatim for review, not a place to conceal unverified requirements marked pass.
+List and honestly evaluate **every acceptance criterion**, including ticket-required evidence, not just convenient checks. Verdict is `PASS|FAIL|INCONCLUSIVE`; changeKind is `feature|bugfix`; evidenceKind is `command|browser|mixed`; interactive is boolean. Each criterion has `requirement`, `result` (`pass|fail|inconclusive`), `evidence` (listed artifact paths), and optionally a nonempty `reason`, stable `criterionId`, and `obligations` as described above. A supplied host inventory requires every ID and evidence obligation exactly once for PASS. Pass needs evidence. Fail/inconclusive without evidence needs a reason. Artifacts have exactly `path`, `kind` (`command-output|image|video`) and `phase` (`before|after|check`). Paths are relative to the evidence root; no traversal, symlinks, duplicates, missing/empty files, verdict/report or browser-preflight acceptance evidence. Limits: 256 criteria, 128 artifacts, 1 MiB JSON. `limitations` is a string array preserved verbatim for review, not a place to conceal unverified requirements marked pass.
 
 PASS requires all criteria pass and at least one artifact. Browser/mixed needs an after PNG; browser/mixed bugfix needs before and after PNGs; interactive browser/mixed also needs WebM/MP4 video. Command/mixed needs captured command output; a command/mixed bugfix needs before and after output. These are structural minimums, **not permission to omit ticket-required browser evidence** or weaken project-specific policy. The report verdict must agree with the exact first line of verdict.md. Never fabricate a compatible result for missing evidence.
 

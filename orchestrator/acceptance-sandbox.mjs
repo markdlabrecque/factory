@@ -23,7 +23,7 @@ async function exec(argv,cwd,limit,input){
 const limit={timeoutMs:plan.bounds.totalMs,outputBytes:plan.bounds.outputBytes};
 const git=async(args,input)=>{const r=await exec(['/usr/bin/git',...args],'/work',limit,input);if(r.status!==0)throw Error('Private Git failed');return r.stdout.trim();};
 try{
-  if(plan.version!==1||Date.now()>=plan.deadline)throw Error('Invalid/late plan');
+  if(plan.version!==1||!['baseline','candidate'].includes(plan.phase ?? 'baseline')||Date.now()>=plan.deadline)throw Error('Invalid/late plan');
   await git(['init','--quiet']);await git(['unpack-objects'],readFileSync('/input/baseline.pack'));
   writeFileSync('/work/.git/shallow',plan.sha+'\n');await git(['-c','core.hooksPath=/dev/null','checkout','--detach','--force',plan.sha]);
   const verify=async()=>{if(await git(['rev-parse','HEAD'])!==plan.sha)throw Error('Baseline SHA changed');};
@@ -40,10 +40,10 @@ try{
     if(out.version!==1||!Array.isArray(out.assertions)||Object.keys(out).sort().join()!=='assertions,version')throw Error('Invalid assertions-v1 output');
     const ids=plan.contract.assertions.filter(a=>a.probeId===probe.id).map(a=>a.id).sort();
     if(out.assertions.map(a=>a.assertionId).sort().join('\0')!==ids.join('\0'))throw Error('Probe assertion inventory mismatch');
-    const ref=`baseline:${plan.executionId}/${probe.id}/${createHash('sha256').update(r.stdout).digest('hex')}`;
+    const ref=`${plan.phase ?? 'baseline'}:${plan.executionId}/${probe.id}/${createHash('sha256').update(r.stdout).digest('hex')}`;
     assertions.push(...out.assertions.map(a=>({...a,evidence:[ref]})));
   }
   await verify();
   // Manual/non-transition evidence is NOT inferred from probe strings; absent independent evidence stays a policy hold.
-  process.stdout.write(JSON.stringify({version:1,sha:plan.sha,reset:{kind:'project-local-synthetic-v1',executionId:plan.executionId},results:{version:1,phase:'baseline',identity:plan.identity,assertions,evidence:[]},observations}));
+  process.stdout.write(JSON.stringify({version:1,sha:plan.sha,reset:{kind:'project-local-synthetic-v1',executionId:plan.executionId},results:{version:1,phase:plan.phase ?? 'baseline',identity:plan.identity,assertions,evidence:[]},observations}));
 }catch(error){process.stderr.write(String(error));process.exitCode=1;}

@@ -1,10 +1,11 @@
 // #153: import-safe single observation of a host-recorded PR; no agents, repair charge, comments or creation.
-// Continuation compares the complete selected inventory and normalized execution inputs before exact-SHA authorization.
+// Continuation authenticates modern replay proof, the original admission and current selected inputs before exact-SHA authorization.
 // All production subprocesses share one 30s deadline and a 10s per-command limit; locks cover only local CAS.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
-import { readProof, sha256 } from './verification.mts';
+import { EXACT_PROOF_POLICY, readProof, sha256 } from './verification.mts';
+import { acceptanceHash } from './acceptance-contract.mts';
 import { validDelivery } from './delivery.mts';
 import type { DeliveryCheckpoint, DeliveryIdentity, DeliveryObservation } from './delivery.mts';
 import type { RunState } from './board.mts';
@@ -55,7 +56,11 @@ export async function observeWaitingDelivery(run: RunState, host: FollowupHost):
         || d.branch !== owned.branch || d.base !== owned.base || owned.verification?.id !== d.proofId || owned.verification.tip !== d.sha || owned.verdict !== 'PASS') return 'Checkpoint/proof execution identity mismatch';
       const frozen = readProof(host.state, { project: d.project, ticket: d.ticket, executionId: d.executionId, attemptId: owned.recovery?.id,
         branch: d.branch, base: d.base, baseline: owned.implementationBaseSha ?? '', tip: d.sha, requirementsHash: owned.verification.requirementsHash }, d.proofId);
+      if (frozen.proof.policyVersion !== EXACT_PROOF_POLICY || !frozen.proof.candidateReplay) return 'Legacy proof cannot authorize CI continuation; preserve the checkpoint and obtain fresh verification with exact replay and obligation evidence';
       if (frozen.report.verdict !== 'PASS') return 'Host proof is not PASS';
+      const original = owned.acceptanceBaseline;
+      if (!original || original.version !== 1 || original.sha !== owned.implementationBaseSha
+        || original.bindingDigest !== acceptanceHash(frozen.proof.candidateReplay.binding)) return 'Original acceptance baseline admission changed; preserve evidence and obtain fresh verification';
       const code = frozen.proof.provenance.code;
       if (!host.inventory || !Object.keys(host.inventory).length || JSON.stringify(Object.entries(code).sort()) !== JSON.stringify(Object.entries(host.inventory).sort()))
         return 'Workflow proof inputs missing or changed; fresh verification required';

@@ -34,5 +34,5 @@ export function namespaceTransport(root:string) {
   };
   const capability=execute(['--tmpfs','/state','--','/usr/bin/true']);
   if(capability.status!==0)throw Error(`Namespace capability unavailable (exit ${capability.status}): ${capability.stderr}`);
-  return (input:string,state:string)=>execute(['--ro-bind',input,'/input','--bind',state,'/state','--','/usr/bin/node','/input/acceptance-sandbox.mjs']);
+  return (input:string,state:string,stateWritable=true)=>execute(['--ro-bind',input,'/input',stateWritable?'--bind':'--ro-bind',state,'/state','--','/usr/bin/node','/input/acceptance-sandbox.mjs']);
 }

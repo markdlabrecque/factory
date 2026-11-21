@@ -984,7 +984,41 @@ node --test orchestrator/verification*.test.mts orchestrator/handoff.test.mts or
 ```
 
 `verification.test.mts` checks schema, evidence paths and frozen proof integrity with
-synthetic bytes, not real browser media. `verification-entrypoint*.test.mts` runs the
+synthetic bytes, not real browser media. Its public evidence boundary additionally
+checks complete original criterion-ID reconciliation (including the full 256-item
+inventory), omitted/duplicate/unknown/absent IDs and retained non-PASS diagnostics.
+The selected normal-entrypoint proof fixture prepares genuine original custody and
+owned baseline authority, then proves an otherwise-green verifier omitting an original
+criterion cannot create proof, post or push. Positive normal/recovery model-family
+journeys retain complete explicit synthetic criterion IDs. This is a semantic-inventory
+vertical at approved verification/recovery seam4. A second normal-entrypoint tracer
+first reproduced actual post/push/merge without candidate replay despite a complete
+structured PASS. It now holds without a separate exact host grant. The positive tracer
+executes the actual copied driver and SAME frozen probe at baseline and exact candidate
+in independent rootless namespaces: named behavioral red→green, preservation pass,
+fresh filesystem synthetic seed despite source dirt, separately authenticated owners,
+confirmed cleanup and retained policy 3 proof chain. Its independent fixture host prepares
+exact grants after observing the committed candidate; SDK reports cannot approve them.
+Additional entrypoint cases deny changed candidates, mismatched bundle observations,
+unknown results and engine infrastructure failure, with no push. Two negative normal
+entrypoint cases execute the copied driver: an implementer-committed shadow probe does
+not replace the frozen probe, and a read-only synthetic state mount cannot satisfy reset.
+Neither publishes proof or pushes. Candidate receipt units also remove each required
+criterion evidence record in turn and check that mismatched or repeated evidence holds.
+The same public entrypoint and proof seam checks missing browser/interactive links, wrong
+kind/phase linkage, reused or mislabeled media, missing independent manual evidence and
+policy 2 CI refusal. Matching synthetic links pass, including two separate obligations on
+one criterion. The stubs exercise container headers and evidence bindings, not media
+playback or human observations. Ordinary model-family
+journeys reuse external-engine protocol responses; only the explicit tracer claims actual
+driver execution on the normal path. Recovery entrypoints independently run the copied
+driver at the original and exact repaired commits, including a saved, unchanged candidate.
+They refuse missing and stale attempt grants, a candidate-selected probe substitute, and
+unconfirmed replay cleanup; the last holds both the recovery claim and the candidate slot
+with no refund or push. These fixtures do not prove browser/manual adequacy, CMS/SQL reset,
+cgroup/watchdog or installed-release acceptance. Runtime inventory already
+ships every changed producer/consumer; the added host module is test-only. Full mandatory
+commands/bounds are unchanged. `verification-entrypoint*.test.mts` runs the
 selected fixture runtime's ordinary entrypoint against real temporary Git repositories and fixture-owned
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
@@ -1000,7 +1034,7 @@ or mismatched Git identities. The entrypoint checks the packaged prompt and orig
 smallest changed-boundary run:
 
 ```sh
-node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
+node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/acceptance-baseline-recovery.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
 ```
 
 Adapter tests assert fresh host authorization after CI and before SHA-guarded merge.
@@ -1013,14 +1047,16 @@ Run the changed boundary first:
 
 ```sh
 node --test board/delivery.test.mts orchestrator/delivery*.test.mts cli/test/delivery-followup-schedule.test.mts
+node --test --test-name-pattern='independently replays' orchestrator/verification-entrypoint-proof.test.mts
 node --test orchestrator/refresh*.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
 ```
 
 Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
-holds and lost merge responses without live trackers. Proof fixtures use synthetic
-command evidence and frozen host records. The selected-runtime dispatch fixture runs local Git
-against a temporary bare origin and a fixture-owned absolute read-only scheduler CLI;
-manual/dry-run/refresh-only passes must perform no continuation. Admission tests cover
+holds and lost merge responses without live trackers. The exact replay fixture reuses a
+genuine policy 3 proof for pending then green CI observation of the same PR, and checks
+admission, configuration, raw output, current requirements and transport holds. The
+selected-runtime dispatch fixture checks explicit legacy migration against a temporary
+bare origin and fixture scheduler CLI; manual/dry-run/refresh-only do not continue it. Admission tests cover
 capacity, conflicting claims, stale tokens and PID reuse without repairing anything.
 Scheduler tests assert the exact trusted command and malformed/off/paused/base-switch
 refusals; they never run the host CLI against the user's service manager. These tests

@@ -475,7 +475,9 @@ No current prompt, CLI or scheduler gains a new authority path from these APIs.
 ## Baseline receipt policy component (not an execution runner)
 
 `orchestrator/acceptance-receipt.mts` supplies `checkAcceptanceReceipt(contract,
-approvals, observed, expectedBinding, now)`, a pure baseline-only policy check.
+approvals, observed, expectedBinding, now, phase?)`, a pure phase-specific policy check.
+The default remains baseline; candidate phase is supplied only by the trusted producer request,
+never selected from observed probe JSON.
 The expected binding is independently supplied by trusted host orchestration, not
 copied from the observed receipt. It compares execution, bundle, approval ID and
 canonical approval digest, exact Git SHA, selected runtime/private dependencies,
@@ -500,7 +502,8 @@ Custody's independent review status is not changed by runner implementation.
 
 `acceptance-runner.mts`, `acceptance-worker.mts` and `acceptance-sandbox.mjs` ship
 in the selected flat runtime. These are **source APIs**, not a newly enabled CLI,
-scheduler gate, implementation launcher or candidate-proof producer. Later layers
+scheduler gate or implementation launcher. The normal replay tracer below also uses
+this same lifecycle for an explicitly authorized candidate purpose. Consumers
 must independently compare the retained binding to the current frozen inputs;
 replay of a historically valid receipt does not authorize another execution.
 
@@ -802,6 +805,112 @@ safe preparation-required, changed-input, authorization-unavailable, cancelled,
 cleanup-pending, review-required, behavior-mismatch and infrastructure categories.
 Remaining direct/adopted/recovery and projection coverage must not be inferred from
 this API. Original roles, full baseline, bundle, work and budgets are unchanged.
+
+## Semantic criterion inventory and evidence obligations
+
+Standard normal and recovery main retain the criterion IDs from the authenticated
+original custody bundle and supply them to the existing independent `runVerifier`.
+Its `ACCEPTANCE_CRITERIA` prompt argument carries the host-owned IDs and typed
+obligations; a verifier/repair report cannot choose the authoritative list. Each PASS report criterion must carry a
+`criterionId` matching one original ID, exactly once. `requirement` remains descriptive
+text, not an identity. Missing, extra, duplicate, unknown or absent IDs refuse before
+proof creation, posting or push. Normal/recovery retain that same host inventory
+through proof freezing and every immediate handoff proof reread/authorization,
+so changing mutable evidence after the verifier cannot erase coverage. Historical
+proof inspection without an inventory remains diagnostic and invents no IDs.
+The shared evidence boundary accepts up to 256
+criteria, matching the acceptance-contract inventory bound. Historical non-PASS
+reports remain inspectable diagnostics without inventing omitted evaluations.
+
+Every criterion of a contract used to authorize delivery must explicitly declare
+`verificationEvidence`: an array of `{requirement, kind}` records. `requirement`
+is the exact text from that criterion's `evidenceRequirements`, and `kind` is
+`browser`, `interactive` or `manual`. Use `[]` only if the criterion has none of
+these obligations; other declared evidence remains subject to replay receipt policy.
+Do not infer classifications from text or from the report's `evidenceKind` or
+`interactive`. A `manual` exception requires a `manual` obligation. The declaration
+is part of the frozen, independently approved contract bytes. Contracts without the
+declaration remain readable but cannot authorize proof. Preparation and independent
+approval are required; there is no automatic migration. For example, if a criterion's
+`evidenceRequirements` includes `Keyboard submission recording`, add
+`{"requirement":"Keyboard submission recording","kind":"interactive"}` to that
+criterion's `verificationEvidence`.
+
+For each declared obligation the independent verifier supplies one matching
+`{requirement, observation, evidence}` entry in its criterion's `obligations`.
+Browser evidence needs an after PNG and, for bugfixes, a before PNG. Interactive
+obligations also need a candidate/check video (WebM or MP4). Paths must appear in
+that criterion's artifact list. The verifier captures and inspects these media; the
+host checks their phase, file type header and linkage, not playback or content.
+Report-wide or other-criterion media cannot fill a missing link, and the same media
+bytes cannot satisfy multiple obligations. For
+manual obligations the report records its assessment with an empty `evidence`
+array: the host binds the exact criterion/requirement to its own distinct evidence
+reference in the authenticated, independently authorized candidate receipt. A
+report path, prose assertion or sandbox result cannot stand in for that reference.
+If an obligation requires a human observation, only actual evidence from the
+required human can satisfy it. The verifier must return non-PASS if it cannot
+establish the requirement. The host checks the evidence linkage and integrity,
+not the adequacy of what a screenshot shows or the truth of an external review.
+Exact-candidate replay remains separately required.
+
+## Exact-candidate replay
+
+After independent semantic verification, its obligation-link preflight and confirmed
+implementer sandbox teardown, normal main requires `replayAcceptanceCandidateForTicket` before freezing/posting proof.
+A structured verifier PASS plus ordinary checks is insufficient. The current original
+baseline admission and full host plan are reauthenticated; `candidateRequestForTicket`
+builds an inert request with the exact candidate SHA and normal workflow key/execution,
+claim, managed entry, original baseline binding and payload-custody nonce. It does not
+approve or execute anything. An independent host preparer must supply a separate exact
+`execution-authorization-<intent-digest>.json`, using the same intent schema as baseline
+but including this candidate request. There is no automatic grant, renewal or retry.
+
+The existing reserve/start/worker/cancel/read lifecycle is reused, not a second sandbox
+implementation. Only the exact live normal claim/entry with a closed implementer payload
+may compose with its own candidate reservation. Foreign/racing work still excludes it;
+the candidate consumes a **separate durable capacity slot**. A cap with no spare slot
+holds, rather than waiving capacity. Candidate pending handles are retained privately
+before worker start. Ownership is rechecked before creation and final publication;
+uncertain cleanup retains the existing reservation. The trusted worker carries phase
+through the copied driver. Baseline readers reject candidate-purpose publications;
+original changed-baseline named-red semantics remain unchanged.
+
+`authenticateCandidateReplay` rereads both producer publications and raw output seals,
+checks independent execution/owner IDs, exact original/candidate SHAs, identical frozen
+bundle/approval/runtime/dependencies/image/setup/reset and full policy/raw-config binding,
+current matching unexpired grants, cancellation and confirmed cleanup. It rehashes original
+custody bytes and checks that the retained preparation, current baseline reference and
+policy/raw-config pins still match. Proof version 3/policy 3 also binds project, state,
+complete requirements hash and verifier image; a normal receipt cannot serve as repair proof.
+The writer and reader derive the mandatory criterion and obligation inventory from the
+authenticated bundle and require independent semantic PASS. Non-PASS diagnostics need no
+candidate replay. Removing the chain from a policy 3 proof holds. Immediate
+delivery reauthenticates the retained chain as well as its existing exact branch,
+requirements, claim, local/remote SHA and CI gates. Unknown, infrastructure, mismatched
+bundle or changed candidate cannot deliver. Replay never overrides semantic non-PASS.
+
+CI continuation requires version 3/policy 3 and the run's matching saved original admission
+binding. It reauthenticates the retained replay and selected inputs before observation/merge;
+it does not execute a replay. Same-SHA policy 1 or 2 proof cannot authorize delivery or
+continue a CI wait. It is not rewritten; the checkpoint and evidence remain intact for
+explicit fresh verification.
+
+Active repair uses the same producer only after exact repair-container absence and
+compare-and-swap import of the verified tip. Its request binds the live recovery claim,
+managed entry, original admission, attempt ID, attempt record and saved start. The
+worker checks the host's repair teardown record and refuses another attempt's ownership.
+The original baseline stays the full-scope baseline; saved start is supplementary and is
+never a new baseline. An unchanged committed tip beyond the original baseline still
+needs fresh attempt-bound replay. The proof reader refuses replay from a different
+attempt, even at the same SHA. If the candidate reservation remains unsettled, recovery
+settlement retains the claim and its charge even when the repair container is absent.
+
+Complete per-criterion semantic evidence obligations are not yet enforced.
+All touched runtime modules were already in the complete asset inventory; no new shipped
+module, dependency or sandbox lifecycle was introduced. Evidence proves disposable Git and
+filesystem-backed synthetic reset through the actual copied driver in rootless namespaces,
+not actual CMS/SQL reset, Docker cgroups or a different-UID watchdog. Unsupported reset holds.
 
 ## Verification
 

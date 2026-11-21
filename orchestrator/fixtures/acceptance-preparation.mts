@@ -13,14 +13,34 @@ export function prepareFixtureFromRuntime(runtime: string, cwd: string, env: Nod
   const input = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e',
     `const t=await import(${JSON.stringify(join(runtime, 'tracker.mts'))}); const g=await import(${JSON.stringify(join(runtime, 'ticket-input.mts'))}); process.stdout.write(JSON.stringify(g.freezeTicketInput(t.contextSource, ${iid})));`],
     {cwd, env, encoding: 'utf8', timeout: 20_000}));
-  if (!existsSync(join(env.SANDCASTLE_STATE_DIR!, 'acceptance', `prepared-${input.hash}.json`))) prepareFixtureAcceptance(env.SANDCASTLE_STATE_DIR!, input);
+  if (!existsSync(join(env.SANDCASTLE_STATE_DIR!, 'acceptance', `prepared-${input.hash}.json`))) prepareFixtureAcceptance(env.SANDCASTLE_STATE_DIR!, input, ['acceptance-replay-pass', 'acceptance-obligation-omitted', 'acceptance-manual-evidence-missing'].includes(env.SCENARIO ?? ''));
 }
 
-export function prepareFixtureAcceptance(stateRoot: string, input: FrozenTicketInput): string {
+export function prepareFixtureAcceptance(stateRoot: string, input: FrozenTicketInput, visual = false): string {
   const root = join(stateRoot, 'acceptance');
   mkdirSync(root, { mode: 0o700, recursive: true });
   const contract = JSON.parse(readFileSync(new URL('../../docs/acceptance-contract.md', import.meta.url), 'utf8').match(/```json\n([\s\S]*?)\n```/)![1]) as AcceptanceContract;
-  const artifacts = [{ path: 'probes/export.mjs', bytes: Buffer.from('/* fixture reviewed probe; never executed here */') }, { path: 'fixtures/rows.json', bytes: Buffer.from('[1,2]') }];
+  for (const criterion of contract.criteria) criterion.verificationEvidence = [];
+  if (visual) {
+    const [feature, , review] = contract.criteria;
+    feature.verificationEvidence = [
+      { requirement: 'Summary panel screenshot', kind: 'browser' },
+      { requirement: 'Keyboard submission recording', kind: 'interactive' },
+    ];
+    feature.evidenceRequirements.push(...feature.verificationEvidence.map(o => o.requirement));
+    review.verificationEvidence = [{ requirement: 'independent documentation review', kind: 'manual' }];
+  }
+  const artifacts = [{ path: 'probes/export.mjs', bytes: Buffer.from(`import {readFileSync,existsSync,writeFileSync} from 'node:fs';
+if(existsSync(process.env.FACTORY_BASELINE_ROOT+'/site.rows'))throw Error('implementer dirt leaked into replay');
+const seed=JSON.parse(readFileSync(process.env.FACTORY_STATE_ROOT+'/rows.json','utf8'));
+if(seed.join(',')!=='1,2')throw Error('synthetic state not reset');
+writeFileSync(process.env.FACTORY_STATE_ROOT+'/rows.json','[99]');
+const app=readFileSync(process.env.FACTORY_BASELINE_ROOT+'/app.txt','utf8');
+const rows=JSON.parse(readFileSync('fixtures/rows.json','utf8'));
+const pass=app==='after';
+process.stdout.write(JSON.stringify({version:1,assertions:[
+{assertionId:'A-summary',status:pass?'pass':'expected-behavioral-fail',failureId:pass?null:'summary-unavailable-or-wrong'},
+{assertionId:'A-order',status:rows.join(',')==='1,2'?'pass':'unknown',failureId:null}]}));`) }, { path: 'fixtures/rows.json', bytes: Buffer.from('[1,2]') }];
   const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
   contract.probes[0].bundle[0].sha256 = sha(artifacts[0].bytes);
   contract.fixtures[0].sha256 = sha(artifacts[1].bytes);

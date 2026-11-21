@@ -7,7 +7,7 @@
 // Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
-import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket } from './acceptance-baseline-admission.mts';
+import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket, replayAcceptanceCandidateForTicket, authenticateCandidateReplay, type CandidateReplay } from './acceptance-baseline-admission.mts';
 import { beginPayloadCustody } from './payload-custody.mts';
 import { ownerOf } from './admission.mts';
 import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup } from './sandbox-readiness.mts';
@@ -30,7 +30,7 @@ import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
-import { claimManagedEntry, readAdmission, releaseManagedEntry } from "./admission.mts";
+import { admissionConflict, claimManagedEntry, readAdmission, readBaselineReservations, releaseManagedEntry } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { freezeTicketInput, saveTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { context, effectiveConfig, AGENT, allLabels, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
@@ -40,7 +40,7 @@ import { blockedOutcome, expandUnits, SANDCASTLE_MARK } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest, readManifest } from "./manifests.mts";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
-import { assertProofStoreOutsideMounts, createProof } from './verification.mts';
+import { assertProofStoreOutsideMounts, createProof, validateEvidence } from './verification.mts';
 import type { Provenance } from './verification.mts';
 import type { Host } from "./handoff.mts";
 import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
@@ -211,6 +211,9 @@ async function requireBaseline(original?: import('./acceptance-baseline-admissio
   }
 }
 const frozenInput = currentTicketInput();
+// Retain the independently authenticated original inventory, not verifier/repair-selected text.
+const acceptanceCriteria = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], frozenInput).contract.criteria;
+const acceptanceCriterionIds = acceptanceCriteria.map(c => c.id);
 recordTicketInput(stateDir(), inputReport, frozenInput);
 const parentIid = frozenInput.context.parent?.iid;
 const withParent = (t: tracker.Ticket): tracker.Ticket => {
@@ -341,8 +344,26 @@ if (recovering) {
   const result = await runRecoveryAttempt({
     root: context.projectRoot, record: file, attempt: { id: rec.id, startSha: rec.startSha }, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
-    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash },
+    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash, criterionIds: acceptanceCriterionIds, criteria: acceptanceCriteria },
     provenance: (sb) => provenance(sb, rec.container),
+    replay: {
+      execute: async tip => {
+        const exactTip = () => {
+          if (sh('git', ['rev-parse', `refs/heads/${rec.branch}`]) !== tip) throw Error('Recovery branch moved from verified tip');
+        };
+        exactTip();
+        const replay = await replayAcceptanceCandidateForTicket(Number(iid), base, original, tip, {
+          key: keyFor(iid!, PROJECT), executionId: claimed.executionId!, claim: token!, entry: managedEntry,
+          baseline: original.sha, bindingDigest: original.admission.bindingDigest,
+          recovery: { attemptId: rec.id, record: file, startSha: rec.startSha, branch: rec.branch },
+        }, cancel.signal);
+        exactTip();
+        return replay;
+      },
+      cleanupHeld: () => readBaselineReservations(stateDir()).some(r => admissionConflict(r.project, {
+        root: context.projectRoot, tracker: { kind: TRACKER.kind, host: TRACKER.gitlabHost ?? TRACKER.host!, project: PROJECT },
+      })),
+    },
     promptArgs: {
       ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
       EVIDENCE_DIR: evidenceBox, CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
@@ -527,7 +548,12 @@ const promptArgs = {
   CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
 };
 
+let candidateReplay: CandidateReplay | undefined;
 const recheck = () => {
+  if (candidateReplay) {
+    try { authenticateCandidateReplay(candidateReplay,{baseline:baseSha,tip,executionId,ticket:iid!}); }
+    catch(error) { return (error as Error).message; }
+  }
   const hold = contextHold(context); if (hold) return hold;
   const nowParent = tracker.parentOf(Number(iid));
   if (nowParent !== parentIid) return 'Ticket parent changed; fresh verification required';
@@ -717,7 +743,7 @@ try {
       sh('git', ['cat-file', '-e', `${tip}^{commit}`]);
       verifierContainer = sandbox.sandboxId ?? '';
       verifiedProvenance = await provenance(sandbox, verifierContainer);
-      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip });
+      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip, criteria: acceptanceCriteria });
     }
   }
 } catch (error) {
@@ -780,14 +806,29 @@ if (blockers) {
 }
 
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
+const replayHold = recheck(); if (replayHold) fail(replayHold);
+if(sh('git',['rev-parse',`refs/heads/${branch}`])!==tip) fail('Branch moved from verified tip before acceptance replay');
+if (validateEvidence(evidenceHost, acceptanceCriterionIds).report.verdict === 'PASS') {
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelSandbox);
+  try {
+    candidateReplay = await replayAcceptanceCandidateForTicket(Number(iid),base,{sha:baseSha,admission:acceptanceBaseline},tip,{
+      key:keyFor(iid!,PROJECT),executionId,claim:claimToken!,entry:managedEntry,custody:custody.pointer,baseline:baseSha,bindingDigest:acceptanceBaseline.bindingDigest,
+    },sandboxCancel.signal);
+    sandboxCancel.signal.throwIfAborted();
+  } finally {
+    for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelSandbox);
+  }
+  const afterReplayHold = recheck(); if (afterReplayHold) fail(afterReplayHold);
+}
 setStage(iid, { stage: "posting" });
 const identity = { project: PROJECT, ticket: iid, executionId, branch, base, baseline: baseSha, tip, requirementsHash: startVersion.hash };
-const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!);
+const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds, candidateReplay, true);
+if (frozen.proof.report.verdict === 'PASS' && !candidateReplay) fail('Semantic evidence changed after teardown; exact candidate replay and fresh verification required');
 setStage(iid, { verification: { id: frozen.id, tip, requirementsHash: startVersion.hash } });
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
 const outcome = await postAndDeliver({
   iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid, origin: { kind: "implemented" },
-  identity, proofId: frozen.id, state: stateDir(), recheck,
+  identity, proofId: frozen.id, state: stateDir(), recheck, criterionIds: acceptanceCriterionIds,
   noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
 }, host);
 if (!outcome.ok) fail(outcome.reason);

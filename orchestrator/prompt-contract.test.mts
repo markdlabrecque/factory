@@ -70,7 +70,7 @@ test('role prompts keep exactly the existing producer placeholder contracts', ()
   const common = ['ISSUE_IID', 'ISSUE_TITLE', 'TICKET', 'BASE_BRANCH', 'EVIDENCE_DIR', 'ADDITIVE_INSTRUCTIONS'];
   const expected = {
     'prompt.md': [...common, 'CATALOGUE', 'IMPLEMENTATION_OUTCOME_FILE', 'EXECUTION_ID'],
-    'prompt.verify.md': [...common, 'BRANCH', 'TIP_SHA', 'BASE_SHA', 'RECOVERY_START_SHA'],
+    'prompt.verify.md': [...common, 'BRANCH', 'TIP_SHA', 'BASE_SHA', 'RECOVERY_START_SHA', 'ACCEPTANCE_CRITERIA'],
     'prompt.recover.md': [...common, 'BRANCH', 'BASE_SHA', 'ATTEMPT', 'ATTEMPT_ID', 'REPAIR_MINUTES', 'CATALOGUE'],
   };
   for (const name of destinations) {

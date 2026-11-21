@@ -18,7 +18,7 @@ import { fixtureTicketHash } from './fixtures/ticket-input.mts';
 
 import { FIXTURES, git, ticket, fixture } from "./refresh-fixture.mts";
 
-for (const changedInstructions of [false, true]) test(`scheduled copied dispatch: ${changedInstructions ? 'changed instructions revoke existing proof' : 'pending then green uses same proof/PR'}`, async t => {
+test('scheduled copied dispatch holds a legacy CI checkpoint without refreshing or merging it', async t => {
   const f = fixture(t), sc = join(f.root, '.factory');
   writeFileSync(join(f.root, 'authority.md'), 'original authority');
   const configPath = join(sc, 'factory.toml');
@@ -45,19 +45,14 @@ for (const changedInstructions of [false, true]) test(`scheduled copied dispatch
   const scheduled={FACTORY_SCHEDULED:'1',FACTORY_CLI_ENTRYPOINT:cli,FACTORY_SCHEDULER_NODE:process.execPath};
   f.pass(); f.pass(['--refresh-only'],scheduled); f.pass(['--dry-run'],scheduled);
   assert.equal(f.bytes(join(f.fake,'status-calls')),'absent');
-  f.pass([],scheduled); assert.equal(JSON.parse(f.bytes(path)).delivery.state,'ci-waiting');
-  if (changedInstructions) writeFileSync(join(f.root, 'authority.md'), 'changed authority');
-  f.data.delivery.pending=false; f.pass([],scheduled);
-  if (changedInstructions) {
-    const calls = f.bytes(join(f.fake,'tracker.jsonl')).split('\n').filter(Boolean).map(s => JSON.parse(s));
-    assert.ok(!calls.some(a => a.includes('repos/owner/repo/pulls/1/merge')), 'changed inputs cannot authorize the existing proof');
-    assert.notEqual(JSON.parse(f.bytes(path)).delivery.state, 'merged');
-    return;
-  }
-  const done=JSON.parse(f.bytes(path)); assert.equal(done.delivery.state,'merged'); assert.equal(done.stage,'done'); assert.equal(done.verification.id,proof.id); assert.equal(done.verdict,'PASS');
-  const calls=f.bytes(join(f.fake,'tracker.jsonl')).split('\n').filter(Boolean).map(s=>JSON.parse(s));
-  assert.equal(calls.filter(a=>a.includes('repos/owner/repo/pulls/1/merge')).length,1);
-  assert.ok(!calls.some(a=>a.includes('create')||a.includes('comment')||a.includes('--undo'))); assert.equal(f.bytes(join(f.fake,'launches')),'absent');
-  assert.ok(f.bytes(join(f.fake,'status-calls')).split('\n').filter(Boolean).every(s=>JSON.stringify(JSON.parse(s))===JSON.stringify(['schedule','status','--project',f.root,'--json'])));
+  f.pass([],scheduled);
+  const held = JSON.parse(f.bytes(path));
+  assert.equal(held.delivery.state, 'operator-required');
+  assert.equal(held.verification.id, proof.id);
+  assert.match(held.note, /legacy proof.*fresh verification/i);
+  const calls = f.bytes(join(f.fake,'tracker.jsonl')).split('\n').filter(Boolean).map(s => JSON.parse(s));
+  assert.ok(!calls.some(a => a.includes('repos/owner/repo/pulls/1/merge') || a.includes('create') || a.includes('comment') || a.includes('--undo')));
+  assert.equal(f.bytes(join(f.fake,'launches')), 'absent');
+  assert.equal(f.bytes(join(f.fake,'status-calls')), 'absent');
 });
 
