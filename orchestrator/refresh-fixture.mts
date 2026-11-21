@@ -14,7 +14,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
-import { fixtureTicketHash } from './fixtures/ticket-input.mts';
+import { fixtureTicketHash, fixtureTicketInput } from './fixtures/ticket-input.mts';
+import { prepareFixtureAcceptance } from './fixtures/acceptance-preparation.mts';
 
 import { readAdmission } from '../board/admission.mts';
 /** Refresh may own a durable managed entry, never an implementation/recovery admission or generation. */
@@ -28,7 +29,7 @@ export const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 // Selected fixtures use v2 model tiers. No model label is required.
 export const ticket = (iid: number, extra = {}) => ({ iid, title: `Ticket ${iid}`, description: "Model tier: mid\nRequirement DEP:20", state: "open", labels: ["ready-for-agent"], ...extra });
-export function fixture(t: any, kind = "github") {
+export function fixture(t: any, kind = "github", prepareAcceptance = true) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-refresh-")));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const origin = join(home, "origin.git"), root = join(home, "site"), dir = join(home, "runs"), bin = join(home, "bin"), fake = join(home, "fake");
@@ -64,7 +65,15 @@ export function fixture(t: any, kind = "github") {
   // Temporary caller bridge for Board routing, which is owned by the next task.
   writeFileSync(join(root, '.factory/dispatch.mts'), `await import(${JSON.stringify(join(runtime.directory, 'dispatch.mts'))});`);
   const data: any = { tickets: [ticket(7), ticket(20, { description: "Provider", labels: [] }), ticket(21, { description: "New provider", labels: [] })], ready: [7], notes: {}, parents: {} };
-  const save = () => writeFileSync(join(fake, "tracker.json"), JSON.stringify(data));
+  const prepared = new Set<string>();
+  const save = () => {
+    writeFileSync(join(fake, "tracker.json"), JSON.stringify(data));
+    // Existing positive journeys explicitly get fixture-owned preparation before entry, not launcher approval.
+    if (prepareAcceptance) for (const ticket of data.tickets) {
+      const input = fixtureTicketInput(data, ticket.iid, kind);
+      if (!prepared.has(input.hash)) { prepareFixtureAcceptance(dir, input); prepared.add(input.hash); }
+    }
+  };
   const key = (iid: number) => `owner_repo--${iid}`;
   const record = (iid: number, stage: string) => {
     const r = { iid: String(iid), project: "owner/repo", title: `old ${iid}`, stage, pid: process.pid, base: "main", verdict: "FAIL", branch: `${iid}-topic`,

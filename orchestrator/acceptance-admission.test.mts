@@ -21,9 +21,19 @@ function prepare(f: ReturnType<typeof fixture>) {
   });
 }
 
+test('dispatch missing preparation holds before analysis, queue record or claim', t => {
+  const f = fixture(t, 'github', false);
+  f.save();
+  const result = f.pass();
+  assert.equal(existsSync(join(f.fake, 'analysis.jsonl')), false, 'no analysis model invocation');
+  assert.match(result.stdout, /Acceptance static hold: missing-preparation/);
+  assert.equal(existsSync(join(f.fake, 'launches')), false);
+  assert.equal(existsSync(join(f.dir, 'owner_repo--7.json')), false);
+});
+
 for (const kind of ['github', 'gitlab']) for (const family of ['openai', 'anthropic']) {
   test(`recovery preparation refuses missing acceptance before analysis (${kind}/${family})`, t => {
-    const f = fixture(t, kind);
+    const f = fixture(t, kind, false);
     const config = join(f.root, '.factory/factory.toml');
     writeFileSync(config, readFileSync(config, 'utf8').replace('family = "anthropic"', `family = "${family}"`));
     f.save();
@@ -42,7 +52,7 @@ for (const kind of ['github', 'gitlab']) for (const family of ['openai', 'anthro
 
 for (const fault of ['malformed-record', 'malformed-contract', 'unapproved', 'changed-ticket']) {
   test(`recovery preparation refuses ${fault} without analyst or implementation effects`, t => {
-    const f = fixture(t);
+    const f = fixture(t, 'github', false);
     f.save();
     const input = inputFor(f), file = prepareFixtureAcceptance(f.dir, input);
     const record = JSON.parse(readFileSync(file, 'utf8'));
@@ -66,7 +76,7 @@ for (const fault of ['malformed-record', 'malformed-contract', 'unapproved', 'ch
 }
 
 test('authentic preparation reaches the analyst; cached analysis is still revoked by current preparation', t => {
-  const f = fixture(t);
+  const f = fixture(t, 'github', false);
   f.data.tickets[0].description = 'Model tier: mid\nComplete standalone requirement';
   f.save();
   const input = inputFor(f), file = prepareFixtureAcceptance(f.dir, input);

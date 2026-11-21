@@ -16,7 +16,9 @@ charge. Its `validate-prepared-acceptance` observation uses `ticket-input` scope
 the preparer/reviewer action; CLI/Board readers only display it.
 
 This is a partial admission integration, **not the complete acceptance guarantee**:
-dispatch, direct implementation, explicit assessment refresh and preclaim baseline
+Dispatch now validates current preparation before candidate selection, stale/live analysis
+selection and the fresh pre-claim input read, so cached execution analysis cannot bypass
+static refusal. Direct implementation, explicit assessment refresh and preclaim baseline
 admission are not yet gated by this static adapter. The preparation result's `ready`
 means current analysis/prerequisites, not a trusted baseline receipt or permission to
 implement. Full overrides remain opaque, not compliant merely because their manifests

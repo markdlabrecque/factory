@@ -2,6 +2,7 @@
 // Only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
 import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthorization } from './delivery-followup.mts';
 import { validDelivery } from './delivery.mts';
+import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
 import { readAdmission } from './admission.mts';
 import { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordReadinessCheck, recordTicketInput, ticketBranch, ticketWorkspaceProblem } from './launch-readiness.mts';
 // #149: cache full three-state dependency results per pass; unknown reads hold dispatch.
@@ -264,6 +265,14 @@ const candidates = unstarted.filter((i) => {
     heldTickets.add(i.iid); log(`#${i.iid} held: ${(error as Error).message}`); return false;
   }
   recordTicketInput(stateDir(), projectReadiness, input);
+  try {
+    input = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], input).ticket;
+    inputs.set(i.iid, input);
+    recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(input));
+  } catch (error) {
+    if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(input, error));
+    heldTickets.add(i.iid); log(`#${i.iid} held: ${(error as Error).message}`); return false;
+  }
   const problem = ticketWorkspaceProblem(context.projectRoot, ticketBranch(i.iid, input.context.child.title));
   recordTicketLaunch(stateDir(), projectReadiness, i.iid, problem);
   if (problem) { heldTickets.add(i.iid); log(`#${i.iid} held: ${problem}`); return false; }
@@ -292,7 +301,15 @@ const inputHolds = new Set<number>();
 const hashOf = new Map<number, string>();
 for (const t of tracked) {
   try {
-    const input = inputs.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid);
+    const fresh = inputs.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid);
+    let input: FrozenTicketInput;
+    try {
+      input = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], fresh).ticket;
+      recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(input));
+    } catch (error) {
+      if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(fresh, error));
+      throw error;
+    }
     inputs.set(t.iid, input);
     notesOf.set(t.iid, input.context.child.notes);
     hashOf.set(t.iid, input.hash);
@@ -425,7 +442,15 @@ for (const [n, d] of launch.entries()) {
   // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
   try {
     context.assertCurrent();
-    const freshInput = freezeTicketInput(tracker.contextSource, d.iid);
+    const collectedInput = freezeTicketInput(tracker.contextSource, d.iid);
+    let freshInput: FrozenTicketInput;
+    try {
+      freshInput = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], collectedInput).ticket;
+      recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(freshInput));
+    } catch (error) {
+      if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(collectedInput, error));
+      throw error;
+    }
     if (freshInput.hash !== hashOf.get(d.iid)) {
       recordTicketInput(stateDir(), projectReadiness, freshInput, hashOf.get(d.iid));
       log(`#${iid} ticket-input changed before admission; retry next pass`);
