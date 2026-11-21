@@ -280,9 +280,17 @@ that identity inventory. PASS reports must reconcile every original `criterionId
 exactly once; the host validates this after verifier immutability checks. The
 existing runtime inventory already ships all touched modules and verifier template;
 no new helper or dependency asset is introduced. This is partial semantic coverage
-integration, not a modern replay-bound proof policy: authenticated candidate execution,
-proof-chain readers and CI-wait migration remain outstanding. Baseline admission
-identity, full-scope baseline and saved repair-start comparison remain separate.
+integration. Normal main now additionally performs separately authorized owned exact-candidate
+replay after implementer payload teardown, reusing the existing detached producer and
+original frozen bundle. The candidate reserves separate capacity while composing only with
+its exact live normal claim/entry/custody; no foreign ownership or cap is bypassed.
+Version2/policy2 normal proofs retain authenticated baseline/candidate handles plus the
+original full policy/raw-config binding; writer and shared proof readers authenticate both
+producer seals, exact SHAs, independent owners, original bytes, current grants and cleanup.
+All changed modules were already shipped by the complete runtime inventory; the new test
+host is fixture-only. This is not full T5 migration: recovery attempt-bound replay, complete
+evidence obligations and current-original/legacy CI continuation policy remain outstanding.
+Baseline admission identity, full-scope baseline and saved repair-start comparison stay separate.
 
 ### Supervisor and independent review inputs
 

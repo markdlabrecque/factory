@@ -1,9 +1,11 @@
 // Host-only verification contract (#150). Import-safe; proof roots are never agent mounts.
-// Optional host-frozen criterion inventories fence PASS; structural integrity is still not semantic coverage.
+// Host-frozen inventories fence PASS. Present replay chains are authenticated on writer AND every reader;
+// legacy diagnostic/recovery records remain policy1 pending complete migration and recovery composition.
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync, mkdirSync, writeFileSync, renameSync, realpathSync, existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import { authenticateCandidateReplay, type CandidateReplay } from './acceptance-baseline-admission.mts';
 export type Verdict = 'PASS' | 'FAIL' | 'INCONCLUSIVE';
 export interface Report {
   version: 1; verdict: Verdict; changeKind: 'feature' | 'bugfix'; evidenceKind: 'command' | 'browser' | 'mixed'; interactive: boolean;
@@ -18,8 +20,9 @@ export interface Identity {
 }
 export interface Provenance { imageId: string; nodeVersion: string; code: Record<string, string>; settings: Record<string, unknown>; settingsHash?: string }
 export interface Proof extends Identity {
-  version: 1; id: string; verifiedAt: string; policyVersion: 1; report: Report;
+  version: 1 | 2; id: string; verifiedAt: string; policyVersion: 1 | 2; report: Report;
   reportHash: string; verdictHash: string; artifacts: Artifact[]; provenance: Provenance;
+  candidateReplay?: CandidateReplay;
 }
 export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const demand = (ok: unknown, why: string): void => { if (!ok) throw new Error(`Verification refused: ${why}`); };
@@ -127,8 +130,9 @@ export const proofRoot = (state: string, project: string, ticket: string, id: st
   return resolve(state, 'verification', `${sha256(project)}--${encodeURIComponent(ticket)}`, id);
 };
 /** Call only after verifier immutability checks and confirmed sandbox teardown. */
-export function createProof(state: string, evidence: string, identity: Identity, provenance: Provenance, criterionIds?: readonly string[]) {
+export function createProof(state: string, evidence: string, identity: Identity, provenance: Provenance, criterionIds?: readonly string[], candidateReplay?: CandidateReplay) {
   checkIdentity(identity);
+  if(candidateReplay) authenticateCandidateReplay(candidateReplay,{baseline:identity.baseline,tip:identity.tip,executionId:identity.executionId,ticket:identity.ticket});
   assertProofStoreOutsideMounts(state, [evidence]);
   demand(/^sha256:[0-9a-f]{64}$/.test(provenance.imageId) && text(provenance.nodeVersion), 'missing immutable image ID or verifier Node version');
   const validated = validateEvidence(evidence, criterionIds), id = randomUUID(), root = proofRoot(state, identity.project, identity.ticket, id);
@@ -141,7 +145,7 @@ export function createProof(state: string, evidence: string, identity: Identity,
   }
   const { report, artifacts, reportHash, verdictHash } = validateEvidence(staging, criterionIds);
   demand(reportHash === validated.reportHash && verdictHash === validated.verdictHash && JSON.stringify(artifacts) === JSON.stringify(validated.artifacts), 'evidence changed while freezing');
-  const proof: Proof = { version: 1, id, ...identity, verifiedAt: new Date().toISOString(), policyVersion: 1, report, reportHash, verdictHash, artifacts, provenance: { ...provenance, settingsHash: sha256(JSON.stringify(provenance.settings)) } };
+  const proof: Proof = { version: candidateReplay ? 2 : 1, id, ...identity, ...(candidateReplay ? {candidateReplay:structuredClone(candidateReplay)} : {}), verifiedAt: new Date().toISOString(), policyVersion: candidateReplay ? 2 : 1, report, reportHash, verdictHash, artifacts, provenance: { ...provenance, settingsHash: sha256(JSON.stringify(provenance.settings)) } };
   writeFileSync(join(staging, 'proof.json'), JSON.stringify(proof, null, 2) + '\n', { flag: 'wx', mode: 0o400 });
   renameSync(staging, root);
   return { id, root, proof };
@@ -151,9 +155,11 @@ export function readProof(state: string, identity: Identity, id: string, criteri
   checkIdentity(identity);
   const root = proofRoot(state, identity.project, identity.ticket, id);
   const proof: Proof = JSON.parse(file(root, 'proof.json').toString('utf8'));
-  demand(proof.version === 1 && proof.policyVersion === 1 && proof.id === id, 'unsupported proof');
+  demand(proof.id === id && (proof.version===1 && proof.policyVersion===1 && proof.candidateReplay===undefined
+    || proof.version===2 && proof.policyVersion===2 && proof.candidateReplay!==undefined), 'unsupported or missing replay proof');
   for (const k of ['project', 'ticket', 'executionId', 'attemptId', 'branch', 'base', 'baseline', 'tip', 'requirementsHash'] as const)
     demand(proof[k] === identity[k], `proof identity mismatch: ${k}`);
+  if(proof.candidateReplay) authenticateCandidateReplay(proof.candidateReplay,{baseline:identity.baseline,tip:identity.tip,executionId:identity.executionId,ticket:identity.ticket});
   demand(proof.provenance?.settingsHash === sha256(JSON.stringify(proof.provenance?.settings)), 'proof settings integrity mismatch');
   const v = validateEvidence(root, criterionIds);
   demand(v.reportHash === proof.reportHash && v.verdictHash === proof.verdictHash && JSON.stringify(v.artifacts) === JSON.stringify(proof.artifacts) && JSON.stringify(v.report) === JSON.stringify(proof.report), 'proof integrity mismatch');

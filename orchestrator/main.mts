@@ -7,7 +7,7 @@
 // Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
-import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket } from './acceptance-baseline-admission.mts';
+import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket, replayAcceptanceCandidateForTicket, authenticateCandidateReplay, type CandidateReplay } from './acceptance-baseline-admission.mts';
 import { beginPayloadCustody } from './payload-custody.mts';
 import { ownerOf } from './admission.mts';
 import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup } from './sandbox-readiness.mts';
@@ -529,7 +529,12 @@ const promptArgs = {
   CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
 };
 
+let candidateReplay: CandidateReplay | undefined;
 const recheck = () => {
+  if (candidateReplay) {
+    try { authenticateCandidateReplay(candidateReplay,{baseline:baseSha,tip,executionId,ticket:iid!}); }
+    catch(error) { return (error as Error).message; }
+  }
   const hold = contextHold(context); if (hold) return hold;
   const nowParent = tracker.parentOf(Number(iid));
   if (nowParent !== parentIid) return 'Ticket parent changed; fresh verification required';
@@ -782,9 +787,15 @@ if (blockers) {
 }
 
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
+const replayHold = recheck(); if (replayHold) fail(replayHold);
+if(sh('git',['rev-parse',`refs/heads/${branch}`])!==tip) fail('Branch moved from verified tip before acceptance replay');
+candidateReplay = await replayAcceptanceCandidateForTicket(Number(iid),base,{sha:baseSha,admission:acceptanceBaseline},tip,{
+  key:keyFor(iid!,PROJECT),executionId,claim:claimToken!,entry:managedEntry,custody:custody.pointer,baseline:baseSha,bindingDigest:acceptanceBaseline.bindingDigest,
+},sandboxCancel.signal);
+const afterReplayHold = recheck(); if (afterReplayHold) fail(afterReplayHold);
 setStage(iid, { stage: "posting" });
 const identity = { project: PROJECT, ticket: iid, executionId, branch, base, baseline: baseSha, tip, requirementsHash: startVersion.hash };
-const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds);
+const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds, candidateReplay);
 setStage(iid, { verification: { id: frozen.id, tip, requirementsHash: startVersion.hash } });
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
 const outcome = await postAndDeliver({

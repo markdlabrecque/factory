@@ -6,6 +6,7 @@ import {dirname,join,resolve} from 'node:path';
 import {createServer} from 'node:net';
 import {once} from 'node:events';
 import {acceptanceHash} from '../acceptance-contract.mts';
+import {namespaceTransport} from './acceptance-namespace.mts';
 
 export function prepareFixtureBaseline(runtime: string, cwd: string, env: NodeJS.ProcessEnv, iid=7, base='main', fault=''): import('../acceptance-baseline-admission.mts').BaselineAdmissionIdentity | undefined {
   const output=execFileSync(process.execPath,[import.meta.filename,'--prepare',runtime,String(iid),base,fault],{cwd,env,encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
@@ -23,7 +24,10 @@ if (process.argv[2] === '--prepare') {
     const {cancelAcceptanceBaseline}=await import(join(runtime,'acceptance-runner.mts'));
     const owned=join(dirname(context.sharedState),'owned-baselines'); mkdirSync(owned,{mode:0o700,recursive:true});
     const socketPath=join(owned,'engine.sock');
-    let labels:any, plan:any;
+    let labels:any, plan:any, inputs='';
+    const real=process.env.SCENARIO==='acceptance-replay-pass';
+    const closure=join(owned,'baseline-namespace');if(real)mkdirSync(closure,{mode:0o700});
+    const execute=real?namespaceTransport(closure):undefined;
     const server=createServer(socket=>{let text='';socket.on('data',bytes=>{
       text+=bytes; if(!text.includes('\n'))return;
       const {args}=JSON.parse(text); let result:any;
@@ -32,11 +36,16 @@ if (process.argv[2] === '--prepare') {
       else if(args[0]==='create') {
         labels=Object.fromEntries(args.flatMap((a:string,i:number)=>a==='--label'?[args[i+1].split('=')]:[]));
         const mount=args[args.indexOf('--mount')+1], input=mount.match(/src=([^,]+)/)[1];
-        plan=JSON.parse(readFileSync(join(input,'plan.json'),'utf8')); result={stdout:'baseline-container'};
+        inputs=input;plan=JSON.parse(readFileSync(join(input,'plan.json'),'utf8')); result={stdout:'baseline-container'};
       } else if(args[0]==='inspect') result={stdout:JSON.stringify([{Id:'baseline-container',Config:{Image:'fixture/baseline@sha256:'+'a'.repeat(64),Labels:labels}}])};
       else if(args[0]==='start') {
         if(fault==='cancelled')cancelAcceptanceBaseline(JSON.parse(readFileSync(join(root,`baseline-current-${input.hash}.json`),'utf8')).handle);
         result={stdout:JSON.stringify({version:1,sha:plan.sha,reset:{kind:'project-local-synthetic-v1',executionId:plan.executionId},results:{version:1,phase:'baseline',identity:bundle.manifest.acceptance,assertions:[{assertionId:'A-summary',status:fault==='already-green'?'pass':fault==='unknown'?'unknown':'expected-behavioral-fail',failureId:fault==='already-green'||fault==='unknown'?null:fault==='mismatch'?'wrong-failure':'summary-unavailable-or-wrong',evidence:['fixture-output']},{assertionId:'A-order',status:'pass',failureId:null,evidence:['fixture-output']}],evidence:[]}})};
+        if(execute) {
+          const state=join(owned,'baseline-state');mkdirSync(state,{mode:0o700});
+          const actual=execute(inputs,state);writeFileSync(join(owned,'baseline-driver.json'),JSON.stringify(actual));
+          result={stdout:actual.stdout,stderr:actual.stderr,status:actual.status};
+        }
       }
       else if(args[0]==='rm') result=fault==='cleanup-uncertain'?{status:1,stderr:'fixture cleanup unavailable'}:{}; else if(args[0]==='ps')result={stdout:fault==='cleanup-uncertain'?'baseline-container':''};
       else { socket.destroy(new Error('Unexpected engine call '+args)); return; }
@@ -47,7 +56,7 @@ if (process.argv[2] === '--prepare') {
       const request={stateDir:context.sharedState,ownedRoot:owned,custodyRoot:root,agentMounts:[context.projectRoot,context.runtimeRoot],source:context.projectRoot,
         project:{root:context.projectRoot,tracker:{kind:TRACKER.kind,host:TRACKER.gitlabHost??TRACKER.host,project:TRACKER.project}},iid:String(iid),pointer:bundle.pointer,
         sha:execFileSync('git',['rev-parse',`origin/${base}`],{cwd:context.projectRoot,encoding:'utf8'}).trim(),runtimeRoot:runtime,
-        engine:{command:process.execPath,args:[resolve(import.meta.dirname,'acceptance-engine.mjs'),socketPath]},image:'fixture/baseline@sha256:'+'a'.repeat(64),setup:[],
+        engine:{command:process.execPath,args:[resolve(import.meta.dirname,'acceptance-engine.mjs'),socketPath]},image:'fixture/baseline@sha256:'+'a'.repeat(64),setup:real?[[ '/usr/bin/node','-e',"const fs=require('node:fs');if(fs.existsSync('/state/rows.json'))throw Error('dirty synthetic state');fs.writeFileSync('/state/rows.json',fs.readFileSync('/input/acceptance/fixtures/rows.json'));" ]]:[],
         reset:{kind:'project-local-synthetic-v1',recipe:'Disposable synthetic state only; no external CMS/database'},bounds:{totalMs:15000,outputBytes:1048576,memoryMiB:256,cpus:1,pids:64,diskMiB:128},cap:effectiveConfig.dispatch.maxConcurrent};
       const hostPlan={version:1,request,policyIdentity:context.policyIdentity,configDigest:acceptanceHash(readFileSync(context.projectPath('.factory/factory.toml'),'utf8'))};
       writeFileSync(join(root,`baseline-plan-${input.hash}.json`),JSON.stringify(hostPlan),{mode:0o600});

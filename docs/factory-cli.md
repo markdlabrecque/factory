@@ -790,9 +790,17 @@ Standard normal/recovery main additionally supplies the authenticated original
 acceptance criterion IDs to the shared verifier. PASS requires one exact
 `criterionId` per original criterion, with no omissions, extras or duplicates;
 free-text `requirement` cannot substitute. Non-PASS diagnostic evidence remains
-retained. This partial semantic-inventory fence does not upgrade policy-1 proof
-or CI continuation to authenticated exact-candidate replay authority. See the
-[remaining candidate-proof boundary](acceptance-contract.md#semantic-criterion-inventory-partial-candidate-proof-integration).
+retained. Normal verification additionally requires a separately host-authorized independent
+exact-candidate replay through the existing owned runner after implementer payload teardown.
+It retains an authenticated baseline/candidate chain in version2/policy2 proof, revalidated
+on shared proof reads and every immediate normal delivery authorization. Missing grant,
+unknown/infrastructure replay, mismatched bundle and changed candidate hold without push.
+Candidate execution consumes a separate capacity slot; no spare slot means hold. There is
+no automatic grant, preparation command, retry or budget exemption. Inspect retained private
+candidate handles and original baseline/custody with the trusted host preparer; never edit
+receipts or approve from tracker/agent JSON. Recovery candidate replay, full evidence-obligation
+reconciliation and legacy/current-original CI migration remain incomplete, not acceptance.
+See the [normal replay tracer and remaining limits](acceptance-contract.md#normal-exact-candidate-replay-tracer-partial-integration).
 
 A repaired branch goes through the same hand-off as an implemented one (#58, `orchestrator/handoff.mts` in the selected runtime). `main.mts` calls it after its implementer, and `main.mts --recover` (#60) after its repair agent.
 

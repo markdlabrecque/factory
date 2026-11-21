@@ -475,7 +475,9 @@ No current prompt, CLI or scheduler gains a new authority path from these APIs.
 ## Baseline receipt policy component (not an execution runner)
 
 `orchestrator/acceptance-receipt.mts` supplies `checkAcceptanceReceipt(contract,
-approvals, observed, expectedBinding, now)`, a pure baseline-only policy check.
+approvals, observed, expectedBinding, now, phase?)`, a pure phase-specific policy check.
+The default remains baseline; candidate phase is supplied only by the trusted producer request,
+never selected from observed probe JSON.
 The expected binding is independently supplied by trusted host orchestration, not
 copied from the observed receipt. It compares execution, bundle, approval ID and
 canonical approval digest, exact Git SHA, selected runtime/private dependencies,
@@ -500,7 +502,8 @@ Custody's independent review status is not changed by runner implementation.
 
 `acceptance-runner.mts`, `acceptance-worker.mts` and `acceptance-sandbox.mjs` ship
 in the selected flat runtime. These are **source APIs**, not a newly enabled CLI,
-scheduler gate, implementation launcher or candidate-proof producer. Later layers
+scheduler gate or implementation launcher. The normal replay tracer below also uses
+this same lifecycle for an explicitly authorized candidate purpose. Consumers
 must independently compare the retained binding to the current frozen inputs;
 replay of a historically valid receipt does not authorize another execution.
 
@@ -819,12 +822,51 @@ The shared evidence boundary accepts up to 256
 criteria, matching the acceptance-contract inventory bound. Historical non-PASS
 reports remain inspectable diagnostics without inventing omitted evaluations.
 
-This is a semantic-inventory fence only: ID coverage is not per-obligation semantic
-adequacy, browser/manual evidence authentication or deterministic replay. The
-baseline-only producer, policy-1 proof writer/readers and CI continuation have NOT
-been upgraded into an authenticated baseline→candidate chain by this increment.
-No complete exact-candidate/recovery-proof guarantee or automatic migration follows;
-those remaining task requirements must be implemented before acceptance/publication.
+ID coverage is not per-obligation semantic adequacy or browser/manual evidence
+authentication. The normal-path tracer below adds authenticated candidate replay;
+recovery, complete evidence obligations and legacy/CI migration remain incomplete.
+No complete exact-candidate/recovery-proof guarantee or automatic migration follows.
+
+## Normal exact-candidate replay tracer (partial integration)
+
+After independent semantic verification and confirmed implementer sandbox teardown,
+normal main requires `replayAcceptanceCandidateForTicket` before freezing/posting proof.
+A structured verifier PASS plus ordinary checks is insufficient. The current original
+baseline admission and full host plan are reauthenticated; `candidateRequestForTicket`
+builds an inert request with the exact candidate SHA and normal workflow key/execution,
+claim, managed entry, original baseline binding and payload-custody nonce. It does not
+approve or execute anything. An independent host preparer must supply a separate exact
+`execution-authorization-<intent-digest>.json`, using the same intent schema as baseline
+but including this candidate request. There is no automatic grant, renewal or retry.
+
+The existing reserve/start/worker/cancel/read lifecycle is reused, not a second sandbox
+implementation. Only the exact live normal claim/entry with a closed implementer payload
+may compose with its own candidate reservation. Foreign/racing work still excludes it;
+the candidate consumes a **separate durable capacity slot**. A cap with no spare slot
+holds, rather than waiving capacity. Candidate pending handles are retained privately
+before worker start. Ownership is rechecked before creation and final publication;
+uncertain cleanup retains the existing reservation. The trusted worker carries phase
+through the copied driver. Baseline readers reject candidate-purpose publications;
+original changed-baseline named-red semantics remain unchanged.
+
+`authenticateCandidateReplay` rereads both producer publications and raw output seals,
+checks independent execution/owner IDs, exact original/candidate SHAs, identical frozen
+bundle/approval/runtime/dependencies/image/setup/reset and full policy/raw-config binding,
+current matching unexpired grants, cancellation and confirmed cleanup. It rehashes original
+custody bytes. Normal proof version2/policy2 retains this chain; its writer and every shared
+proof reread authenticate it. Removing the chain from a version2 proof holds. Immediate
+normal delivery reauthenticates the retained chain as well as its existing exact branch,
+requirements, claim, local/remote SHA and CI gates. Unknown, infrastructure, mismatched
+bundle or changed candidate cannot deliver. Replay never overrides semantic non-PASS.
+
+This tracer is **not** completed T5: recovery has no fresh attempt-bound candidate replay;
+legacy policy1 migration/refusal and complete current-original/criterion-obligation checking
+in CI continuation remain open. Policy1 records remain readable by existing historical/
+recovery consumers; that compatibility must not be presented as modern replay authority.
+All touched runtime modules were already in the complete asset inventory; no new shipped
+module, dependency or sandbox lifecycle was introduced. Evidence proves disposable Git and
+filesystem-backed synthetic reset through the actual copied driver in rootless namespaces,
+not actual CMS/SQL reset, Docker cgroups or a different-UID watchdog. Unsupported reset holds.
 
 ## Verification
 

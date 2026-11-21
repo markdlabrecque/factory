@@ -10,7 +10,7 @@ export interface AcceptanceReceipt {
   version: 1; binding: AcceptanceExecutionBinding; startedAt: number; deadline: number; finishedAt: number;
   cleanup: 'confirmed' | 'unknown'; results: unknown;
 }
-export function checkAcceptanceReceipt(contract: AcceptanceContract, approvals: TrustedApprovalIngress, receipt: unknown, expected: AcceptanceExecutionBinding, now: number) {
+export function checkAcceptanceReceipt(contract: AcceptanceContract, approvals: TrustedApprovalIngress, receipt: unknown, expected: AcceptanceExecutionBinding, now: number, phase: 'baseline' | 'candidate' = 'baseline') {
   const hold = () => ({ status: 'hold' as const, code: 'invalid-receipt' as const, reason: 'Foreign, incomplete, late or unclean execution receipt' });
   if (!receipt || typeof receipt !== 'object') return hold();
   const r = receipt as AcceptanceReceipt;
@@ -25,5 +25,5 @@ export function checkAcceptanceReceipt(contract: AcceptanceContract, approvals: 
   if (approved.status === 'hold') return approved;
   if (approved.value.approval.id !== expected.approvalId || acceptanceHash(approved.value.approval) !== expected.approvalDigest) return hold();
   // Freeze the single trusted observation; a second ingress read cannot substitute another review.
-  return checkAcceptanceResults(approved.value.contract, { lookup: () => approved.value.approval }, r.results, 'baseline');
+  return checkAcceptanceResults(approved.value.contract, { lookup: () => approved.value.approval }, r.results, phase);
 }

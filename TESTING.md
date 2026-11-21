@@ -991,8 +991,21 @@ The selected normal-entrypoint proof fixture prepares genuine original custody a
 owned baseline authority, then proves an otherwise-green verifier omitting an original
 criterion cannot create proof, post or push. Positive normal/recovery model-family
 journeys retain complete explicit synthetic criterion IDs. This is a semantic-inventory
-vertical at approved verification/recovery seam4, not exact candidate replay, browser
-adequacy or installed-release acceptance. Full mandatory commands/bounds are unchanged. `verification-entrypoint*.test.mts` runs the
+vertical at approved verification/recovery seam4. A second normal-entrypoint tracer
+first reproduced actual post/push/merge without candidate replay despite a complete
+structured PASS. It now holds without a separate exact host grant. The positive tracer
+executes the actual copied driver and SAME frozen probe at baseline and exact candidate
+in independent rootless namespaces: named behavioral red→green, preservation pass,
+fresh filesystem synthetic seed despite source dirt, separately authenticated owners,
+confirmed cleanup and retained version2 proof chain. Its independent fixture host prepares
+exact grants after observing the committed candidate; SDK reports cannot approve them.
+Additional entrypoint cases deny changed candidates, mismatched bundle observations,
+unknown results and engine infrastructure failure, with no push. Ordinary model-family
+journeys reuse external-engine protocol responses; only the explicit tracer claims actual
+driver execution. This is not complete recovery/CI migration, browser/manual adequacy,
+CMS/SQL reset, cgroup/watchdog or installed-release acceptance. Runtime inventory already
+ships every changed producer/consumer; the added host module is test-only. Full mandatory
+commands/bounds are unchanged. `verification-entrypoint*.test.mts` runs the
 selected fixture runtime's ordinary entrypoint against real temporary Git repositories and fixture-owned
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
