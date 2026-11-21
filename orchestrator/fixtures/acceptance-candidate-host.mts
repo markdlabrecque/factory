@@ -17,7 +17,8 @@ export async function startCandidateHost(t:TestContext,runtime:string,cwd:string
 }
 if(process.argv[2]==='--host') {
   const runtime=process.argv[3],fake=process.env.FAKE_STATE!,scenario=process.env.SCENARIO!;
-  const {context}=await import(join(runtime,'runtime-config.mts'));
+  const {context,TRACKER}=await import(join(runtime,'runtime-config.mts'));
+  const {keyFor}=await import(join(runtime,'board.mts'));
   const {candidateRequestForTicket}=await import(join(runtime,'acceptance-baseline-admission.mts'));
   const root=join(context.sharedState,'acceptance');
   const tracker=await import(join(runtime,'tracker.mts'));
@@ -58,7 +59,7 @@ if(process.argv[2]==='--host') {
   const watcher=watch(fake,async()=>{
     if(started||!existsSync(join(fake,'candidate-request')))return;started=true;
     try {
-      const run=JSON.parse(readFileSync(join(context.sharedState,'owner_repo--7.json'),'utf8'));
+      const run=JSON.parse(readFileSync(join(context.sharedState,`${keyFor('7',TRACKER.project)}.json`),'utf8'));
       const {readPayloadCustody}=await import(join(runtime,'payload-custody.mts'));
       const custody=readPayloadCustody(context.sharedState,run.payloadCustody);
       // request builder is nonexecuting; actual reserve later authenticates CLOSED payload and current owner.

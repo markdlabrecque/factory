@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { admissionFile, emptyAdmission, keyFor, ownerOf, withAdmission } from '../../board/admission.mts';
@@ -214,14 +214,16 @@ test('review lists the workflow, refuses an incomplete copy, and --confirm activ
   // #137: reviewed runtime/parser assets include nested paths.
   for (const f of WORKFLOW.filter(f => f !== 'main.mts' && f !== 'prompt.recover.md' && !['package.json','package-lock.json'].includes(f))) { mkdirSync(join(sc(f), '..'), { recursive: true }); writeFileSync(sc(f), `// ${f}\n`); }
   projectFixture(p, root);
+  const repairPrompt = { bytes: readFileSync(sc('prompt.recover.md')), mode: statSync(sc('prompt.recover.md')).mode & 0o777 };
   rmSync(sc('prompt.recover.md'));
   assert.equal(await recovery(p, 'review', { cwd: root, confirm: true }), 1);
   assert.match(err(), /prompt\.recover\.md[^]*Nothing was recorded/);
   assert.equal(readReview(p, root), null);
 
-  writeFileSync(sc('prompt.recover.md'), readFileSync(new URL('../../orchestrator/prompt.recover.md', import.meta.url)));
+  writeFileSync(sc('prompt.recover.md'), repairPrompt.bytes, { mode: repairPrompt.mode });
   clear();
-  assert.equal(await recovery(p, 'review', { cwd: root }), 0, 'without --confirm it only lists');
+  const listed = await recovery(p, 'review', { cwd: root });
+  assert.equal(listed, 0, `without --confirm it only lists: ${err()}`);
   assert.match(out(), /prompt\.recover\.md +project-specific/);
   assert.match(out(), /recovery\.mts +project-specific/);
   assert.match(out(), /main\.mts +project-specific/);

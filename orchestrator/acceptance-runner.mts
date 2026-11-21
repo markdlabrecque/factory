@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { acceptanceHash, type AcceptanceContract } from './acceptance-contract.mts';
 import { readAcceptanceBundle, type AcceptanceBundlePointer } from './acceptance-custody.mts';
 import { checkAcceptanceReceipt, type AcceptanceReceipt } from './acceptance-receipt.mts';
-import type { AdmissionIdentity, BaselineReservation } from '../board/admission.mts';
+import type { AdmissionIdentity, AdmissionState, BaselineReservation } from '../board/admission.mts';
 const flat = existsSync(new URL('./admission.mts', import.meta.url));
 const admission = await import(flat ? './admission.mts' : '../board/admission.mts');
 const { readRuns, TERMINAL, PARKED } = await import(flat ? './board.mts' : '../board/board.mts');
@@ -53,7 +53,7 @@ export function readBaselineSpec(h: BaselineHandle): any {
 }
 /** Candidate work may coexist ONLY with its own live normal claim/entry and closed implementer payload.
  * It still consumes a separate capacity slot; all foreign/uncertain work remains conflicting. */
-export function assertCandidateOwner(r: BaselineRequest, state: import('../board/admission.mts').AdmissionState): void {
+export function assertCandidateOwner(r: BaselineRequest, state: AdmissionState): void {
   const c = r.candidate;
   if (!c) throw Error('Candidate workflow identity missing');
   const run = readRuns(r.stateDir,false).find(run=>run.key===c.key);
