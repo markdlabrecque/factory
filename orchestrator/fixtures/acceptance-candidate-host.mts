@@ -9,7 +9,7 @@ import type {TestContext} from 'node:test';
 import {acceptanceHash} from '../acceptance-contract.mts';
 import {namespaceTransport} from './acceptance-namespace.mts';
 export async function startCandidateHost(t:TestContext,runtime:string,cwd:string,env:NodeJS.ProcessEnv) {
-  if(!env.FIXTURE_REPLAY_RECORD && !['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate'].includes(env.SCENARIO!))return;
+  if(!env.FIXTURE_REPLAY_RECORD && !['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(env.SCENARIO!))return;
   const child=spawn(process.execPath,[import.meta.filename,'--host',runtime],{cwd,env,stdio:['ignore','ignore','pipe','ipc']});
   let stderr='';child.stderr!.on('data',b=>stderr+=b);
   t.after(()=>{if(child.exitCode===null)child.kill('SIGKILL');});
@@ -29,7 +29,7 @@ if(process.argv[2]==='--host') {
   let labels:any,plan:any,inputs='';
   const recoveryRecord=process.env.FIXTURE_REPLAY_RECORD;
   const replayFault=process.env.FIXTURE_REPLAY_FAULT;
-  const real=scenario==='acceptance-replay-pass'||!!recoveryRecord;
+  const real=['acceptance-replay-pass','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(scenario)||!!recoveryRecord;
   const closure=real?join(fake,'candidate-namespace'):'';
   if(real)mkdirSync(closure,{mode:0o700});
   const execute=real?namespaceTransport(closure):undefined;
@@ -47,7 +47,7 @@ if(process.argv[2]==='--host') {
     } else if(args[0]==='inspect')result={stdout:JSON.stringify([{Id:'candidate-container',Config:{Image:baselinePlan.request.image,Labels:labels}}])};
     else if(args[0]==='start') {
       if(scenario==='acceptance-replay-infrastructure') result={status:1,stderr:'external engine unavailable'};
-      else if(execute) {const state=join(fake,'candidate-state');mkdirSync(state,{mode:0o700});const actual=execute(inputs,state);writeFileSync(join(fake,'candidate-driver.json'),JSON.stringify(actual));result={stdout:actual.stdout,stderr:actual.stderr,status:actual.status};}
+      else if(execute) {const state=join(fake,'candidate-state');mkdirSync(state,{mode:0o700});const actual=execute(inputs,state,scenario!=='acceptance-reset-unsupported');writeFileSync(join(fake,'candidate-driver.json'),JSON.stringify(actual));result={stdout:actual.stdout,stderr:actual.stderr,status:actual.status};}
       else result={stdout:JSON.stringify({version:1,sha:plan.sha,reset:{kind:'project-local-synthetic-v1',executionId:plan.executionId},results:{version:1,phase:'candidate',identity:scenario==='acceptance-replay-mismatched-bundle'?{...plan.identity,contractDigest:'0'.repeat(64)}:plan.identity,assertions:[{assertionId:'A-summary',status:scenario==='acceptance-replay-unknown'?'unknown':'pass',failureId:null,evidence:['external-engine-output']},{assertionId:'A-order',status:'pass',failureId:null,evidence:['external-engine-output']}],evidence:[]}})};
     } else if(args[0]==='rm' && replayFault==='cleanup') result={status:1,stderr:'candidate removal not confirmed'};
     else if(args[0]==='ps') {

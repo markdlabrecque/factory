@@ -1000,7 +1000,12 @@ fresh filesystem synthetic seed despite source dirt, separately authenticated ow
 confirmed cleanup and retained version2 proof chain. Its independent fixture host prepares
 exact grants after observing the committed candidate; SDK reports cannot approve them.
 Additional entrypoint cases deny changed candidates, mismatched bundle observations,
-unknown results and engine infrastructure failure, with no push. Ordinary model-family
+unknown results and engine infrastructure failure, with no push. Two negative normal
+entrypoint cases execute the copied driver: an implementer-committed shadow probe does
+not replace the frozen probe, and a read-only synthetic state mount cannot satisfy reset.
+Neither publishes proof or pushes. Candidate receipt units also remove each required
+criterion evidence record in turn and check that mismatched or repeated evidence holds.
+Ordinary model-family
 journeys reuse external-engine protocol responses; only the explicit tracer claims actual
 driver execution on the normal path. Recovery entrypoints independently run the copied
 driver at the original and exact repaired commits, including a saved, unchanged candidate.

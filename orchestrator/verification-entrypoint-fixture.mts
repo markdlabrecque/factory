@@ -166,7 +166,13 @@ export async function createSandbox(o) {
           }
           return {commits:[], iterations:[{sessionFilePath:session}], stdout:'arbitrary raw log must never be reported'};
         }
-        writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
+        if (scenario === 'acceptance-implementer-tamper') {
+          mkdirSync(join(worktree,'probes'));
+          const dishonest = {version:1,assertions:['A-summary','A-order'].map(assertionId=>({assertionId,status:'pass',failureId:null}))};
+          writeFileSync(join(worktree,'probes/export.mjs'),'process.stdout.write('+JSON.stringify(JSON.stringify(dishonest))+');');
+          git(worktree,['add','probes/export.mjs']);
+        } else writeFileSync(join(worktree,'app.txt'),'after');
+        git(worktree,['commit','-qam','implementation']);
         if (scenario === 'instruction-edit') { writeFileSync(join(root,'common.md'),'changed after invocation'); writeFileSync(join(fake,'frozen-after-edit.txt'),o.promptArgs.ADDITIVE_INSTRUCTIONS); }
         if (scenario === 'config-family') { const file=join(root,'.factory/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
         if (scenario === 'config-setup') { const file=join(root,'.factory/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('setup = []','setup = [{command="changed setup"}]')); }
@@ -187,7 +193,7 @@ export async function createSandbox(o) {
       writeFileSync(join(evidence,'check.txt'),process.env.FIXTURE_ARTIFACT ?? 'Assertions passed');
       if (scenario === 'dirty') writeFileSync(join(worktree,'app.txt'),'verifier changed tracked output');
       writeFileSync(join(fake,'changed'),'yes');
-      if(['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate'].includes(scenario)) await new Promise(resolve=>{
+      if(['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(scenario)) await new Promise(resolve=>{
         const watcher=watch(fake,()=>{if(existsSync(join(fake,'candidate-ready'))){watcher.close();resolve();}});
         writeFileSync(join(fake,'candidate-request'),'host observation requested');
         if(existsSync(join(fake,'candidate-ready'))){watcher.close();resolve();}
@@ -989,7 +995,23 @@ console.log('sha256:'+'a'.repeat(64));
         assert.equal(record.modelChoice.family, 'openai'); assert.equal(record.modelChoice.tier, 'mid');
         assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.mid, thinking: 'high' });
       }
-      const reason = ({'parent-plan':/Acceptance static hold: missing-preparation/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Acceptance static hold: missing-preparation/,title:/Acceptance static hold: missing-preparation/,body:/Acceptance static hold: missing-preparation/,comment:/Acceptance static hold: missing-preparation/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/,'acceptance-omitted-criterion':/authoritative criterion inventory/,'acceptance-missing-replay':/Acceptance candidate hold/,'acceptance-replay-unknown':/Acceptance candidate hold/,'acceptance-replay-infrastructure':/Acceptance candidate hold/,'acceptance-replay-mismatched-bundle':/Acceptance candidate hold/,'acceptance-replay-changed-candidate':/moved from verified tip|tip|branch/i} as Record<string, RegExp>)[scenario];
+      if (['acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(scenario)) {
+        const record = JSON.parse(readFileSync(join(state,'owner_repo--7.json'),'utf8'));
+        assert.equal(record.verification,undefined,'no accepting proof is published');
+        const actual = JSON.parse(readFileSync(join(fake,'candidate-driver.json'),'utf8'));
+        if (scenario === 'acceptance-implementer-tamper') {
+          assert.ok(git(root,'show','7-fix-login:probes/export.mjs').includes('A-summary'));
+          assert.equal(actual.status,0,'the original probe can still execute');
+          assert.deepEqual(JSON.parse(actual.stdout).results.assertions.map((a:any)=>[a.assertionId,a.status,a.failureId]),[
+            ['A-summary','expected-behavioral-fail','summary-unavailable-or-wrong'],['A-order','pass',null],
+          ]);
+        } else {
+          assert.notEqual(actual.status,0);
+          assert.match(actual.stderr,/Synthetic local setup failed/);
+          assert.equal(actual.stdout,'','unsupported reset cannot publish an assertion observation');
+        }
+      }
+      const reason = ({'acceptance-implementer-tamper':/Acceptance candidate hold:.*behavior-mismatch/,'acceptance-reset-unsupported':/Acceptance candidate hold:.*invalid-results/,'parent-plan':/Acceptance static hold: missing-preparation/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Acceptance static hold: missing-preparation/,title:/Acceptance static hold: missing-preparation/,body:/Acceptance static hold: missing-preparation/,comment:/Acceptance static hold: missing-preparation/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/,'acceptance-omitted-criterion':/authoritative criterion inventory/,'acceptance-missing-replay':/Acceptance candidate hold/,'acceptance-replay-unknown':/Acceptance candidate hold/,'acceptance-replay-infrastructure':/Acceptance candidate hold/,'acceptance-replay-mismatched-bundle':/Acceptance candidate hold/,'acceptance-replay-changed-candidate':/moved from verified tip|tip|branch/i} as Record<string, RegExp>)[scenario];
       assert.match(result.stdout + result.stderr, reason);
     }
 }

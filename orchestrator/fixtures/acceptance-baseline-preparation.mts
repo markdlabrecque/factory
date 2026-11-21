@@ -25,7 +25,7 @@ if (process.argv[2] === '--prepare') {
     const owned=join(dirname(context.sharedState),'owned-baselines'); mkdirSync(owned,{mode:0o700,recursive:true});
     const socketPath=join(owned,'engine.sock');
     let labels:any, plan:any, inputs='';
-    const real=process.env.SCENARIO==='acceptance-replay-pass'||iid===7&&!!process.env.FIXTURE_REPLAY_RECORD;
+    const real=['acceptance-replay-pass','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(process.env.SCENARIO ?? '') || iid===7&&!!process.env.FIXTURE_REPLAY_RECORD;
     const closure=join(owned,'baseline-namespace');if(real)mkdirSync(closure,{mode:0o700});
     const execute=real?namespaceTransport(closure):undefined;
     const server=createServer(socket=>{let text='';socket.on('data',bytes=>{
