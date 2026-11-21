@@ -202,6 +202,8 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
     try {
       if (h.identity.project !== h.project || h.identity.ticket !== iid || h.identity.tip !== tip || h.identity.baseline !== h.baseSha || h.identity.branch !== branch || h.identity.base !== base) return 'handoff identity mismatch';
       const frozen = readProof(h.state, h.identity, h.proofId, h.criterionIds);
+      if (h.criterionIds !== undefined && frozen.report.verdict === 'PASS' && frozen.proof.policyVersion !== 2)
+        return 'Legacy proof cannot authorize delivery; obtain fresh verification with exact replay';
       const gateHold=gateProofHold(h.state,frozen.proof);if(gateHold)return gateHold;
       return h.recheck();
     } catch (e) { return `Verification authorization failed: ${(e as Error).message}`; }

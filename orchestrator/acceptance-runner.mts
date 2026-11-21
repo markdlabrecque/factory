@@ -8,6 +8,8 @@ import { acceptanceHash, type AcceptanceContract } from './acceptance-contract.m
 import { readAcceptanceBundle, type AcceptanceBundlePointer } from './acceptance-custody.mts';
 import { checkAcceptanceReceipt, type AcceptanceReceipt } from './acceptance-receipt.mts';
 import type { AdmissionIdentity, AdmissionState, BaselineReservation } from '../board/admission.mts';
+import type { PayloadPointer } from './payload-custody.mts';
+import { readAttemptRecord } from './recovery.mts';
 const flat = existsSync(new URL('./admission.mts', import.meta.url));
 const admission = await import(flat ? './admission.mts' : '../board/admission.mts');
 const { readRuns, TERMINAL, PARKED } = await import(flat ? './board.mts' : '../board/board.mts');
@@ -21,7 +23,9 @@ export interface BaselineRequest {
   reset: { kind: 'project-local-synthetic-v1'; recipe: string };
   bounds: { totalMs: number; outputBytes: number; memoryMiB: number; cpus: number; pids: number; diskMiB: number };
   cap: number;
-  candidate?: { key: string; executionId: string; claim: string; entry: string; custody: import('./payload-custody.mts').PayloadPointer; baseline: string; bindingDigest: string };
+  candidate?: { key: string; executionId: string; claim: string; entry: string; baseline: string; bindingDigest: string } & (
+    { custody: PayloadPointer; recovery?: never } |
+    { custody?: never; recovery: { attemptId: string; record: string; startSha: string; branch: string } });
 }
 export interface ExecutionAuthorization { id: string; intentDigest: string; expiresAt: number;
   /** Independently reviewed host-retained non-transition evidence; NEVER obtained from sandbox strings. */
@@ -51,23 +55,36 @@ export function readBaselineSpec(h: BaselineHandle): any {
   if (acceptanceHash(s.handle) !== acceptanceHash(h)) throw Error('Foreign baseline handle');
   return s;
 }
-/** Candidate work may coexist ONLY with its own live normal claim/entry and closed implementer payload.
- * It still consumes a separate capacity slot; all foreign/uncertain work remains conflicting. */
+/** Candidate work composes only with its own live normal/recovery claim and managed entry.
+ * It still consumes separate capacity and cannot displace foreign or uncertain work. */
 export function assertCandidateOwner(r: BaselineRequest, state: AdmissionState): void {
   const c = r.candidate;
   if (!c) throw Error('Candidate workflow identity missing');
   const run = readRuns(r.stateDir,false).find(run=>run.key===c.key);
   const claim = state.claims[c.key], entry = state.entries[c.entry];
   const same = (a: unknown,b: unknown)=>acceptanceHash(a)===acceptanceHash(b);
+  const refuse = () => { throw Error('Candidate workflow ownership/cleanup changed'); };
+  if (!run || run.project!==r.project.tracker.project || run.iid!==r.iid || run.executionId!==c.executionId || run.claim!==c.claim
+    || run.implementationBaseSha!==c.baseline || run.acceptanceBaseline?.bindingDigest!==c.bindingDigest
+    || !claim || claim.token!==c.claim || claim.project!==r.project.tracker.project || claim.iid!==r.iid
+    || !entry || !same(entry.project,r.project) || !same(entry.owner,claim.owner) || admission.ownerState(claim.owner)!=='alive') return refuse();
+  if (c.recovery) {
+    const a = c.recovery, saved = readAttemptRecord(a.record);
+    if (c.custody || claim.kind!=='recovery' || claim.attempt!==a.attemptId || run.recovery?.id!==a.attemptId || run.branch!==a.branch
+      || !saved.ok) return refuse();
+    const rec = saved.record;
+    if (rec.id!==a.attemptId || rec.seq!==run.recovery.attempt || rec.startSha!==a.startSha || rec.branch!==a.branch
+      || rec.executionId!==c.executionId || rec.implementationBaseSha!==c.baseline || rec.project!==claim.project || rec.iid!==r.iid
+      || rec.phase!=='verifying' || rec.repairClosed!==rec.container || rec.owner?.pid!==claim.owner.pid
+      || rec.tip!==r.sha || rec.verifier?.tip!==r.sha || rec.verifier.refused) return refuse();
+    return;
+  }
+  if (claim.kind!=='normal' || !c.custody || run.payloadCustody?.nonce!==c.custody.nonce) return refuse();
   const custody = readPayloadCustody(r.stateDir,c.custody);
   const b = custody.binding;
-  if (!run || run.executionId!==c.executionId || run.claim!==c.claim || run.payloadCustody?.nonce!==c.custody.nonce
-    || run.implementationBaseSha!==c.baseline || run.acceptanceBaseline?.bindingDigest!==c.bindingDigest
-    || !claim || claim.token!==c.claim || claim.kind!=='normal' || claim.project!==r.project.tracker.project || claim.iid!==r.iid
-    || !entry || !same(entry.project,r.project) || !same(entry.owner,claim.owner) || admission.ownerState(claim.owner)!=='alive'
-    || !b || b.executionId!==c.executionId || b.claim!==c.claim || b.entry!==c.entry || b.key!==c.key || b.ticket!==r.iid
+  if (!b || b.executionId!==c.executionId || b.claim!==c.claim || b.entry!==c.entry || b.key!==c.key || b.ticket!==r.iid
     || b.baseline!==c.baseline || !same(b.project,r.project) || !same(b.owner,claim.owner)
-    || custody.sealed || !custody.payloads.size || [...custody.payloads.values()].some(p=>!p.container||!p.absent)) throw Error('Candidate workflow ownership/cleanup changed');
+    || custody.sealed || !custody.payloads.size || [...custody.payloads.values()].some(p=>!p.container||!p.absent)) return refuse();
 }
 const { readPayloadCustody } = await import('./payload-custody.mts');
 export function reserveAcceptanceBaseline(input: BaselineRequest, authorization: TrustedExecutionAuthorization, now = Date.now()): BaselineHandle {

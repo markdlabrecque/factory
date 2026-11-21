@@ -1,6 +1,7 @@
 // Recovery requires fresh host/filesystem, complete input matching preparation, and image readiness before admission.
 // Only typed read-only ticket refusals permit scanning. Environment holds stop the pass without spending attempts.
-// Settlement stays explicit; any preparation or admission failure stops the pass. Advisory candidates share this owner and charge.
+// Settlement retains ownership until both the repair sandbox and any independent replay reservation are cleared.
+// Advisory candidates share the bounded recovery claim and charge.
 import type { RepairCandidate } from './supervisor-policy.mts';
 import { freezeTicketInput, TicketInputHold } from '../../orchestrator/ticket-input.mts';
 import { commandContextSource } from '../../orchestrator/ticket-context-source.mts';
@@ -48,7 +49,7 @@ import { acquireRuntimeLease, releaseRuntimeLease, transferRuntimeLease } from '
 import { ownerOf } from '../../board/admission.mts';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { claimLive, claimManagedEntry, generationOf, keyFor, ownerState, readAdmission, releaseClaim, releaseManagedEntry, transferClaim, withAdmission } from '../../board/admission.mts';
+import { claimLive, claimManagedEntry, generationOf, keyFor, ownerState, readAdmission, readBaselineReservations, releaseClaim, releaseManagedEntry, transferClaim, withAdmission } from '../../board/admission.mts';
 import type { AdmissionClaim } from '../../board/admission.mts';
 // Launcher patches share the persisted stage writer; settlement is observational, after charge/cleanup locks.
 import { observeEvent } from '../../board/execution-events.mts';
@@ -145,10 +146,14 @@ export function settleRecovery(p: Paths, o: Common): Settled {
     return Object.values(tx.state.claims).find(c => c.kind === 'recovery' && c.project === o.tracker);
   });
   const release = (c: AdmissionClaim) => releaseClaim(dir, keyFor(c.iid, c.project), c.token, 'recovery');
+  const replayHeld = () => {
+    try { return readBaselineReservations(dir).some(r => r.project.root === o.root || keyFor('namespace', r.project.tracker.project) === keyFor('namespace', o.tracker)); }
+    catch { return true; } // An unreadable ownership ledger cannot prove absence.
+  };
   const a = runningAttempt(readRecovery(p, o.root));
   if (!a) {
     // An attempt already finished whose claim was never released (a crash in between): release it once its container is gone.
-    if (claim?.attempt && ownerState(claim.owner) === 'dead' && ownedContainerGone(containerFor(claim.attempt), docker).ok) release(claim);
+    if (claim?.attempt && ownerState(claim.owner) === 'dead' && !replayHeld() && ownedContainerGone(containerFor(claim.attempt), docker).ok) release(claim);
     return { state: 'none' };
   }
   const mine = claim?.attempt === a.id ? claim : undefined;
@@ -157,6 +162,7 @@ export function settleRecovery(p: Paths, o: Common): Settled {
   const alive = mine ? ownerState(mine.owner) !== 'dead' : !!run && run.recovery?.attempt === a.seq && inFlight(run);
   if (alive) return { state: 'running', attempt: a };
   const unconfirmed = (why: string): Settled => ({ state: 'unconfirmed', attempt: a, reason: `recovery attempt ${a.seq} on #${a.ticket} ended, but ${why}` });
+  if (replayHeld()) return unconfirmed('candidate acceptance cleanup ownership is still held; do not retry or release the charge');
   if (!a.container) return unconfirmed('it has no recorded container identity; nothing is guessed or removed');
   const gone = ownedContainerGone(a.container, docker);
   if (!gone.ok) return unconfirmed(`its container is not confirmed gone: ${gone.reason}`);

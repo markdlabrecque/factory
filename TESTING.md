@@ -1002,8 +1002,12 @@ exact grants after observing the committed candidate; SDK reports cannot approve
 Additional entrypoint cases deny changed candidates, mismatched bundle observations,
 unknown results and engine infrastructure failure, with no push. Ordinary model-family
 journeys reuse external-engine protocol responses; only the explicit tracer claims actual
-driver execution. This is not complete recovery/CI migration, browser/manual adequacy,
-CMS/SQL reset, cgroup/watchdog or installed-release acceptance. Runtime inventory already
+driver execution on the normal path. Recovery entrypoints independently run the copied
+driver at the original and exact repaired commits, including a saved, unchanged candidate.
+They refuse missing and stale attempt grants, a candidate-selected probe substitute, and
+unconfirmed replay cleanup; the last holds both the recovery claim and the candidate slot
+with no refund or push. These fixtures do not prove browser/manual adequacy, CMS/SQL reset,
+cgroup/watchdog or installed-release acceptance. Runtime inventory already
 ships every changed producer/consumer; the added host module is test-only. Full mandatory
 commands/bounds are unchanged. `verification-entrypoint*.test.mts` runs the
 selected fixture runtime's ordinary entrypoint against real temporary Git repositories and fixture-owned
@@ -1021,7 +1025,7 @@ or mismatched Git identities. The entrypoint checks the packaged prompt and orig
 smallest changed-boundary run:
 
 ```sh
-node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
+node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/acceptance-baseline-recovery.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
 ```
 
 Adapter tests assert fresh host authorization after CI and before SHA-guarded merge.

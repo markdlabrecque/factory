@@ -1,6 +1,6 @@
-// Host-only verification contract (#150). Import-safe; proof roots are never agent mounts.
-// Host-frozen inventories fence PASS. Present replay chains are authenticated on writer AND every reader;
-// legacy diagnostic/recovery records remain policy1 pending complete migration and recovery composition.
+// Host-only verification contract; proof roots are never agent mounts.
+// Host-frozen inventories fence PASS. Present replay chains are authenticated by writer and readers;
+// legacy policy1 proofs remain inspectable without creating modern delivery authority.
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync, mkdirSync, writeFileSync, renameSync, realpathSync, existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -135,13 +135,14 @@ function replayCriterionIds(state: string, identity: Identity, provenance: Prove
   return criteria.map(c => c.id);
 }
 /** Call only after verifier immutability checks and confirmed sandbox teardown. */
-export function createProof(state: string, evidence: string, identity: Identity, provenance: Provenance, criterionIds?: readonly string[], candidateReplay?: CandidateReplay) {
+export function createProof(state: string, evidence: string, identity: Identity, provenance: Provenance, criterionIds?: readonly string[], candidateReplay?: CandidateReplay, requireReplay = false) {
   checkIdentity(identity);
   const authoritativeIds = replayCriterionIds(state, identity, provenance, candidateReplay, criterionIds);
   assertProofStoreOutsideMounts(state, [evidence]);
   demand(/^sha256:[0-9a-f]{64}$/.test(provenance.imageId) && text(provenance.nodeVersion), 'missing immutable image ID or verifier Node version');
   const validated = validateEvidence(evidence, authoritativeIds), id = randomUUID(), root = proofRoot(state, identity.project, identity.ticket, id);
   demand(!candidateReplay || validated.report.verdict === 'PASS', 'replay proof requires independent semantic PASS');
+  demand(!requireReplay || validated.report.verdict !== 'PASS' || !!candidateReplay, 'exact candidate replay required for PASS');
   const staging = root + '.tmp';
   demand(!resolve(evidence).startsWith(resolve(state, 'verification') + '/'), 'evidence must be separate from proof storage');
   mkdirSync(staging, { recursive: true, mode: 0o700 });

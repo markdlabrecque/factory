@@ -790,19 +790,21 @@ Standard normal/recovery main additionally supplies the authenticated original
 acceptance criterion IDs to the shared verifier. PASS requires one exact
 `criterionId` per original criterion, with no omissions, extras or duplicates;
 free-text `requirement` cannot substitute. Non-PASS diagnostic evidence remains
-retained. Normal verification additionally requires a separately host-authorized independent
-exact-candidate replay through the existing owned runner after implementer payload teardown.
-It retains an authenticated baseline/candidate chain in version2/policy2 proof, revalidated
-on shared proof reads and every immediate normal delivery authorization. Missing grant,
+retained. Normal verification and active repair additionally require separately host-authorized
+independent exact-candidate replay after their payload teardown. Repair replays after exact tip
+import and binds the replay to the specific claimed attempt, even if the saved tip needed no
+new commit. Verification retains an authenticated baseline/candidate chain in version2/policy2
+proof, revalidated on shared proof reads and every immediate delivery authorization. Missing grant,
 unknown/infrastructure replay, mismatched bundle or preparation and changed candidate hold
 without push. A non-PASS verifier report remains diagnostic and does not start candidate
 replay; accepting proof requires the exact original criterion inventory and a separate PASS.
 Candidate execution consumes a separate capacity slot; no spare slot means hold. There is
 no automatic grant, preparation command, retry or budget exemption. Inspect retained private
 candidate handles and original baseline/custody with the trusted host preparer; never edit
-receipts or approve from tracker/agent JSON. Recovery candidate replay and full
-semantic evidence-obligation reconciliation remain incomplete.
-See the [normal replay tracer and remaining limits](acceptance-contract.md#normal-exact-candidate-replay-tracer-partial-integration).
+receipts or approve from tracker/agent JSON. Recovery settlement retains the claim and charge
+while candidate cleanup is uncertain; repair-container absence alone is insufficient.
+Full semantic evidence-obligation reconciliation remains incomplete.
+See [exact-candidate replay and its limits](acceptance-contract.md#exact-candidate-replay).
 
 A repaired branch goes through the same hand-off as an implemented one (#58, `orchestrator/handoff.mts` in the selected runtime). `main.mts` calls it after its implementer, and `main.mts --recover` (#60) after its repair agent.
 

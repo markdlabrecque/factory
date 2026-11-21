@@ -30,7 +30,7 @@ import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
-import { claimManagedEntry, readAdmission, releaseManagedEntry } from "./admission.mts";
+import { admissionConflict, claimManagedEntry, readAdmission, readBaselineReservations, releaseManagedEntry } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { freezeTicketInput, saveTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { context, effectiveConfig, AGENT, allLabels, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
@@ -345,6 +345,24 @@ if (recovering) {
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
     proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash, criterionIds: acceptanceCriterionIds },
     provenance: (sb) => provenance(sb, rec.container),
+    replay: {
+      execute: async tip => {
+        const exactTip = () => {
+          if (sh('git', ['rev-parse', `refs/heads/${rec.branch}`]) !== tip) throw Error('Recovery branch moved from verified tip');
+        };
+        exactTip();
+        const replay = await replayAcceptanceCandidateForTicket(Number(iid), base, original, tip, {
+          key: keyFor(iid!, PROJECT), executionId: claimed.executionId!, claim: token!, entry: managedEntry,
+          baseline: original.sha, bindingDigest: original.admission.bindingDigest,
+          recovery: { attemptId: rec.id, record: file, startSha: rec.startSha, branch: rec.branch },
+        }, cancel.signal);
+        exactTip();
+        return replay;
+      },
+      cleanupHeld: () => readBaselineReservations(stateDir()).some(r => admissionConflict(r.project, {
+        root: context.projectRoot, tracker: { kind: TRACKER.kind, host: TRACKER.gitlabHost ?? TRACKER.host!, project: PROJECT },
+      })),
+    },
     promptArgs: {
       ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
       EVIDENCE_DIR: evidenceBox, CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",

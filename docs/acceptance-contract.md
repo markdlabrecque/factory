@@ -823,11 +823,10 @@ criteria, matching the acceptance-contract inventory bound. Historical non-PASS
 reports remain inspectable diagnostics without inventing omitted evaluations.
 
 ID coverage is not per-obligation semantic adequacy or browser/manual evidence
-authentication. The normal-path tracer below adds authenticated candidate replay;
-recovery, complete evidence obligations and legacy/CI migration remain incomplete.
-No complete exact-candidate/recovery-proof guarantee or automatic migration follows.
+authentication. Exact-candidate replay is required separately, as described below.
+There is no automatic migration.
 
-## Normal exact-candidate replay tracer (partial integration)
+## Exact-candidate replay
 
 After independent semantic verification and confirmed implementer sandbox teardown,
 normal main requires `replayAcceptanceCandidateForTicket` before freezing/posting proof.
@@ -859,7 +858,7 @@ complete requirements hash and verifier image; a normal receipt cannot serve as 
 The writer and reader derive the mandatory criterion inventory from the authenticated bundle
 and require independent semantic PASS. Non-PASS diagnostics need no candidate replay.
 Removing the chain from a version2 proof holds. Immediate
-normal delivery reauthenticates the retained chain as well as its existing exact branch,
+delivery reauthenticates the retained chain as well as its existing exact branch,
 requirements, claim, local/remote SHA and CI gates. Unknown, infrastructure, mismatched
 bundle or changed candidate cannot deliver. Replay never overrides semantic non-PASS.
 
@@ -868,8 +867,17 @@ binding. It reauthenticates the retained replay and selected inputs before obser
 it does not execute a replay. Same-SHA policy1 proof remains inspectable but cannot
 continue a CI wait. The checkpoint and evidence remain intact for explicit fresh verification.
 
-This tracer is **not** completed T5: recovery has no fresh attempt-bound candidate replay,
-and complete per-criterion semantic evidence obligations are not yet enforced.
+Active repair uses the same producer only after exact repair-container absence and
+compare-and-swap import of the verified tip. Its request binds the live recovery claim,
+managed entry, original admission, attempt ID, attempt record and saved start. The
+worker checks the host's repair teardown record and refuses another attempt's ownership.
+The original baseline stays the full-scope baseline; saved start is supplementary and is
+never a new baseline. An unchanged committed tip beyond the original baseline still
+needs fresh attempt-bound replay. The proof reader refuses replay from a different
+attempt, even at the same SHA. If the candidate reservation remains unsettled, recovery
+settlement retains the claim and its charge even when the repair container is absent.
+
+Complete per-criterion semantic evidence obligations are not yet enforced.
 All touched runtime modules were already in the complete asset inventory; no new shipped
 module, dependency or sandbox lifecycle was introduced. Evidence proves disposable Git and
 filesystem-backed synthetic reset through the actual copied driver in rootless namespaces,

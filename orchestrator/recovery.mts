@@ -1,4 +1,4 @@
-// Runtime-owned repair/verifier templates share the fixed recovery lifecycle; only the claimed start commit can supplement the historical baseline for behavioral verification.
+// Runtime-owned repair and verification retain full original scope and use the claimed start only for supplementary behavioral comparison.
 import { eventIdFor, observeEvent } from './execution-events.mts';
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { browserPreflight } from './capabilities.mts';
 // #150: a repair binds fresh proof to its execution, historical baseline and exact attempt UUID after teardown.
 import { postAndDeliver, runVerifier } from "./handoff.mts";
-import { createProof } from './verification.mts';
+import { createProof, validateEvidence } from './verification.mts';
+import type { CandidateReplay } from './acceptance-baseline-admission.mts';
 import type { Provenance } from './verification.mts';
 import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 
@@ -42,8 +43,8 @@ import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 //  7. Requirements, prerequisites and ownership are rechecked (deps.recheck); then the shared independent verifier
 //     (handoff.mts runVerifier) checks the exact tip with this attempt's evidence folder.
 //  8. The container is removed by its exact name and confirmed gone before anything is imported or delivered.
-//  9. The repaired tip is imported into the project's branch only by compare-and-swap against the recorded tip, then
-//     requirements/ownership are rechecked and handoff.mts postAndDeliver delivers that exact tip. `delivered` is
+//  9. The repaired tip is imported by compare-and-swap. After rechecking requirements and ownership, the selected
+//     runtime independently replays the original acceptance at the exact imported tip before proof/delivery. `delivered` is
 //     recorded only after delivery succeeds; a failed or ambiguous delivery is reported, never retried here.
 // Every timeout, cancellation and error aborts the agent, waits for it to settle, removes only the exact owned container
 // and confirms it is gone. Unconfirmed: the attempt stays `cleanup-pending` (the launcher keeps it running and starts no
@@ -87,6 +88,7 @@ export interface AttemptRecord {
   input?: { head: string; dirty: string[] };
   tip?: string;
   verifier?: { tip: string; refused?: string };
+  repairClosed?: string; // exact attempt container confirmed absent by the host before candidate replay
   delivery?: { tip: string; ok: boolean; url?: string; reason?: string };
   intended?: RecoveryOutcome;
   outcome?: RecoveryOutcome;
@@ -120,7 +122,7 @@ export function decodeAttemptRecord(d: any, file = 'saved attempt'): { ok: true;
     && (d.executionId === undefined || str(d.executionId))
     && (d.previousEvidence === undefined || str(d.previousEvidence))
     && (d.implementationBaseSha === undefined || /^[0-9a-f]{40,64}$/.test(d.implementationBaseSha))
-    && d.container === containerFor(d.id) && PHASES.includes(d.phase) && Array.isArray(d.events)
+    && d.container === containerFor(d.id) && (d.repairClosed === undefined || d.repairClosed === d.container) && PHASES.includes(d.phase) && Array.isArray(d.events)
     && (d.outcome === undefined || OUTCOMES.includes(d.outcome)) && (d.intended === undefined || OUTCOMES.includes(d.intended));
   return ok ? { ok: true, record: d } : { ok: false, reason: `attempt record ${file} has an unsupported shape or version` };
 }
@@ -293,6 +295,7 @@ export interface RecoveryContext {
   baseSha: string;
   proof: { state: string; executionId: string; requirementsHash: string; criterionIds?: readonly string[] };
   provenance: (sandbox: RecoverySandbox) => Promise<Provenance>;
+  replay?: { execute: (tip: string) => Promise<CandidateReplay>; cleanupHeld: () => boolean };
   parentIid?: number;
   promptArgs: Record<string, string>;
   verificationInstructions?: string;
@@ -485,12 +488,33 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   const stale = deps.recheck("deliver");
   if (stale) return finish("unresolved", `not delivering: ${stale}; ${preserved}`);
   if (ctx.cancel.aborted) return finish("interrupted", `cancelled before delivery; ${preserved}`);
+  let candidateReplay: CandidateReplay | undefined;
+  try {
+    if (validateEvidence(dir, ctx.proof.criterionIds).report.verdict === 'PASS') {
+      if (ctx.proof.criterionIds && !ctx.replay) throw Error('Acceptance candidate hold: attempt-bound exact replay required');
+      if (ctx.replay) {
+        save('verifying', { repairClosed: rec.container }, 'independent acceptance replay of the exact repaired tip');
+        candidateReplay = await ctx.replay.execute(tip);
+        if (ctx.cancel.aborted) throw Error('Attempt cancelled during acceptance replay');
+        const moved = deps.recheck('deliver');
+        if (moved) throw Error(moved);
+      }
+    }
+  } catch (error) {
+    const outcome = ctx.cancel.aborted ? 'interrupted' : 'failed';
+    const reason = `${(error as Error).message}; ${preserved}`;
+    if (ctx.replay?.cleanupHeld()) {
+      save('cleanup-pending', { intended: outcome, reason: `${reason}; candidate acceptance cleanup is unconfirmed` });
+      return { outcome, reason: rec.reason!, cleanupPending: true, record: rec };
+    }
+    return finish(outcome, reason);
+  }
   save("delivering");
   let out: Outcome;
   try {
     const identity = { project: rec.project, ticket: rec.iid, executionId: ctx.proof.executionId, attemptId: rec.id, branch: rec.branch,
       base: rec.base, baseline: ctx.baseSha, tip, requirementsHash: ctx.proof.requirementsHash };
-    const frozen = createProof(ctx.proof.state, dir, identity, verifiedProvenance!, ctx.proof.criterionIds);
+    const frozen = createProof(ctx.proof.state, dir, identity, verifiedProvenance!, ctx.proof.criterionIds, candidateReplay, ctx.proof.criterionIds !== undefined);
     deps.setStage({ verification: { id: frozen.id, tip, requirementsHash: ctx.proof.requirementsHash } });
     out = await postAndDeliver({
       identity, proofId: frozen.id, state: ctx.proof.state, criterionIds: ctx.proof.criterionIds, recheck: () => ctx.cancel.aborted ? 'Attempt cancelled' : deps.recheck('deliver'),

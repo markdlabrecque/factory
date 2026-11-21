@@ -1,4 +1,4 @@
-// TEST ONLY independent host preparer and external engine boundary for the real normal verification entrypoint.
+// TEST ONLY independent host preparer and external engine boundary for normal verification and repair replay.
 // The parent provisions exact grants after observing the candidate; the SDK can only signal/wait, never approve.
 import {spawn,execFileSync} from 'node:child_process';
 import {existsSync,mkdirSync,readFileSync,writeFileSync,watch,renameSync} from 'node:fs';
@@ -9,7 +9,7 @@ import type {TestContext} from 'node:test';
 import {acceptanceHash} from '../acceptance-contract.mts';
 import {namespaceTransport} from './acceptance-namespace.mts';
 export async function startCandidateHost(t:TestContext,runtime:string,cwd:string,env:NodeJS.ProcessEnv) {
-  if(!['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate'].includes(env.SCENARIO!))return;
+  if(!env.FIXTURE_REPLAY_RECORD && !['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate'].includes(env.SCENARIO!))return;
   const child=spawn(process.execPath,[import.meta.filename,'--host',runtime],{cwd,env,stdio:['ignore','ignore','pipe','ipc']});
   let stderr='';child.stderr!.on('data',b=>stderr+=b);
   t.after(()=>{if(child.exitCode===null)child.kill('SIGKILL');});
@@ -27,7 +27,9 @@ if(process.argv[2]==='--host') {
   const planFile=join(root,`baseline-plan-${input.hash}.json`),baselinePlan=JSON.parse(readFileSync(planFile,'utf8'));
   const socketPath=baselinePlan.request.engine.args.at(-1);
   let labels:any,plan:any,inputs='';
-  const real=scenario==='acceptance-replay-pass';
+  const recoveryRecord=process.env.FIXTURE_REPLAY_RECORD;
+  const replayFault=process.env.FIXTURE_REPLAY_FAULT;
+  const real=scenario==='acceptance-replay-pass'||!!recoveryRecord;
   const closure=real?join(fake,'candidate-namespace'):'';
   if(real)mkdirSync(closure,{mode:0o700});
   const execute=real?namespaceTransport(closure):undefined;
@@ -47,7 +49,8 @@ if(process.argv[2]==='--host') {
       if(scenario==='acceptance-replay-infrastructure') result={status:1,stderr:'external engine unavailable'};
       else if(execute) {const state=join(fake,'candidate-state');mkdirSync(state,{mode:0o700});const actual=execute(inputs,state);writeFileSync(join(fake,'candidate-driver.json'),JSON.stringify(actual));result={stdout:actual.stdout,stderr:actual.stderr,status:actual.status};}
       else result={stdout:JSON.stringify({version:1,sha:plan.sha,reset:{kind:'project-local-synthetic-v1',executionId:plan.executionId},results:{version:1,phase:'candidate',identity:scenario==='acceptance-replay-mismatched-bundle'?{...plan.identity,contractDigest:'0'.repeat(64)}:plan.identity,assertions:[{assertionId:'A-summary',status:scenario==='acceptance-replay-unknown'?'unknown':'pass',failureId:null,evidence:['external-engine-output']},{assertionId:'A-order',status:'pass',failureId:null,evidence:['external-engine-output']}],evidence:[]}})};
-    } else if(args[0]==='ps') {
+    } else if(args[0]==='rm' && replayFault==='cleanup') result={status:1,stderr:'candidate removal not confirmed'};
+    else if(args[0]==='ps') {
       if(scenario==='acceptance-replay-changed-candidate')execFileSync('git',['update-ref','refs/heads/7-fix-login',baselinePlan.request.sha,plan.sha],{cwd:context.projectRoot});
       result={stdout:''};socket.once('close',()=>{clearTimeout(timeout);watcher.close();server.close();});}
     else if(args[0]!=='rm')throw Error('Unexpected engine command '+args);
@@ -59,12 +62,24 @@ if(process.argv[2]==='--host') {
   const watcher=watch(fake,async()=>{
     if(started||!existsSync(join(fake,'candidate-request')))return;started=true;
     try {
-      const run=JSON.parse(readFileSync(join(context.sharedState,`${keyFor('7',TRACKER.project)}.json`),'utf8'));
-      const {readPayloadCustody}=await import(join(runtime,'payload-custody.mts'));
-      const custody=readPayloadCustody(context.sharedState,run.payloadCustody);
-      // request builder is nonexecuting; actual reserve later authenticates CLOSED payload and current owner.
-      const tip=execFileSync('git',['rev-parse',run.branch],{cwd:context.projectRoot,encoding:'utf8'}).trim();
-      const workflow={key:custody.binding.key,executionId:run.executionId,claim:run.claim,entry:custody.binding.entry,custody:run.payloadCustody,baseline:run.implementationBaseSha,bindingDigest:run.acceptanceBaseline.bindingDigest};
+      const key=keyFor('7',TRACKER.project);
+      const run=JSON.parse(readFileSync(join(context.sharedState,`${key}.json`),'utf8'));
+      const common={key,executionId:run.executionId,claim:run.claim,baseline:run.implementationBaseSha,bindingDigest:run.acceptanceBaseline.bindingDigest};
+      let tip:string, workflow;
+      if (recoveryRecord) {
+        const rec=JSON.parse(readFileSync(recoveryRecord,'utf8'));
+        const {readAdmission}=await import(join(runtime,'admission.mts'));
+        const state=readAdmission(context.sharedState);
+        const entry=Object.values(state.entries).find((e:any)=>acceptanceHash(e.owner)===acceptanceHash(state.claims[key].owner)) as {id:string};
+        tip=rec.tip;
+        workflow={...common,entry:entry.id,recovery:{attemptId:replayFault==='stale'?'c13ee4ab-be1d-4727-8e74-40ad52ff957b':rec.id,record:recoveryRecord,startSha:rec.startSha,branch:rec.branch}};
+      } else {
+        const {readPayloadCustody}=await import(join(runtime,'payload-custody.mts'));
+        const custody=readPayloadCustody(context.sharedState,run.payloadCustody);
+        tip=execFileSync('git',['rev-parse',run.branch],{cwd:context.projectRoot,encoding:'utf8'}).trim();
+        workflow={...common,entry:custody.binding.entry,custody:run.payloadCustody};
+      }
+      // Inert request builder; reserve checks the live claim and confirmed cleanup.
       const request=await candidateRequestForTicket(7,'main',{sha:run.implementationBaseSha,admission:run.acceptanceBaseline},tip,workflow);
       const intent={version:1,request,runtime:context.manifest.id,dependencies:context.manifest.dependencies,approval:input&&JSON.parse(readFileSync(join(root,`prepared-${input.hash}.json`),'utf8')).approvalDigest,setup:acceptanceHash(request.setup),reset:acceptanceHash(request.reset)};
       const digest=acceptanceHash(intent);

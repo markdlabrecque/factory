@@ -32,7 +32,9 @@ import type { Spawner } from "../cli/src/recovery-run.mts";
 import { observePass, readRecovery } from "../cli/src/recovery-state.mts";
 import { containerFor, readAttemptRecord } from "./recovery.mts";
 import type { AttemptRecord, Docker } from "./recovery.mts";
-import { readProof } from './verification.mts';
+import { readProof, createProof } from './verification.mts';
+import { readBaselineReservations } from '../board/admission.mts';
+import { startCandidateHost } from './fixtures/acceptance-candidate-host.mts';
 
 const ID = "5b1f3c2a-9d8e-4f70-8a6b-0c1d2e3f4a5b";
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
@@ -61,9 +63,11 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const worktree = join(root, ".factory/worktrees/7-fix-login");
   mkdirSync(dirname(worktree), { recursive: true });
   git(root, "worktree", "add", "-q", worktree, "7-fix-login");
-  writeFileSync(join(worktree, "app.txt"), "v2\n");
-  git(worktree, "commit", "-qam", "half done");
+  const unchanged = baselineFault === 'replay-unchanged';
+  writeFileSync(join(worktree, "app.txt"), unchanged ? 'after' : 'v2\n');
   writeFileSync(join(worktree, "untracked.txt"), "keep me\n");
+  if (unchanged) git(worktree, 'add', 'untracked.txt');
+  git(worktree, "commit", "-qam", "half done");
   const otherRef = git(root, "rev-parse", "8-other");
   const savedStart = git(worktree, 'rev-parse', 'HEAD');
 
@@ -106,6 +110,17 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     FAKE_REPAIR: `printf 'fixed\\n' > fix.txt && git add -A && git commit -qm repair && printf '%s' '${JSON.stringify({ cause: "missing fix", filesChanged: ["fix.txt", "untracked.txt"], tests: [{ command: "true", result: "pass" }], canProceed: true, remainingBlockers: [], requiresHostUpdate: false })}' > "$EVIDENCE/recovery-report.json" && echo ok > "$EVIDENCE/recovery-report.md"`,
     FAKE_VERIFY: `printf 'VERDICT: PASS\\nverified\\n' > "$EVIDENCE/verdict.md" && ${verificationCommand()}`,
   };
+  const replayRecord = join(p.recovery, 'attempts', `${ID}.json`);
+  const replayHost = scenario === 'pass' && !['revoked','late-host-revoked','child-revoked','child-binding-changed'].includes(baselineFault)
+    || ['replay-stale','replay-cleanup','replay-probe-replacement'].includes(scenario);
+  if (replayHost) {
+    Object.assign(env, {FIXTURE_REPLAY_RECORD:replayRecord,FIXTURE_REPLAY_FAULT:scenario.slice('replay-'.length)});
+    const signal = `const fs=require('node:fs');const dir=${JSON.stringify(fake)};const ready=dir+'/candidate-ready';const waiter=fs.watch(dir,()=>{if(fs.existsSync(ready))waiter.close();});fs.writeFileSync(dir+'/candidate-request','ready for independent host review');if(fs.existsSync(ready))waiter.close();`;
+    env.FAKE_VERIFY += ` && '${process.execPath}' -e '${signal.replaceAll("'", "'\\''")}'`;
+  }
+  if (unchanged) env.FAKE_REPAIR = env.FAKE_REPAIR.slice(env.FAKE_REPAIR.indexOf('printf \'%s\''));
+  else if (scenario === 'replay-probe-replacement') env.FAKE_REPAIR = `mkdir -p probes && printf 'candidate-selected substitute' > probes/export.mjs && ${env.FAKE_REPAIR}`;
+  else env.FAKE_REPAIR = `printf after > app.txt && ${env.FAKE_REPAIR}`;
   if (scenario === 'closed-before') env.FAKE_REPAIR += ` && touch '${join(fake, 'changed')}'`;
   if (scenario === 'title' || scenario === 'parent-plan') env.FAKE_VERIFY += ` && touch '${join(fake, 'changed')}'`;
   if (scenario === 'dirty') env.FAKE_VERIFY += ` && echo dirty > app.txt`;
@@ -195,6 +210,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.equal(git(root,'rev-parse','7-fix-login'),git(worktree,'rev-parse','HEAD'),'saved implementation preserved');
     assert.equal(readFileSync(join(evidence,'verdict.md'),'utf8'),'VERDICT: FAIL\nold\n');
   }
+  if (replayHost) await startCandidateHost(t,runtime.directory,root,{...process.env,...env,SANDCASTLE_STATE_DIR:state});
   let readinessChecked = false;
   const launch = await launchRecovery(p, { root, preparation, workflowEnv:env, tracker: "owner/repo", ticket: 7, dir: state,
     contextSource: commandContextSource({kind:'github',host:'github.com',project:'owner/repo'}, undefined, {...process.env,...env}),
@@ -222,6 +238,33 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.equal(existsSync(join(fake,'models.log')),false,'child independently rechecks before repair');
     assert.equal(readRecovery(p,root).attempts.length,1,'host charge is preserved, not refunded');
     assert.equal(git(worktree,'rev-parse','HEAD'),savedStart);return;
+  }
+  if (['replay-missing','replay-stale','replay-cleanup','replay-probe-replacement'].includes(scenario)) {
+    assert.notEqual(code, 0, log);
+    assert.match(log, scenario === 'replay-cleanup' ? /candidate acceptance cleanup is unconfirmed/
+      : scenario === 'replay-probe-replacement' ? /Acceptance candidate hold:.*behavior-mismatch/
+      : /Acceptance candidate hold:.*Exact trusted execution authorization unavailable/);
+    assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', 'semantic PASS without replay cannot push');
+    const attempt = readAttemptRecord(join(p.recovery, 'attempts', `${ID}.json`));
+    assert.ok(attempt.ok);
+    assert.equal(attempt.record.startSha, savedStart);
+    assert.equal(attempt.record.implementationBaseSha, originalBaseline);
+    assert.notEqual(attempt.record.tip, savedStart);
+    assert.equal(attempt.record.verifier?.tip, attempt.record.tip);
+    assert.equal(git(root,'rev-parse','7-fix-login'),attempt.record.tip, 'already verified repair is saved locally even when replay holds');
+    assert.equal(readRuns(state).find(r => r.iid === '7')?.verification, undefined);
+    assert.equal(readRecovery(p, root).budgets[7].used, 1);
+    if (scenario === 'replay-cleanup') {
+      assert.equal(attempt.record.phase, 'cleanup-pending');
+      assert.equal(existsSync(join(fake, 'containers', `${attempt.record.container}.json`)), false, 'repair container absence cannot settle replay');
+      assert.equal(readBaselineReservations(state).length, 1, 'separate candidate capacity remains reserved');
+      assert.equal(settleRecovery(p, {root,tracker:'owner/repo',dir:state,docker}).state, 'unconfirmed');
+      const held = readAdmission(state);
+      assert.equal(held.claims['owner_repo--7']?.attempt, ID);
+      assert.ok(Object.values(held.entries).some(e => e.owner.pid === held.claims['owner_repo--7'].owner.pid));
+      assert.equal(readRecovery(p,root).budgets[7].used,1);
+    }
+    return;
   }
   if (scenario !== 'pass') {
     assert.notEqual(code, 0, log);
@@ -305,8 +348,23 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   assert.match(inputText, /Agreed parent decisions and implementation plan/);
   const snapshot = JSON.parse(readFileSync(join(inputDir, 'ticket-context.json'), 'utf8'));
   assert.equal(snapshot.contentHash, runRec.verification!.requirementsHash);
-  readProof(state, { project: 'owner/repo', ticket: '7', executionId: runRec.executionId!, attemptId: ID,
-    branch: '7-fix-login', base: 'main', baseline, tip, requirementsHash: snapshot.contentHash }, runRec.verification!.id);
+  const identity = { project: 'owner/repo', ticket: '7', executionId: runRec.executionId!, attemptId: ID,
+    branch: '7-fix-login', base: 'main', baseline, tip, requirementsHash: snapshot.contentHash };
+  const {proof} = readProof(state, identity, runRec.verification!.id);
+  assert.equal(proof.policyVersion, 2);
+  assert.ok(proof.candidateReplay);
+  assert.notEqual(proof.candidateReplay.candidate.executionId, proof.candidateReplay.baseline.executionId);
+  if (unchanged) assert.equal(tip, savedStart, 'fresh attempt replay also authorizes an unchanged committed candidate');
+  else assert.notEqual(tip, savedStart);
+  assert.notEqual(tip, baseline);
+  const baselineDriver = JSON.parse(readFileSync(join(dirname(proof.candidateReplay.baseline.directory),'baseline-driver.json'),'utf8'));
+  const candidateDriver = JSON.parse(readFileSync(join(fake,'candidate-driver.json'),'utf8'));
+  const red = JSON.parse(baselineDriver.stdout), green = JSON.parse(candidateDriver.stdout);
+  assert.deepEqual([red.sha,green.sha],[baseline,tip]);
+  assert.deepEqual(red.results.identity,green.results.identity);
+  assert.deepEqual(red.results.assertions.map((a:any)=>[a.assertionId,a.status,a.failureId]),[['A-summary','expected-behavioral-fail','summary-unavailable-or-wrong'],['A-order','pass',null]]);
+  assert.deepEqual(green.results.assertions.map((a:any)=>[a.assertionId,a.status]),[['A-summary','pass'],['A-order','pass']]);
+  assert.throws(() => createProof(state,record.evidence,{...identity,attemptId:'c13ee4ab-be1d-4727-8e74-40ad52ff957b'},proof.provenance,undefined,proof.candidateReplay),/attempt mismatch/);
   if (copied) assert.equal(runRec.implementationModel, 'openai/gpt-6.1-terra');
   assert.deepEqual([runRec.stage, runRec.verdict, runRec.mr], ["done", "PASS", "https://github.com/owner/repo/pull/9"]);
 
