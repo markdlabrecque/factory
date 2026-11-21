@@ -36,6 +36,32 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Owned acceptance baseline runner
+
+`orchestrator/acceptance-runner.test.mts` exercises the approved owned-runner seam
+with real private filesystem stores, shared interprocess admission locks, disposable
+Git and native detached/controller processes. Only the external engine is emulated
+by `orchestrator/fixtures/acceptance-engine.mjs`; the fixture never executes project,
+setup or frozen probe argv on the host and never supplies admission/cleanup authority.
+IPC/socket barriers and an injected reservation clock cover competing reservations,
+controller death, worker death, cancellation, late results, foreign owner/engine,
+ambiguous creation, output overflow, image-volume refusal and retained sealed output.
+The exact Git pack excludes dirty CMS-like site/database files; frozen copies and
+fresh bounded state/mount policy are inspected independently. The receipt units
+cover full assertion inventory and transition/failure/manual-evidence taxonomy.
+
+```sh
+node --test orchestrator/acceptance-{contract,custody,receipt,runner}.test.mts orchestrator/ticket-input.test.mts
+```
+
+This is filesystem/process integration evidence, **not** real container/cgroup/
+watchdog or actual CMS installation/database-seeding evidence. No artifact command
+runs on the host as a substitute. A supported-image runtime smoke is unperformed
+and requires separate local disposable runtime authorization; no production, network
+DB, credentials or paid provider is part of these fixtures. All four commit-tier
+shards, docs checks and the independent browser lifecycle gate remain unchanged.
+See [runner contract](docs/acceptance-contract.md#owned-baseline-producer).
+
 ## Standard implementation continuation
 
 `orchestrator/implementation-outcome.test.mts` covers bounded execution/turn reports and fail-closed eligibility. `orchestrator/payload-custody.test.mts` verifies durable one-time reservation without treating it as cleanup. `orchestrator/verification-entrypoint-continuation.test.mts` exercises the flat normal runner with stubbed SDK, tracker and container boundaries and disposable real Git. It checks that a resumed commit keeps the original baseline and requires the independent verifier; second incompletion, a stalled or failed resume, false success, wrong checkout, an unexplained Git delta and superseded execution do not push. A stalled SDK resume or post-resume Git probe retains unsealed custody even when the container is gone. The fixture supplies the inspected Sandcastle resume contract, not a live Pi transport or a production rollout test.

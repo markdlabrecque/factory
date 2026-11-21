@@ -1,4 +1,4 @@
-// Durable exclusion accepts only an exact current source-sealed normal run; opaque/foreign raw records remain held.
+// Durable exclusion requires baseline quiescence and an exact source-sealed normal run; foreign raw records hold.
 // Exact release requires local terminal supervisor journal closure; neither closure grants scheduler/send permission.
 // Admission and supervisor journals have separate locks. No cross-store lock, provider or tracker work runs here.
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { readOwnedCleanup, readOwnedProcess } from './supervisor-process.mts';
 import { readProviderUsage } from './supervisor-openai-usage.mts';
 import type { AdmissionIdentity, SupervisorHold } from '../../board/admission.mts';
 const flat = existsSync(new URL('./admission.mts', import.meta.url));
-const { admissionConflict, claimLive, newToken, ownerOf, validAdmissionIdentity, withAdmission } = await import(flat ? './admission.mts' : '../../board/admission.mts');
+const { admissionConflict, claimLive, newToken, ownerOf, readBaselineReservations, validAdmissionIdentity, withAdmission } = await import(flat ? './admission.mts' : '../../board/admission.mts');
 const { validateRuntimeBundle } = await import('./runtime-bundle.mts');
 const { readSupervisor } = await import('./supervisor-state.mts');
 const contract = await import(flat ? './supervisor-contract.mts' : '../../orchestrator/supervisor-contract.mts');
@@ -55,7 +55,7 @@ export function claimSupervisorHold(dir: string, o: { project: AdmissionIdentity
   if (!owner.start) throw Error('Supervisor held: owner start identity unknown');
   return withAdmission(dir, tx => {
     if (Object.values(tx.state.supervisorHolds).some(h => admissionConflict(h.project, project))) throw Error('Supervisor exclusion already held');
-    if (Object.keys(tx.state.entries).length || Object.values(tx.state.claims).some(claimLive)
+    if (readBaselineReservations(dir).length || Object.keys(tx.state.entries).length || Object.values(tx.state.claims).some(claimLive)
       || Object.values(tx.state.recovery).some(r => r.pending.length)) throw Error('Supervisor held: managed work or pending accounting is not quiescent');
     // Strict raw records: do not reconcile dead PIDs into apparent quiescence or silently skip corrupt records.
     let savedRunSeen = false;

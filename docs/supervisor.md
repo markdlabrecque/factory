@@ -402,7 +402,13 @@ recovery settlement retain their existing semantics.
 The initial claim requires conservative **shared run-state quiescence**, because
 legacy claims and raw run records cannot establish exact canonical-root ownership:
 no live/unknown normal/delivery claims, recovery claims or pending charges, managed
-entries or any raw run record without definitive ownership and whole-payload cleanup.
+entries, retained owned-baseline reservations or any raw run record without definitive ownership and whole-payload cleanup.
+Owned baselines use the mandatory `admission/baselines.json` sidecar under the same
+lock, not invented implementation/recovery claims. They also refuse conflicting
+supervisor holds and consume shared run capacity until exact-owned cleanup.
+Earlier v2 code ignores this sidecar: the complete updated admission/board/
+supervisor runtime and old/unmanaged-work quiescence are required before its use.
+See [owned baseline producer](acceptance-contract.md#owned-baseline-producer).
 Legacy raw-record producers supply no such proof, so queued, waiting, done or
 stopped legacy records hold, including dead controllers, dangling claims, starting
 handoffs and unresolved recovery payloads. A stage label is not cleanup.
