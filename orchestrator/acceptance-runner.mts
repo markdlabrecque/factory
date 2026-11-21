@@ -2,14 +2,14 @@
 // private exact inputs and authenticated receipts. Candidate admission composes only with its exact owned workflow.
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { constants, existsSync, fstatSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { acceptanceHash, type AcceptanceContract } from './acceptance-contract.mts';
 import { readAcceptanceBundle, type AcceptanceBundlePointer } from './acceptance-custody.mts';
 import { checkAcceptanceReceipt, type AcceptanceReceipt } from './acceptance-receipt.mts';
 import type { AdmissionIdentity, AdmissionState, BaselineReservation } from '../board/admission.mts';
 import type { PayloadPointer } from './payload-custody.mts';
-import { readAttemptRecord } from './recovery.mts';
+import type { AttemptRecord } from './recovery.mts';
 const flat = existsSync(new URL('./admission.mts', import.meta.url));
 const admission = await import(flat ? './admission.mts' : '../board/admission.mts');
 const { readRuns, TERMINAL, PARKED } = await import(flat ? './board.mts' : '../board/board.mts');
@@ -69,13 +69,21 @@ export function assertCandidateOwner(r: BaselineRequest, state: AdmissionState):
     || !claim || claim.token!==c.claim || claim.project!==r.project.tracker.project || claim.iid!==r.iid
     || !entry || !same(entry.project,r.project) || !same(entry.owner,claim.owner) || admission.ownerState(claim.owner)!=='alive') return refuse();
   if (c.recovery) {
-    const a = c.recovery, saved = readAttemptRecord(a.record);
+    const a = c.recovery, directory = dirname(a.record);
     if (c.custody || claim.kind!=='recovery' || claim.attempt!==a.attemptId || run.recovery?.id!==a.attemptId || run.branch!==a.branch
-      || !saved.ok) return refuse();
-    const rec = saved.record;
-    if (rec.id!==a.attemptId || rec.seq!==run.recovery.attempt || rec.startSha!==a.startSha || rec.branch!==a.branch
+      || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(a.attemptId) || a.record!==join(directory,`${a.attemptId}.json`)
+      || [...r.agentMounts,r.source,r.runtimeRoot].some(p=>overlap(p,directory)||overlap(directory,p))) return refuse();
+    privateDirectory(directory);
+    const fd = openSync(a.record,constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let rec: AttemptRecord;
+    try {
+      const file = fstatSync(fd);
+      if (!file.isFile() || file.nlink!==1 || file.uid!==process.getuid?.() || file.mode&0o077 || file.size>1024*1024) return refuse();
+      rec = JSON.parse(readFileSync(fd,'utf8'));
+    } finally { closeSync(fd); }
+    if (rec?.version!==1 || rec.id!==a.attemptId || rec.seq!==run.recovery.attempt || rec.startSha!==a.startSha || rec.branch!==a.branch
       || rec.executionId!==c.executionId || rec.implementationBaseSha!==c.baseline || rec.project!==claim.project || rec.iid!==r.iid
-      || rec.phase!=='verifying' || rec.repairClosed!==rec.container || rec.owner?.pid!==claim.owner.pid
+      || rec.phase!=='verifying' || rec.container!==`factory-recovery-${a.attemptId}` || rec.repairClosed!==rec.container || rec.owner?.pid!==claim.owner.pid
       || rec.tip!==r.sha || rec.verifier?.tip!==r.sha || rec.verifier.refused) return refuse();
     return;
   }
