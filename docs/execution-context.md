@@ -136,21 +136,29 @@ code and an isolated implementer, not protection against malicious same-UID host
 processes. See [the custody API contract](acceptance-contract.md#host-owned-frozen-acceptance-custody)
 for bounds, publication/retention and caller responsibilities.
 
-### Baseline receipt policy without execution authority
+### Owned baseline execution and receipt custody
 
-The selected inventory also includes `acceptance-receipt.mts`, a pure baseline
-receipt policy component. It compares an independently supplied host binding for
-execution/bundle/approval/SHA/runtime/dependencies/image/config/setup/reset/owner,
-checks the finite completion window and reuses the contract's exact assertion and
-evidence reconciliation. A different review of identical acceptance cannot replace
-the retained approval ID/digest. See [the receipt policy contract](acceptance-contract.md#baseline-receipt-policy-component-not-an-execution-runner).
+The selected inventory includes `acceptance-runner.mts`, `acceptance-worker.mts`,
+`acceptance-sandbox.mjs` and the pure `acceptance-receipt.mts` policy checker.
+The host producer requires distinct exact execution authorization, a complete
+validated runtime/private dependency identity and a saved frozen bundle/approval.
+It reserves separate capacity under the shared admission lock, starts a detached
+worker, transports only exact Git objects and rehashed runner copies, and performs
+setup/probes only inside the bounded private sandbox. Fresh `/work` and `/state`
+support pinned project-local synthetic web/database setup; no implementer/shared
+Git, original custody, host credentials, Docker socket or external resources are
+mounted or authorized. Unsupported reset holds.
 
-No owned baseline runner or durable receipt producer is supplied yet. `cleanup:
-'confirmed'` and reset provenance are data to be authenticated by a future owned
-boundary, not callback assertions that establish actual resource absence or clean
-site/database state. No shared capacity is reserved, no sandbox runs and no admission
-or proof gate is activated by this component. An execution context or policy-valid
-object alone cannot satisfy those missing guarantees.
+Controller death does not release the reservation. A different-UID in-container
+watchdog bounds payload execution independently; stable engine/container/owner/
+generation cleanup, deadline and cancellation fencing govern settlement. Unknown
+or ambiguous late creation retains capacity. An immutable producer seal and durable
+admission publication index authenticate exact results and retained raw output;
+caller booleans or arbitrary policy-valid JSON are not producer receipts.
+See [the owned producer contract](acceptance-contract.md#owned-baseline-producer)
+for supported images, limits, source APIs and real-runtime evidence limitations.
+No standard entrypoint admission, implementation launch or candidate-proof gate is
+activated here; independent custody/semantic review remains separate.
 
 ## Normal payload custody and terminal handoff
 
@@ -337,6 +345,17 @@ preserving claims/generations/recovery pending and candidate accounting. Old act
 v1 readers reject v2. No optional exclusion bypass or downgrade is supported. Complete
 copy/import fixtures must include both assets unchanged; never fall back to source
 code from a selected flat runtime.
+
+Owned baseline reservations additionally use the mandatory v1
+`admission/baselines.json` sidecar under that same lock. Normal/recovery/delivery
+capacity counts retained baselines, conflicting managed entries refuse them, and
+supervisor acquisition requires their quiescence. No baseline creates a run or
+recovery charge. Baselines are never reaped by PID or age. **Old v2 admission code
+does not understand this sidecar**: select the entire updated admission/board/
+supervisor runtime and quiesce all old/unmanaged work before baseline API use.
+Keeping the main state version at 2 is not a mixed-runtime compatibility guarantee.
+Immutable `admission/baseline-<execution>.sealed` indexes survive reservation release;
+private receipt/spec/output identities remain retained outside sandbox mounts.
 
 Managed CLI dispatch/manual/selected-issue, shell bootstrap, standard direct main/
 dispatch and recovery launch acquire durable entry ownership before effecting work.
