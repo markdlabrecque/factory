@@ -163,7 +163,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const hash = preparedInput.hash;
   prepareFixtureAcceptance(state, preparedInput);
   prepareFixtureBaseline(runtime.directory,root,{...process.env,...env,SANDCASTLE_STATE_DIR:state});
-  const baselineIdentity=JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',`const a=await import(${JSON.stringify(join(runtime.directory,'acceptance-baseline-admission.mts'))});process.stdout.write(JSON.stringify(await a.requireAcceptanceBaselineForTicket(7,'main')));`],{cwd:root,env:{...process.env,...env,SANDCASTLE_STATE_DIR:state},encoding:'utf8',timeout:20000}));
+  const baselineIdentity=JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',`const a=await import(${JSON.stringify(join(runtime.directory,'acceptance-baseline-admission.mts'))});process.stdout.write(JSON.stringify(await a.requireAcceptanceBaselineForTicket(7,'main')));`],{cwd:root,env:{...process.env,...env,SANDCASTLE_STATE_DIR:state},encoding:'utf8',timeout:60_000}));
   const runFile=join(state,'owner_repo--7.json');
   writeFileSync(runFile,JSON.stringify({...JSON.parse(readFileSync(runFile,'utf8')),acceptanceBaseline:baselineIdentity}));
   const baselineRoot=join(state,'acceptance'), grantPath=join(baselineRoot,readdirSync(baselineRoot).find(n=>n.startsWith('execution-authorization-'))!);

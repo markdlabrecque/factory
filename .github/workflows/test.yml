@@ -19,6 +19,7 @@ jobs:
 
   suite:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +30,7 @@ jobs:
         with:
           node-version: 24
       - name: Run complete suite shard
+        timeout-minutes: 22
         run: bash scripts/test-shard.sh ${{ matrix.shard }} 4
 
   # Keep the existing check name and fail closed on any failed, cancelled or skipped prerequisite.

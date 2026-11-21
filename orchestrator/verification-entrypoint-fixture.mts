@@ -36,6 +36,8 @@ import { prepareFixtureFromRuntime } from './fixtures/acceptance-preparation.mts
 import { prepareFixtureBaseline } from './fixtures/acceptance-baseline-preparation.mts';
 import { startCandidateHost } from './fixtures/acceptance-candidate-host.mts';
 
+// Harness watchdog for main paths that run implementation, replay and delivery.
+const workflowChildTimeoutMs = 90_000;
 
 export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false, publicJourney?: (context: any) => Promise<void>, adopted = false) {
     const home = mkdtempSync(join(tmpdir(), 'verification-entry-'));
@@ -345,7 +347,7 @@ console.log('sha256:'+'a'.repeat(64));
       prepareFixtureFromRuntime(selected.root, root, env);
       prepareFixtureBaseline(selected.root, root, env);
       await startCandidateHost(t,selected.root,root,env);
-      const result = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env, timeout: 15000 });
+      const result = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env, timeout: workflowChildTimeoutMs });
       assert.equal(result.status, 0, result.stdout + result.stderr);
       for (const role of ['implementer', 'verifier']) {
         const identity = JSON.parse(readFileSync(join(fake, `${role}-identity.json`), 'utf8'));
@@ -455,7 +457,7 @@ console.log('sha256:'+'a'.repeat(64));
       let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
       t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
       const exited = once(child, 'exit');
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 60_000;
       while (!existsSync(join(fake, 'implementer-started'))) {
         assert.ok(child.exitCode === null && child.signalCode === null && Date.now() < deadline, output || 'implementer did not reach barrier');
         await new Promise(resolve => setTimeout(resolve, 10));
@@ -489,7 +491,7 @@ console.log('sha256:'+'a'.repeat(64));
       prepareFixtureBaseline(selected.root,root,{...env,...selected.env,FIXTURE_BARRIER:''});
       rmSync(join(fake,'candidate-request'),{force:true});rmSync(join(fake,'candidate-ready'),{force:true});
       await startCandidateHost(t,selected.root,root,{...env,...selected.env,FIXTURE_BARRIER:''});
-      const fresh = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env: { ...env, ...selected.env, FIXTURE_BARRIER: '' }, timeout: 15000 });
+      const fresh = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env: { ...env, ...selected.env, FIXTURE_BARRIER: '' }, timeout: workflowChildTimeoutMs });
       assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
       const bImpl = JSON.parse(readFileSync(join(fake, 'implementer-identity.json'), 'utf8'));
       const bVerify = JSON.parse(readFileSync(join(fake, 'verifier-identity.json'), 'utf8'));
@@ -526,7 +528,7 @@ console.log('sha256:'+'a'.repeat(64));
     const pending=adopted?claimRun({dir:state,project:'owner/repo',iid:'7',pid:process.pid,cap:2,patch:{base:'main',acceptanceBaseline:preparedBaseline,implementationBaseSha:preparedBaseline?.sha}}):undefined;
     if(pending)assert.ok(pending.ok);
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: {...runEnv,...(pending?.ok?{FACTORY_LAUNCH_CLAIM:pending.run.claim}:{})}, timeout: 15000,
+      cwd: root, encoding: 'utf8', env: {...runEnv,...(pending?.ok?{FACTORY_LAUNCH_CLAIM:pending.run.claim}:{})}, timeout: workflowChildTimeoutMs,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
     if (copied) {

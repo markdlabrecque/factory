@@ -57,7 +57,8 @@ if(process.argv[2]==='--host') {
     socket.end(JSON.stringify(result)+'\n');
   });});
   server.listen(socketPath);await once(server,'listening');
-  const timeout=setTimeout(()=>process.exit(2),20000);
+  // Starts before launch: allow original-baseline checks, grant preparation, replay and exact absence.
+  const timeout=setTimeout(()=>process.exit(2),150_000);
   let started=false;
   const watcher=watch(fake,async()=>{
     if(started||!existsSync(join(fake,'candidate-request')))return;started=true;

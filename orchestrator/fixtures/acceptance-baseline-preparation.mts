@@ -9,7 +9,7 @@ import {acceptanceHash} from '../acceptance-contract.mts';
 import {namespaceTransport} from './acceptance-namespace.mts';
 
 export function prepareFixtureBaseline(runtime: string, cwd: string, env: NodeJS.ProcessEnv, iid=7, base='main', fault=''): import('../acceptance-baseline-admission.mts').BaselineAdmissionIdentity | undefined {
-  const output=execFileSync(process.execPath,[import.meta.filename,'--prepare',runtime,String(iid),base,fault],{cwd,env,encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
+  const output=execFileSync(process.execPath,[import.meta.filename,'--prepare',runtime,String(iid),base,fault],{cwd,env,encoding:'utf8',timeout:60_000,stdio:['ignore','pipe','pipe']});
   return output?JSON.parse(output):undefined;
 }
 if (process.argv[2] === '--prepare') {

@@ -71,7 +71,7 @@ bash scripts/test-shard.sh 4 4
 timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator/browser-provisioning.test.mts
 ```
 
-The shard deadlines and separate browser-lifecycle gate are unchanged; see [TESTING.md](../TESTING.md#supported-layout-acceptance) for supported-layout preservation and the distinction between synthetic acceptance and actual-package evidence. The browser-lifecycle gate uses fixture processes, not the Docker image smoke.
+See [TESTING.md](../TESTING.md#run-the-tests) for current shard budgets and [supported-layout acceptance](../TESTING.md#supported-layout-acceptance) for the distinction between synthetic acceptance and actual-package evidence. The browser-lifecycle gate uses fixture processes, not the Docker image smoke.
 
 The exact-package check is separate and opt-in:
 
