@@ -10,6 +10,7 @@ import { browserPreflight } from './capabilities.mts';
 import { postAndDeliver, runVerifier } from "./handoff.mts";
 import { createProof, validateEvidence } from './verification.mts';
 import type { CandidateReplay } from './acceptance-baseline-admission.mts';
+import type { Criterion } from './acceptance-contract.mts';
 import type { Provenance } from './verification.mts';
 import type { Host, Outcome, VerifierSandbox } from "./handoff.mts";
 
@@ -293,7 +294,7 @@ export interface RecoveryContext {
   model: string;
   title: string;
   baseSha: string;
-  proof: { state: string; executionId: string; requirementsHash: string; criterionIds?: readonly string[] };
+  proof: { state: string; executionId: string; requirementsHash: string; criterionIds?: readonly string[]; criteria?: readonly Criterion[] };
   provenance: (sandbox: RecoverySandbox) => Promise<Provenance>;
   replay?: { execute: (tip: string) => Promise<CandidateReplay>; cleanupHeld: () => boolean };
   parentIid?: number;
@@ -461,6 +462,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
       iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), tip, promptFile: ctx.verifyPrompt ?? VERIFY_PROMPT,
       promptArgs: { ...ctx.promptArgs, ADDITIVE_INSTRUCTIONS: ctx.verificationInstructions ?? '' },
       recoveryComparison: { baseline: ctx.baseSha, start: rec.startSha },
+      criteria: ctx.proof.criteria,
       criterionIds: ctx.proof.criterionIds,
     });
     rec.verifier = { tip, ...(refused ? { refused } : {}) };

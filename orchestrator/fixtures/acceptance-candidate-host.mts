@@ -9,7 +9,7 @@ import type {TestContext} from 'node:test';
 import {acceptanceHash} from '../acceptance-contract.mts';
 import {namespaceTransport} from './acceptance-namespace.mts';
 export async function startCandidateHost(t:TestContext,runtime:string,cwd:string,env:NodeJS.ProcessEnv) {
-  if(!env.FIXTURE_REPLAY_RECORD && !['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(env.SCENARIO!))return;
+  if(!env.FIXTURE_REPLAY_RECORD && !['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-manual-evidence-missing','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(env.SCENARIO!))return;
   const child=spawn(process.execPath,[import.meta.filename,'--host',runtime],{cwd,env,stdio:['ignore','ignore','pipe','ipc']});
   let stderr='';child.stderr!.on('data',b=>stderr+=b);
   t.after(()=>{if(child.exitCode===null)child.kill('SIGKILL');});
@@ -86,8 +86,8 @@ if(process.argv[2]==='--host') {
       if(scenario!=='acceptance-missing-replay')writeFileSync(join(root,`execution-authorization-${digest}.json`),JSON.stringify({id:'fixture-independent-candidate-grant',intentDigest:digest,expiresAt:Date.now()+300000,evidence:[
         {criterionId:'C-feature',requirement:'independent replay transcript',reference:'fixture-host-reviewed-protocol:feature'},
         {criterionId:'C-preserve',requirement:'independent replay transcript',reference:'fixture-host-reviewed-protocol:preserve'},
-        {criterionId:'C-manual',requirement:'independent documentation review',reference:'fixture-independent-review:17'},
-        ...(scenario==='acceptance-replay-pass' ? [
+        ...(scenario==='acceptance-manual-evidence-missing' ? [] : [{criterionId:'C-manual',requirement:'independent documentation review',reference:'fixture-independent-review:17'}]),
+        ...(['acceptance-replay-pass','acceptance-manual-evidence-missing'].includes(scenario) ? [
           {criterionId:'C-feature',requirement:'Summary panel screenshot',reference:'fixture-host-reviewed-protocol:summary'},
           {criterionId:'C-feature',requirement:'Keyboard submission recording',reference:'fixture-host-reviewed-protocol:keyboard'},
         ] : []),

@@ -13,7 +13,7 @@ export function prepareFixtureFromRuntime(runtime: string, cwd: string, env: Nod
   const input = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e',
     `const t=await import(${JSON.stringify(join(runtime, 'tracker.mts'))}); const g=await import(${JSON.stringify(join(runtime, 'ticket-input.mts'))}); process.stdout.write(JSON.stringify(g.freezeTicketInput(t.contextSource, ${iid})));`],
     {cwd, env, encoding: 'utf8', timeout: 20_000}));
-  if (!existsSync(join(env.SANDCASTLE_STATE_DIR!, 'acceptance', `prepared-${input.hash}.json`))) prepareFixtureAcceptance(env.SANDCASTLE_STATE_DIR!, input, env.SCENARIO === 'acceptance-replay-pass');
+  if (!existsSync(join(env.SANDCASTLE_STATE_DIR!, 'acceptance', `prepared-${input.hash}.json`))) prepareFixtureAcceptance(env.SANDCASTLE_STATE_DIR!, input, ['acceptance-replay-pass', 'acceptance-obligation-omitted', 'acceptance-manual-evidence-missing'].includes(env.SCENARIO ?? ''));
 }
 
 export function prepareFixtureAcceptance(stateRoot: string, input: FrozenTicketInput, visual = false): string {

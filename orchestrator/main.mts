@@ -212,7 +212,8 @@ async function requireBaseline(original?: import('./acceptance-baseline-admissio
 }
 const frozenInput = currentTicketInput();
 // Retain the independently authenticated original inventory, not verifier/repair-selected text.
-const acceptanceCriterionIds = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], frozenInput).contract.criteria.map(c => c.id);
+const acceptanceCriteria = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], frozenInput).contract.criteria;
+const acceptanceCriterionIds = acceptanceCriteria.map(c => c.id);
 recordTicketInput(stateDir(), inputReport, frozenInput);
 const parentIid = frozenInput.context.parent?.iid;
 const withParent = (t: tracker.Ticket): tracker.Ticket => {
@@ -343,7 +344,7 @@ if (recovering) {
   const result = await runRecoveryAttempt({
     root: context.projectRoot, record: file, attempt: { id: rec.id, startSha: rec.startSha }, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
-    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash, criterionIds: acceptanceCriterionIds },
+    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash, criterionIds: acceptanceCriterionIds, criteria: acceptanceCriteria },
     provenance: (sb) => provenance(sb, rec.container),
     replay: {
       execute: async tip => {
@@ -742,7 +743,7 @@ try {
       sh('git', ['cat-file', '-e', `${tip}^{commit}`]);
       verifierContainer = sandbox.sandboxId ?? '';
       verifiedProvenance = await provenance(sandbox, verifierContainer);
-      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip, criterionIds: acceptanceCriterionIds });
+      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip, criteria: acceptanceCriteria });
     }
   }
 } catch (error) {
@@ -821,7 +822,7 @@ if (validateEvidence(evidenceHost, acceptanceCriterionIds).report.verdict === 'P
 }
 setStage(iid, { stage: "posting" });
 const identity = { project: PROJECT, ticket: iid, executionId, branch, base, baseline: baseSha, tip, requirementsHash: startVersion.hash };
-const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds, candidateReplay);
+const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds, candidateReplay, true);
 if (frozen.proof.report.verdict === 'PASS' && !candidateReplay) fail('Semantic evidence changed after teardown; exact candidate replay and fresh verification required');
 setStage(iid, { verification: { id: frozen.id, tip, requirementsHash: startVersion.hash } });
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------

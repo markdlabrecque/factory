@@ -1,4 +1,4 @@
-// Runtime-owned independent verification retains browser, immutable-proof and exact-SHA delivery gates; scoped guidance requires fresh candidate analysis.
+// Independent verification preflights the original evidence obligations; delivery reauthorizes frozen proof at the exact SHA.
 import { browserPreflight } from './capabilities.mts';
 export { browserPreflight, BROWSER_PROBE } from './capabilities.mts';
 // #153: persist exact opened PR identity before CI; later delivery results retain the original host proof.
@@ -9,6 +9,7 @@ import type { DependencyResult } from "./dependencies.mts";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 const {gateProofHold}=await import(existsSync(new URL('./supervisor-gate-apply.mts',import.meta.url))?'./supervisor-gate-apply.mts':'../cli/src/supervisor-gate-apply.mts');
 import { EXACT_PROOF_POLICY, readProof, validateEvidence } from './verification.mts';
+import type { Criterion } from './acceptance-contract.mts';
 import type { Identity } from './verification.mts';
 import { sha256 } from './verification.mts';
 import { ticketContextHash, renderTicketContext } from './ticket-context.mts';
@@ -106,7 +107,8 @@ async function recoveryComparisonHold(sandbox: VerifierSandbox, baseline: string
 /** Run the independent verifier on `tip` in the run's sandbox. Returns why the result can't be used, or undefined. */
 export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "setStage">,
   o: { iid: string; evidenceHost: string; agent: unknown; promptArgs: Record<string, string>; tip: string; promptFile?: string;
-    /** Host-retained original criterion IDs; candidate/repair reports cannot select this inventory. */
+    /** Host-retained original inventory; candidate/repair reports cannot select it. */
+    criteria?: readonly Criterion[];
     criterionIds?: readonly string[];
     /** Only the owned recovery runner sets this, from the admitted attempt and historical baseline. */
     recoveryComparison?: { baseline: string; start: string };
@@ -137,7 +139,8 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
     agent: o.agent,
     promptFile: o.execution?.context.identity.gate ? o.execution.context.codePath('prompt.verify.md') : o.promptFile ?? VERIFY_PROMPT,
     promptArgs: { ...o.promptArgs, TIP_SHA: o.tip, RECOVERY_START_SHA: comparison?.start ?? '(none)',
-      ACCEPTANCE_CRITERIA: o.criterionIds === undefined ? '(not supplied; evaluate every original ticket requirement)' : JSON.stringify(o.criterionIds),
+      ACCEPTANCE_CRITERIA: o.criteria ? JSON.stringify(o.criteria.map(({id, verificationEvidence}) => ({id, verificationEvidence})))
+        : o.criterionIds === undefined ? '(not supplied; evaluate every original ticket requirement)' : JSON.stringify(o.criterionIds),
       ...(comparison ? { BASE_SHA: comparison.baseline } : {}) },
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
@@ -156,8 +159,8 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
   if (ver.commits.length || after !== o.tip || dirty) {
     return `Verifier changed the branch (commits=${ver.commits.length}, head=${after.slice(0, 8)}, dirty=${!!dirty}). Not posting or pushing; inspect ${sandbox.worktreePath ?? "the worktree"}.`;
   }
-  try { current(); validateEvidence(o.evidenceHost, o.criterionIds); }
-  catch (e) { return `${(e as Error).message}. Retain evidence in ${o.evidenceHost}; custom verifier prompts must be explicitly upgraded to write verification.json (policy 1).`; }
+  try { current(); validateEvidence(o.evidenceHost, o.criterionIds, o.criteria); }
+  catch (e) { return `${(e as Error).message}. Retain evidence in ${o.evidenceHost}; custom verifier prompts must emit a version 1 verification.json with the required criterion IDs and obligation links.`; }
   return undefined;
 }
 
@@ -202,7 +205,7 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
     try {
       if (h.identity.project !== h.project || h.identity.ticket !== iid || h.identity.tip !== tip || h.identity.baseline !== h.baseSha || h.identity.branch !== branch || h.identity.base !== base) return 'handoff identity mismatch';
       const frozen = readProof(h.state, h.identity, h.proofId, h.criterionIds);
-      if (h.criterionIds !== undefined && frozen.report.verdict === 'PASS' && frozen.proof.policyVersion !== EXACT_PROOF_POLICY)
+      if ((h.criterionIds !== undefined || frozen.proof.candidateReplay) && frozen.report.verdict === 'PASS' && frozen.proof.policyVersion !== EXACT_PROOF_POLICY)
         return 'Legacy proof cannot authorize delivery; obtain fresh verification with exact replay and obligation evidence';
       const gateHold=gateProofHold(h.state,frozen.proof);if(gateHold)return gateHold;
       return h.recheck();

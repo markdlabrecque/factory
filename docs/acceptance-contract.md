@@ -810,8 +810,8 @@ this API. Original roles, full baseline, bundle, work and budgets are unchanged.
 
 Standard normal and recovery main retain the criterion IDs from the authenticated
 original custody bundle and supply them to the existing independent `runVerifier`.
-Its `ACCEPTANCE_CRITERIA` prompt argument is host-owned; a verifier/repair report
-cannot choose the authoritative list. Each PASS report criterion must carry a
+Its `ACCEPTANCE_CRITERIA` prompt argument carries the host-owned IDs and typed
+obligations; a verifier/repair report cannot choose the authoritative list. Each PASS report criterion must carry a
 `criterionId` matching one original ID, exactly once. `requirement` remains descriptive
 text, not an identity. Missing, extra, duplicate, unknown or absent IDs refuse before
 proof creation, posting or push. Normal/recovery retain that same host inventory
@@ -831,14 +831,19 @@ Do not infer classifications from text or from the report's `evidenceKind` or
 `interactive`. A `manual` exception requires a `manual` obligation. The declaration
 is part of the frozen, independently approved contract bytes. Contracts without the
 declaration remain readable but cannot authorize proof. Preparation and independent
-approval are required; there is no automatic migration.
+approval are required; there is no automatic migration. For example, if a criterion's
+`evidenceRequirements` includes `Keyboard submission recording`, add
+`{"requirement":"Keyboard submission recording","kind":"interactive"}` to that
+criterion's `verificationEvidence`.
 
 For each declared obligation the independent verifier supplies one matching
 `{requirement, observation, evidence}` entry in its criterion's `obligations`.
 Browser evidence needs an after PNG and, for bugfixes, a before PNG. Interactive
 obligations also need a candidate/check video (WebM or MP4). Paths must appear in
-that criterion's artifact list. Report-wide or other-criterion media cannot fill a
-missing link, and the same media bytes cannot satisfy multiple obligations. For
+that criterion's artifact list. The verifier captures and inspects these media; the
+host checks their phase, file type header and linkage, not playback or content.
+Report-wide or other-criterion media cannot fill a missing link, and the same media
+bytes cannot satisfy multiple obligations. For
 manual obligations the report records its assessment with an empty `evidence`
 array: the host binds the exact criterion/requirement to its own distinct evidence
 reference in the authenticated, independently authorized candidate receipt. A
@@ -851,8 +856,8 @@ Exact-candidate replay remains separately required.
 
 ## Exact-candidate replay
 
-After independent semantic verification and confirmed implementer sandbox teardown,
-normal main requires `replayAcceptanceCandidateForTicket` before freezing/posting proof.
+After independent semantic verification, its obligation-link preflight and confirmed
+implementer sandbox teardown, normal main requires `replayAcceptanceCandidateForTicket` before freezing/posting proof.
 A structured verifier PASS plus ordinary checks is insufficient. The current original
 baseline admission and full host plan are reauthenticated; `candidateRequestForTicket`
 builds an inert request with the exact candidate SHA and normal workflow key/execution,

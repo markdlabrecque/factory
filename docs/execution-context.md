@@ -277,7 +277,7 @@ Standard normal/recovery main retain the original authenticated custody criterio
 IDs separately from verifier report text and pass them through the existing verifier
 entrypoint. The runtime-owned `ACCEPTANCE_CRITERIA` prompt argument exposes only
 that identity inventory. PASS reports must reconcile every original `criterionId`
-exactly once; the host validates this after verifier immutability checks. The
+exactly once; the host validates IDs and explicit evidence obligations after verifier immutability checks. The
 existing runtime inventory already ships all touched modules and verifier template;
 no new helper or dependency asset is introduced. Normal and recovery main perform
 separately authorized owned exact-candidate

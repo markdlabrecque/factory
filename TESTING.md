@@ -997,7 +997,7 @@ structured PASS. It now holds without a separate exact host grant. The positive 
 executes the actual copied driver and SAME frozen probe at baseline and exact candidate
 in independent rootless namespaces: named behavioral red→green, preservation pass,
 fresh filesystem synthetic seed despite source dirt, separately authenticated owners,
-confirmed cleanup and retained version2 proof chain. Its independent fixture host prepares
+confirmed cleanup and retained policy 3 proof chain. Its independent fixture host prepares
 exact grants after observing the committed candidate; SDK reports cannot approve them.
 Additional entrypoint cases deny changed candidates, mismatched bundle observations,
 unknown results and engine infrastructure failure, with no push. Two negative normal
@@ -1005,7 +1005,11 @@ entrypoint cases execute the copied driver: an implementer-committed shadow prob
 not replace the frozen probe, and a read-only synthetic state mount cannot satisfy reset.
 Neither publishes proof or pushes. Candidate receipt units also remove each required
 criterion evidence record in turn and check that mismatched or repeated evidence holds.
-Ordinary model-family
+The same public entrypoint and proof seam checks missing browser/interactive links, wrong
+kind/phase linkage, reused or mislabeled media, missing independent manual evidence and
+policy 2 CI refusal. Matching synthetic links pass, including two separate obligations on
+one criterion. The stubs exercise container headers and evidence bindings, not media
+playback or human observations. Ordinary model-family
 journeys reuse external-engine protocol responses; only the explicit tracer claims actual
 driver execution on the normal path. Recovery entrypoints independently run the copied
 driver at the original and exact repaired commits, including a saved, unchanged candidate.
@@ -1049,7 +1053,7 @@ node --test orchestrator/refresh*.test.mts cli/test/init.test.mts cli/test/updat
 
 Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
 holds and lost merge responses without live trackers. The exact replay fixture reuses a
-genuine version2 proof for pending then green CI observation of the same PR, and checks
+genuine policy 3 proof for pending then green CI observation of the same PR, and checks
 admission, configuration, raw output, current requirements and transport holds. The
 selected-runtime dispatch fixture checks explicit legacy migration against a temporary
 bare origin and fixture scheduler CLI; manual/dry-run/refresh-only do not continue it. Admission tests cover

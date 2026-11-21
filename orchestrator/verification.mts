@@ -91,12 +91,20 @@ function file(root: string, path: string): Buffer {
   }
   const data = readFileSync(at); demand(data.length > 0, `empty evidence: ${path}`); return data;
 }
-export function validateEvidence(root: string, criterionIds?: readonly string[]) {
+function mediaHeaderMatches(path: string, data: Buffer) {
+  if (path.endsWith('.png')) return data.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'));
+  if (path.endsWith('.webm')) return data.subarray(0, 4).equals(Buffer.from('1a45dfa3', 'hex'));
+  return data.toString('ascii', 4, 8) === 'ftyp';
+}
+/** With an original inventory, preflight the verifier's evidence without granting proof. The
+ * candidate receipt is not available until after teardown; the proof writer/reader check it. */
+export function validateEvidence(root: string, criterionIds?: readonly string[], criteria?: readonly Criterion[], candidateEvidence?: ResultEnvelope['evidence']) {
   const reportBytes = file(root, 'verification.json');
   demand(reportBytes.length <= 1024 * 1024, 'report exceeds 1 MiB');
   const report = validateReport(JSON.parse(reportBytes.toString('utf8')));
   // The host supplies the original inventory, never a list inferred from this report.
   // Non-PASS reports remain diagnostic even when some criteria could not be evaluated.
+  criterionIds = criteria?.map(c => c.id) ?? criterionIds;
   if (criterionIds !== undefined && report.verdict === 'PASS') {
     const actual = report.criteria.map(c => c.criterionId);
     demand(criterionIds.length > 0 && new Set(criterionIds).size === criterionIds.length
@@ -106,13 +114,17 @@ export function validateEvidence(root: string, criterionIds?: readonly string[])
   const verdictBytes = file(root, 'verdict.md');
   const first = verdictBytes.toString('utf8').replaceAll('\r\n', '\n').split('\n')[0];
   demand(first === `VERDICT: ${report.verdict}`, 'verdict.md first line must exactly match verification.json');
+  const matchingHeaders = new Set<string>();
   const artifacts: Artifact[] = report.artifacts.map(a => {
     demand(!['verdict.md', 'verification.json', 'browser-preflight.log', 'implementation-initial-outcome.json',
       'implementation-continuation-outcome.json', 'implementation-initial-diagnostic.json'].includes(basename(a.path)), 'reserved diagnostic is not acceptance evidence');
     if (a.kind === 'image') demand(a.path.endsWith('.png'), 'images must be PNG');
     if (a.kind === 'video') demand(/\.(webm|mp4)$/.test(a.path), 'videos must be WebM or MP4');
-    const bytes = file(root, a.path); return { ...a, bytes: bytes.length, sha256: sha256(bytes) };
+    const bytes = file(root, a.path);
+    if (criteria && a.kind !== 'command-output' && mediaHeaderMatches(a.path, bytes)) matchingHeaders.add(a.path);
+    return { ...a, bytes: bytes.length, sha256: sha256(bytes) };
   });
+  if (criteria && report.verdict === 'PASS') requireObligationEvidence(report, artifacts, matchingHeaders, criteria, candidateEvidence);
   return { report, artifacts, reportHash: sha256(reportBytes), verdictHash: sha256(verdictBytes), verdictText: verdictBytes.toString('utf8') };
 }
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -139,30 +151,32 @@ export const proofRoot = (state: string, project: string, ticket: string, id: st
   // The run key is constructed, not taken from agent metadata; no caller-controlled paths.
   return resolve(state, 'verification', `${sha256(project)}--${encodeURIComponent(ticket)}`, id);
 };
-type EvidenceCheck = ReturnType<typeof validateEvidence>;
-function requireObligationEvidence(v: EvidenceCheck, criteria: readonly Criterion[], candidateEvidence: ResultEnvelope['evidence']) {
+function requireObligationEvidence(report: Report, artifacts: Artifact[], matchingHeaders: Set<string>, criteria: readonly Criterion[], candidateEvidence?: ResultEnvelope['evidence']) {
   const mediaOwners = new Map<string, object>();
   const manualRefs = new Set<string>();
   for (const criterion of criteria) {
     const label = `authoritative evidence obligation (${criterion.id})`;
     const expected = criterion.verificationEvidence;
     if (!expected) throw Error(`Verification refused: unclassified ${label} inventory; have the preparer classify and independently reapprove the original acceptance`);
-    const actual = v.report.criteria.find(c => c.criterionId === criterion.id)!.obligations ?? [];
+    const actual = report.criteria.find(c => c.criterionId === criterion.id)!.obligations ?? [];
     demand(actual.length === expected.length && new Set(actual.map(o => o.requirement)).size === actual.length, `${label} inventory must match exactly once`);
     for (const { requirement, kind } of expected) {
       const obligation = `${label}: ${requirement}`;
       const assessment = actual.find(o => o.requirement === requirement);
       if (!assessment) throw Error(`Verification refused: missing ${obligation}`);
       if (kind === 'manual') {
-        const record = candidateEvidence.find(e => e.criterionId === criterion.id && e.requirement === requirement);
-        demand(assessment.evidence.length === 0 && record && !manualRefs.has(record.reference), `${obligation} needs its own independently authorized manual evidence, not report artifacts`);
-        if (record) manualRefs.add(record.reference);
+        demand(assessment.evidence.length === 0, `${obligation} needs independently authorized manual evidence, not report artifacts`);
+        if (candidateEvidence) {
+          const record = candidateEvidence.find(e => e.criterionId === criterion.id && e.requirement === requirement);
+          if (!record || manualRefs.has(record.reference)) throw Error(`Verification refused: ${obligation} needs its own independently authorized manual evidence`);
+          manualRefs.add(record.reference);
+        }
         continue;
       }
-      const media = assessment.evidence.map(path => v.artifacts.find(a => a.path === path)!);
-      demand(new Set(assessment.evidence).size === media.length && media.every(a => a.kind !== 'command-output')
+      const media = assessment.evidence.map(path => artifacts.find(a => a.path === path)!);
+      demand(new Set(assessment.evidence).size === media.length && media.every(a => matchingHeaders.has(a.path))
         && media.some(a => a.kind === 'image' && a.phase === 'after')
-        && (v.report.changeKind !== 'bugfix' || media.some(a => a.kind === 'image' && a.phase === 'before'))
+        && (report.changeKind !== 'bugfix' || media.some(a => a.kind === 'image' && a.phase === 'before'))
         && (kind !== 'interactive' || media.some(a => a.kind === 'video' && a.phase !== 'before')),
       `${obligation} needs matching ${kind} media`);
       for (const a of media) {
@@ -173,9 +187,9 @@ function requireObligationEvidence(v: EvidenceCheck, criteria: readonly Criterio
   }
 }
 function validateProofEvidence(root: string, fallback: readonly string[] | undefined, chain: ReturnType<typeof authenticateCandidateReplay> | undefined, policy: number) {
-  const v = validateEvidence(root, chain?.criteria.map(c => c.id) ?? fallback);
+  const v = validateEvidence(root, chain?.criteria.map(c => c.id) ?? fallback,
+    policy === EXACT_PROOF_POLICY ? chain?.criteria : undefined, chain?.candidateEvidence);
   demand(!chain || v.report.verdict === 'PASS', 'replay proof requires independent semantic PASS');
-  if (chain && policy === EXACT_PROOF_POLICY) requireObligationEvidence(v, chain.criteria, chain.candidateEvidence);
   return v;
 }
 /** Call only after verifier immutability checks and confirmed sandbox teardown. */

@@ -188,8 +188,11 @@ export async function createSandbox(o) {
       if (scenario !== 'legacy-prompt') {
         const report = ${JSON.stringify(fixtureReport())};
         if (scenario === 'acceptance-omitted-criterion') report.criteria.pop();
-        if (scenario === 'acceptance-replay-pass') {
+        if (['acceptance-replay-pass','acceptance-manual-evidence-missing'].includes(scenario)) {
           // The independent SDK stub supplies synthetic verifier output, not live browser/human acceptance.
+          const frozenCriteria = JSON.parse(o.promptArgs.ACCEPTANCE_CRITERIA);
+          const feature = frozenCriteria.find(c => c.id === 'C-feature');
+          if (feature?.verificationEvidence.map(o => o.kind).join(',') !== 'browser,interactive') throw Error('Verifier did not receive its original evidence obligations');
           report.criteria[0].obligations = [
             { requirement: 'Summary panel screenshot', observation: 'Synthetic summary panel', evidence: ['after-summary.png'] },
             { requirement: 'Keyboard submission recording', observation: 'Synthetic keyboard submission', evidence: ['after-keyboard.png','after-keyboard.webm'] },
@@ -200,7 +203,9 @@ export async function createSandbox(o) {
           for (const path of report.criteria[0].obligations.flatMap(o => o.evidence)) {
             report.criteria[0].evidence.push(path);
             report.artifacts.push({ path, kind: path.endsWith('.png') ? 'image' : 'video', phase: 'after' });
-            writeFileSync(join(evidence,path), 'synthetic fixture: ' + path);
+            // Only container headers and distinct bytes are relevant to this host-policy fixture.
+            const header = Buffer.from(path.endsWith('.png') ? '89504e470d0a1a0a' : '1a45dfa3', 'hex');
+            writeFileSync(join(evidence,path), Buffer.concat([header, Buffer.from('synthetic fixture: ' + path)]));
           }
         }
         writeFileSync(join(evidence,'verification.json'),JSON.stringify(report));
@@ -208,7 +213,7 @@ export async function createSandbox(o) {
       writeFileSync(join(evidence,'check.txt'),process.env.FIXTURE_ARTIFACT ?? 'Assertions passed');
       if (scenario === 'dirty') writeFileSync(join(worktree,'app.txt'),'verifier changed tracked output');
       writeFileSync(join(fake,'changed'),'yes');
-      if(['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(scenario)) await new Promise(resolve=>{
+      if(['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-manual-evidence-missing','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(scenario)) await new Promise(resolve=>{
         const watcher=watch(fake,()=>{if(existsSync(join(fake,'candidate-ready'))){watcher.close();resolve();}});
         writeFileSync(join(fake,'candidate-request'),'host observation requested');
         if(existsSync(join(fake,'candidate-ready'))){watcher.close();resolve();}
@@ -832,10 +837,27 @@ console.log('sha256:'+'a'.repeat(64));
         const identity = { project, ticket, executionId, branch, base, baseline, tip, requirementsHash };
         const provenance = proof.provenance;
         const replay = proof.candidateReplay;
-        const withoutObligationEvidence = structuredClone(proof.report);
-        for (const criterion of withoutObligationEvidence.criteria) delete criterion.obligations;
-        writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify(withoutObligationEvidence));
-        assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /authoritative evidence obligation/);
+        for (const [mutate, reason] of [
+          [(r: any) => delete r.criteria[0].obligations, /authoritative evidence obligation.*inventory/],
+          [(r: any) => r.criteria[0].obligations[0].requirement = 'Wrong obligation', /missing authoritative evidence obligation/],
+          [(r: any) => r.criteria[0].obligations[0].evidence = ['check.txt'], /needs matching browser media/],
+          [(r: any) => r.artifacts.find((a: any) => a.path === 'after-summary.png').phase = 'before', /needs matching browser media/],
+          [(r: any) => r.criteria[0].obligations[1].evidence = ['after-keyboard.png'], /needs matching interactive media/],
+          [(r: any) => r.criteria[0].obligations[1].evidence = ['after-summary.png', 'after-keyboard.webm'], /reuses another obligation/],
+          [(r: any) => r.criteria[2].obligations[0].evidence = ['check.txt'], /needs independently authorized manual evidence/],
+          [(r: any) => delete r.criteria[2].obligations, /authoritative evidence obligation \(C-manual\).*inventory/],
+        ] as const) {
+          const report = structuredClone(proof.report);
+          mutate(report);
+          writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify(report));
+          assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), reason);
+        }
+        const visual = join(run.evidenceDir, 'after-summary.png');
+        const visualBytes = readFileSync(visual);
+        writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify(proof.report));
+        writeFileSync(visual, 'command output with a misleading extension');
+        assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /needs matching browser media/);
+        writeFileSync(visual, visualBytes);
         assert.throws(() => createProof(state, run.evidenceDir, { ...identity, project: 'foreign/project' }, provenance, undefined, replay), /replay.*project/i);
         assert.throws(() => createProof(state, run.evidenceDir, identity, { ...provenance, imageId: `sha256:${'b'.repeat(64)}` }, undefined, replay), /replay.*image/i);
         const unrelatedAttempt = 'd5135819-dad4-4942-aa99-393592637af8';
@@ -848,7 +870,25 @@ console.log('sha256:'+'a'.repeat(64));
         writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify({ ...proof.report, criteria: proof.report.criteria.slice(1) }));
         writeFileSync(join(run.evidenceDir, 'verdict.md'), 'VERDICT: PASS\nSynthetic independent verdict');
         assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /authoritative criterion inventory/);
-        assert.equal(readProof(state, identity, run.verification.id).report.verdict, 'PASS');
+        const accepted = readProof(state, identity, run.verification.id);
+        assert.equal(accepted.report.verdict, 'PASS');
+        // Even internally consistent hashes are insufficient if the frozen report loses an obligation.
+        const frozenReportPath = join(accepted.root, 'verification.json');
+        const frozenProofPath = join(accepted.root, 'proof.json');
+        const originalFrozen = [frozenReportPath, frozenProofPath].map(path => readFileSync(path));
+        const mismatched = structuredClone(proof.report);
+        mismatched.criteria[0].obligations[0].evidence = ['check.txt'];
+        const malformedReport = JSON.stringify(mismatched);
+        for (const path of [frozenReportPath, frozenProofPath]) chmodSync(path, 0o600);
+        try {
+          writeFileSync(frozenReportPath, malformedReport);
+          writeFileSync(frozenProofPath, JSON.stringify({ ...proof, report: mismatched, reportHash: createHash('sha256').update(malformedReport).digest('hex') }));
+          assert.throws(() => readProof(state, identity, run.verification.id), /needs matching browser media/);
+        } finally {
+          for (const [i, path] of [frozenReportPath, frozenProofPath].entries()) {
+            writeFileSync(path, originalFrozen[i]); chmodSync(path, 0o400);
+          }
+        }
 
         // Same exact proof can authorize observation of the same PR without another producer.
         const { observeWaitingDelivery, RetryableDeliveryRead } = await import(join(runtime.directory, 'delivery-followup.mts'));
@@ -869,6 +909,13 @@ console.log('sha256:'+'a'.repeat(64));
               : { state: 'merged', reasonCode: 'merged', reason: 'fixture merged', mergedAt: new Date().toISOString() };
           },
         };
+        // A historical criterion-only replay proof is not a same-PR authority upgrade.
+        chmodSync(frozenProofPath, 0o600);
+        try {
+          writeFileSync(frozenProofPath, JSON.stringify({ ...proof, version: 2, policyVersion: 2 }));
+          assert.match(await observeWaitingDelivery(waiting, host), /Legacy proof cannot authorize CI continuation/);
+          assert.equal(observed, 0);
+        } finally { writeFileSync(frozenProofPath, originalFrozen[1]); chmodSync(frozenProofPath, 0o400); }
         const pending = await observeWaitingDelivery(waiting, host);
         assert.match(pending, /Pending CI/);
         assert.equal(checkpoint.state, 'ci-waiting');
@@ -1030,7 +1077,12 @@ console.log('sha256:'+'a'.repeat(64));
           assert.equal(actual.stdout,'','unsupported reset cannot publish an assertion observation');
         }
       }
-      const reason = ({'acceptance-implementer-tamper':/Acceptance candidate hold:.*behavior-mismatch/,'acceptance-reset-unsupported':/Acceptance candidate hold:.*invalid-results/,'parent-plan':/Acceptance static hold: missing-preparation/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Acceptance static hold: missing-preparation/,title:/Acceptance static hold: missing-preparation/,body:/Acceptance static hold: missing-preparation/,comment:/Acceptance static hold: missing-preparation/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/,'acceptance-omitted-criterion':/authoritative criterion inventory/,'acceptance-missing-replay':/Acceptance candidate hold/,'acceptance-replay-unknown':/Acceptance candidate hold/,'acceptance-replay-infrastructure':/Acceptance candidate hold/,'acceptance-replay-mismatched-bundle':/Acceptance candidate hold/,'acceptance-replay-changed-candidate':/moved from verified tip|tip|branch/i} as Record<string, RegExp>)[scenario];
+      if (['acceptance-obligation-omitted', 'acceptance-manual-evidence-missing'].includes(scenario)) {
+        const record = JSON.parse(readFileSync(join(state,'owner_repo--7.json'),'utf8'));
+        assert.equal(record.verification, undefined, 'no accepting proof is published');
+        assert.equal(existsSync(join(fake, 'candidate-input.json')), scenario === 'acceptance-manual-evidence-missing');
+      }
+      const reason = ({'acceptance-manual-evidence-missing':/Acceptance candidate hold:.*missing-evidence/,'acceptance-implementer-tamper':/Acceptance candidate hold:.*behavior-mismatch/,'acceptance-reset-unsupported':/Acceptance candidate hold:.*invalid-results/,'parent-plan':/Acceptance static hold: missing-preparation/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Acceptance static hold: missing-preparation/,title:/Acceptance static hold: missing-preparation/,body:/Acceptance static hold: missing-preparation/,comment:/Acceptance static hold: missing-preparation/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/,'acceptance-omitted-criterion':/authoritative criterion inventory/,'acceptance-obligation-omitted':/authoritative evidence obligation.*inventory/,'acceptance-missing-replay':/Acceptance candidate hold/,'acceptance-replay-unknown':/Acceptance candidate hold/,'acceptance-replay-infrastructure':/Acceptance candidate hold/,'acceptance-replay-mismatched-bundle':/Acceptance candidate hold/,'acceptance-replay-changed-candidate':/moved from verified tip|tip|branch/i} as Record<string, RegExp>)[scenario];
       assert.match(result.stdout + result.stderr, reason);
     }
 }
