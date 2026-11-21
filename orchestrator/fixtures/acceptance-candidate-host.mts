@@ -87,6 +87,10 @@ if(process.argv[2]==='--host') {
         {criterionId:'C-feature',requirement:'independent replay transcript',reference:'fixture-host-reviewed-protocol:feature'},
         {criterionId:'C-preserve',requirement:'independent replay transcript',reference:'fixture-host-reviewed-protocol:preserve'},
         {criterionId:'C-manual',requirement:'independent documentation review',reference:'fixture-independent-review:17'},
+        ...(scenario==='acceptance-replay-pass' ? [
+          {criterionId:'C-feature',requirement:'Summary panel screenshot',reference:'fixture-host-reviewed-protocol:summary'},
+          {criterionId:'C-feature',requirement:'Keyboard submission recording',reference:'fixture-host-reviewed-protocol:keyboard'},
+        ] : []),
       ]}),{mode:0o600,flag:'wx'});
       writeFileSync(join(fake,'candidate-ready.tmp'),'ready');renameSync(join(fake,'candidate-ready.tmp'),join(fake,'candidate-ready'));
     } catch(error){writeFileSync(join(fake,'candidate-host-error'),String(error));writeFileSync(join(fake,'candidate-ready'),'host failed');process.stderr.write(String(error));process.exit(2);}

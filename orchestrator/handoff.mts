@@ -8,7 +8,7 @@ import type { DependencyResult } from "./dependencies.mts";
 // #150: only host-frozen structured proof can authorize publication, exact-SHA push and merge.
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 const {gateProofHold}=await import(existsSync(new URL('./supervisor-gate-apply.mts',import.meta.url))?'./supervisor-gate-apply.mts':'../cli/src/supervisor-gate-apply.mts');
-import { readProof, validateEvidence } from './verification.mts';
+import { EXACT_PROOF_POLICY, readProof, validateEvidence } from './verification.mts';
 import type { Identity } from './verification.mts';
 import { sha256 } from './verification.mts';
 import { ticketContextHash, renderTicketContext } from './ticket-context.mts';
@@ -202,8 +202,8 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
     try {
       if (h.identity.project !== h.project || h.identity.ticket !== iid || h.identity.tip !== tip || h.identity.baseline !== h.baseSha || h.identity.branch !== branch || h.identity.base !== base) return 'handoff identity mismatch';
       const frozen = readProof(h.state, h.identity, h.proofId, h.criterionIds);
-      if (h.criterionIds !== undefined && frozen.report.verdict === 'PASS' && frozen.proof.policyVersion !== 2)
-        return 'Legacy proof cannot authorize delivery; obtain fresh verification with exact replay';
+      if (h.criterionIds !== undefined && frozen.report.verdict === 'PASS' && frozen.proof.policyVersion !== EXACT_PROOF_POLICY)
+        return 'Legacy proof cannot authorize delivery; obtain fresh verification with exact replay and obligation evidence';
       const gateHold=gateProofHold(h.state,frozen.proof);if(gateHold)return gateHold;
       return h.recheck();
     } catch (e) { return `Verification authorization failed: ${(e as Error).message}`; }

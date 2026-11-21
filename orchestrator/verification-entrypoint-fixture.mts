@@ -188,6 +188,21 @@ export async function createSandbox(o) {
       if (scenario !== 'legacy-prompt') {
         const report = ${JSON.stringify(fixtureReport())};
         if (scenario === 'acceptance-omitted-criterion') report.criteria.pop();
+        if (scenario === 'acceptance-replay-pass') {
+          // The independent SDK stub supplies synthetic verifier output, not live browser/human acceptance.
+          report.criteria[0].obligations = [
+            { requirement: 'Summary panel screenshot', observation: 'Synthetic summary panel', evidence: ['after-summary.png'] },
+            { requirement: 'Keyboard submission recording', observation: 'Synthetic keyboard submission', evidence: ['after-keyboard.png','after-keyboard.webm'] },
+          ];
+          report.criteria[2].obligations = [
+            { requirement: 'independent documentation review', observation: 'Synthetic scope for host-retained review', evidence: [] },
+          ];
+          for (const path of report.criteria[0].obligations.flatMap(o => o.evidence)) {
+            report.criteria[0].evidence.push(path);
+            report.artifacts.push({ path, kind: path.endsWith('.png') ? 'image' : 'video', phase: 'after' });
+            writeFileSync(join(evidence,path), 'synthetic fixture: ' + path);
+          }
+        }
         writeFileSync(join(evidence,'verification.json'),JSON.stringify(report));
       }
       writeFileSync(join(evidence,'check.txt'),process.env.FIXTURE_ARTIFACT ?? 'Assertions passed');
@@ -817,6 +832,10 @@ console.log('sha256:'+'a'.repeat(64));
         const identity = { project, ticket, executionId, branch, base, baseline, tip, requirementsHash };
         const provenance = proof.provenance;
         const replay = proof.candidateReplay;
+        const withoutObligationEvidence = structuredClone(proof.report);
+        for (const criterion of withoutObligationEvidence.criteria) delete criterion.obligations;
+        writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify(withoutObligationEvidence));
+        assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /authoritative evidence obligation/);
         assert.throws(() => createProof(state, run.evidenceDir, { ...identity, project: 'foreign/project' }, provenance, undefined, replay), /replay.*project/i);
         assert.throws(() => createProof(state, run.evidenceDir, identity, { ...provenance, imageId: `sha256:${'b'.repeat(64)}` }, undefined, replay), /replay.*image/i);
         const unrelatedAttempt = 'd5135819-dad4-4942-aa99-393592637af8';

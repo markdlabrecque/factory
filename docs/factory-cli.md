@@ -793,8 +793,9 @@ free-text `requirement` cannot substitute. Non-PASS diagnostic evidence remains
 retained. Normal verification and active repair additionally require separately host-authorized
 independent exact-candidate replay after their payload teardown. Repair replays after exact tip
 import and binds the replay to the specific claimed attempt, even if the saved tip needed no
-new commit. Verification retains an authenticated baseline/candidate chain in version2/policy2
-proof, revalidated on shared proof reads and every immediate delivery authorization. Missing grant,
+new commit. Verification retains an authenticated baseline/candidate chain and the
+verifier's exact obligation-to-evidence links in version 3/policy 3 proof, revalidated
+on shared proof reads and every immediate delivery authorization. Missing grant,
 unknown/infrastructure replay, mismatched bundle or preparation and changed candidate hold
 without push. A non-PASS verifier report remains diagnostic and does not start candidate
 replay; accepting proof requires the exact original criterion inventory and a separate PASS.
@@ -803,7 +804,9 @@ no automatic grant, preparation command, retry or budget exemption. Inspect reta
 candidate handles and original baseline/custody with the trusted host preparer; never edit
 receipts or approve from tracker/agent JSON. Recovery settlement retains the claim and charge
 while candidate cleanup is uncertain; repair-container absence alone is insufficient.
-Full semantic evidence-obligation reconciliation remains incomplete.
+Missing or mismatched browser, interactive or independently authorized manual evidence
+holds even if every criterion ID is present and replay passes. Unclassified originals
+require explicit preparation and independent reapproval, not an inferred evidence policy.
 See [exact-candidate replay and its limits](acceptance-contract.md#exact-candidate-replay).
 
 A repaired branch goes through the same hand-off as an implemented one (#58, `orchestrator/handoff.mts` in the selected runtime). `main.mts` calls it after its implementer, and `main.mts --recover` (#60) after its repair agent.
@@ -821,7 +824,7 @@ A verified branch can have an open PR/MR whose required checks are not ready whe
 
 Only a non-dry scheduled dispatch with automatic merge enabled continues `ci-waiting` checkpoints. Manual dispatch, direct runs, dry runs and read-only refresh do not perform this continuation. Each pass considers at most ten waits, oldest observation first. It starts no implementer, repair agent or verifier, spends no recovery attempt, posts no new evidence comment and creates no replacement PR/MR.
 
-Continuation takes a delivery admission claim and revalidates the frozen version2/policy2 PASS proof, authenticated replay, the run's original acceptance admission binding, execution/branch identity, complete selected runtime inventory and normalized settings. Historical proof, even for the same SHA, holds for migration and fresh verification; no replay is started by the observer. It also requires unchanged local and remote head SHAs, current complete ticket/parent input, selection/eligibility, no exclusion or needs-human label, the same checked-out base, and live scheduler/project authorization through the trusted saved CLI/Node. Capacity and conflicting ownership can hold the observation. Current checks, review and merge restrictions still apply. Both tracker adapters reauthorize immediately before exact-head merge; a remote ticket edit can still race the last read.
+Continuation takes a delivery admission claim and revalidates the frozen version 3/policy 3 PASS proof, authenticated replay and obligation evidence, the run's original acceptance admission binding, execution/branch identity, complete selected runtime inventory and normalized settings. Historical proof, even for the same SHA, holds for migration and fresh verification; no replay is started by the observer. It also requires unchanged local and remote head SHAs, current complete ticket/parent input, selection/eligibility, no exclusion or needs-human label, the same checked-out base, and live scheduler/project authorization through the trusted saved CLI/Node. Capacity and conflicting ownership can hold the observation. Current checks, review and merge restrictions still apply. Both tracker adapters reauthorize immediately before exact-head merge; a remote ticket edit can still race the last read.
 
 One observation has a total 30-second deadline and at most 10 seconds per subprocess. Pending or missing checks and unknown tracker responses stay retryable on the same recorded PR/MR. Failed checks, identity/proof/settings changes, draft/closed PRs or merge restrictions can require operator action. An ambiguous merge response does not justify a second PR or a blind repair; the next eligible pass observes the same identity. Token-fenced completion discards stale observers. Only confirmed merge records completion.
 

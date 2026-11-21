@@ -191,12 +191,13 @@ export function authenticateCandidateReplay(replay: CandidateReplay, expected: {
   if (w.recovery?.attemptId !== expected.attemptId || w.recovery && expected.branch !== undefined && w.recovery.branch !== expected.branch) throw Error('Acceptance replay attempt mismatch');
   if (expected.requirementsHash !== undefined && replay.binding.ticket?.contentHash !== expected.requirementsHash) throw Error('Acceptance replay requirements mismatch');
   if (expected.imageId !== undefined && !r.image.endsWith(`@${expected.imageId}`)) throw Error('Acceptance replay image mismatch');
-  for (const [h,s,phase] of [[replay.baseline,b,'baseline'],[replay.candidate,c,'candidate']] as const) {
+  const observations = ([[replay.baseline,b,'baseline'],[replay.candidate,c,'candidate']] as const).map(([h,s,phase]) => {
     if (h.directory!==join(s.intent.request.ownedRoot,h.executionId) || h.stateDir!==r.stateDir || existsSync(join(h.directory,'cancel.json'))
       || !same(privateRecord(r.custodyRoot,`execution-authorization-${acceptanceHash(s.intent)}.json`),s.grant) || s.grant.expiresAt<now) throw Error('Acceptance candidate hold: authorization revoked/expired');
     const observed=readAcceptanceBaseline(h,now,phase);
     if(observed.policy.status!=='valid') throw Error(`Acceptance candidate hold: ${phase} ${observed.policy.code}`);
-  }
+    return observed.policy.value;
+  });
   // Rehash the originals, not just the previously sealed receipt's declared bundle ID.
   const bundle=readAcceptanceBundle(r.custodyRoot,r.agentMounts,r.pointer);
   const ticket = frozenTicketIdentity(bundle.ticket);
@@ -208,7 +209,7 @@ export function authenticateCandidateReplay(replay: CandidateReplay, expected: {
     || plan.policyIdentity !== replay.binding.policyIdentity || plan.configDigest !== replay.binding.configDigest
     || !same(prepared.bundle, r.pointer) || prepared.approvalDigest !== c.intent.approval
     || bundle.manifest.approvalDigest !== c.intent.approval) throw Error('Acceptance candidate hold: original preparation/config/approval changed');
-  return { replay, criteria: bundle.contract.criteria };
+  return { replay, criteria: bundle.contract.criteria, candidateEvidence: observations[1].evidence };
 }
 /** Active workflow ingress: no automatic grant, retry or inherited sandbox. */
 export async function replayAcceptanceCandidateForTicket(iid:number,base:string,original:OriginalBaseline,tip:string,workflow:NonNullable<BaselineRequest['candidate']>,signal?:AbortSignal):Promise<CandidateReplay> {

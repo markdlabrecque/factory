@@ -17,9 +17,14 @@ export interface Assertion {
   failureId: string | null;
 }
 export type NonTransitionKind = 'documentation-only' | 'refactor' | 'investigation' | 'manual';
+export interface VerificationObligation {
+  requirement: string; kind: 'browser' | 'interactive' | 'manual';
+}
 export interface Criterion {
   id: string; behavior: string; mode: 'changed' | 'preservation' | 'non-transition';
   assertionIds: string[]; evidenceRequirements: string[];
+  /** Explicitly classify special obligations for verification. Omission is legacy, not an empty inventory. */
+  verificationEvidence?: VerificationObligation[];
   exception: { kind: NonTransitionKind; rationale: string; approver: string } | null;
 }
 export interface AcceptanceContract {
@@ -136,11 +141,23 @@ function parseContract(x: any): AcceptanceContract {
   const used = new Set<string>();
   let evidenceObligations = 0;
   for (const c of x.criteria) {
-    record(c, ['id', 'behavior', 'mode', 'assertionIds', 'evidenceRequirements', 'exception'], '$.criteria');
+    const fields = ['id', 'behavior', 'mode', 'assertionIds', 'evidenceRequirements', 'exception'];
+    if (Object.hasOwn(c, 'verificationEvidence')) fields.push('verificationEvidence');
+    record(c, fields, '$.criteria');
     text(c.behavior, '$.criteria.behavior');
     need(['changed', 'preservation', 'non-transition'].includes(c.mode), '$.criteria.mode', 'unknown mode');
     refs(c.assertionIds, '$.criteria.assertionIds', c.mode === 'non-transition');
     list(c.evidenceRequirements, '$.criteria.evidenceRequirements'); c.evidenceRequirements.forEach((r: any) => text(r, '$.criteria.evidenceRequirements')); unique(c.evidenceRequirements, '$.criteria.evidenceRequirements');
+    if (c.verificationEvidence !== undefined) {
+      const path = '$.criteria.verificationEvidence';
+      list(c.verificationEvidence, path, true);
+      for (const o of c.verificationEvidence) {
+        record(o, ['requirement', 'kind'], path);
+        need(c.evidenceRequirements.includes(o.requirement) && ['browser', 'interactive', 'manual'].includes(o.kind), path, 'unknown evidence requirement or kind');
+      }
+      unique(c.verificationEvidence.map((o: VerificationObligation) => o.requirement), path);
+      need(c.exception?.kind !== 'manual' || c.verificationEvidence.some((o: VerificationObligation) => o.kind === 'manual'), path, 'manual exception requires a manual obligation');
+    }
     // Each criterion/requirement pair needs its own record in the bounded result envelope.
     evidenceObligations += c.evidenceRequirements.length;
     need(evidenceObligations <= ACCEPTANCE_LIMITS.items, '$.criteria.evidenceRequirements', 'aggregate evidence obligation limit');

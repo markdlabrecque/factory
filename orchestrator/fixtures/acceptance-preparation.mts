@@ -13,13 +13,23 @@ export function prepareFixtureFromRuntime(runtime: string, cwd: string, env: Nod
   const input = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e',
     `const t=await import(${JSON.stringify(join(runtime, 'tracker.mts'))}); const g=await import(${JSON.stringify(join(runtime, 'ticket-input.mts'))}); process.stdout.write(JSON.stringify(g.freezeTicketInput(t.contextSource, ${iid})));`],
     {cwd, env, encoding: 'utf8', timeout: 20_000}));
-  if (!existsSync(join(env.SANDCASTLE_STATE_DIR!, 'acceptance', `prepared-${input.hash}.json`))) prepareFixtureAcceptance(env.SANDCASTLE_STATE_DIR!, input);
+  if (!existsSync(join(env.SANDCASTLE_STATE_DIR!, 'acceptance', `prepared-${input.hash}.json`))) prepareFixtureAcceptance(env.SANDCASTLE_STATE_DIR!, input, env.SCENARIO === 'acceptance-replay-pass');
 }
 
-export function prepareFixtureAcceptance(stateRoot: string, input: FrozenTicketInput): string {
+export function prepareFixtureAcceptance(stateRoot: string, input: FrozenTicketInput, visual = false): string {
   const root = join(stateRoot, 'acceptance');
   mkdirSync(root, { mode: 0o700, recursive: true });
   const contract = JSON.parse(readFileSync(new URL('../../docs/acceptance-contract.md', import.meta.url), 'utf8').match(/```json\n([\s\S]*?)\n```/)![1]) as AcceptanceContract;
+  for (const criterion of contract.criteria) criterion.verificationEvidence = [];
+  if (visual) {
+    const [feature, , review] = contract.criteria;
+    feature.verificationEvidence = [
+      { requirement: 'Summary panel screenshot', kind: 'browser' },
+      { requirement: 'Keyboard submission recording', kind: 'interactive' },
+    ];
+    feature.evidenceRequirements.push(...feature.verificationEvidence.map(o => o.requirement));
+    review.verificationEvidence = [{ requirement: 'independent documentation review', kind: 'manual' }];
+  }
   const artifacts = [{ path: 'probes/export.mjs', bytes: Buffer.from(`import {readFileSync,existsSync,writeFileSync} from 'node:fs';
 if(existsSync(process.env.FACTORY_BASELINE_ROOT+'/site.rows'))throw Error('implementer dirt leaked into replay');
 const seed=JSON.parse(readFileSync(process.env.FACTORY_STATE_ROOT+'/rows.json','utf8'));

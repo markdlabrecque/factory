@@ -806,7 +806,7 @@ cleanup-pending, review-required, behavior-mismatch and infrastructure categorie
 Remaining direct/adopted/recovery and projection coverage must not be inferred from
 this API. Original roles, full baseline, bundle, work and budgets are unchanged.
 
-## Semantic criterion inventory (partial candidate-proof integration)
+## Semantic criterion inventory and evidence obligations
 
 Standard normal and recovery main retain the criterion IDs from the authenticated
 original custody bundle and supply them to the existing independent `runVerifier`.
@@ -822,9 +822,32 @@ The shared evidence boundary accepts up to 256
 criteria, matching the acceptance-contract inventory bound. Historical non-PASS
 reports remain inspectable diagnostics without inventing omitted evaluations.
 
-ID coverage is not per-obligation semantic adequacy or browser/manual evidence
-authentication. Exact-candidate replay is required separately, as described below.
-There is no automatic migration.
+Every criterion of a contract used to authorize delivery must explicitly declare
+`verificationEvidence`: an array of `{requirement, kind}` records. `requirement`
+is the exact text from that criterion's `evidenceRequirements`, and `kind` is
+`browser`, `interactive` or `manual`. Use `[]` only if the criterion has none of
+these obligations; other declared evidence remains subject to replay receipt policy.
+Do not infer classifications from text or from the report's `evidenceKind` or
+`interactive`. A `manual` exception requires a `manual` obligation. The declaration
+is part of the frozen, independently approved contract bytes. Contracts without the
+declaration remain readable but cannot authorize proof. Preparation and independent
+approval are required; there is no automatic migration.
+
+For each declared obligation the independent verifier supplies one matching
+`{requirement, observation, evidence}` entry in its criterion's `obligations`.
+Browser evidence needs an after PNG and, for bugfixes, a before PNG. Interactive
+obligations also need a candidate/check video (WebM or MP4). Paths must appear in
+that criterion's artifact list. Report-wide or other-criterion media cannot fill a
+missing link, and the same media bytes cannot satisfy multiple obligations. For
+manual obligations the report records its assessment with an empty `evidence`
+array: the host binds the exact criterion/requirement to its own distinct evidence
+reference in the authenticated, independently authorized candidate receipt. A
+report path, prose assertion or sandbox result cannot stand in for that reference.
+If an obligation requires a human observation, only actual evidence from the
+required human can satisfy it. The verifier must return non-PASS if it cannot
+establish the requirement. The host checks the evidence linkage and integrity,
+not the adequacy of what a screenshot shows or the truth of an external review.
+Exact-candidate replay remains separately required.
 
 ## Exact-candidate replay
 
@@ -853,19 +876,20 @@ checks independent execution/owner IDs, exact original/candidate SHAs, identical
 bundle/approval/runtime/dependencies/image/setup/reset and full policy/raw-config binding,
 current matching unexpired grants, cancellation and confirmed cleanup. It rehashes original
 custody bytes and checks that the retained preparation, current baseline reference and
-policy/raw-config pins still match. Normal proof version2/policy2 also binds project, state,
+policy/raw-config pins still match. Proof version 3/policy 3 also binds project, state,
 complete requirements hash and verifier image; a normal receipt cannot serve as repair proof.
-The writer and reader derive the mandatory criterion inventory from the authenticated bundle
-and require independent semantic PASS. Non-PASS diagnostics need no candidate replay.
-Removing the chain from a version2 proof holds. Immediate
+The writer and reader derive the mandatory criterion and obligation inventory from the
+authenticated bundle and require independent semantic PASS. Non-PASS diagnostics need no
+candidate replay. Removing the chain from a policy 3 proof holds. Immediate
 delivery reauthenticates the retained chain as well as its existing exact branch,
 requirements, claim, local/remote SHA and CI gates. Unknown, infrastructure, mismatched
 bundle or changed candidate cannot deliver. Replay never overrides semantic non-PASS.
 
-CI continuation requires version2/policy2 and the run's matching saved original admission
+CI continuation requires version 3/policy 3 and the run's matching saved original admission
 binding. It reauthenticates the retained replay and selected inputs before observation/merge;
-it does not execute a replay. Same-SHA policy1 proof remains inspectable but cannot
-continue a CI wait. The checkpoint and evidence remain intact for explicit fresh verification.
+it does not execute a replay. Same-SHA policy 1 or 2 proof cannot authorize delivery or
+continue a CI wait. It is not rewritten; the checkpoint and evidence remain intact for
+explicit fresh verification.
 
 Active repair uses the same producer only after exact repair-container absence and
 compare-and-swap import of the verified tip. Its request binds the live recovery claim,

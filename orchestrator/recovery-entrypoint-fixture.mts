@@ -32,7 +32,7 @@ import type { Spawner } from "../cli/src/recovery-run.mts";
 import { observePass, readRecovery } from "../cli/src/recovery-state.mts";
 import { containerFor, readAttemptRecord } from "./recovery.mts";
 import type { AttemptRecord, Docker } from "./recovery.mts";
-import { readProof, createProof } from './verification.mts';
+import { EXACT_PROOF_POLICY, readProof, createProof } from './verification.mts';
 import { readBaselineReservations } from '../board/admission.mts';
 import { startCandidateHost } from './fixtures/acceptance-candidate-host.mts';
 
@@ -351,7 +351,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const identity = { project: 'owner/repo', ticket: '7', executionId: runRec.executionId!, attemptId: ID,
     branch: '7-fix-login', base: 'main', baseline, tip, requirementsHash: snapshot.contentHash };
   const {proof} = readProof(state, identity, runRec.verification!.id);
-  assert.equal(proof.policyVersion, 2);
+  assert.equal(proof.policyVersion, EXACT_PROOF_POLICY);
   assert.ok(proof.candidateReplay);
   assert.notEqual(proof.candidateReplay.candidate.executionId, proof.candidateReplay.baseline.executionId);
   if (unchanged) assert.equal(tip, savedStart, 'fresh attempt replay also authorizes an unchanged committed candidate');
