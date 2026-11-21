@@ -89,13 +89,27 @@ export function fixture(t: any, kind = "github", prepareAcceptance = true) {
       base: "main", baseSha: "", provides: [], requires: [], footprint: [], actualFootprint: [], catalogueIids: data.tickets.filter((t: any) => !t.contextOnly).map((t: any) => t.iid), blockerHashes: {} };
     writeFileSync(join(dir, "graph", `${key(iid)}.json`), JSON.stringify(m));
   };
+  const launchLog = join(fake, 'launches');
+  const readLaunchLog = () => existsSync(launchLog) ? readFileSync(launchLog, 'utf8') : undefined;
   const pass = (args: string[] = [], extra = {}) => {
+    const before = readLaunchLog();
     save();
     const r = spawnSync(node, [join(runtime.directory, 'dispatch.mts'), "--base", "main", ...args], { cwd: root, encoding: "utf8", env: { ...env, ...extra }, timeout: 20_000 });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     if (/launching owned implementation child/.test(r.stdout)) {
       const deadline = Date.now() + 2000;
-      while (!existsSync(join(fake, 'launches')) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      // The detached stub creates the file before writing a newline-terminated record.
+      const completeAppend = (log: string | undefined) => {
+        const appended = log?.slice(before?.length ?? 0);
+        return appended?.endsWith('\n') && appended.trim().length > 0;
+      };
+      let log = readLaunchLog();
+      while (!completeAppend(log) && Date.now() < deadline) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        log = readLaunchLog();
+      }
+      // A launch decision can still be held before admission, leaving the log untouched.
+      assert.ok(log === before || completeAppend(log), 'launch log append did not complete');
     }
     return r;
   };
