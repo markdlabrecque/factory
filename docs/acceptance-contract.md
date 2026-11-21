@@ -5,7 +5,9 @@ hashing, structural checks, approval binding and assertion transition policy. It
 imports only Node crypto, never project configuration, trackers, processes or models.
 It does not execute argv, read files, authenticate reviewers, freeze bundles, admit
 work, publish receipts or grant delivery authority. The flat runtime includes this
-module now; custody, runner, admission and exact-candidate proof are later layers.
+module. The host-only custody APIs below freeze reviewed originals; the owned
+baseline producer below executes them. Standard entrypoint admission and
+exact-candidate proof remain later layers.
 No existing ticket is automatically migrated or made ready by these functions.
 
 ## Trust and identity
@@ -184,7 +186,7 @@ budget and can overflow; that fails closed as `invalid-results`, never a pass.
 The 256/257 aggregate admission rule remains necessary independently of byte sizing.
 
 Enforcement, cancellation, overflow handling and resource/cleanup ownership belong
-to the future runner. Exceeding a bound cannot yield expected behavioral red. Runner
+to the owned runner below. Exceeding a bound cannot yield expected behavioral red. Runner
 receipts must additionally bind exact baseline/candidate SHA, frozen byte identity,
 approval, execution/attempt, runtime/image/config/dependencies and clean/reset
 provenance. These interfaces do not implement receipt authentication or custody.
@@ -372,11 +374,556 @@ substitution and additive instructions. Manual rendered-prompt review remains
 necessary to check that the instructions agree, especially feature transitions and
 recovery comparisons.
 
+## Host-owned frozen acceptance custody
+
+`orchestrator/acceptance-custody.mts` supplies explicit source APIs, shipped in the
+complete flat runtime. These custody functions do **not** activate a gate, run probes, fetch tracker
+instructions, admit implementation or publish replay/delivery proof. Existing
+standard entrypoints are not yet wired to consume these bundles.
+
+### Preparation and trusted review
+
+`prepareAcceptanceBundle({ ticket, contract, artifacts, approvals })` is a pure
+bounded preparation API. `ticket` is the full `FrozenTicketInput` produced by
+`freezeTicketInput`; `frozenTicketIdentity` recomputes the source content hash,
+rendered text and rendered SHA-256 rather than trusting declared hashes. The full
+original input is retained, not just a summary. `artifacts` supplies exact byte
+arrays indexed by the contract's portable paths. Missing/extra/duplicate artifacts,
+conflicting file/directory paths, mismatched digests and oversized inputs hold.
+Repeated identical paths across probes/fixtures may share the same exact bytes.
+
+`TrustedCustodyApprovalIngress.lookup({ ticket, acceptance })` must be implemented
+by the authenticated, access-controlled **host** review store. It returns the v1
+`ApprovalRecord` only when that review covers both the exact frozen requirements
+(`contentHash`, `renderedSha256`) and the exact acceptance identity. This stronger
+lookup scope prevents a valid contract review from silently approving changed ticket
+requirements. The returned review still passes the existing contract approval
+validator. There is no caller-supplied approval JSON parameter, tracker self-approval
+or checksum-only approval path. As with the pure contract ingress, this callback is
+an explicit trust boundary: a malicious caller implementing a lying ingress is not
+authenticated by JavaScript or by a reviewer name string.
+
+`resolveAcceptanceArtifacts(sourceRoot, contract)` optionally reads local files
+using the reviewed SHA-256 as the immutable selector. It does not accept remote
+URLs, branch names, fetch instructions or commands. There is no moving-revision
+resolution: a preparer must supply bytes matching the reviewed digest. Every path
+ancestor must be canonical, files must be regular single-link files, and symlinks,
+hard links, traversal, special files, size overflow and unstable reads hold. Descriptor
+reads are bounded even if a file grows between stat and read. No newline or encoding
+normalization changes probe/fixture bytes.
+
+Custody adds fixed bounds: 256 distinct artifacts, 1 MiB per artifact, 16 MiB total
+artifact bytes, 8 MiB serialized frozen ticket, 1 MiB per contract/approval/manifest
+record. These do not relax the portable contract's existing ceilings. Large probe
+inventories require smaller reviewed bundles, not an automatic bound increase.
+
+### Store, publication and resume
+
+`freezeAcceptanceBundle({ root, agentMounts, ...preparation })` requires an existing
+canonical host-owned private root (0700 recommended). It returns a saved
+`{ version: 1, id }` pointer. The content-addressed bundle identity hashes a canonical
+manifest binding both ticket hashes, the complete acceptance identity, authoritative
+criterion inventory digest, exact approval digest, and every original file's size
+and byte hash. A new review, changed requirements, contract, probe or fixture yields
+a new identity after fresh approval; nothing edits a historical identity in place.
+
+The caller must enumerate **every** agent mount, including project/code/runtime,
+evidence, helper, file mounts and any future mounts. Root/mount equality, either
+ancestor relationship, aliases and unknown mount paths refuse. Check again before
+any later mount is exposed. The private root must not live in repository code,
+mutable execution evidence, or any directory an agent can mount. The API cannot
+discover omitted mounts or defend against a malicious same-UID host process: host
+API access and mount construction remain trusted responsibilities, not a claim that
+0400 files alone isolate an implementer running on the host.
+
+Publication exclusively reserves the final identity directory, writes each original
+0400 with exclusive creation and fsync, and atomically links a completed seal only
+after all originals and manifest are complete. Concurrent publishers may reuse only
+a fully validated identical original; a loser observing partial publication holds.
+A partial marker, unknown file, incomplete inventory, unsafe file or invalid hash
+cannot yield a usable bundle. There is no overwrite, retry-repair, automatic deletion
+or garbage collection. Interrupted/unknown directories are retained for investigation.
+
+`readAcceptanceBundle(root, agentMounts, savedPointer)` is the resume/repair path.
+It validates the private canonical store and exact closed inventory, rehashes all
+original bytes, recomputes ticket/contract/criteria/approval bindings, and reestablishes
+directory durability before returning independent byte copies. Reads never fetch
+replacement probes, call current tracker approval, or rewrite historical proof.
+Missing or tampered originals throw `AcceptanceCustodyHold` with a preparer/reviewer
+next actor and remain held. Re-running freeze cannot repair an existing identity.
+Save the original pointer with the execution/attempt; resume and repair must keep
+using it rather than selecting the latest freshly prepared bundle. Binding that
+pointer into execution/proof records belongs to the downstream runner/proof work.
+
+### Independent runner copies
+
+`copyAcceptanceForRunner(root, agentMounts, pointer, destination)` rehashes originals
+and creates a new private, exclusive directory of exact probe/fixture files with
+0400 permissions. Its private parent and destination must be outside all implementer
+mounts and must not overlap originals. Candidate code never supplies expected results.
+The trusted independent runner obtains the authoritative contract through the host
+read API, not a candidate file. It may mount its copy read-only into its own trusted
+execution context, **never mount originals** or share that context with implementation.
+Copies are disposable and cannot mutate original bytes; failed/partial copies remain
+for explicit investigation. This API does not authorize execution or prove clean
+checkout/site/database reset. Those guarantees belong to the independent runner.
+
+Keep every custody return value host-private. The implementer receives requirements
+and diagnostic summaries, not these authoritative artifacts or an ingress capability.
+No current prompt, CLI or scheduler gains a new authority path from these APIs.
+
+## Baseline receipt policy component (not an execution runner)
+
+`orchestrator/acceptance-receipt.mts` supplies `checkAcceptanceReceipt(contract,
+approvals, observed, expectedBinding, now, phase?)`, a pure phase-specific policy check.
+The default remains baseline; candidate phase is supplied only by the trusted producer request,
+never selected from observed probe JSON.
+The expected binding is independently supplied by trusted host orchestration, not
+copied from the observed receipt. It compares execution, bundle, approval ID and
+canonical approval digest, exact Git SHA, selected runtime/private dependencies,
+immutable image/config/setup identities, reset provenance and sandbox owner ID.
+Every binding field must match, with no extra or missing binding fields.
+
+Version 1 receipts contain exactly `version`, `binding`, `startedAt`, `deadline`,
+`finishedAt`, `cleanup` and `results`. Integer timestamps must describe a positive
+finite execution window no longer than the contract's 300,000 ms ceiling. Completion
+before start, after deadline or after the supplied current observation holds, as does
+unconfirmed cleanup. The independently retained review must match both approval ID
+and digest; another approval for the same contract cannot substitute. The existing
+contract checker then reconciles baseline assertion inventory, transition outcomes
+and required non-transition evidence against a single snapshot of that review.
+
+This pure component **does not authenticate observations or enforce cleanup**.
+Use the producer read API below, not an arbitrary policy-valid JSON object, as
+execution evidence. Neither API grants candidate-proof/implementation authority.
+Custody's independent review status is not changed by runner implementation.
+
+## Owned baseline producer
+
+`acceptance-runner.mts`, `acceptance-worker.mts` and `acceptance-sandbox.mjs` ship
+in the selected flat runtime. These are **source APIs**, not a newly enabled CLI,
+scheduler gate or implementation launcher. The normal replay tracer below also uses
+this same lifecycle for an explicitly authorized candidate purpose. Consumers
+must independently compare the retained binding to the current frozen inputs;
+replay of a historically valid receipt does not authorize another execution.
+
+### Authorization and reservation
+
+`reserveAcceptanceBaseline(request, trustedAuthorization, now?)` accepts a saved
+frozen pointer, exact 40-character baseline SHA, canonical project/tracker identity,
+private host-owned output root, explicit complete agent-mount inventory, selected
+runtime root, trusted local engine transport, digest-pinned image, literal setup
+argv, reset recipe, positive capacity and finite resource bounds. This initial
+implementation requires Linux and a non-root host owner. Runtime/dependency hashes
+are recomputed from the complete selected bundle; the producer assets must match
+the source implementation, not an arbitrary valid custom override.
+
+`TrustedExecutionAuthorization.lookup(intent)` is a host-authenticated ingress,
+**not** an issue label, readiness result, tracker approval JSON or reset callback.
+It receives the entire snapshotted request plus actual runtime/dependencies,
+retained custody approval, setup digest and reset digest. It must return an exact
+`{id, intentDigest, expiresAt}` grant covering the whole deadline. An optional
+`evidence` array contains independently reviewed host-retained criterion evidence;
+sandbox strings cannot confer manual-review authority. Missing evidence remains a
+policy hold. A lying host ingress is not authenticated by TypeScript: keep this
+capability and all returned handles outside implementer custody.
+
+Reservation uses the **real shared admission transaction**, before any engine or
+project command. Separate `<stateDir>/admission/baselines.json` v1 reservations
+compete with normal/recovery/delivery counts and raw in-flight run records, refuse
+conflicting managed/supervisor ownership, and prevent conflicting new managed
+entries. Supervisor exclusion acquisition also requires baseline quiescence.
+Normal/recovery admission counts every retained baseline against the shared cap.
+No run record, implementation generation, recovery attempt or recovery charge is
+fabricated. A failure after reservation retains it. Corrupt/unknown sidecars fail
+closed. PID death, time, stopped stages and current engine absence never reap it.
+
+**Compatibility gate:** old v2 readers do not understand this sidecar. Quiesce old
+and unmanaged runtimes and select the complete updated admission/board/supervisor
+bundle everywhere before using these source APIs. The unchanged main admission
+version is not evidence of mixed-version safety; the new sidecar is mandatory for
+participating writers. No rollout or installed-entrypoint activation occurs here.
+
+### Private exact inputs and synthetic CMS reset
+
+`startAcceptanceBaseline(handle)` exclusively starts one detached worker. Controller
+exit/session death does not own the worker lifetime. It never retries the same
+reservation. The worker revalidates runtime and custody, obtains stable engine ID,
+and inspects the pinned local image: missing digests and image-declared volumes
+hold before creation. It never pulls an image or contacts an external service.
+
+Trusted host Git plumbing exports only the exact commit and reachable tree/blob
+objects into a bounded private pack: no checkout hooks, refs, remotes, shared Git,
+source configuration, dirty files, old uploads or database data are transported.
+The original bundle is rehashed and copied into a new exclusive runner input tree.
+Only that tree is mounted read-only, at `/input`. Originals, source checkout,
+implementer work, host runtime/dependencies, Docker socket and credentials are not
+mounted. No host environment is forwarded to the sandbox or engine client; the
+client receives a private HOME and fixed minimal environment. Host commands are
+trusted Git plumbing and engine orchestration only, never setup/probe argv.
+
+Inside the sandbox the trusted driver initializes **private Git metadata**, unpacks
+the exact commit, records shallow history and checks out its SHA in a fresh `/work`
+tmpfs. It verifies HEAD before/after setup and every probe. The supported reset is
+`project-local-synthetic-v1`: pinned trusted project code builds fresh local site,
+database, uploads and fixture state in `/work` and `/state`, with services on
+loopback. Setup argv runs directly inside the sandbox in `/work`; probes run from
+the read-only frozen copy with `FACTORY_BASELINE_ROOT=/work`,
+`FACTORY_STATE_ROOT=/state` and `FACTORY_ACCEPTANCE_ROOT=/input/acceptance`.
+This supports CMS-like local synthetic setup (including local web/database
+processes), not only projects without a database. The setup layer's local-web,
+bootstrap-site and compat-ddev patterns illustrate the approach; the existing
+root/service-writing scripts are not blindly run under this stricter envelope.
+Dependencies must already be in the pinned image or exact tree. External database,
+network, credentials, mounts and unsupported reset needs **hold**, never authorize
+an external-resource reset or reuse of an implementer-modified site.
+
+### Bounds, crash, cancellation and cleanup
+
+The total absolute deadline starts at reservation, covering preparation, creation,
+setup, probes, termination and settlement; ceiling 300,000 ms. Each host child has
+bounded stdout/stderr, a process-group SIGKILL deadline and a cleared environment.
+Git binary transport has a separate ceiling of min(32 MiB, memoryMiB/8); object
+inventory is at most 65,536 entries and uncompressed content at most diskMiB/2.
+The output ceiling is 2 MiB, memory 8192 MiB, CPU 8, PID count 512, application disk
+2048 MiB. Disk must be at least 64 MiB; 49 MiB covers `/tmp`, `/run`, `/dev/shm`,
+with the rest divided between `/work` and `/state`. Container memory (including
+these tmpfs pages), swap, CPU and PIDs are engine-enforced. Whole-container memory
+and CPU cannot exceed **any** reviewed probe's bounds; probe timeout/output are
+also individually enforced. Exhaustion is infrastructure/unknown, never red.
+
+The root filesystem is read-only, network is `none`, restart/logging are disabled,
+and image-declared volumes are refused. A root GNU `timeout --signal=KILL` watchdog
+starts as the container entrypoint, using only SETUID/SETGID/SETPCAP/KILL capabilities.
+`setpriv` drops to the non-root owner and drops **all** bounding/inheritable/ambient
+capabilities before the Node driver, setup or probes. Untrusted processes cannot
+stop their different-UID watchdog. The pinned image must supply Node, Git, GNU
+timeout and util-linux setpriv at the explicit paths; unavailable tools hold.
+The watchdog bounds payload lifetime independently even if the worker itself dies;
+the durable reservation still survives until source-owned exact cleanup is known.
+
+`cancelAcceptanceBaseline(handle)` accepts only the current execution/owner/random
+generation and cancellation secret. It durably fences publication, aborts the
+in-flight engine client, and lets the independent worker attempt bounded cleanup.
+Foreign/stale handles do nothing. Late cancellation after immutable settlement does
+nothing. Engine-client termination alone is **not** cleanup proof.
+
+Cleanup rechecks stable engine ID, exact container ID, image and execution/owner/
+generation labels, removes only that ID, then confirms its absence. A create whose
+client outcome is ambiguous may materialize late: even a current absence cannot
+release it. Foreign identity, engine change, worker death, expired deadline,
+output exhaustion or unknown cleanup retain ownership/capacity. There is no public
+force-settlement API, age release, automatic repair or probe retry. Retain the
+private evidence for operator investigation; this module does not invent a recovery
+launcher for an orphan.
+
+### Retained receipts and observation protocol
+
+Each `assertions-v1` probe exits zero with exactly
+`{version:1, assertions:[...]}`; behavioral failures are named structured assertion
+statuses, not exit-code normalization. The driver reconciles each probe's assertion
+IDs, attaches execution/probe/output-digest references, and returns an envelope with
+actual SHA and fresh-state provenance. The host retains bounded raw output and
+supplies manual criterion evidence **only** from trusted authorization ingress.
+The existing pure checker classifies full inventory, named red, preservation,
+already-green review-required, infrastructure and missing evidence.
+
+After exact cleanup, and only while the original owner/generation reservation is
+current and deadline unexpired, the worker publishes an exclusive 0400 receipt.
+It binds the frozen pointer/contract/probes/fixtures/approval, actual SHA, selected
+runtime/private dependencies, image, resource config, setup/reset identity and
+execution owner. The producer seal also binds authorization, real engine/container,
+generation, reset observation and retained raw-output digest. Its HMAC uses a
+separate host-private producer key, never the cancellation token. A synced immutable
+publication index under the real admission directory binds the exact spec and seal
+before releasing the reservation. A crash between publication and release remains
+held; no reader infers settlement from a receipt alone.
+
+`readAcceptanceBaseline(handle, now?)` requires that producer index, private seal,
+exact spec, retained output digest and confirmed reservation release; it then calls
+`checkAcceptanceReceipt` with independently reconstructed expected binding. It
+returns both receipt and policy classification. A completed infrastructure/manual/
+already-green hold is not implementation permission. Caller-supplied receipt JSON,
+cleanup booleans or reset callbacks cannot be published through this API. Filesystem
+protection assumes trusted host API/store access, not a hostile same-UID host
+process. Independent semantic verification and final exact-candidate proof remain
+mandatory; this producer alone activates neither.
+
+### Evidence limits
+
+Runner integration tests use real disposable Git, private filesystem stores, locks
+and native detached/controller/engine processes. Engine identity/lifecycle responses
+are simulated; they never decide admission or release. One case executes the unchanged
+copied driver, pinned baseline setup and frozen probe through a real local rootless
+user/mount/PID/network namespace transport, not computed result JSON. Read-only frozen
+inputs and a narrow copied executable/library closure are the only read-only mounts;
+only fixture-private synthetic state is writable, with fresh private Git/work/tmp/run.
+No source, custody originals, host sockets, credential/configuration directories or
+host network are exposed. Missing namespace capability fails without host fallback.
+
+The probe observes the exact checked-out SHA and seeded rows/uploads through the
+existing baseline API, then dirties the filesystem-backed synthetic site. A second
+independent fresh execution must observe the original seed and same SHA despite dirty
+source. A third execution deliberately reuses the first run's persistent dirty state:
+the pinned setup refuses it, actual driver exit is nonzero, and the real producer
+publishes a policy hold without assertion results. Actual driver stdout/stderr and
+assertions are retained in test diagnostics and successful sealed output; no reset or
+ownership boolean stands in for those observations. This proves the real-driver
+synthetic reset boundary, alongside existing crash/cancel and authenticated-retention
+evidence. See [test prerequisites and bounds](../TESTING.md#owned-acceptance-baseline-runner).
+
+It does **not** prove a real container engine's cgroup/memory/PID/tmpfs enforcement,
+different-UID watchdog, or successful CMS/SQL installation and database seeding.
+The synthetic rows are JSON, not MariaDB/MySQL; available local binaries do not
+establish a PHP/CMS/database runtime. These are outstanding actual-runtime proof
+limits, not a narrowed supported-project contract: unsupported reset still holds.
+No live Docker, paid model, production, credentials or external reset is needed or
+authorized by the tests. A supported-image/CMS runtime smoke remains separate
+unperformed acceptance evidence, not inferred from synthetic success.
+
+## Current host preparation reference
+
+`acceptance-admission.mts` supplies the active static reader used by the standard
+analysis, dispatch, direct main, assessment refresh and recovery-analysis adapters.
+Before launching preparation, an authorized preparer
+uses the custody API's exact-ticket trusted approval ingress and immutable publication.
+The host's current reference lives at
+`<state>/acceptance/prepared-<included-source-content-hash>.json`; bundle directories
+are also under this private `acceptance` store. The reference is a bounded (4096-byte),
+host-owned private regular single-link UTF-8 JSON file, with exactly these fields:
+
+- `version: 1`
+- `bundle`: the published `AcceptanceBundlePointer`
+- `ticket`: the original bundle's complete `{ contentHash, renderedSha256 }`
+- `acceptance`: the original complete acceptance identity
+- `approvalDigest`: the original manifest's exact approval digest
+
+This file is trusted preparation state, never a tracker approval claim or a candidate
+file. Publish it atomically and durably only after independent exact-content approval
+and custody publication; no launch path creates, repairs, approves or renews it. Revoking
+or changing the current reference prevents old preparation reuse. There is no operator
+publication command or automatic migration in this slice. Do not create a reference to
+bypass missing approval. Store and reference aliases, unsafe permissions, links,
+oversize/invalid records and unavailable originals hold. The reader rechecks reference
+identity after the custody read; custody itself rehashes all retained originals and
+rejects overlap with the supplied agent-mount inventory.
+
+Fresh tracker collection is compared using the included-source content hash. Collection
+timestamps are not requirements, but they do affect the rendered hash: therefore the
+analyst receives the **original independently approved rendering** returned from custody,
+not a newly rendered snapshot rebound to an old approval. Both original hashes remain
+bound to the reference and approval. Child/parent/comment edits require fresh independent
+preparation. The adapter repeats this lookup on cached/fresh preparation and both
+post-I/O rechecks. It publishes safe `validate-prepared-acceptance` observations; passive
+status/Board/readiness reads never invoke this active custody reader (which includes
+durability fsync), models or probes.
+
+Dispatch checks even cached candidates before selection, live/stale analysis and fresh
+pre-claim input; assessment refresh checks its input before cache reuse. Direct main
+checks before normal/recovery claim adoption and subsequent input boundaries. Common
+analysis independently checks at entry, immediately before the model and after its I/O.
+No caller callback or tracker declaration can approve acceptance. Static refusals remain
+ticket-scoped preparation/migration holds, not stopped implementation runs.
+
+**Partial integration only:** dispatch now consumes current authenticated owned baseline
+before its implementation claim/child launch. Direct main independently consumes the same
+current authentic evidence after host/Git I/O, before acquiring a claim; dispatched children
+repeat this check before adoption against the dispatch-saved binding, regardless of dispatch
+observations. Standard recovery host authentication runs before claim/charge and again inside
+claim validation; the child independently authenticates before adoption and after Git/input I/O.
+Recovery uses the ORIGINAL saved implementation SHA and admission binding, not origin's current
+integration tip or the repair worktree. CLI/Board expose safe stored categories and baseline
+SHA/binding digest, without reading private runner authority or executing on passive views.
+Static preparation `ready` does not attest to runner/reset capability, explicit execution
+authorization, a baseline reservation or an authenticated matching baseline receipt.
+No baseline is executed or claimed here. Original full-scope baseline, saved work,
+existing admission/ownership/dependency/image fences and charges remain unchanged.
+Candidate replay/proof and installed-release/override protocol coverage remain separate.
+
+Normal admission saves `{version:1,bindingDigest,sha}` as `acceptanceBaseline` on the run;
+the digest covers the full current binding including original bundle/approval, full-scope SHA,
+runtime/dependencies and full policy/reset plan. Recovery cannot replace that binding with a
+newer approved bundle or runtime. A legacy saved run lacking its original admission identity
+holds for explicit host preparation/migration; historical PASS, saved work and budgets are not
+rewritten to manufacture provenance. Automatic legacy identity reconstruction and a public
+operator preparation command are not supplied here. Complete custom overrides are prominently
+**outside this standard guarantee**: host recovery does not infer protocol adoption from a
+valid manifest, and arbitrary override internals remain opaque. Candidate replay/proof and
+installed-release/override protocol adoption remain separate work, not acceptance from this stage.
+
+## Explicit host baseline preparation and dispatch admission
+
+`acceptance-baseline-admission.mts` extends the trusted-host local protocol. It does
+not grant execution from tracker text, static approval, readiness or caller receipt JSON.
+An authorized host preparer provisions these private, regular, single-link bounded UTF-8
+records under `<state>/acceptance` (same host-private trust boundary as custody):
+
+- `baseline-plan-<ticket-content-hash>.json`: exactly `{version:1, request,
+  policyIdentity, configDigest}`. `request` is the complete existing `BaselineRequest`;
+  `policyIdentity` is the selected context's complete policy identity and `configDigest`
+  is `acceptanceHash` of the raw current `.factory/factory.toml` string. Host plan setup,
+  reset recipe, transport and resource limits are explicit reviewed host configuration,
+  not values inferred from tracker commands. Unsupported reset holds.
+- `execution-authorization-<intent-digest>.json`: the exact existing runner execution
+authorization (`id`, `intentDigest`, finite `expiresAt`, optional independently retained
+criterion `evidence`). The digest is `acceptanceHash` of the runner's documented intent:
+`{version:1, request, runtime, dependencies, approval, setup, reset}`. The entire deadline
+must fit the host-supplied grant; preparation never manufactures or renews a grant.
+
+The explicit local host API `prepareAcceptanceBaselineForTicket(iid, base, signal?)`
+recollects tracker child/parent originals and current preparation, independently resolves
+`origin/<base>` with replacement objects disabled, revalidates selected runtime/private
+dependencies/full policy/raw configuration, and inspects the current configured image.
+The host plan must match project/tracker/ticket/bundle/SHA/runtime/cap and observed image.
+It calls the existing separate durable reserve/start/cancel/read APIs, never `claimRun`.
+A private immutable `baseline-current-<ticket-content-hash>.json` containing the exact
+handle and complete current binding is durable before start. Failure or cancellation
+retains that handle and reservation for exact-owned inspection; no automatic retry,
+rotation, cleanup assumption or force-settlement is offered. Explicit host preparation
+must occur before managed launch entry; baseline reservation does not bypass existing
+managed-entry, capacity or project-exclusion fences.
+
+Dispatch's active `requireAcceptanceBaselineForTicket` authenticates retained producer
+index/spec/seal/output and released reservation through `readAcceptanceBaseline`. That
+reader authenticates the **historical request**, so admission additionally compares the
+complete independently resolved CURRENT binding before and after the read. Runner
+`config` is only its bounds digest, not full project policy; the additional policy,
+raw config and full host-plan digest bind setup/reset/transport and all request fields.
+Current exact host authorization must still exist, match the retained grant and remain
+unexpired. Revoked/cancelled/unknown/cleanup-held execution grants no implementation
+claim. Original preparation and host plan are reread after image/Git I/O, and authorization
+and cancellation are rechecked after current-binding collection. A still-reserved baseline
+publishes a cleanup-pending ticket observation before managed-entry refusal, without tracker
+collection or probe execution, and retains its exact capacity ownership.
+Named behavioral red, preservation and reviewed obligations remain reconciled
+by the original runner policy; already-green changed criteria require review.
+
+Preparation is explicit host action, not a new CLI command, automatic scheduler probe,
+tracker mutation or installed-release guarantee. Passive views only read stored
+`validate-current-acceptance-baseline` observations. The current dispatch vertical has
+safe preparation-required, changed-input, authorization-unavailable, cancelled,
+cleanup-pending, review-required, behavior-mismatch and infrastructure categories.
+Remaining direct/adopted/recovery and projection coverage must not be inferred from
+this API. Original roles, full baseline, bundle, work and budgets are unchanged.
+
+## Semantic criterion inventory and evidence obligations
+
+Standard normal and recovery main retain the criterion IDs from the authenticated
+original custody bundle and supply them to the existing independent `runVerifier`.
+Its `ACCEPTANCE_CRITERIA` prompt argument carries the host-owned IDs and typed
+obligations; a verifier/repair report cannot choose the authoritative list. Each PASS report criterion must carry a
+`criterionId` matching one original ID, exactly once. `requirement` remains descriptive
+text, not an identity. Missing, extra, duplicate, unknown or absent IDs refuse before
+proof creation, posting or push. Normal/recovery retain that same host inventory
+through proof freezing and every immediate handoff proof reread/authorization,
+so changing mutable evidence after the verifier cannot erase coverage. Historical
+proof inspection without an inventory remains diagnostic and invents no IDs.
+The shared evidence boundary accepts up to 256
+criteria, matching the acceptance-contract inventory bound. Historical non-PASS
+reports remain inspectable diagnostics without inventing omitted evaluations.
+
+Every criterion of a contract used to authorize delivery must explicitly declare
+`verificationEvidence`: an array of `{requirement, kind}` records. `requirement`
+is the exact text from that criterion's `evidenceRequirements`, and `kind` is
+`browser`, `interactive` or `manual`. Use `[]` only if the criterion has none of
+these obligations; other declared evidence remains subject to replay receipt policy.
+Do not infer classifications from text or from the report's `evidenceKind` or
+`interactive`. A `manual` exception requires a `manual` obligation. The declaration
+is part of the frozen, independently approved contract bytes. Contracts without the
+declaration remain readable but cannot authorize proof. Preparation and independent
+approval are required; there is no automatic migration. For example, if a criterion's
+`evidenceRequirements` includes `Keyboard submission recording`, add
+`{"requirement":"Keyboard submission recording","kind":"interactive"}` to that
+criterion's `verificationEvidence`.
+
+For each declared obligation the independent verifier supplies one matching
+`{requirement, observation, evidence}` entry in its criterion's `obligations`.
+Browser evidence needs an after PNG and, for bugfixes, a before PNG. Interactive
+obligations also need a candidate/check video (WebM or MP4). Paths must appear in
+that criterion's artifact list. The verifier captures and inspects these media; the
+host checks their phase, file type header and linkage, not playback or content.
+Report-wide or other-criterion media cannot fill a missing link, and the same media
+bytes cannot satisfy multiple obligations. For
+manual obligations the report records its assessment with an empty `evidence`
+array: the host binds the exact criterion/requirement to its own distinct evidence
+reference in the authenticated, independently authorized candidate receipt. A
+report path, prose assertion or sandbox result cannot stand in for that reference.
+If an obligation requires a human observation, only actual evidence from the
+required human can satisfy it. The verifier must return non-PASS if it cannot
+establish the requirement. The host checks the evidence linkage and integrity,
+not the adequacy of what a screenshot shows or the truth of an external review.
+Exact-candidate replay remains separately required.
+
+## Exact-candidate replay
+
+After independent semantic verification, its obligation-link preflight and confirmed
+implementer sandbox teardown, normal main requires `replayAcceptanceCandidateForTicket` before freezing/posting proof.
+A structured verifier PASS plus ordinary checks is insufficient. The current original
+baseline admission and full host plan are reauthenticated; `candidateRequestForTicket`
+builds an inert request with the exact candidate SHA and normal workflow key/execution,
+claim, managed entry, original baseline binding and payload-custody nonce. It does not
+approve or execute anything. An independent host preparer must supply a separate exact
+`execution-authorization-<intent-digest>.json`, using the same intent schema as baseline
+but including this candidate request. There is no automatic grant, renewal or retry.
+
+The existing reserve/start/worker/cancel/read lifecycle is reused, not a second sandbox
+implementation. Only the exact live normal claim/entry with a closed implementer payload
+may compose with its own candidate reservation. Foreign/racing work still excludes it;
+the candidate consumes a **separate durable capacity slot**. A cap with no spare slot
+holds, rather than waiving capacity. Candidate pending handles are retained privately
+before worker start. Ownership is rechecked before creation and final publication;
+uncertain cleanup retains the existing reservation. The trusted worker carries phase
+through the copied driver. Baseline readers reject candidate-purpose publications;
+original changed-baseline named-red semantics remain unchanged.
+
+`authenticateCandidateReplay` rereads both producer publications and raw output seals,
+checks independent execution/owner IDs, exact original/candidate SHAs, identical frozen
+bundle/approval/runtime/dependencies/image/setup/reset and full policy/raw-config binding,
+current matching unexpired grants, cancellation and confirmed cleanup. It rehashes original
+custody bytes and checks that the retained preparation, current baseline reference and
+policy/raw-config pins still match. Proof version 3/policy 3 also binds project, state,
+complete requirements hash and verifier image; a normal receipt cannot serve as repair proof.
+The writer and reader derive the mandatory criterion and obligation inventory from the
+authenticated bundle and require independent semantic PASS. Non-PASS diagnostics need no
+candidate replay. Removing the chain from a policy 3 proof holds. Immediate
+delivery reauthenticates the retained chain as well as its existing exact branch,
+requirements, claim, local/remote SHA and CI gates. Unknown, infrastructure, mismatched
+bundle or changed candidate cannot deliver. Replay never overrides semantic non-PASS.
+
+CI continuation requires version 3/policy 3 and the run's matching saved original admission
+binding. It reauthenticates the retained replay and selected inputs before observation/merge;
+it does not execute a replay. Same-SHA policy 1 or 2 proof cannot authorize delivery or
+continue a CI wait. It is not rewritten; the checkpoint and evidence remain intact for
+explicit fresh verification.
+
+Active repair uses the same producer only after exact repair-container absence and
+compare-and-swap import of the verified tip. Its request binds the live recovery claim,
+managed entry, original admission, attempt ID, attempt record and saved start. The
+worker checks the host's repair teardown record and refuses another attempt's ownership.
+The original baseline stays the full-scope baseline; saved start is supplementary and is
+never a new baseline. An unchanged committed tip beyond the original baseline still
+needs fresh attempt-bound replay. The proof reader refuses replay from a different
+attempt, even at the same SHA. If the candidate reservation remains unsettled, recovery
+settlement retains the claim and its charge even when the repair container is absent.
+
+Complete per-criterion semantic evidence obligations are not yet enforced.
+All touched runtime modules were already in the complete asset inventory; no new shipped
+module, dependency or sandbox lifecycle was introduced. Evidence proves disposable Git and
+filesystem-backed synthetic reset through the actual copied driver in rootless namespaces,
+not actual CMS/SQL reset, Docker cgroups or a different-UID watchdog. Unsupported reset holds.
+
 ## Verification
 
 ```sh
-node --test orchestrator/acceptance-contract.test.mts
+node --test orchestrator/acceptance-contract.test.mts orchestrator/acceptance-custody.test.mts orchestrator/acceptance-receipt.test.mts orchestrator/acceptance-runner.test.mts orchestrator/ticket-input.test.mts
 ```
+
+Custody uses pure preparation/binding tests plus a disposable filesystem boundary
+covering exclusive publication, rehash, mount exclusions, private copies, missing and
+tampered originals, symlink/hard-link/size refusal, retained interrupted publication,
+and two concurrent native Node publishers synchronized with IPC. No live tracker,
+agent, Docker, credentials, service manager or browser is used. Full commit-tier
+shards and the independent browser-lifecycle gate remain mandatory.
 
 Pure units cover schema, identity/approval and failure taxonomy using the documented
 example, including 256 aggregate criterion evidence obligations reconciling in both

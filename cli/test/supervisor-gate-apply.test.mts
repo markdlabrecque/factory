@@ -151,6 +151,9 @@ test('disposable public source path: exact approved local guidance, immutable in
     Object.assign(process.env,f.runtime.env,{PATH:bin+':'+savedEnv.PATH});process.chdir(f.root);
     const {analyse}=await import(pathToFileURL(join(f.runtime.directory,'analyze.mts')).href);
     const {ticket,frozen}=f;
+    const {prepareFixtureAcceptance}=await import('../../orchestrator/fixtures/acceptance-preparation.mts');
+    mkdirSync(join(f.stateDir,'worktrees'),{recursive:true});
+    prepareFixtureAcceptance(f.stateDir,frozen);
     const args={project:'owner/repo',base:'develop',worktree:{path:f.workspace,sha:tip},ticket,input:frozen,notes:[],catalogue:[ticket],manifests:new Map(),keepImplementerBlockers:false,executionContext:current,runId:p.change.owner.runId};
     assert.throws(()=>analyse({...args,executionContext:f.baseContext}),/Scoped gate/);
     assert.throws(()=>analyse({...args,input:{...frozen,hash:'c'.repeat(64)}}),/exact reviewed ticket/);

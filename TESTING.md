@@ -1,4 +1,4 @@
-<!-- Commit checks use fixture-owned runtimes and external boundaries across four bounded CI shards plus a separate browser-lifecycle gate. Exact-package offline verification and real browser-image/service-manager smoke checks are distinct opt-in boundaries. -->
+<!-- Commit checks use fixture-owned runtimes, a local namespace-backed acceptance driver and external boundaries across four bounded CI shards plus a separate browser-lifecycle gate. Exact-package offline verification and real browser-image/service-manager smoke checks are distinct opt-in boundaries. -->
 # Testing
 
 ## Run the tests
@@ -35,6 +35,103 @@ The independent browser lifecycle job below remains mandatory. Its file also rem
 Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
+
+## Owned acceptance baseline runner
+
+`orchestrator/acceptance-runner.test.mts` exercises the approved owned-runner seam
+with real private filesystem stores, shared interprocess admission locks, disposable
+Git and native detached/controller processes. The external engine lifecycle is emulated
+by `orchestrator/fixtures/acceptance-engine.mjs`; the fixture never executes project,
+setup or frozen probe argv on the host and never supplies admission/cleanup authority.
+IPC/socket barriers and an injected reservation clock cover competing reservations,
+controller death, worker death, cancellation, late results, foreign owner/engine,
+ambiguous creation, output overflow, image-volume refusal and retained sealed output.
+The exact Git pack excludes dirty CMS-like site/database files; frozen copies and
+fresh bounded state/mount policy are inspected independently. The receipt units
+cover full assertion inventory and transition/failure/manual-evidence taxonomy.
+
+```sh
+node --test orchestrator/acceptance-{contract,custody,receipt,runner}.test.mts orchestrator/ticket-input.test.mts
+```
+
+One case replaces only the engine's start response with actual execution of the
+unchanged copied `acceptance-sandbox.mjs` inside rootless user/mount/PID/network
+namespaces (`fixtures/acceptance-namespace.mts`). It requires Linux, working rootless
+Bubblewrap (`/usr/bin/bwrap`), local Git, `ldd`, `prlimit` and GNU `timeout`, plus the
+running Node executable. The helper freezes only those executable/library bytes,
+mounts that private closure and `/input` read-only, creates fresh `/work`, `/tmp`,
+`/run`, `/proc`, `/dev`, and mounts only fixture-private disposable synthetic state
+writable. It clears the environment, denies host network/mounts/sockets, and uses a
+10-second outer kill deadline, CPU/file-size/fd guards and a 1 MiB captured-output
+ceiling. Capability failure **fails**, never skips or falls back to host execution;
+no test installs tools or changes host namespace policy.
+
+The pinned setup seeds filesystem-backed synthetic rows/site/uploads, not SQL/CMS.
+The frozen probe imports the baseline API, observes actual seed/SHA, tests read-only
+inputs and hidden host source, then dirties state. Two independent runs must observe
+the same seed and exact baseline despite dirty source; reuse of the first run's
+persistent dirt must produce an actual driver failure and a sealed policy hold with
+no results. TAP diagnostics retain real driver exit/stdout/stderr (including actual
+assertions); the driver currently reports setup failure without forwarding setup
+stderr. Reservation/start/read and retained receipt authentication are real.
+
+This closes real-driver synthetic execution evidence, **not** real container/cgroup/
+different-UID watchdog or actual CMS installation/database-seeding evidence. The
+namespace fixture's resource guards are not proof of the engine's memory/PID/tmpfs
+limits. A supported-image/CMS runtime smoke remains unperformed; absent local PHP
+and MariaDB/MySQL cannot be replaced by synthetic JSON state, and unsupported reset
+still holds. No production, network DB, credentials or paid provider is part of
+these fixtures. All four commit-tier shards, docs checks and the independent browser
+lifecycle gate remain unchanged.
+See [runner contract](docs/acceptance-contract.md#owned-baseline-producer).
+
+## Acceptance static admission (partial integration)
+
+```sh
+node --test orchestrator/acceptance-admission*.test.mts orchestrator/recovery-entrypoint.test.mts
+```
+
+The approved analysis/implementation admission seam is exercised through the actual
+selected common analysis, dispatch, direct, explicit-refresh, `refreshProject` and
+recovery-preparation entrypoints with disposable Git and fixture-owned rejecting
+tracker/Pi boundaries. Missing preparation covers both trackers and configured families;
+malformed references/contracts, unapproved/tampered originals and changed input stop
+before analysis or implementation records. Cached dispatch selection, cached assessment
+revocation, a pending dispatched child and direct post-Git/pre-adoption revocation are covered.
+Actual analyst-I/O revocation discards results and retains static diagnostics without new queue
+records. An authentic custody publication reaches the
+analyst, reuses cached analysis without another call, and is revoked by removing current
+preparation while preserving the saved manifest. Passive stored-readiness reads retain
+the safe ticket-specific reason/action without recreating state or invoking models.
+`fixtures/acceptance-preparation.mts` supplies synthetic independent approval **before**
+launch, never production authority or baseline execution. The existing recovery fixture
+also prepares its exact complete child/parent input before its analysis pass.
+
+These are focused filesystem/process integrations, not helper-only schema tests, browser
+E2E or installed release acceptance. `acceptance-baseline-entrypoints.test.mts` additionally
+exercises actual dispatch with real separate reserve/start/read, durable private grants,
+disposable Git and the existing owned engine transport. Explicit host preparation occurs
+before managed entry; valid current evidence permits the actual claim and child launch
+for both trackers/configured families, including cached selection. Actual dispatch denies
+missing/stale/current-SHA/ticket/config/reset changes, revoked/expired grants, unknown,
+already-green, wrong behavioral failure, actual API cancellation, unknown engine cleanup
+and tampered retained output before claim/child. Final image-I/O revocation is rechecked.
+Stored reads preserve records/reservations and invoke no preparation. Pending cleanup
+publishes its ticket observation before managed-entry refusal, with no tracker collection.
+`fixtures/acceptance-baseline-preparation.mts` is test-only and simulates sandbox output,
+not CMS reset or production authority. Direct/adopted main now independently denies missing
+or revoked baselines before claim/adoption, preserving pending run bytes and admission;
+normal positive model-family/tier journeys explicitly prepare actual owned baselines.
+`acceptance-baseline-recovery.test.mts` proves authorized dispatched-child adoption, host
+revocation and late image-read revocation before recovery charge, independent child revocation/
+saved-binding change before repair, and successful original-fullscope recovery after integration
+HEAD advances. Existing recovery journeys retain independent verifier, work and charge assertions;
+all positive baselines are prepared before intentionally uncertain managed payload ownership.
+CLI status/Board/ticket projections cover every baseline hold category plus ready observations,
+retained safe SHA/binding identities and zero model/container/claim effects on passive reads.
+These are standard source/offline admission proofs, not override adoption or candidate replay. No
+real provider, tracker, credentials, Docker, shared daemon or package install runs.
+The four full shards, documentation and independent lifecycle gates remain unchanged.
 
 ## Standard implementation continuation
 
@@ -887,7 +984,41 @@ node --test orchestrator/verification*.test.mts orchestrator/handoff.test.mts or
 ```
 
 `verification.test.mts` checks schema, evidence paths and frozen proof integrity with
-synthetic bytes, not real browser media. `verification-entrypoint*.test.mts` runs the
+synthetic bytes, not real browser media. Its public evidence boundary additionally
+checks complete original criterion-ID reconciliation (including the full 256-item
+inventory), omitted/duplicate/unknown/absent IDs and retained non-PASS diagnostics.
+The selected normal-entrypoint proof fixture prepares genuine original custody and
+owned baseline authority, then proves an otherwise-green verifier omitting an original
+criterion cannot create proof, post or push. Positive normal/recovery model-family
+journeys retain complete explicit synthetic criterion IDs. This is a semantic-inventory
+vertical at approved verification/recovery seam4. A second normal-entrypoint tracer
+first reproduced actual post/push/merge without candidate replay despite a complete
+structured PASS. It now holds without a separate exact host grant. The positive tracer
+executes the actual copied driver and SAME frozen probe at baseline and exact candidate
+in independent rootless namespaces: named behavioral red→green, preservation pass,
+fresh filesystem synthetic seed despite source dirt, separately authenticated owners,
+confirmed cleanup and retained policy 3 proof chain. Its independent fixture host prepares
+exact grants after observing the committed candidate; SDK reports cannot approve them.
+Additional entrypoint cases deny changed candidates, mismatched bundle observations,
+unknown results and engine infrastructure failure, with no push. Two negative normal
+entrypoint cases execute the copied driver: an implementer-committed shadow probe does
+not replace the frozen probe, and a read-only synthetic state mount cannot satisfy reset.
+Neither publishes proof or pushes. Candidate receipt units also remove each required
+criterion evidence record in turn and check that mismatched or repeated evidence holds.
+The same public entrypoint and proof seam checks missing browser/interactive links, wrong
+kind/phase linkage, reused or mislabeled media, missing independent manual evidence and
+policy 2 CI refusal. Matching synthetic links pass, including two separate obligations on
+one criterion. The stubs exercise container headers and evidence bindings, not media
+playback or human observations. Ordinary model-family
+journeys reuse external-engine protocol responses; only the explicit tracer claims actual
+driver execution on the normal path. Recovery entrypoints independently run the copied
+driver at the original and exact repaired commits, including a saved, unchanged candidate.
+They refuse missing and stale attempt grants, a candidate-selected probe substitute, and
+unconfirmed replay cleanup; the last holds both the recovery claim and the candidate slot
+with no refund or push. These fixtures do not prove browser/manual adequacy, CMS/SQL reset,
+cgroup/watchdog or installed-release acceptance. Runtime inventory already
+ships every changed producer/consumer; the added host module is test-only. Full mandatory
+commands/bounds are unchanged. `verification-entrypoint*.test.mts` runs the
 selected fixture runtime's ordinary entrypoint against real temporary Git repositories and fixture-owned
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.
@@ -903,7 +1034,7 @@ or mismatched Git identities. The entrypoint checks the packaged prompt and orig
 smallest changed-boundary run:
 
 ```sh
-node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
+node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/acceptance-baseline-recovery.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
 ```
 
 Adapter tests assert fresh host authorization after CI and before SHA-guarded merge.
@@ -916,14 +1047,16 @@ Run the changed boundary first:
 
 ```sh
 node --test board/delivery.test.mts orchestrator/delivery*.test.mts cli/test/delivery-followup-schedule.test.mts
+node --test --test-name-pattern='independently replays' orchestrator/verification-entrypoint-proof.test.mts
 node --test orchestrator/refresh*.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
 ```
 
 Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
-holds and lost merge responses without live trackers. Proof fixtures use synthetic
-command evidence and frozen host records. The selected-runtime dispatch fixture runs local Git
-against a temporary bare origin and a fixture-owned absolute read-only scheduler CLI;
-manual/dry-run/refresh-only passes must perform no continuation. Admission tests cover
+holds and lost merge responses without live trackers. The exact replay fixture reuses a
+genuine policy 3 proof for pending then green CI observation of the same PR, and checks
+admission, configuration, raw output, current requirements and transport holds. The
+selected-runtime dispatch fixture checks explicit legacy migration against a temporary
+bare origin and fixture scheduler CLI; manual/dry-run/refresh-only do not continue it. Admission tests cover
 capacity, conflicting claims, stale tokens and PID reuse without repairing anything.
 Scheduler tests assert the exact trusted command and malformed/off/paused/base-switch
 refusals; they never run the host CLI against the user's service manager. These tests

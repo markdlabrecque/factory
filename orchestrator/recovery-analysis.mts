@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { freezeTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
+import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
 import type { Manifest, Note } from './graph.mts';
 import type { Ticket } from './tracker.mts';
 import { digest, held } from './recovery-analysis-contract.mts';
@@ -75,7 +76,7 @@ function prepareCore(d: PreparationDeps): Preparation {
     return {version:1,state:'ready',code:'ready',scope:'ticket',reason:'Current execution analysis and prerequisites validated',
       project:d.project,root:resolve(d.root),ticket:d.ticket,base:d.base,requirementsHash:next.hash,baseSha:input.baseSha,
       analysisKey:key,manifestDigest:d.manifestDigest()};
-  } catch (e) { return e instanceof TicketInputHold ? held('ticket-input', e.message, 'ticket') : held('config',String(e),'project'); }
+  } catch (e) { return e instanceof TicketInputHold ? held('ticket-input', e.message, 'ticket') : e instanceof AcceptanceAdmissionHold ? held('acceptance-static', e.message, 'ticket') : held('config',String(e),'project'); }
 }
 /** Cleanup uncertainty overrides readiness, including a dirty invocation-owned analysis worktree. */
 export function prepareRecoveryAnalysis(d: PreparationDeps): Preparation {
@@ -109,7 +110,7 @@ async function main(): Promise<Preparation> {
   const { dependencyState } = await import('./dependencies.mts');
   const { readRuns, stateDir } = await import('./board.mts');
   const project = runtime.TRACKER.project;
-  const { projectLaunchReadiness, readinessReason, recordTicketInput } = await import('./launch-readiness.mts');
+  const { projectLaunchReadiness, readinessReason, recordTicketInput, recordReadinessCheck } = await import('./launch-readiness.mts');
   const hostReport = await projectLaunchReadiness({ projectRoot: root, runtimeRoot: runtime.context.runtimeRoot, runtimeIdentity: runtime.context.manifest.id, runtimeDependencies: runtime.context.manifest.dependencies, config: runtime.effectiveConfig, stateRoot: stateDir(), base });
   const hostHold = readinessReason(hostReport);
   if (hostHold) return held('config', hostHold, 'project');
@@ -123,6 +124,15 @@ async function main(): Promise<Preparation> {
     try { input = freezeTicketInput(tracker.contextSource, ticket); }
     catch (error) { if (error instanceof TicketInputHold) recordTicketInput(stateDir(), hostReport, error); throw error; }
     recordTicketInput(stateDir(), hostReport, input);
+    // Every read includes cached preparation and both post-I/O rechecks. A prior analysis
+    // or readiness observation never substitutes for current host preparation/custody.
+    try {
+      input = readPreparedAcceptance(stateDir(), [runtime.context.projectRoot, runtime.context.runtimeRoot, resolve(stateDir(), 'worktrees')], input).ticket;
+      recordReadinessCheck(stateDir(), hostReport, acceptanceStaticCheck(input));
+    } catch (error) {
+      if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), hostReport, acceptanceStaticCheck(input, error));
+      throw error;
+    }
     const t = { ...tracker.ticket(ticket), title: input.context.child.title, description: input.context.child.description }, parent = input.context.parent?.iid;
     if (parent !== undefined) { const p = input.context.parent!; t.parent = {iid:p.iid,title:p.title,description:p.description}; }
     const notes = input.context.child.notes, catalogue = tracker.workCatalogue(runtime.SUBTASKS.enabled).tickets;

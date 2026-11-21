@@ -45,7 +45,7 @@ test("manual worker has a bounded process group and coalesces overlapping reques
 
 test('a running dispatcher keeps bundle A for detached children after descriptor B publication', async t => {
   const f = fixture(t), gate = join(f.fake, 'replacement-gate');
-  f.data.tickets = [ticket(7, { description: 'Implement this change' })]; f.save();
+  f.data.tickets = [ticket(7, { description: 'Implement this change' })]; f.save(); f.baseline();
   writeFileSync(join(f.home, 'bin/pi'), `#!/bin/sh\ntouch '${gate}.ready'\nwhile [ ! -f '${gate}.release' ]; do sleep 0.02; done\nexec '${f.node}' '${join(FIXTURES, 'refresh-analysis.mjs')}' "$@"\n`, { mode: 0o755 });
   const child = spawn(f.node, [join(f.runtime.directory, 'dispatch.mts'), '--base', 'main'], { cwd: f.root, env: f.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = ''; child.stdout.on('data', s => { output += s; }); child.stderr.on('data', s => { output += s; });
@@ -200,6 +200,8 @@ test("assessment read, write/rename and request-removal failures preserve eligib
   const results: any[] = [];
   for (const failure of ["healthy", "read", "write", "rename", "remove"]) {
     const f = fixture(t); f.record(8, "stopped"); f.data.tickets.push(ticket(8)); f.manifest(7);
+    // Explicit host-owned baseline precedes the assessment-store fault.
+    f.baseline();
     // Ensure no analysis is necessary to make the same #7 launch decision in every scenario.
     const dir = join(f.dir, "assessment"), refresh = join(f.dir, "refresh");
     if (failure === "read") writeFileSync(dir, "not a directory");
@@ -247,6 +249,7 @@ test('a branch created during the final fresh context read is held before admiss
   assert.equal(git(f.root, 'branch', '--list', '7-ticket-7'), '7-ticket-7');
   // Stand in for an operator resolving this synthetic conflict, not an automatic Factory repair.
   git(f.root, 'branch', '-D', '7-ticket-7'); f.data.workspaceRace = false;
+  f.baseline();
   assert.match(f.pass().stdout, /#7 Ticket 7: launching/);
 });
 
@@ -257,6 +260,7 @@ for (const conflict of ['input', 'workspace']) test(`one ${conflict} hold preser
   f.manifest(7); f.manifest(8);
   if (conflict === 'input') f.data.contextErrors = [7];
   else git(f.root, 'branch', '7-ticket-7');
+  f.baseline(8);
   const result = f.pass();
   assert.match(result.stdout, /#7 held:/); assert.match(result.stdout, /#8 Ticket 8: launching/);
   assert.equal(existsSync(join(f.dir, f.key(7) + '.json')), false);

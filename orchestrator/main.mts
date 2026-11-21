@@ -1,10 +1,13 @@
 // Execute one fixed Pi workflow with durable managed admission before readiness/tracker/model work.
 // A pinned leased runtime binds explicit project assets and state; immutable payload custody retains uncertain admission ownership.
 // Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
-// Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
+// Current original acceptance and authentic authorized baselines gate direct/adopted claims and recovery adoption.
+// Original approved full child/parent bytes bind prompts/evidence; static validity grants no baseline authority.
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
+import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
+import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket, replayAcceptanceCandidateForTicket, authenticateCandidateReplay, type CandidateReplay } from './acceptance-baseline-admission.mts';
 import { beginPayloadCustody } from './payload-custody.mts';
 import { ownerOf } from './admission.mts';
 import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup } from './sandbox-readiness.mts';
@@ -27,7 +30,7 @@ import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 import { adoptClaim, keyFor, PARKED, queueModelProblem, readRuns, setProject, setStage, stateDir, TERMINAL } from "./board.mts";
-import { claimManagedEntry, readAdmission, releaseManagedEntry } from "./admission.mts";
+import { admissionConflict, claimManagedEntry, readAdmission, readBaselineReservations, releaseManagedEntry } from "./admission.mts";
 import { fillReceipt, recordIntent } from "./ownership.mts";
 import { freezeTicketInput, saveTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { context, effectiveConfig, AGENT, allLabels, LABELS, MERGE, SUBTASKS, TRACKER } from "./runtime-config.mts";
@@ -37,7 +40,7 @@ import { blockedOutcome, expandUnits, SANDCASTLE_MARK } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest, readManifest } from "./manifests.mts";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
-import { assertProofStoreOutsideMounts, createProof } from './verification.mts';
+import { assertProofStoreOutsideMounts, createProof, validateEvidence } from './verification.mts';
 import type { Provenance } from './verification.mts';
 import type { Host } from "./handoff.mts";
 import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
@@ -82,7 +85,7 @@ process.on('exit', () => { if (entryCleanupConfirmed) releaseManagedEntry(stateD
 
 // Sandbox and CI settings are data, never executable project configuration.
 const runtimeLease = await retainRuntime(context);
-const { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordTicketInput, ticketWorkspaceProblem, ticketBranch } = await import('./launch-readiness.mts');
+const { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordTicketInput, recordReadinessCheck, ticketWorkspaceProblem, ticketBranch } = await import('./launch-readiness.mts');
 const hostReadinessInput = { projectRoot: context.projectRoot, runtimeRoot: context.runtimeRoot, runtimeIdentity: context.manifest.id, runtimeDependencies: context.manifest.dependencies, config: effectiveConfig, stateRoot: stateDir() };
 const hostReport = await projectLaunchReadiness(hostReadinessInput);
 let inputReport = hostReport;
@@ -176,9 +179,20 @@ if (!iid) {
 }
 // A Task gets its parent issue as context; whole tickets have none.
 // Collection is host-only and fails before a run/agent is created. Later authority checks recollect.
+let observedInitialAcceptance = false;
 const currentTicketInput = (): FrozenTicketInput => {
-  try { return freezeTicketInput(tracker.contextSource, Number(iid)); }
-  catch (error) {
+  let input: FrozenTicketInput | undefined;
+  try {
+    input = freezeTicketInput(tracker.contextSource, Number(iid));
+    const approved = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], input).ticket;
+    if (!observedInitialAcceptance) recordReadinessCheck(stateDir(), inputReport, acceptanceStaticCheck(approved));
+    observedInitialAcceptance = true;
+    return approved;
+  } catch (error) {
+    if (input && error instanceof AcceptanceAdmissionHold) {
+      try { recordReadinessCheck(stateDir(), inputReport, acceptanceStaticCheck(input, error)); }
+      catch (writeError) { console.error(`Ticket readiness report write failed: ${(writeError as Error).message}`); }
+    }
     if (error instanceof TicketInputHold) {
       try { recordTicketInput(stateDir(), inputReport, error); }
       catch (writeError) { console.error(`Ticket readiness report write failed: ${(writeError as Error).message}`); }
@@ -186,7 +200,20 @@ const currentTicketInput = (): FrozenTicketInput => {
     throw error;
   }
 };
+async function requireBaseline(original?: import('./acceptance-baseline-admission.mts').OriginalBaseline) {
+  try {
+    const identity = await requireAcceptanceBaselineForTicket(Number(iid), base, original);
+    recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid),undefined,undefined,identity));
+    return identity;
+  } catch(error) {
+    if(error instanceof AcceptanceBaselineHold) recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid),error));
+    throw error;
+  }
+}
 const frozenInput = currentTicketInput();
+// Retain the independently authenticated original inventory, not verifier/repair-selected text.
+const acceptanceCriteria = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], frozenInput).contract.criteria;
+const acceptanceCriterionIds = acceptanceCriteria.map(c => c.id);
 recordTicketInput(stateDir(), inputReport, frozenInput);
 const parentIid = frozenInput.context.parent?.iid;
 const withParent = (t: tracker.Ticket): tracker.Ticket => {
@@ -255,6 +282,9 @@ if (recovering) {
     || admitted?.kind !== "recovery" || admitted.attempt !== rec.id || admitted.token !== claimed.claim) {
     fail(`#${iid} is not claimed for recovery attempt ${seq} (${rec.id}); only Factory's recovery launcher starts --recover, once per attempt.`);
   }
+  if (!claimed?.implementationBaseSha || !claimed.acceptanceBaseline) fail('Acceptance baseline hold: preparation-required; original saved fullscope baseline admission is missing. Preserve work and charges; prepare explicitly.');
+  const original = {sha:claimed.implementationBaseSha,admission:claimed.acceptanceBaseline};
+  await requireBaseline(original);
   let token: string | undefined;
   try {
     token = adoptClaim(iid);
@@ -305,6 +335,7 @@ if (recovering) {
   };
   const inputHold = recheck();
   if (inputHold) fail(inputHold);
+  await requireBaseline(original);
   saveTicketInput(inputEvidence(claimed.executionId!, rec.id), frozenInput);
   setStage(iid, { ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash, attemptId: rec.id } });
   entryCleanupConfirmed = false;
@@ -313,8 +344,26 @@ if (recovering) {
   const result = await runRecoveryAttempt({
     root: context.projectRoot, record: file, attempt: { id: rec.id, startSha: rec.startSha }, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
-    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash },
+    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash, criterionIds: acceptanceCriterionIds, criteria: acceptanceCriteria },
     provenance: (sb) => provenance(sb, rec.container),
+    replay: {
+      execute: async tip => {
+        const exactTip = () => {
+          if (sh('git', ['rev-parse', `refs/heads/${rec.branch}`]) !== tip) throw Error('Recovery branch moved from verified tip');
+        };
+        exactTip();
+        const replay = await replayAcceptanceCandidateForTicket(Number(iid), base, original, tip, {
+          key: keyFor(iid!, PROJECT), executionId: claimed.executionId!, claim: token!, entry: managedEntry,
+          baseline: original.sha, bindingDigest: original.admission.bindingDigest,
+          recovery: { attemptId: rec.id, record: file, startSha: rec.startSha, branch: rec.branch },
+        }, cancel.signal);
+        exactTip();
+        return replay;
+      },
+      cleanupHeld: () => readBaselineReservations(stateDir()).some(r => admissionConflict(r.project, {
+        root: context.projectRoot, tracker: { kind: TRACKER.kind, host: TRACKER.gitlabHost ?? TRACKER.host!, project: PROJECT },
+      })),
+    },
     promptArgs: {
       ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
       EVIDENCE_DIR: evidenceBox, CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
@@ -338,6 +387,7 @@ if (recovering) {
         invocationId: rec.id, ticket: iid, baseline: baseSha, tip: rec.startSha, evidence: evidenceBox,
         uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
         files: { ...context.additive.recovery.hashes }, signal: cancel.signal });
+      inputReport = recoveryReport;
       return sandboxReadinessHold(recoveryReport);
     },
     sandboxCleanup: (confirmed) => { if (recoveryReport) recordSandboxCleanup(stateDir(), recoveryReport, confirmed); },
@@ -380,6 +430,14 @@ const baseSha = sh("git", ["rev-parse", `origin/${base}`]);
 if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads", "origin", branch])) {
   fail(`Branch ${branch} already exists locally or on origin; preserve saved work and inspect this ticket's workspace.`);
 }
+// Static authority must survive host readiness and Git I/O before ANY claim/adoption.
+if (ticketHash().hash !== startVersion.hash) fail('Ticket-input changed before admission; retry collection before launch');
+const pendingRun=readRuns().find(r=>r.project===PROJECT && r.iid===iid);
+if(process.env.FACTORY_LAUNCH_CLAIM && (!pendingRun?.acceptanceBaseline || !pendingRun.implementationBaseSha)) throw new AcceptanceBaselineHold('preparation-required');
+const dispatchedOriginal=process.env.FACTORY_LAUNCH_CLAIM && pendingRun?.acceptanceBaseline && pendingRun.implementationBaseSha
+  ? {sha:pendingRun.implementationBaseSha,admission:pendingRun.acceptanceBaseline} : undefined;
+const acceptanceBaseline = await requireBaseline(dispatchedOriginal);
+if (acceptanceBaseline.sha !== baseSha) throw new AcceptanceBaselineHold('changed-input');
 setProject(PROJECT);
 // Adopt dispatch ownership or atomically acquire a normal claim for a tokenless manual run.
 let claimToken: string | undefined;
@@ -397,7 +455,7 @@ saveTicketInput(inputEvidence(executionId), frozenInput);
 setStage(iid, {
   title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
   implementationModel: implementerModel, modelChoice: picked.choice,
-  implementationBaseSha: baseSha, verification: undefined,
+  implementationBaseSha: baseSha, acceptanceBaseline, verification: undefined,
   executionId,
   evidenceDir: resolve(layout.evidence, iid, executionId), ticketHash: startVersion.hash,
   ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash }, verdict: undefined, mr: undefined,
@@ -490,7 +548,12 @@ const promptArgs = {
   CATALOGUE: catalogue.map((t) => `- #${t.iid} ${t.title}`).join("\n") || "(none)",
 };
 
+let candidateReplay: CandidateReplay | undefined;
 const recheck = () => {
+  if (candidateReplay) {
+    try { authenticateCandidateReplay(candidateReplay,{baseline:baseSha,tip,executionId,ticket:iid!}); }
+    catch(error) { return (error as Error).message; }
+  }
   const hold = contextHold(context); if (hold) return hold;
   const nowParent = tracker.parentOf(Number(iid));
   if (nowParent !== parentIid) return 'Ticket parent changed; fresh verification required';
@@ -532,6 +595,7 @@ try {
     invocationId: executionId, ticket: iid, baseline: baseSha, tip: baseSha, evidence: evidenceBox,
     uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000,
     files: { ...context.additive.implementation.hashes }, signal: sandboxCancel.signal });
+  inputReport = sandboxReport;
   const sandboxHold = sandboxReadinessHold(sandboxReport);
   if (sandboxHold) throw Error(sandboxHold);
   sandboxCancel.signal.throwIfAborted();
@@ -679,7 +743,7 @@ try {
       sh('git', ['cat-file', '-e', `${tip}^{commit}`]);
       verifierContainer = sandbox.sandboxId ?? '';
       verifiedProvenance = await provenance(sandbox, verifierContainer);
-      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip });
+      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip, criteria: acceptanceCriteria });
     }
   }
 } catch (error) {
@@ -742,14 +806,29 @@ if (blockers) {
 }
 
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
+const replayHold = recheck(); if (replayHold) fail(replayHold);
+if(sh('git',['rev-parse',`refs/heads/${branch}`])!==tip) fail('Branch moved from verified tip before acceptance replay');
+if (validateEvidence(evidenceHost, acceptanceCriterionIds).report.verdict === 'PASS') {
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelSandbox);
+  try {
+    candidateReplay = await replayAcceptanceCandidateForTicket(Number(iid),base,{sha:baseSha,admission:acceptanceBaseline},tip,{
+      key:keyFor(iid!,PROJECT),executionId,claim:claimToken!,entry:managedEntry,custody:custody.pointer,baseline:baseSha,bindingDigest:acceptanceBaseline.bindingDigest,
+    },sandboxCancel.signal);
+    sandboxCancel.signal.throwIfAborted();
+  } finally {
+    for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelSandbox);
+  }
+  const afterReplayHold = recheck(); if (afterReplayHold) fail(afterReplayHold);
+}
 setStage(iid, { stage: "posting" });
 const identity = { project: PROJECT, ticket: iid, executionId, branch, base, baseline: baseSha, tip, requirementsHash: startVersion.hash };
-const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!);
+const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds, candidateReplay, true);
+if (frozen.proof.report.verdict === 'PASS' && !candidateReplay) fail('Semantic evidence changed after teardown; exact candidate replay and fresh verification required');
 setStage(iid, { verification: { id: frozen.id, tip, requirementsHash: startVersion.hash } });
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
 const outcome = await postAndDeliver({
   iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid, origin: { kind: "implemented" },
-  identity, proofId: frozen.id, state: stateDir(), recheck,
+  identity, proofId: frozen.id, state: stateDir(), recheck, criterionIds: acceptanceCriterionIds,
   noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
 }, host);
 if (!outcome.ok) fail(outcome.reason);

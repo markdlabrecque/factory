@@ -793,7 +793,7 @@
         var scope = c.scope === 'project' ? 'Project' : c.ticket ? 'Ticket #' + c.ticket : 'Unattributed ticket/sandbox check (not a project hold)';
         add(row, el('h4', null, scope + ' · ' + c.scope + '/' + c.phase + ' · ' + (current ? c.status : 'stale evidence')),
           el('p', null, c.operation + (c.path ? ' · ' + c.path : '') + (c.errno ? ' · ' + c.errno : '') + ' · ' + c.reason),
-          el('p', null, 'Checked ' + c.observedAt + ' · Next actor: ' + c.nextActor + ' · ' + c.nextAction + ' · Automatic recheck: ' + c.automaticRecheck));
+          el('p', null, 'Checked ' + c.observedAt + ' · Next actor: ' + c.nextActor + ' · ' + c.nextAction + ' · Automatic recheck: ' + c.automaticRecheck + (c.baseline ? ' · Baseline SHA: ' + (c.baseline.sha || 'unknown') + ' · binding: ' + (c.baseline.bindingDigest || 'unknown') : '')));
         section.appendChild(row);
       });
       container.appendChild(section);

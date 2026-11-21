@@ -105,6 +105,68 @@ runtime proves actual installed mount or cleanup authority. Refer to the
 [complete input contract](supervisor.md#complete-saved-run-input-collection) for
 source roles, authoritative decisions, cache stability and refusal conditions.
 
+## Reviewed acceptance originals
+
+The selected runtime includes the host-only `acceptance-custody.mts` APIs alongside
+`acceptance-contract.mts`. They bind exact frozen ticket content/rendered hashes,
+authoritative criterion inventory, reviewed contract/probe/fixture bytes and trusted
+approval into a content-addressed sealed original. `ticket-input.mts` exports the
+shared `frozenTicketIdentity` recomputation; payload journals and existing proof
+formats are unchanged. No standard entrypoint, admission or replay gate is activated
+by adding these APIs.
+
+A trusted host supplies an authenticated approval ingress scoped to both ticket and
+acceptance identities, a canonical private store, and the complete inventory of
+**all** agent mounts. Originals must be outside every mount, including mutable
+evidence, project and runtime code; ancestor/equality/alias overlaps refuse. Probe
+bytes are digest-pinned local bytes, never remote fetch or host shell instructions.
+Exclusive publication and a complete seal permit only rehashed exact originals;
+partial, unknown, missing and tampered state holds without replacement or deletion.
+Resume/repair must retain their original saved bundle pointer, not refreeze current
+tracker inputs or replace historical proof. New requirements or approval create a
+new reviewed identity for a separately authorized execution.
+
+Only the trusted independent runner may obtain a new private execution copy outside
+implementer mounts. It reads expected results from the original contract, not candidate
+code, and must never mount the original store. The implementer receives requirements
+and diagnostics only. These APIs do not themselves establish runner reset, execution
+authorization, mount completeness, candidate replay or delivery proof; downstream
+host integration owns those boundaries. Filesystem permissions assume trusted host
+code and an isolated implementer, not protection against malicious same-UID host
+processes. See [the custody API contract](acceptance-contract.md#host-owned-frozen-acceptance-custody)
+for bounds, publication/retention and caller responsibilities.
+
+### Owned baseline execution and receipt custody
+
+The selected inventory includes `acceptance-runner.mts`, `acceptance-worker.mts`,
+`acceptance-sandbox.mjs` and the pure `acceptance-receipt.mts` policy checker.
+The host producer requires distinct exact execution authorization, a complete
+validated runtime/private dependency identity and a saved frozen bundle/approval.
+It reserves separate capacity under the shared admission lock, starts a detached
+worker, transports only exact Git objects and rehashed runner copies, and performs
+setup/probes only inside the bounded private sandbox. Fresh `/work` and `/state`
+support pinned project-local synthetic web/database setup; no implementer/shared
+Git, original custody, host credentials, Docker socket or external resources are
+mounted or authorized. Unsupported reset holds.
+
+Controller death does not release the reservation. A different-UID in-container
+watchdog bounds payload execution independently; stable engine/container/owner/
+generation cleanup, deadline and cancellation fencing govern settlement. Unknown
+or ambiguous late creation retains capacity. An immutable producer seal and durable
+admission publication index authenticate exact results and retained raw output;
+caller booleans or arbitrary policy-valid JSON are not producer receipts.
+See [the owned producer contract](acceptance-contract.md#owned-baseline-producer)
+for supported images, limits, source APIs and real-runtime evidence limitations.
+The owned-runner tests now execute the actual copied driver/setup/frozen probe in a
+local rootless namespace with only a copied executable/library closure, read-only
+inputs and disposable private synthetic state. Two fresh executions observe the
+same seed/SHA; reuse of persistent dirty synthetic state yields a real setup failure
+and no results. This is filesystem-backed synthetic site evidence, not actual
+CMS/SQL reset, Docker cgroups or the different-UID watchdog. Those proof limits and
+unsupported-reset holds remain; no project-class narrowing is implied.
+No standard entrypoint admission, implementation launch or candidate-proof gate is
+activated here; independent custody/semantic review remains separate.
+
 ## Normal payload custody and terminal handoff
 
 The standard launcher inventories `payload-custody.mts` with the exact selected
@@ -211,6 +273,33 @@ settings or templates requires fresh authority; TOML comments alone do not.
 Requirement, historical baseline, immutable verifier, independent browser probe,
 claim, exact-SHA CI and merge checks remain separate mandatory gates.
 
+Standard normal/recovery main retain the original authenticated custody criterion
+IDs separately from verifier report text and pass them through the existing verifier
+entrypoint. The runtime-owned `ACCEPTANCE_CRITERIA` prompt argument exposes only
+that identity inventory. PASS reports must reconcile every original `criterionId`
+exactly once; the host validates IDs and explicit evidence obligations after verifier immutability checks. The
+existing runtime inventory already ships all touched modules and verifier template;
+no new helper or dependency asset is introduced. Normal and recovery main perform
+separately authorized owned exact-candidate
+replay after payload teardown, reusing the detached producer and original frozen bundle.
+The candidate reserves separate capacity and composes only with its exact live claim and
+managed entry. Normal runs authenticate their payload journal; repair authenticates its
+attempt record and exact repair-container absence. No foreign ownership or cap is bypassed.
+Version 3/policy 3 proofs retain authenticated baseline/candidate handles plus the
+original full policy/raw-config binding; writer and shared proof readers authenticate both
+producer seals, exact SHAs, independent owners, original bytes, current grants and cleanup.
+The current host preparation and baseline reference must still match. Writer and reader
+also check the project/state, requirements hash, image and normal or exact-recovery-attempt replay purpose,
+and derive mandatory semantic criterion IDs and typed obligations from the authenticated
+original bundle. The report and frozen media bind browser and interactive obligations;
+manual links resolve to the independently authorized candidate receipt, not agent output.
+All changed modules were already shipped by the complete runtime inventory; the test
+host is fixture-only. Nonexecuting CI continuation requires modern replay proof and
+compares it to the run's saved original admission. Legacy PASS holds with explicit
+migration guidance; it is not rewritten. Unsettled candidate reservations retain recovery claim
+ownership and charges.
+Baseline admission identity, full-scope baseline and saved repair-start comparison stay separate.
+
 ### Supervisor and independent review inputs
 
 The additive roles `supervisor` and `gateReview` use the same contained Markdown loader as existing roles: common files first, canonical deduplication, literal frozen text and hashes, no secret-path aliases. Their ordered hash maps and normalized supervisor policy participate in `identity`/`policyIdentity` and `assertCurrent`. Edits invalidate authority without rewriting the existing snapshot. These are additional guidelines, not replacement Factory prompts or constraints.
@@ -290,6 +379,17 @@ preserving claims/generations/recovery pending and candidate accounting. Old act
 v1 readers reject v2. No optional exclusion bypass or downgrade is supported. Complete
 copy/import fixtures must include both assets unchanged; never fall back to source
 code from a selected flat runtime.
+
+Owned baseline reservations additionally use the mandatory v1
+`admission/baselines.json` sidecar under that same lock. Normal/recovery/delivery
+capacity counts retained baselines, conflicting managed entries refuse them, and
+supervisor acquisition requires their quiescence. No baseline creates a run or
+recovery charge. Baselines are never reaped by PID or age. **Old v2 admission code
+does not understand this sidecar**: select the entire updated admission/board/
+supervisor runtime and quiesce all old/unmanaged work before baseline API use.
+Keeping the main state version at 2 is not a mixed-runtime compatibility guarantee.
+Immutable `admission/baseline-<execution>.sealed` indexes survive reservation release;
+private receipt/spec/output identities remain retained outside sandbox mounts.
 
 Managed CLI dispatch/manual/selected-issue, shell bootstrap, standard direct main/
 dispatch and recovery launch acquire durable entry ownership before effecting work.

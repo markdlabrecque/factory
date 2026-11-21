@@ -6,9 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { scheduledEnv, refreshEnv } from '../src/commands/tick.mts';
+import { RUNTIME_ASSETS } from '../src/runtime-assets.mts';
 const dir = realpathSync(mkdtempSync(join(tmpdir(),'delivery-auth-')));
-for(const f of ['delivery-followup.mts','verification.mts']) copyFileSync(new URL(`../../orchestrator/${f}`,import.meta.url),join(dir,f));
-copyFileSync(new URL('../../board/delivery.mts',import.meta.url),join(dir,'delivery.mts'));
+for (const { source, destination } of RUNTIME_ASSETS.filter(asset => asset.destination.endsWith('.mts'))) {
+  copyFileSync(new URL(`../../${source}`, import.meta.url), join(dir, destination));
+}
 const {schedulerAuthorization,bounded}=await import(pathToFileURL(join(dir,'delivery-followup.mts')).href);
 process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
 const env={FACTORY_SCHEDULED:'1',FACTORY_CLI_ENTRYPOINT:'/trusted/app/cli/bin/factory.mts',FACTORY_SCHEDULER_NODE:process.execPath};

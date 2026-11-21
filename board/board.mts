@@ -1,4 +1,4 @@
-// Run storage, admission and Board assembly. Browser/snapshot reads never reconcile records or inspect logs.
+// Run storage, mixed run/baseline capacity admission and Board assembly. Snapshot reads never inspect logs.
 // Readiness is a separate passive registered-project snapshot; execution history stays independent.
 import { buildReadinessData } from './readiness-view.mts';
 export { buildReadinessData } from './readiness-view.mts';
@@ -10,7 +10,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // Persisted transitions emit observations after authoritative locks, never on heartbeat writes.
 import { observeRun } from './execution-events.mts';
-import { claimLive, keyFor, newToken, ownerOf, releaseClaim, supervisorExclusion, withAdmission, writeDurable } from "./admission.mts";
+import { claimLive, keyFor, newToken, ownerOf, readBaselineReservations, releaseClaim, supervisorExclusion, withAdmission, writeDurable } from "./admission.mts";
 import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
 import { readAssessments, requestRefresh } from "./assessment.mts";
@@ -77,6 +77,7 @@ export interface RunState {
   executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
   payloadCustody?: { version: 1; nonce: string }; // private source journal pointer; never readiness/projection authority
   implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
+  acceptanceBaseline?: { version: 1; bindingDigest: string; sha: string }; // original full-scope/current-host admission binding, never replaced by repair
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
   delivery?: DeliveryCheckpoint; // host-only current pointer; never reconstructed from note prose
   implementationModel?: string; // chosen once by main.mts, never updated by description refresh
@@ -304,6 +305,9 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   const kind = o.kind ?? "normal";
   const exclusion = supervisorExclusion(tx.state, proj, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()));
   if (exclusion) return { ok: false, reason: exclusion };
+  const baselines = readBaselineReservations(dir);
+  if (baselines.some(b => b.project.tracker.project === proj || b.project.root === realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd())))
+    return { ok: false, reason: 'project held by acceptance baseline cleanup' };
   const runs = readRuns(dir);
   const claims = Object.entries(tx.state.claims).filter(([, c]) => claimLive(c));
   const current = runs.find((r) => r.key === key);
@@ -318,7 +322,7 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
     if (other) return { ok: false, reason: `project ${proj ?? "(unnamed)"} has #${other} in flight; recovery needs the project to itself` };
   }
   const busy = new Set([...claims.map(([k]) => k), ...runs.filter(inFlight).map((r) => r.key)]);
-  if (busy.size >= o.cap) return { ok: false, reason: `no capacity: ${busy.size} run(s) in flight, cap ${o.cap}` };
+  if (busy.size + baselines.length >= o.cap) return { ok: false, reason: `no capacity: ${busy.size + baselines.length} ${baselines.length ? 'run(s)/baseline(s)' : 'run(s)'} in flight, cap ${o.cap}` };
   let extra: Partial<RunState> | void;
   try {
     extra = o.also?.(current);
