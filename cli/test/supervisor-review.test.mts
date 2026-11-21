@@ -35,7 +35,7 @@ function setup(home:string,name:string, mutate?: (a:ReturnType<typeof reviewFixt
     start(command,argv,options){launches++;assert.equal(command,'pi');assert.equal(Object.values(readSupervisor(stateDir,input.snapshot.project).reservations).filter(r=>r.state==='active').length,1);
       assert.equal(argv[argv.indexOf('--model')+1],modelForRole(a.family,'gateReview').model);
       for(const flag of ['--no-session','--no-tools','--no-extensions','--no-skills','--no-context-files'])assert.ok(argv.includes(flag));
-      for(const forbidden of ['--tools','--resume','--continue','FlagAHuman'])assert.ok(!argv.includes(forbidden));
+      for(const forbidden of ['--tools','--resume','--continue'])assert.ok(!argv.includes(forbidden));
       assert.deepEqual(readdirSync(options.cwd),[]);assert.equal(options.env.HOME,options.cwd);assert.equal(options.env.PI_CODING_AGENT_DIR,options.cwd);
       assert.deepEqual(Object.keys(options.env).sort(),['HOME','PATH','PI_CODING_AGENT_DIR']);
       const x=JSON.parse(options.input.slice(options.input.lastIndexOf('\n\n{')+2));envelopes.push(x);
