@@ -273,6 +273,17 @@ settings or templates requires fresh authority; TOML comments alone do not.
 Requirement, historical baseline, immutable verifier, independent browser probe,
 claim, exact-SHA CI and merge checks remain separate mandatory gates.
 
+Standard normal/recovery main retain the original authenticated custody criterion
+IDs separately from verifier report text and pass them through the existing verifier
+entrypoint. The runtime-owned `ACCEPTANCE_CRITERIA` prompt argument exposes only
+that identity inventory. PASS reports must reconcile every original `criterionId`
+exactly once; the host validates this after verifier immutability checks. The
+existing runtime inventory already ships all touched modules and verifier template;
+no new helper or dependency asset is introduced. This is partial semantic coverage
+integration, not a modern replay-bound proof policy: authenticated candidate execution,
+proof-chain readers and CI-wait migration remain outstanding. Baseline admission
+identity, full-scope baseline and saved repair-start comparison remain separate.
+
 ### Supervisor and independent review inputs
 
 The additive roles `supervisor` and `gateReview` use the same contained Markdown loader as existing roles: common files first, canonical deduplication, literal frozen text and hashes, no secret-path aliases. Their ordered hash maps and normalized supervisor policy participate in `identity`/`policyIdentity` and `assertCurrent`. Edits invalidate authority without rewriting the existing snapshot. These are additional guidelines, not replacement Factory prompts or constraints.

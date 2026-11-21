@@ -211,6 +211,8 @@ async function requireBaseline(original?: import('./acceptance-baseline-admissio
   }
 }
 const frozenInput = currentTicketInput();
+// Retain the independently authenticated original inventory, not verifier/repair-selected text.
+const acceptanceCriterionIds = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], frozenInput).contract.criteria.map(c => c.id);
 recordTicketInput(stateDir(), inputReport, frozenInput);
 const parentIid = frozenInput.context.parent?.iid;
 const withParent = (t: tracker.Ticket): tracker.Ticket => {
@@ -341,7 +343,7 @@ if (recovering) {
   const result = await runRecoveryAttempt({
     root: context.projectRoot, record: file, attempt: { id: rec.id, startSha: rec.startSha }, model: AGENT.model, title: String(issue.title), baseSha, parentIid,
     repairPrompt: context.codePath('prompt.recover.md'), verifyPrompt: context.codePath('prompt.verify.md'),
-    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash },
+    proof: { state: stateDir(), executionId: claimed.executionId!, requirementsHash: startVersion.hash, criterionIds: acceptanceCriterionIds },
     provenance: (sb) => provenance(sb, rec.container),
     promptArgs: {
       ISSUE_IID: iid, ISSUE_TITLE: String(issue.title), TICKET: ticket, BASE_BRANCH: base, BASE_SHA: baseSha, BRANCH: rec.branch,
@@ -717,7 +719,7 @@ try {
       sh('git', ['cat-file', '-e', `${tip}^{commit}`]);
       verifierContainer = sandbox.sandboxId ?? '';
       verifiedProvenance = await provenance(sandbox, verifierContainer);
-      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip });
+      verificationRefusal = await runVerifier(sandbox, { setStage }, { iid, evidenceHost, agent: agent(AGENT.model), promptArgs: { ...promptArgs, ADDITIVE_INSTRUCTIONS: context.additive.verification.text }, tip, criterionIds: acceptanceCriterionIds });
     }
   }
 } catch (error) {
@@ -782,12 +784,12 @@ if (blockers) {
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
 setStage(iid, { stage: "posting" });
 const identity = { project: PROJECT, ticket: iid, executionId, branch, base, baseline: baseSha, tip, requirementsHash: startVersion.hash };
-const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!);
+const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds);
 setStage(iid, { verification: { id: frozen.id, tip, requirementsHash: startVersion.hash } });
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
 const outcome = await postAndDeliver({
   iid, project: PROJECT, branch, base, baseSha, tip, title: String(issue.title), evidenceHost, parentIid, origin: { kind: "implemented" },
-  identity, proofId: frozen.id, state: stateDir(), recheck,
+  identity, proofId: frozen.id, state: stateDir(), recheck, criterionIds: acceptanceCriterionIds,
   noPush: opts["no-push"], ciWaitMinutes: CONFIG.ciWaitMinutes, noCiMinutes: CONFIG.noPipelineMinutes, autoMerge: MERGE.auto,
 }, host);
 if (!outcome.ok) fail(outcome.reason);

@@ -984,7 +984,15 @@ node --test orchestrator/verification*.test.mts orchestrator/handoff.test.mts or
 ```
 
 `verification.test.mts` checks schema, evidence paths and frozen proof integrity with
-synthetic bytes, not real browser media. `verification-entrypoint*.test.mts` runs the
+synthetic bytes, not real browser media. Its public evidence boundary additionally
+checks complete original criterion-ID reconciliation (including the full 256-item
+inventory), omitted/duplicate/unknown/absent IDs and retained non-PASS diagnostics.
+The selected normal-entrypoint proof fixture prepares genuine original custody and
+owned baseline authority, then proves an otherwise-green verifier omitting an original
+criterion cannot create proof, post or push. Positive normal/recovery model-family
+journeys retain complete explicit synthetic criterion IDs. This is a semantic-inventory
+vertical at approved verification/recovery seam4, not exact candidate replay, browser
+adequacy or installed-release acceptance. Full mandatory commands/bounds are unchanged. `verification-entrypoint*.test.mts` runs the
 selected fixture runtime's ordinary entrypoint against real temporary Git repositories and fixture-owned
 SDK, tracker and Docker commands. It exercises requirements/eligibility changes,
 branch/claim changes, dirty verifier output, missing baseline and legacy prompts.

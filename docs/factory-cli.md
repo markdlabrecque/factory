@@ -786,6 +786,14 @@ before SHA-guarded auto merge; manual merge remains manual. An external edit can
 race after the last tracker read. Project owners must review custom prompts and helpers and renew project-mode recovery review when the selected identity changes. No continuation
 loop, scheduler change or historical record migration is included.
 
+Standard normal/recovery main additionally supplies the authenticated original
+acceptance criterion IDs to the shared verifier. PASS requires one exact
+`criterionId` per original criterion, with no omissions, extras or duplicates;
+free-text `requirement` cannot substitute. Non-PASS diagnostic evidence remains
+retained. This partial semantic-inventory fence does not upgrade policy-1 proof
+or CI continuation to authenticated exact-candidate replay authority. See the
+[remaining candidate-proof boundary](acceptance-contract.md#semantic-criterion-inventory-partial-candidate-proof-integration).
+
 A repaired branch goes through the same hand-off as an implemented one (#58, `orchestrator/handoff.mts` in the selected runtime). `main.mts` calls it after its implementer, and `main.mts --recover` (#60) after its repair agent.
 
 - **`runVerifier`** runs the independent verifier in the run's sandbox: `prompt.verify.md`, `AGENT.model`, one iteration, `TIP_SHA` set to the tip being verified. A verifier that commits, moves `HEAD` or leaves the worktree dirty is refused before anything is posted or pushed. First, `beginVerification` deletes an earlier `verdict.md` from the ticket's evidence folder and clears the record's `verdict`, `mr` and `mergedAt`, so on a reused record and evidence folder only this run's verdict counts and a stale PASS never reads as delivery (`deliveryMarker`). Other evidence is kept.

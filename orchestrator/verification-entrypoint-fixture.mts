@@ -177,7 +177,11 @@ export async function createSandbox(o) {
       writeFileSync(join(fake,'verifier-started'),'yes');
       if (scenario === 'continuation-failed-verification') throw Error('fixture verifier failure');
       writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\\nSynthetic checks');
-      if (scenario !== 'legacy-prompt') writeFileSync(join(evidence,'verification.json'),${JSON.stringify(JSON.stringify(fixtureReport()))});
+      if (scenario !== 'legacy-prompt') {
+        const report = ${JSON.stringify(fixtureReport())};
+        if (scenario === 'acceptance-omitted-criterion') report.criteria.pop();
+        writeFileSync(join(evidence,'verification.json'),JSON.stringify(report));
+      }
       writeFileSync(join(evidence,'check.txt'),process.env.FIXTURE_ARTIFACT ?? 'Assertions passed');
       if (scenario === 'dirty') writeFileSync(join(worktree,'app.txt'),'verifier changed tracked output');
       writeFileSync(join(fake,'changed'),'yes');
@@ -879,7 +883,7 @@ console.log('sha256:'+'a'.repeat(64));
         assert.equal(record.modelChoice.family, 'openai'); assert.equal(record.modelChoice.tier, 'mid');
         assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.mid, thinking: 'high' });
       }
-      const reason = ({'parent-plan':/Acceptance static hold: missing-preparation/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Acceptance static hold: missing-preparation/,title:/Acceptance static hold: missing-preparation/,body:/Acceptance static hold: missing-preparation/,comment:/Acceptance static hold: missing-preparation/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
+      const reason = ({'parent-plan':/Acceptance static hold: missing-preparation/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Acceptance static hold: missing-preparation/,title:/Acceptance static hold: missing-preparation/,body:/Acceptance static hold: missing-preparation/,comment:/Acceptance static hold: missing-preparation/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/,'acceptance-omitted-criterion':/authoritative criterion inventory/} as Record<string, RegExp>)[scenario];
       assert.match(result.stdout + result.stderr, reason);
     }
 }

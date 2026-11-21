@@ -291,7 +291,7 @@ export interface RecoveryContext {
   model: string;
   title: string;
   baseSha: string;
-  proof: { state: string; executionId: string; requirementsHash: string };
+  proof: { state: string; executionId: string; requirementsHash: string; criterionIds?: readonly string[] };
   provenance: (sandbox: RecoverySandbox) => Promise<Provenance>;
   parentIid?: number;
   promptArgs: Record<string, string>;
@@ -458,6 +458,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
       iid: rec.iid, evidenceHost: dir, agent: deps.agent(ctx.model), tip, promptFile: ctx.verifyPrompt ?? VERIFY_PROMPT,
       promptArgs: { ...ctx.promptArgs, ADDITIVE_INSTRUCTIONS: ctx.verificationInstructions ?? '' },
       recoveryComparison: { baseline: ctx.baseSha, start: rec.startSha },
+      criterionIds: ctx.proof.criterionIds,
     });
     rec.verifier = { tip, ...(refused ? { refused } : {}) };
     if (ctx.cancel.aborted) return finish("interrupted", `cancelled during verification; ${preserved}`);
@@ -489,10 +490,10 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   try {
     const identity = { project: rec.project, ticket: rec.iid, executionId: ctx.proof.executionId, attemptId: rec.id, branch: rec.branch,
       base: rec.base, baseline: ctx.baseSha, tip, requirementsHash: ctx.proof.requirementsHash };
-    const frozen = createProof(ctx.proof.state, dir, identity, verifiedProvenance!);
+    const frozen = createProof(ctx.proof.state, dir, identity, verifiedProvenance!, ctx.proof.criterionIds);
     deps.setStage({ verification: { id: frozen.id, tip, requirementsHash: ctx.proof.requirementsHash } });
     out = await postAndDeliver({
-      identity, proofId: frozen.id, state: ctx.proof.state, recheck: () => ctx.cancel.aborted ? 'Attempt cancelled' : deps.recheck('deliver'),
+      identity, proofId: frozen.id, state: ctx.proof.state, criterionIds: ctx.proof.criterionIds, recheck: () => ctx.cancel.aborted ? 'Attempt cancelled' : deps.recheck('deliver'),
       iid: rec.iid, project: rec.project, branch: rec.branch, base: rec.base, baseSha: ctx.baseSha, tip, title: ctx.title, evidenceHost: dir,
       parentIid: ctx.parentIid, origin: { kind: "repaired", attempt: rec.seq }, staleNote: "",
       ciWaitMinutes: ctx.delivery.ciWaitMinutes, noCiMinutes: ctx.delivery.noCiMinutes, autoMerge: ctx.delivery.autoMerge,

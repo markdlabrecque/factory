@@ -803,6 +803,29 @@ cleanup-pending, review-required, behavior-mismatch and infrastructure categorie
 Remaining direct/adopted/recovery and projection coverage must not be inferred from
 this API. Original roles, full baseline, bundle, work and budgets are unchanged.
 
+## Semantic criterion inventory (partial candidate-proof integration)
+
+Standard normal and recovery main retain the criterion IDs from the authenticated
+original custody bundle and supply them to the existing independent `runVerifier`.
+Its `ACCEPTANCE_CRITERIA` prompt argument is host-owned; a verifier/repair report
+cannot choose the authoritative list. Each PASS report criterion must carry a
+`criterionId` matching one original ID, exactly once. `requirement` remains descriptive
+text, not an identity. Missing, extra, duplicate, unknown or absent IDs refuse before
+proof creation, posting or push. Normal/recovery retain that same host inventory
+through proof freezing and every immediate handoff proof reread/authorization,
+so changing mutable evidence after the verifier cannot erase coverage. Historical
+proof inspection without an inventory remains diagnostic and invents no IDs.
+The shared evidence boundary accepts up to 256
+criteria, matching the acceptance-contract inventory bound. Historical non-PASS
+reports remain inspectable diagnostics without inventing omitted evaluations.
+
+This is a semantic-inventory fence only: ID coverage is not per-obligation semantic
+adequacy, browser/manual evidence authentication or deterministic replay. The
+baseline-only producer, policy-1 proof writer/readers and CI continuation have NOT
+been upgraded into an authenticated baseline→candidate chain by this increment.
+No complete exact-candidate/recovery-proof guarantee or automatic migration follows;
+those remaining task requirements must be implemented before acceptance/publication.
+
 ## Verification
 
 ```sh

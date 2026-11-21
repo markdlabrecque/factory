@@ -106,6 +106,8 @@ async function recoveryComparisonHold(sandbox: VerifierSandbox, baseline: string
 /** Run the independent verifier on `tip` in the run's sandbox. Returns why the result can't be used, or undefined. */
 export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "setStage">,
   o: { iid: string; evidenceHost: string; agent: unknown; promptArgs: Record<string, string>; tip: string; promptFile?: string;
+    /** Host-retained original criterion IDs; candidate/repair reports cannot select this inventory. */
+    criterionIds?: readonly string[];
     /** Only the owned recovery runner sets this, from the admitted attempt and historical baseline. */
     recoveryComparison?: { baseline: string; start: string };
     execution?: { context: import('./context.mts').ExecutionContext; runId: string; manifest: Manifest; requirementsHash: string; input?: import('./ticket-input.mts').FrozenTicketInput } }): Promise<string | undefined> {
@@ -135,6 +137,7 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
     agent: o.agent,
     promptFile: o.execution?.context.identity.gate ? o.execution.context.codePath('prompt.verify.md') : o.promptFile ?? VERIFY_PROMPT,
     promptArgs: { ...o.promptArgs, TIP_SHA: o.tip, RECOVERY_START_SHA: comparison?.start ?? '(none)',
+      ACCEPTANCE_CRITERIA: o.criterionIds === undefined ? '(not supplied; evaluate every original ticket requirement)' : JSON.stringify(o.criterionIds),
       ...(comparison ? { BASE_SHA: comparison.baseline } : {}) },
     maxIterations: 1,
     completionSignal: "<promise>COMPLETE</promise>",
@@ -153,7 +156,7 @@ export async function runVerifier(sandbox: VerifierSandbox, host: Pick<Host, "se
   if (ver.commits.length || after !== o.tip || dirty) {
     return `Verifier changed the branch (commits=${ver.commits.length}, head=${after.slice(0, 8)}, dirty=${!!dirty}). Not posting or pushing; inspect ${sandbox.worktreePath ?? "the worktree"}.`;
   }
-  try { current(); validateEvidence(o.evidenceHost); }
+  try { current(); validateEvidence(o.evidenceHost, o.criterionIds); }
   catch (e) { return `${(e as Error).message}. Retain evidence in ${o.evidenceHost}; custom verifier prompts must be explicitly upgraded to write verification.json (policy 1).`; }
   return undefined;
 }
@@ -164,6 +167,8 @@ export interface Handoff {
   /** Host-owned identity and proof, never obtained from agent reports. */
   identity: Identity;
   proofId: string;
+  /** Original host inventory retained through freezing and each delivery authorization. */
+  criterionIds?: readonly string[];
   state: string;
   /** Fail closed: undefined means authorized; a reason or exception refuses the operation. */
   recheck: () => string | undefined;
@@ -196,14 +201,14 @@ export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   const authorize = (): string | undefined => {
     try {
       if (h.identity.project !== h.project || h.identity.ticket !== iid || h.identity.tip !== tip || h.identity.baseline !== h.baseSha || h.identity.branch !== branch || h.identity.base !== base) return 'handoff identity mismatch';
-      const frozen = readProof(h.state, h.identity, h.proofId);
+      const frozen = readProof(h.state, h.identity, h.proofId, h.criterionIds);
       const gateHold=gateProofHold(h.state,frozen.proof);if(gateHold)return gateHold;
       return h.recheck();
     } catch (e) { return `Verification authorization failed: ${(e as Error).message}`; }
   };
   const refusal = authorize();
   if (refusal) return { ok: false, reason: refusal };
-  const frozen = readProof(h.state, h.identity, h.proofId);
+  const frozen = readProof(h.state, h.identity, h.proofId, h.criterionIds);
   const { verdictText } = frozen;
   const verdict = frozen.report.verdict;
   const repaired = h.origin.kind === "repaired" ? `Repaired by Factory recovery attempt ${h.origin.attempt}, then verified independently.` : "";
