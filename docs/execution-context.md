@@ -287,6 +287,9 @@ its exact live normal claim/entry/custody; no foreign ownership or cap is bypass
 Version2/policy2 normal proofs retain authenticated baseline/candidate handles plus the
 original full policy/raw-config binding; writer and shared proof readers authenticate both
 producer seals, exact SHAs, independent owners, original bytes, current grants and cleanup.
+The current host preparation and baseline reference must still match. Writer and reader
+also check the project/state, requirements hash, image and normal-only replay purpose,
+and derive mandatory semantic criterion IDs from the authenticated original bundle.
 All changed modules were already shipped by the complete runtime inventory; the new test
 host is fixture-only. This is not full T5 migration: recovery attempt-bound replay, complete
 evidence obligations and current-original/legacy CI continuation policy remain outstanding.

@@ -794,7 +794,9 @@ retained. Normal verification additionally requires a separately host-authorized
 exact-candidate replay through the existing owned runner after implementer payload teardown.
 It retains an authenticated baseline/candidate chain in version2/policy2 proof, revalidated
 on shared proof reads and every immediate normal delivery authorization. Missing grant,
-unknown/infrastructure replay, mismatched bundle and changed candidate hold without push.
+unknown/infrastructure replay, mismatched bundle or preparation and changed candidate hold
+without push. A non-PASS verifier report remains diagnostic and does not start candidate
+replay; accepting proof requires the exact original criterion inventory and a separate PASS.
 Candidate execution consumes a separate capacity slot; no spare slot means hold. There is
 no automatic grant, preparation command, retry or budget exemption. Inspect retained private
 candidate handles and original baseline/custody with the trusted host preparer; never edit

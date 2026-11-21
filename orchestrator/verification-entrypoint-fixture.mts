@@ -20,7 +20,7 @@ import { structuredContextSource } from './ticket-context-source.mts';
 import { install } from '../cli/src/commands/install.mts';
 import { pathToFileURL } from 'node:url';
 import { fixtureReport } from './fixtures/verification.mts';
-import { proofRoot } from './verification.mts';
+import { createProof, proofRoot, readProof } from './verification.mts';
 import { createHash } from 'node:crypto';
 import { MODEL_POLICY } from './model-policy.mts';
 import { supervisorHash } from './supervisor-contract.mts';
@@ -807,6 +807,23 @@ console.log('sha256:'+'a'.repeat(64));
         assert.equal(JSON.parse(readFileSync(join(baselineHandle.directory,'sandbox-output.json'),'utf8')).results.assertions[0].status,'expected-behavioral-fail');
         assert.notEqual(baselineHandle.ownerId,proof.candidateReplay.candidate.ownerId);
         assert.notEqual(baselineHandle.executionId,proof.candidateReplay.candidate.executionId);
+        const { project, ticket, executionId, branch, base, requirementsHash } = proof;
+        const identity = { project, ticket, executionId, branch, base, baseline, tip, requirementsHash };
+        const provenance = proof.provenance;
+        const replay = proof.candidateReplay;
+        assert.throws(() => createProof(state, run.evidenceDir, { ...identity, project: 'foreign/project' }, provenance, undefined, replay), /replay.*project/i);
+        assert.throws(() => createProof(state, run.evidenceDir, identity, { ...provenance, imageId: `sha256:${'b'.repeat(64)}` }, undefined, replay), /replay.*image/i);
+        const unrelatedAttempt = 'd5135819-dad4-4942-aa99-393592637af8';
+        assert.throws(() => createProof(state, run.evidenceDir, { ...identity, attemptId: unrelatedAttempt }, provenance, undefined, replay), /replay.*attempt/i);
+        for (const verdict of ['FAIL', 'INCONCLUSIVE']) {
+          writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify({ ...proof.report, verdict }));
+          writeFileSync(join(run.evidenceDir, 'verdict.md'), `VERDICT: ${verdict}\nSynthetic independent verdict`);
+          assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /replay.*semantic PASS/i);
+        }
+        writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify({ ...proof.report, criteria: proof.report.criteria.slice(1) }));
+        writeFileSync(join(run.evidenceDir, 'verdict.md'), 'VERDICT: PASS\nSynthetic independent verdict');
+        assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /authoritative criterion inventory/);
+        assert.equal(readProof(state, identity, run.verification.id).report.verdict, 'PASS');
       }
       if (copied) {
         assert.match(result.stdout, /implementer openai\/gpt-6\.1-terra/);

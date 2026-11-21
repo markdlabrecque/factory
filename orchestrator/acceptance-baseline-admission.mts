@@ -176,7 +176,7 @@ export async function candidateRequestForTicket(iid: number, base: string, origi
 }
 /** Authenticate BOTH independently produced executions, retained grant, raw output and original custody.
  * No arbitrary receipt/report JSON or candidate-owned path can replace a producer publication. */
-export function authenticateCandidateReplay(replay: CandidateReplay, expected: {baseline:string;tip:string;executionId:string;ticket:string}, now=Date.now()) {
+export function authenticateCandidateReplay(replay: CandidateReplay, expected: {baseline:string;tip:string;executionId:string;ticket:string;project?:string;state?:string;attemptId?:string;requirementsHash?:string;imageId?:string}, now=Date.now()) {
   if (!replay || replay.version!==1 || replay.baseline.executionId===replay.candidate.executionId || replay.baseline.ownerId===replay.candidate.ownerId) throw Error('Acceptance candidate hold: independent execution missing');
   const b=readBaselineSpec(replay.baseline), c=readBaselineSpec(replay.candidate), r=c.intent.request as BaselineRequest;
   const w=r.candidate;
@@ -186,6 +186,11 @@ export function authenticateCandidateReplay(replay: CandidateReplay, expected: {
     || !same(replay.binding.bundle,r.pointer) || replay.binding.sha!==expected.baseline || acceptanceHash(replay.binding)!==w.bindingDigest
     || replay.binding.runtime!==c.intent.runtime || replay.binding.dependencies!==c.intent.dependencies
     || b.intent.approval!==c.intent.approval) throw Error('Acceptance candidate hold: chain identity mismatch');
+  if ((expected.project !== undefined && r.project.tracker.project !== expected.project)
+    || (expected.state !== undefined && r.stateDir !== expected.state)) throw Error('Acceptance replay project/state mismatch');
+  if (expected.attemptId !== undefined) throw Error('Acceptance replay attempt mismatch');
+  if (expected.requirementsHash !== undefined && replay.binding.ticket?.contentHash !== expected.requirementsHash) throw Error('Acceptance replay requirements mismatch');
+  if (expected.imageId !== undefined && !r.image.endsWith(`@${expected.imageId}`)) throw Error('Acceptance replay image mismatch');
   for (const [h,s,phase] of [[replay.baseline,b,'baseline'],[replay.candidate,c,'candidate']] as const) {
     if (h.directory!==join(s.intent.request.ownedRoot,h.executionId) || h.stateDir!==r.stateDir || existsSync(join(h.directory,'cancel.json'))
       || !same(privateRecord(r.custodyRoot,`execution-authorization-${acceptanceHash(s.intent)}.json`),s.grant) || s.grant.expiresAt<now) throw Error('Acceptance candidate hold: authorization revoked/expired');
@@ -194,8 +199,16 @@ export function authenticateCandidateReplay(replay: CandidateReplay, expected: {
   }
   // Rehash the originals, not just the previously sealed receipt's declared bundle ID.
   const bundle=readAcceptanceBundle(r.custodyRoot,r.agentMounts,r.pointer);
-  if(bundle.manifest.approvalDigest!==c.intent.approval) throw Error('Acceptance candidate hold: original approval changed');
-  return replay;
+  const ticket = frozenTicketIdentity(bundle.ticket);
+  const plan = privateRecord(r.custodyRoot, `baseline-plan-${ticket.contentHash}.json`);
+  const reference = privateRecord(r.custodyRoot, `baseline-current-${ticket.contentHash}.json`);
+  const prepared = privateRecord(r.custodyRoot, `prepared-${ticket.contentHash}.json`);
+  if (!same(ticket, replay.binding.ticket) || !same(reference.handle, replay.baseline) || !same(reference.binding, replay.binding)
+    || !same(plan.request, baselineRequest) || acceptanceHash(plan) !== replay.binding.planDigest
+    || plan.policyIdentity !== replay.binding.policyIdentity || plan.configDigest !== replay.binding.configDigest
+    || !same(prepared.bundle, r.pointer) || prepared.approvalDigest !== c.intent.approval
+    || bundle.manifest.approvalDigest !== c.intent.approval) throw Error('Acceptance candidate hold: original preparation/config/approval changed');
+  return { replay, criteria: bundle.contract.criteria };
 }
 /** Normal workflow ingress: no automatic grant, retry, inherited sandbox or second lifecycle. */
 export async function replayAcceptanceCandidateForTicket(iid:number,base:string,original:OriginalBaseline,tip:string,workflow:NonNullable<BaselineRequest['candidate']>,signal?:AbortSignal):Promise<CandidateReplay> {
@@ -216,7 +229,7 @@ export async function replayAcceptanceCandidateForTicket(iid:number,base:string,
       await startAcceptanceBaseline(handle,true).finished;
       await requireAcceptanceBaselineForTicket(iid,base,original);
       const replay={version:1 as const,baseline:reference.handle,candidate:handle,binding:before.binding};
-      return authenticateCandidateReplay(replay,{baseline:original.sha,tip,executionId:workflow.executionId,ticket:String(iid)});
+      return authenticateCandidateReplay(replay,{baseline:original.sha,tip,executionId:workflow.executionId,ticket:String(iid)}).replay;
     } catch(error){cancel();throw error;} finally{signal?.removeEventListener('abort',cancel);}
   } catch(error){throw Error(`Acceptance candidate hold: ${(error as Error).message}`);}
 }

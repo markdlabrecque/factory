@@ -40,7 +40,7 @@ import { blockedOutcome, expandUnits, SANDCASTLE_MARK } from "./graph.mts";
 import type { ImplementerBlocker } from "./graph.mts";
 import { patchManifest, readManifest } from "./manifests.mts";
 import { postAndDeliver, prerequisiteHold, runVerifier } from "./handoff.mts";
-import { assertProofStoreOutsideMounts, createProof } from './verification.mts';
+import { assertProofStoreOutsideMounts, createProof, validateEvidence } from './verification.mts';
 import type { Provenance } from './verification.mts';
 import type { Host } from "./handoff.mts";
 import { ownedContainerGone, readAttemptRecord, realClock, realDocker, REPAIR_DEADLINE_MS, REPAIR_MINUTES, runRecoveryAttempt } from "./recovery.mts";
@@ -789,13 +789,22 @@ if (blockers) {
 // ---- 3. post evidence to the ticket (host-side) -----------------------------------
 const replayHold = recheck(); if (replayHold) fail(replayHold);
 if(sh('git',['rev-parse',`refs/heads/${branch}`])!==tip) fail('Branch moved from verified tip before acceptance replay');
-candidateReplay = await replayAcceptanceCandidateForTicket(Number(iid),base,{sha:baseSha,admission:acceptanceBaseline},tip,{
-  key:keyFor(iid!,PROJECT),executionId,claim:claimToken!,entry:managedEntry,custody:custody.pointer,baseline:baseSha,bindingDigest:acceptanceBaseline.bindingDigest,
-},sandboxCancel.signal);
-const afterReplayHold = recheck(); if (afterReplayHold) fail(afterReplayHold);
+if (validateEvidence(evidenceHost, acceptanceCriterionIds).report.verdict === 'PASS') {
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, cancelSandbox);
+  try {
+    candidateReplay = await replayAcceptanceCandidateForTicket(Number(iid),base,{sha:baseSha,admission:acceptanceBaseline},tip,{
+      key:keyFor(iid!,PROJECT),executionId,claim:claimToken!,entry:managedEntry,custody:custody.pointer,baseline:baseSha,bindingDigest:acceptanceBaseline.bindingDigest,
+    },sandboxCancel.signal);
+    sandboxCancel.signal.throwIfAborted();
+  } finally {
+    for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, cancelSandbox);
+  }
+  const afterReplayHold = recheck(); if (afterReplayHold) fail(afterReplayHold);
+}
 setStage(iid, { stage: "posting" });
 const identity = { project: PROJECT, ticket: iid, executionId, branch, base, baseline: baseSha, tip, requirementsHash: startVersion.hash };
 const frozen = createProof(stateDir(), evidenceHost, identity, verifiedProvenance!, acceptanceCriterionIds, candidateReplay);
+if (frozen.proof.report.verdict === 'PASS' && !candidateReplay) fail('Semantic evidence changed after teardown; exact candidate replay and fresh verification required');
 setStage(iid, { verification: { id: frozen.id, tip, requirementsHash: startVersion.hash } });
 // ---- 3-4. post evidence, then on PASS push and deliver (handoff.mts) ----------------
 const outcome = await postAndDeliver({

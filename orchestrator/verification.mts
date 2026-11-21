@@ -129,13 +129,19 @@ export const proofRoot = (state: string, project: string, ticket: string, id: st
   // The run key is constructed, not taken from agent metadata; no caller-controlled paths.
   return resolve(state, 'verification', `${sha256(project)}--${encodeURIComponent(ticket)}`, id);
 };
+function replayCriterionIds(state: string, identity: Identity, provenance: Provenance, replay: CandidateReplay | undefined, fallback?: readonly string[]) {
+  if (!replay) return fallback;
+  const { criteria } = authenticateCandidateReplay(replay, { ...identity, state, imageId: provenance.imageId });
+  return criteria.map(c => c.id);
+}
 /** Call only after verifier immutability checks and confirmed sandbox teardown. */
 export function createProof(state: string, evidence: string, identity: Identity, provenance: Provenance, criterionIds?: readonly string[], candidateReplay?: CandidateReplay) {
   checkIdentity(identity);
-  if(candidateReplay) authenticateCandidateReplay(candidateReplay,{baseline:identity.baseline,tip:identity.tip,executionId:identity.executionId,ticket:identity.ticket});
+  const authoritativeIds = replayCriterionIds(state, identity, provenance, candidateReplay, criterionIds);
   assertProofStoreOutsideMounts(state, [evidence]);
   demand(/^sha256:[0-9a-f]{64}$/.test(provenance.imageId) && text(provenance.nodeVersion), 'missing immutable image ID or verifier Node version');
-  const validated = validateEvidence(evidence, criterionIds), id = randomUUID(), root = proofRoot(state, identity.project, identity.ticket, id);
+  const validated = validateEvidence(evidence, authoritativeIds), id = randomUUID(), root = proofRoot(state, identity.project, identity.ticket, id);
+  demand(!candidateReplay || validated.report.verdict === 'PASS', 'replay proof requires independent semantic PASS');
   const staging = root + '.tmp';
   demand(!resolve(evidence).startsWith(resolve(state, 'verification') + '/'), 'evidence must be separate from proof storage');
   mkdirSync(staging, { recursive: true, mode: 0o700 });
@@ -143,7 +149,7 @@ export function createProof(state: string, evidence: string, identity: Identity,
     const target = join(staging, path); mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
     writeFileSync(target, file(evidence, path), { flag: 'wx', mode: 0o400 });
   }
-  const { report, artifacts, reportHash, verdictHash } = validateEvidence(staging, criterionIds);
+  const { report, artifacts, reportHash, verdictHash } = validateEvidence(staging, authoritativeIds);
   demand(reportHash === validated.reportHash && verdictHash === validated.verdictHash && JSON.stringify(artifacts) === JSON.stringify(validated.artifacts), 'evidence changed while freezing');
   const proof: Proof = { version: candidateReplay ? 2 : 1, id, ...identity, ...(candidateReplay ? {candidateReplay:structuredClone(candidateReplay)} : {}), verifiedAt: new Date().toISOString(), policyVersion: candidateReplay ? 2 : 1, report, reportHash, verdictHash, artifacts, provenance: { ...provenance, settingsHash: sha256(JSON.stringify(provenance.settings)) } };
   writeFileSync(join(staging, 'proof.json'), JSON.stringify(proof, null, 2) + '\n', { flag: 'wx', mode: 0o400 });
@@ -159,9 +165,10 @@ export function readProof(state: string, identity: Identity, id: string, criteri
     || proof.version===2 && proof.policyVersion===2 && proof.candidateReplay!==undefined), 'unsupported or missing replay proof');
   for (const k of ['project', 'ticket', 'executionId', 'attemptId', 'branch', 'base', 'baseline', 'tip', 'requirementsHash'] as const)
     demand(proof[k] === identity[k], `proof identity mismatch: ${k}`);
-  if(proof.candidateReplay) authenticateCandidateReplay(proof.candidateReplay,{baseline:identity.baseline,tip:identity.tip,executionId:identity.executionId,ticket:identity.ticket});
   demand(proof.provenance?.settingsHash === sha256(JSON.stringify(proof.provenance?.settings)), 'proof settings integrity mismatch');
-  const v = validateEvidence(root, criterionIds);
+  const authoritativeIds = replayCriterionIds(state, identity, proof.provenance, proof.candidateReplay, criterionIds);
+  const v = validateEvidence(root, authoritativeIds);
+  demand(!proof.candidateReplay || v.report.verdict === 'PASS', 'replay proof requires independent semantic PASS');
   demand(v.reportHash === proof.reportHash && v.verdictHash === proof.verdictHash && JSON.stringify(v.artifacts) === JSON.stringify(proof.artifacts) && JSON.stringify(v.report) === JSON.stringify(proof.report), 'proof integrity mismatch');
   return { root, proof, ...v };
 }

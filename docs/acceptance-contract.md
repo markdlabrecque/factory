@@ -853,8 +853,12 @@ original changed-baseline named-red semantics remain unchanged.
 checks independent execution/owner IDs, exact original/candidate SHAs, identical frozen
 bundle/approval/runtime/dependencies/image/setup/reset and full policy/raw-config binding,
 current matching unexpired grants, cancellation and confirmed cleanup. It rehashes original
-custody bytes. Normal proof version2/policy2 retains this chain; its writer and every shared
-proof reread authenticate it. Removing the chain from a version2 proof holds. Immediate
+custody bytes and checks that the retained preparation, current baseline reference and
+policy/raw-config pins still match. Normal proof version2/policy2 also binds project, state,
+complete requirements hash and verifier image; a normal receipt cannot serve as repair proof.
+The writer and reader derive the mandatory criterion inventory from the authenticated bundle
+and require independent semantic PASS. Non-PASS diagnostics need no candidate replay.
+Removing the chain from a version2 proof holds. Immediate
 normal delivery reauthenticates the retained chain as well as its existing exact branch,
 requirements, claim, local/remote SHA and CI gates. Unknown, infrastructure, mismatched
 bundle or changed candidate cannot deliver. Replay never overrides semantic non-PASS.
