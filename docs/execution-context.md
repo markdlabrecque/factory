@@ -157,6 +157,13 @@ admission publication index authenticate exact results and retained raw output;
 caller booleans or arbitrary policy-valid JSON are not producer receipts.
 See [the owned producer contract](acceptance-contract.md#owned-baseline-producer)
 for supported images, limits, source APIs and real-runtime evidence limitations.
+The owned-runner tests now execute the actual copied driver/setup/frozen probe in a
+local rootless namespace with only a copied executable/library closure, read-only
+inputs and disposable private synthetic state. Two fresh executions observe the
+same seed/SHA; reuse of persistent dirty synthetic state yields a real setup failure
+and no results. This is filesystem-backed synthetic site evidence, not actual
+CMS/SQL reset, Docker cgroups or the different-UID watchdog. Those proof limits and
+unsupported-reset holds remain; no project-class narrowing is implied.
 No standard entrypoint admission, implementation launch or candidate-proof gate is
 activated here; independent custody/semantic review remains separate.
 
