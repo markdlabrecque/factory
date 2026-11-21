@@ -471,10 +471,39 @@ Keep every custody return value host-private. The implementer receives requireme
 and diagnostic summaries, not these authoritative artifacts or an ingress capability.
 No current prompt, CLI or scheduler gains a new authority path from these APIs.
 
+## Baseline receipt policy component (not an execution runner)
+
+`orchestrator/acceptance-receipt.mts` supplies `checkAcceptanceReceipt(contract,
+approvals, observed, expectedBinding, now)`, a pure baseline-only policy check.
+The expected binding is independently supplied by trusted host orchestration, not
+copied from the observed receipt. It compares execution, bundle, approval ID and
+canonical approval digest, exact Git SHA, selected runtime/private dependencies,
+immutable image/config/setup identities, reset provenance and sandbox owner ID.
+Every binding field must match, with no extra or missing binding fields.
+
+Version 1 receipts contain exactly `version`, `binding`, `startedAt`, `deadline`,
+`finishedAt`, `cleanup` and `results`. Integer timestamps must describe a positive
+finite execution window no longer than the contract's 300,000 ms ceiling. Completion
+before start, after deadline or after the supplied current observation holds, as does
+unconfirmed cleanup. The independently retained review must match both approval ID
+and digest; another approval for the same contract cannot substitute. The existing
+contract checker then reconciles baseline assertion inventory, transition outcomes
+and required non-transition evidence against a single snapshot of that review.
+
+This component **does not authenticate observations or enforce cleanup**. Its
+`cleanup` field and timestamps must eventually come from a durable owned execution
+boundary; accepting caller-supplied values is not that boundary. It does not reserve
+capacity, persist receipts, create/reset a sandbox, bound a running process or grant
+candidate-proof/implementation authority. No `acceptance-runner.mts` is implemented
+in this increment and no entrypoint consumes this check. Execution ownership,
+independent deadline enforcement, reset adapters and retained receipt publication
+remain outstanding. In particular, a green policy unit is not T3-ownership or
+T3-isolation acceptance and does not change custody's independent review status.
+
 ## Verification
 
 ```sh
-node --test orchestrator/acceptance-contract.test.mts orchestrator/acceptance-custody.test.mts orchestrator/ticket-input.test.mts
+node --test orchestrator/acceptance-contract.test.mts orchestrator/acceptance-custody.test.mts orchestrator/acceptance-receipt.test.mts orchestrator/ticket-input.test.mts
 ```
 
 Custody uses pure preparation/binding tests plus a disposable filesystem boundary

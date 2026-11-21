@@ -136,6 +136,22 @@ code and an isolated implementer, not protection against malicious same-UID host
 processes. See [the custody API contract](acceptance-contract.md#host-owned-frozen-acceptance-custody)
 for bounds, publication/retention and caller responsibilities.
 
+### Baseline receipt policy without execution authority
+
+The selected inventory also includes `acceptance-receipt.mts`, a pure baseline
+receipt policy component. It compares an independently supplied host binding for
+execution/bundle/approval/SHA/runtime/dependencies/image/config/setup/reset/owner,
+checks the finite completion window and reuses the contract's exact assertion and
+evidence reconciliation. A different review of identical acceptance cannot replace
+the retained approval ID/digest. See [the receipt policy contract](acceptance-contract.md#baseline-receipt-policy-component-not-an-execution-runner).
+
+No owned baseline runner or durable receipt producer is supplied yet. `cleanup:
+'confirmed'` and reset provenance are data to be authenticated by a future owned
+boundary, not callback assertions that establish actual resource absence or clean
+site/database state. No shared capacity is reserved, no sandbox runs and no admission
+or proof gate is activated by this component. An execution context or policy-valid
+object alone cannot satisfy those missing guarantees.
+
 ## Normal payload custody and terminal handoff
 
 The standard launcher inventories `payload-custody.mts` with the exact selected
