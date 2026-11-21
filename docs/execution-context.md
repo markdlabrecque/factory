@@ -136,6 +136,37 @@ code and an isolated implementer, not protection against malicious same-UID host
 processes. See [the custody API contract](acceptance-contract.md#host-owned-frozen-acceptance-custody)
 for bounds, publication/retention and caller responsibilities.
 
+### Owned baseline execution and receipt custody
+
+The selected inventory includes `acceptance-runner.mts`, `acceptance-worker.mts`,
+`acceptance-sandbox.mjs` and the pure `acceptance-receipt.mts` policy checker.
+The host producer requires distinct exact execution authorization, a complete
+validated runtime/private dependency identity and a saved frozen bundle/approval.
+It reserves separate capacity under the shared admission lock, starts a detached
+worker, transports only exact Git objects and rehashed runner copies, and performs
+setup/probes only inside the bounded private sandbox. Fresh `/work` and `/state`
+support pinned project-local synthetic web/database setup; no implementer/shared
+Git, original custody, host credentials, Docker socket or external resources are
+mounted or authorized. Unsupported reset holds.
+
+Controller death does not release the reservation. A different-UID in-container
+watchdog bounds payload execution independently; stable engine/container/owner/
+generation cleanup, deadline and cancellation fencing govern settlement. Unknown
+or ambiguous late creation retains capacity. An immutable producer seal and durable
+admission publication index authenticate exact results and retained raw output;
+caller booleans or arbitrary policy-valid JSON are not producer receipts.
+See [the owned producer contract](acceptance-contract.md#owned-baseline-producer)
+for supported images, limits, source APIs and real-runtime evidence limitations.
+The owned-runner tests now execute the actual copied driver/setup/frozen probe in a
+local rootless namespace with only a copied executable/library closure, read-only
+inputs and disposable private synthetic state. Two fresh executions observe the
+same seed/SHA; reuse of persistent dirty synthetic state yields a real setup failure
+and no results. This is filesystem-backed synthetic site evidence, not actual
+CMS/SQL reset, Docker cgroups or the different-UID watchdog. Those proof limits and
+unsupported-reset holds remain; no project-class narrowing is implied.
+No standard entrypoint admission, implementation launch or candidate-proof gate is
+activated here; independent custody/semantic review remains separate.
+
 ## Normal payload custody and terminal handoff
 
 The standard launcher inventories `payload-custody.mts` with the exact selected
@@ -321,6 +352,17 @@ preserving claims/generations/recovery pending and candidate accounting. Old act
 v1 readers reject v2. No optional exclusion bypass or downgrade is supported. Complete
 copy/import fixtures must include both assets unchanged; never fall back to source
 code from a selected flat runtime.
+
+Owned baseline reservations additionally use the mandatory v1
+`admission/baselines.json` sidecar under that same lock. Normal/recovery/delivery
+capacity counts retained baselines, conflicting managed entries refuse them, and
+supervisor acquisition requires their quiescence. No baseline creates a run or
+recovery charge. Baselines are never reaped by PID or age. **Old v2 admission code
+does not understand this sidecar**: select the entire updated admission/board/
+supervisor runtime and quiesce all old/unmanaged work before baseline API use.
+Keeping the main state version at 2 is not a mixed-runtime compatibility guarantee.
+Immutable `admission/baseline-<execution>.sealed` indexes survive reservation release;
+private receipt/spec/output identities remain retained outside sandbox mounts.
 
 Managed CLI dispatch/manual/selected-issue, shell bootstrap, standard direct main/
 dispatch and recovery launch acquire durable entry ownership before effecting work.

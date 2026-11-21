@@ -1,4 +1,5 @@
-// Shared v2 exclusion covers managed launch entries and durable supervisor holds; neither is send authorization.
+// Shared v2 exclusion covers managed entries, durable supervisor holds and separate durable baseline reservations.
+// Baselines use the same transaction lock, survive controller death and consume capacity until exact engine cleanup.
 // Persisted writers may defer observational callbacks until every admission critical section has exited.
 // Admission reads fail closed on malformed stores or IO uncertainty; only ENOENT means absent.
 // Directory creation/replacement is strictly synced; unsupported or failed durability never returns successful publication.
@@ -76,6 +77,30 @@ export const admissionDir = (stateDir: string) => join(stateDir, "admission");
 export const admissionFile = (stateDir: string) => join(admissionDir(stateDir), "state.json");
 export const emptyAdmission = (): AdmissionState => ({ version: 2, supervisorHolds: {}, entries: {}, claims: {}, generations: {}, recovery: {} });
 export const newToken = () => randomUUID();
+
+/** Separate pre-implementation reservations, NOT run claims or recovery attempts. Never reap by PID/age.
+ * Compatible readers must consult this sidecar under the same admission lock before claiming capacity. */
+export interface BaselineReservation {
+  executionId: string; ownerId: string; generation: string; project: AdmissionIdentity;
+  iid: string; engine: string; name: string; intentDigest: string; tokenDigest: string; deadline: number;
+}
+export const baselineFile = (dir: string) => join(admissionDir(dir), 'baselines.json');
+export function readBaselineReservations(dir: string): BaselineReservation[] {
+  let d: any;
+  try { d = JSON.parse(readFileSync(baselineFile(dir), 'utf8')); }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []; throw Error('Baseline reservations unreadable; admission held'); }
+  if (!isObj(d) || Object.keys(d).sort().join() !== 'reservations,version' || d.version !== 1 || !Array.isArray(d.reservations)
+    || new Set(d.reservations.map((r: any) => r?.executionId)).size !== d.reservations.length
+    || !d.reservations.every((r: any) => isObj(r) && Object.keys(r).sort().join() === 'deadline,engine,executionId,generation,iid,intentDigest,name,ownerId,project,tokenDigest'
+      && ['executionId','ownerId','generation','iid','engine','name','intentDigest','tokenDigest'].every(k => str(r[k]))
+      && validAdmissionIdentity(r.project) && Number.isSafeInteger(r.deadline) && r.deadline > 0)) throw Error('Baseline reservations malformed; admission held');
+  return d.reservations;
+}
+/** Trusted transaction writer only: use within withAdmission, never infer release from controller death. */
+export function writeBaselineReservations(dir: string, reservations: BaselineReservation[]): void {
+  if (!admissionDepth) throw Error('Baseline reservation write requires admission transaction');
+  writeDurable(baselineFile(dir), JSON.stringify({ version: 1, reservations }));
+}
 
 // ---- process identity ------------------------------------------------------------------------------------------------
 
@@ -189,6 +214,7 @@ export function claimManagedEntry(dir: string, project: AdmissionIdentity): stri
   return withAdmission(dir, tx => {
     const reason = supervisorExclusion(tx.state, project.tracker.project, project.root);
     if (reason) throw Error(reason);
+    if (readBaselineReservations(dir).some(b => admissionConflict(b.project, project))) throw Error('Project held by acceptance baseline cleanup');
     const owner = ownerOf(process.pid);
     if (!owner.start) throw Error('Managed entry owner unknown');
     const id = newToken(); tx.state.entries[id] = { id, project: structuredClone(project), owner }; tx.commit(); return id;

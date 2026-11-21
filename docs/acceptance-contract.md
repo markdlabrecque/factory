@@ -5,8 +5,9 @@ hashing, structural checks, approval binding and assertion transition policy. It
 imports only Node crypto, never project configuration, trackers, processes or models.
 It does not execute argv, read files, authenticate reviewers, freeze bundles, admit
 work, publish receipts or grant delivery authority. The flat runtime includes this
-module now. The host-only custody APIs below freeze reviewed originals; runner,
-admission and exact-candidate proof remain later layers.
+module. The host-only custody APIs below freeze reviewed originals; the owned
+baseline producer below executes them. Standard entrypoint admission and
+exact-candidate proof remain later layers.
 No existing ticket is automatically migrated or made ready by these functions.
 
 ## Trust and identity
@@ -185,7 +186,7 @@ budget and can overflow; that fails closed as `invalid-results`, never a pass.
 The 256/257 aggregate admission rule remains necessary independently of byte sizing.
 
 Enforcement, cancellation, overflow handling and resource/cleanup ownership belong
-to the future runner. Exceeding a bound cannot yield expected behavioral red. Runner
+to the owned runner below. Exceeding a bound cannot yield expected behavioral red. Runner
 receipts must additionally bind exact baseline/candidate SHA, frozen byte identity,
 approval, execution/attempt, runtime/image/config/dependencies and clean/reset
 provenance. These interfaces do not implement receipt authentication or custody.
@@ -376,7 +377,7 @@ recovery comparisons.
 ## Host-owned frozen acceptance custody
 
 `orchestrator/acceptance-custody.mts` supplies explicit source APIs, shipped in the
-complete flat runtime. They do **not** activate a gate, run probes, fetch tracker
+complete flat runtime. These custody functions do **not** activate a gate, run probes, fetch tracker
 instructions, admit implementation or publish replay/delivery proof. Existing
 standard entrypoints are not yet wired to consume these bundles.
 
@@ -471,10 +472,216 @@ Keep every custody return value host-private. The implementer receives requireme
 and diagnostic summaries, not these authoritative artifacts or an ingress capability.
 No current prompt, CLI or scheduler gains a new authority path from these APIs.
 
+## Baseline receipt policy component (not an execution runner)
+
+`orchestrator/acceptance-receipt.mts` supplies `checkAcceptanceReceipt(contract,
+approvals, observed, expectedBinding, now)`, a pure baseline-only policy check.
+The expected binding is independently supplied by trusted host orchestration, not
+copied from the observed receipt. It compares execution, bundle, approval ID and
+canonical approval digest, exact Git SHA, selected runtime/private dependencies,
+immutable image/config/setup identities, reset provenance and sandbox owner ID.
+Every binding field must match, with no extra or missing binding fields.
+
+Version 1 receipts contain exactly `version`, `binding`, `startedAt`, `deadline`,
+`finishedAt`, `cleanup` and `results`. Integer timestamps must describe a positive
+finite execution window no longer than the contract's 300,000 ms ceiling. Completion
+before start, after deadline or after the supplied current observation holds, as does
+unconfirmed cleanup. The independently retained review must match both approval ID
+and digest; another approval for the same contract cannot substitute. The existing
+contract checker then reconciles baseline assertion inventory, transition outcomes
+and required non-transition evidence against a single snapshot of that review.
+
+This pure component **does not authenticate observations or enforce cleanup**.
+Use the producer read API below, not an arbitrary policy-valid JSON object, as
+execution evidence. Neither API grants candidate-proof/implementation authority.
+Custody's independent review status is not changed by runner implementation.
+
+## Owned baseline producer
+
+`acceptance-runner.mts`, `acceptance-worker.mts` and `acceptance-sandbox.mjs` ship
+in the selected flat runtime. These are **source APIs**, not a newly enabled CLI,
+scheduler gate, implementation launcher or candidate-proof producer. Later layers
+must independently compare the retained binding to the current frozen inputs;
+replay of a historically valid receipt does not authorize another execution.
+
+### Authorization and reservation
+
+`reserveAcceptanceBaseline(request, trustedAuthorization, now?)` accepts a saved
+frozen pointer, exact 40-character baseline SHA, canonical project/tracker identity,
+private host-owned output root, explicit complete agent-mount inventory, selected
+runtime root, trusted local engine transport, digest-pinned image, literal setup
+argv, reset recipe, positive capacity and finite resource bounds. This initial
+implementation requires Linux and a non-root host owner. Runtime/dependency hashes
+are recomputed from the complete selected bundle; the producer assets must match
+the source implementation, not an arbitrary valid custom override.
+
+`TrustedExecutionAuthorization.lookup(intent)` is a host-authenticated ingress,
+**not** an issue label, readiness result, tracker approval JSON or reset callback.
+It receives the entire snapshotted request plus actual runtime/dependencies,
+retained custody approval, setup digest and reset digest. It must return an exact
+`{id, intentDigest, expiresAt}` grant covering the whole deadline. An optional
+`evidence` array contains independently reviewed host-retained criterion evidence;
+sandbox strings cannot confer manual-review authority. Missing evidence remains a
+policy hold. A lying host ingress is not authenticated by TypeScript: keep this
+capability and all returned handles outside implementer custody.
+
+Reservation uses the **real shared admission transaction**, before any engine or
+project command. Separate `<stateDir>/admission/baselines.json` v1 reservations
+compete with normal/recovery/delivery counts and raw in-flight run records, refuse
+conflicting managed/supervisor ownership, and prevent conflicting new managed
+entries. Supervisor exclusion acquisition also requires baseline quiescence.
+Normal/recovery admission counts every retained baseline against the shared cap.
+No run record, implementation generation, recovery attempt or recovery charge is
+fabricated. A failure after reservation retains it. Corrupt/unknown sidecars fail
+closed. PID death, time, stopped stages and current engine absence never reap it.
+
+**Compatibility gate:** old v2 readers do not understand this sidecar. Quiesce old
+and unmanaged runtimes and select the complete updated admission/board/supervisor
+bundle everywhere before using these source APIs. The unchanged main admission
+version is not evidence of mixed-version safety; the new sidecar is mandatory for
+participating writers. No rollout or installed-entrypoint activation occurs here.
+
+### Private exact inputs and synthetic CMS reset
+
+`startAcceptanceBaseline(handle)` exclusively starts one detached worker. Controller
+exit/session death does not own the worker lifetime. It never retries the same
+reservation. The worker revalidates runtime and custody, obtains stable engine ID,
+and inspects the pinned local image: missing digests and image-declared volumes
+hold before creation. It never pulls an image or contacts an external service.
+
+Trusted host Git plumbing exports only the exact commit and reachable tree/blob
+objects into a bounded private pack: no checkout hooks, refs, remotes, shared Git,
+source configuration, dirty files, old uploads or database data are transported.
+The original bundle is rehashed and copied into a new exclusive runner input tree.
+Only that tree is mounted read-only, at `/input`. Originals, source checkout,
+implementer work, host runtime/dependencies, Docker socket and credentials are not
+mounted. No host environment is forwarded to the sandbox or engine client; the
+client receives a private HOME and fixed minimal environment. Host commands are
+trusted Git plumbing and engine orchestration only, never setup/probe argv.
+
+Inside the sandbox the trusted driver initializes **private Git metadata**, unpacks
+the exact commit, records shallow history and checks out its SHA in a fresh `/work`
+tmpfs. It verifies HEAD before/after setup and every probe. The supported reset is
+`project-local-synthetic-v1`: pinned trusted project code builds fresh local site,
+database, uploads and fixture state in `/work` and `/state`, with services on
+loopback. Setup argv runs directly inside the sandbox in `/work`; probes run from
+the read-only frozen copy with `FACTORY_BASELINE_ROOT=/work`,
+`FACTORY_STATE_ROOT=/state` and `FACTORY_ACCEPTANCE_ROOT=/input/acceptance`.
+This supports CMS-like local synthetic setup (including local web/database
+processes), not only projects without a database. The setup layer's local-web,
+bootstrap-site and compat-ddev patterns illustrate the approach; the existing
+root/service-writing scripts are not blindly run under this stricter envelope.
+Dependencies must already be in the pinned image or exact tree. External database,
+network, credentials, mounts and unsupported reset needs **hold**, never authorize
+an external-resource reset or reuse of an implementer-modified site.
+
+### Bounds, crash, cancellation and cleanup
+
+The total absolute deadline starts at reservation, covering preparation, creation,
+setup, probes, termination and settlement; ceiling 300,000 ms. Each host child has
+bounded stdout/stderr, a process-group SIGKILL deadline and a cleared environment.
+Git binary transport has a separate ceiling of min(32 MiB, memoryMiB/8); object
+inventory is at most 65,536 entries and uncompressed content at most diskMiB/2.
+The output ceiling is 2 MiB, memory 8192 MiB, CPU 8, PID count 512, application disk
+2048 MiB. Disk must be at least 64 MiB; 49 MiB covers `/tmp`, `/run`, `/dev/shm`,
+with the rest divided between `/work` and `/state`. Container memory (including
+these tmpfs pages), swap, CPU and PIDs are engine-enforced. Whole-container memory
+and CPU cannot exceed **any** reviewed probe's bounds; probe timeout/output are
+also individually enforced. Exhaustion is infrastructure/unknown, never red.
+
+The root filesystem is read-only, network is `none`, restart/logging are disabled,
+and image-declared volumes are refused. A root GNU `timeout --signal=KILL` watchdog
+starts as the container entrypoint, using only SETUID/SETGID/SETPCAP/KILL capabilities.
+`setpriv` drops to the non-root owner and drops **all** bounding/inheritable/ambient
+capabilities before the Node driver, setup or probes. Untrusted processes cannot
+stop their different-UID watchdog. The pinned image must supply Node, Git, GNU
+timeout and util-linux setpriv at the explicit paths; unavailable tools hold.
+The watchdog bounds payload lifetime independently even if the worker itself dies;
+the durable reservation still survives until source-owned exact cleanup is known.
+
+`cancelAcceptanceBaseline(handle)` accepts only the current execution/owner/random
+generation and cancellation secret. It durably fences publication, aborts the
+in-flight engine client, and lets the independent worker attempt bounded cleanup.
+Foreign/stale handles do nothing. Late cancellation after immutable settlement does
+nothing. Engine-client termination alone is **not** cleanup proof.
+
+Cleanup rechecks stable engine ID, exact container ID, image and execution/owner/
+generation labels, removes only that ID, then confirms its absence. A create whose
+client outcome is ambiguous may materialize late: even a current absence cannot
+release it. Foreign identity, engine change, worker death, expired deadline,
+output exhaustion or unknown cleanup retain ownership/capacity. There is no public
+force-settlement API, age release, automatic repair or probe retry. Retain the
+private evidence for operator investigation; this module does not invent a recovery
+launcher for an orphan.
+
+### Retained receipts and observation protocol
+
+Each `assertions-v1` probe exits zero with exactly
+`{version:1, assertions:[...]}`; behavioral failures are named structured assertion
+statuses, not exit-code normalization. The driver reconciles each probe's assertion
+IDs, attaches execution/probe/output-digest references, and returns an envelope with
+actual SHA and fresh-state provenance. The host retains bounded raw output and
+supplies manual criterion evidence **only** from trusted authorization ingress.
+The existing pure checker classifies full inventory, named red, preservation,
+already-green review-required, infrastructure and missing evidence.
+
+After exact cleanup, and only while the original owner/generation reservation is
+current and deadline unexpired, the worker publishes an exclusive 0400 receipt.
+It binds the frozen pointer/contract/probes/fixtures/approval, actual SHA, selected
+runtime/private dependencies, image, resource config, setup/reset identity and
+execution owner. The producer seal also binds authorization, real engine/container,
+generation, reset observation and retained raw-output digest. Its HMAC uses a
+separate host-private producer key, never the cancellation token. A synced immutable
+publication index under the real admission directory binds the exact spec and seal
+before releasing the reservation. A crash between publication and release remains
+held; no reader infers settlement from a receipt alone.
+
+`readAcceptanceBaseline(handle, now?)` requires that producer index, private seal,
+exact spec, retained output digest and confirmed reservation release; it then calls
+`checkAcceptanceReceipt` with independently reconstructed expected binding. It
+returns both receipt and policy classification. A completed infrastructure/manual/
+already-green hold is not implementation permission. Caller-supplied receipt JSON,
+cleanup booleans or reset callbacks cannot be published through this API. Filesystem
+protection assumes trusted host API/store access, not a hostile same-UID host
+process. Independent semantic verification and final exact-candidate proof remain
+mandatory; this producer alone activates neither.
+
+### Evidence limits
+
+Runner integration tests use real disposable Git, private filesystem stores, locks
+and native detached/controller/engine processes. Engine identity/lifecycle responses
+are simulated; they never decide admission or release. One case executes the unchanged
+copied driver, pinned baseline setup and frozen probe through a real local rootless
+user/mount/PID/network namespace transport, not computed result JSON. Read-only frozen
+inputs and a narrow copied executable/library closure are the only read-only mounts;
+only fixture-private synthetic state is writable, with fresh private Git/work/tmp/run.
+No source, custody originals, host sockets, credential/configuration directories or
+host network are exposed. Missing namespace capability fails without host fallback.
+
+The probe observes the exact checked-out SHA and seeded rows/uploads through the
+existing baseline API, then dirties the filesystem-backed synthetic site. A second
+independent fresh execution must observe the original seed and same SHA despite dirty
+source. A third execution deliberately reuses the first run's persistent dirty state:
+the pinned setup refuses it, actual driver exit is nonzero, and the real producer
+publishes a policy hold without assertion results. Actual driver stdout/stderr and
+assertions are retained in test diagnostics and successful sealed output; no reset or
+ownership boolean stands in for those observations. This proves the real-driver
+synthetic reset boundary, alongside existing crash/cancel and authenticated-retention
+evidence. See [test prerequisites and bounds](../TESTING.md#owned-acceptance-baseline-runner).
+
+It does **not** prove a real container engine's cgroup/memory/PID/tmpfs enforcement,
+different-UID watchdog, or successful CMS/SQL installation and database seeding.
+The synthetic rows are JSON, not MariaDB/MySQL; available local binaries do not
+establish a PHP/CMS/database runtime. These are outstanding actual-runtime proof
+limits, not a narrowed supported-project contract: unsupported reset still holds.
+No live Docker, paid model, production, credentials or external reset is needed or
+authorized by the tests. A supported-image/CMS runtime smoke remains separate
+unperformed acceptance evidence, not inferred from synthetic success.
+
 ## Verification
 
 ```sh
-node --test orchestrator/acceptance-contract.test.mts orchestrator/acceptance-custody.test.mts orchestrator/ticket-input.test.mts
+node --test orchestrator/acceptance-contract.test.mts orchestrator/acceptance-custody.test.mts orchestrator/acceptance-receipt.test.mts orchestrator/acceptance-runner.test.mts orchestrator/ticket-input.test.mts
 ```
 
 Custody uses pure preparation/binding tests plus a disposable filesystem boundary
