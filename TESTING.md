@@ -111,7 +111,13 @@ These are focused filesystem/process integrations, not helper-only schema tests,
 E2E or installed release acceptance. `acceptance-baseline-entrypoints.test.mts` additionally
 exercises actual dispatch with real separate reserve/start/read, durable private grants,
 disposable Git and the existing owned engine transport. Explicit host preparation occurs
-before managed entry; valid current evidence permits the actual claim and child launch.
+before managed entry; valid current evidence permits the actual claim and child launch
+for both trackers/configured families, including cached selection. Actual dispatch denies
+missing/stale/current-SHA/ticket/config/reset changes, revoked/expired grants, unknown,
+already-green, wrong behavioral failure, actual API cancellation, unknown engine cleanup
+and tampered retained output before claim/child. Final image-I/O revocation is rechecked.
+Stored reads preserve records/reservations and invoke no preparation. Pending cleanup
+publishes its ticket observation before managed-entry refusal, with no tracker collection.
 `fixtures/acceptance-baseline-preparation.mts` is test-only and simulates sandbox output,
 not CMS reset or production authority. Direct/adopted main, recovery precharge and full
 baseline diagnostic projections remain unproved/unimplemented in this partial slice. No

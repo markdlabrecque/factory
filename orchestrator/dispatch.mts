@@ -5,7 +5,7 @@ import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthor
 import { validDelivery } from './delivery.mts';
 import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
 import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket } from './acceptance-baseline-admission.mts';
-import { readAdmission } from './admission.mts';
+import { readAdmission, readBaselineReservations } from './admission.mts';
 import { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordReadinessCheck, recordTicketInput, ticketBranch, ticketWorkspaceProblem } from './launch-readiness.mts';
 // #149: cache full three-state dependency results per pass; unknown reads hold dispatch.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
@@ -68,6 +68,15 @@ import type { Ticket } from "./tracker.mts";
 
 // All filters and launch limits come from validated v2 data. --max overrides only the cap.
 const entryTracker = context.config.TRACKER;
+// Pending owned baseline cleanup already excludes managed entry. Publish only the safe retained
+// owner/ticket observation; do not collect tracker input, execute probes or prune that reservation.
+const pendingBaselines = readBaselineReservations(stateDir()).filter(b => b.project.root === context.projectRoot && b.project.tracker.project === entryTracker.project);
+if (pendingBaselines.length) {
+  const report = await projectLaunchReadiness({projectRoot:context.projectRoot,runtimeRoot:context.runtimeRoot,runtimeIdentity:context.manifest.id,runtimeDependencies:context.manifest.dependencies,config:effectiveConfig,stateRoot:stateDir()});
+  for (const pending of pendingBaselines) recordReadinessCheck(stateDir(),report,acceptanceBaselineCheck(Number(pending.iid),new AcceptanceBaselineHold('cleanup-pending')));
+  console.log('Acceptance baseline hold: cleanup-pending. Preserve exact-owned reservation; trusted host preparer must inspect retained execution.');
+  process.exit(0);
+}
 const managedEntry = claimManagedEntry(stateDir(), { root: context.projectRoot, tracker: {
   kind: entryTracker.kind, host: entryTracker.gitlabHost ?? entryTracker.host!, project: entryTracker.project } });
 process.on('exit', code => { if (code === 0) releaseManagedEntry(stateDir(), managedEntry); });
@@ -478,6 +487,7 @@ for (const [n, d] of launch.entries()) {
     if (claim.reason.startsWith("no capacity")) break;
     continue;
   }
+  log(`#${iid}: launching owned implementation child`);
   const out = openSync(resolve(logDir, `run-${iid}.log`), "a");
   const childRuntime = runtimeLease.childLease();
   const child = spawn(process.execPath, [context.tsx, context.codePath('main.mts'), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {

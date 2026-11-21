@@ -93,16 +93,16 @@ export function fixture(t: any, kind = "github", prepareAcceptance = true) {
     save();
     const r = spawnSync(node, [join(runtime.directory, 'dispatch.mts'), "--base", "main", ...args], { cwd: root, encoding: "utf8", env: { ...env, ...extra }, timeout: 20_000 });
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    if (/launching/.test(r.stdout) && !/not launched/.test(r.stdout)) {
+    if (/launching owned implementation child/.test(r.stdout)) {
       const deadline = Date.now() + 2000;
       while (!existsSync(join(fake, 'launches')) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
     return r;
   };
-  const baseline = (iid=7) => {
+  const baseline = (iid=7, fault='') => {
     save();
     writeFileSync(join(bin,'docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs',import.meta.url).pathname)}; const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE); if(out===undefined)process.exit(90); console.log(out);\n`, {mode:0o755});
-    prepareFixtureBaseline(runtime.directory,root,env,iid);
+    prepareFixtureBaseline(runtime.directory,root,env,iid,'main',fault);
   };
   const bytes = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "absent";
   return { home, root, dir, fake, env, runtime, snapshot, data, save, baseline, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };

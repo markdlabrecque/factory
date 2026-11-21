@@ -7,11 +7,11 @@ import {createServer} from 'node:net';
 import {once} from 'node:events';
 import {acceptanceHash} from '../acceptance-contract.mts';
 
-export function prepareFixtureBaseline(runtime: string, cwd: string, env: NodeJS.ProcessEnv, iid=7, base='main'): void {
-  execFileSync(process.execPath,[import.meta.filename,'--prepare',runtime,String(iid),base],{cwd,env,encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
+export function prepareFixtureBaseline(runtime: string, cwd: string, env: NodeJS.ProcessEnv, iid=7, base='main', fault=''): void {
+  execFileSync(process.execPath,[import.meta.filename,'--prepare',runtime,String(iid),base,fault],{cwd,env,encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
 }
 if (process.argv[2] === '--prepare') {
-  const [runtime,iidText,base]=process.argv.slice(3), iid=Number(iidText);
+  const [runtime,iidText,base,fault='']=process.argv.slice(3), iid=Number(iidText);
   const {context,effectiveConfig,TRACKER}=await import(join(runtime,'runtime-config.mts'));
   const tracker=await import(join(runtime,'tracker.mts'));
   const {freezeTicketInput}=await import(join(runtime,'ticket-input.mts'));
@@ -19,6 +19,7 @@ if (process.argv[2] === '--prepare') {
   const input=freezeTicketInput(tracker.contextSource,iid), root=join(context.sharedState,'acceptance');
   if (!existsSync(join(root,`baseline-current-${input.hash}.json`))) {
     const bundle=readPreparedAcceptance(context.sharedState,[context.projectRoot,context.runtimeRoot],input);
+    const {cancelAcceptanceBaseline}=await import(join(runtime,'acceptance-runner.mts'));
     const owned=join(dirname(context.sharedState),'owned-baselines'); mkdirSync(owned,{mode:0o700,recursive:true});
     const socketPath=join(owned,'engine.sock');
     let labels:any, plan:any;
@@ -32,8 +33,11 @@ if (process.argv[2] === '--prepare') {
         const mount=args[args.indexOf('--mount')+1], input=mount.match(/src=([^,]+)/)[1];
         plan=JSON.parse(readFileSync(join(input,'plan.json'),'utf8')); result={stdout:'baseline-container'};
       } else if(args[0]==='inspect') result={stdout:JSON.stringify([{Id:'baseline-container',Config:{Image:'fixture/baseline@sha256:'+'a'.repeat(64),Labels:labels}}])};
-      else if(args[0]==='start')result={stdout:JSON.stringify({version:1,sha:plan.sha,reset:{kind:'project-local-synthetic-v1',executionId:plan.executionId},results:{version:1,phase:'baseline',identity:bundle.manifest.acceptance,assertions:[{assertionId:'A-summary',status:'expected-behavioral-fail',failureId:'summary-unavailable-or-wrong',evidence:['fixture-output']},{assertionId:'A-order',status:'pass',failureId:null,evidence:['fixture-output']}],evidence:[]}})};
-      else if(args[0]==='rm') result={}; else if(args[0]==='ps')result={stdout:''};
+      else if(args[0]==='start') {
+        if(fault==='cancelled')cancelAcceptanceBaseline(JSON.parse(readFileSync(join(root,`baseline-current-${input.hash}.json`),'utf8')).handle);
+        result={stdout:JSON.stringify({version:1,sha:plan.sha,reset:{kind:'project-local-synthetic-v1',executionId:plan.executionId},results:{version:1,phase:'baseline',identity:bundle.manifest.acceptance,assertions:[{assertionId:'A-summary',status:fault==='already-green'?'pass':fault==='unknown'?'unknown':'expected-behavioral-fail',failureId:fault==='already-green'||fault==='unknown'?null:fault==='mismatch'?'wrong-failure':'summary-unavailable-or-wrong',evidence:['fixture-output']},{assertionId:'A-order',status:'pass',failureId:null,evidence:['fixture-output']}],evidence:[]}})};
+      }
+      else if(args[0]==='rm') result=fault==='cleanup-uncertain'?{status:1,stderr:'fixture cleanup unavailable'}:{}; else if(args[0]==='ps')result={stdout:fault==='cleanup-uncertain'?'baseline-container':''};
       else { socket.destroy(new Error('Unexpected engine call '+args)); return; }
       socket.end(JSON.stringify(result)+'\n');
     });socket.on('error',()=>{});});
@@ -51,7 +55,8 @@ if (process.argv[2] === '--prepare') {
         evidence:[{criterionId:'C-manual',requirement:'independent documentation review',reference:'fixture-independent-review:17'}]};
       writeFileSync(join(root,`execution-authorization-${digest}.json`),JSON.stringify(grant),{mode:0o600,flag:'wx'});
       const {prepareAcceptanceBaselineForTicket}=await import(join(runtime,'acceptance-baseline-admission.mts'));
-      await prepareAcceptanceBaselineForTicket(iid,base);
+      try { await prepareAcceptanceBaselineForTicket(iid,base); }
+      catch(error) { if(!fault || !String(error).includes('Acceptance baseline hold:'))throw error; }
     } finally {server.close();}
   }
 }

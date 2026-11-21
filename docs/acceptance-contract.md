@@ -771,7 +771,11 @@ complete independently resolved CURRENT binding before and after the read. Runne
 raw config and full host-plan digest bind setup/reset/transport and all request fields.
 Current exact host authorization must still exist, match the retained grant and remain
 unexpired. Revoked/cancelled/unknown/cleanup-held execution grants no implementation
-claim. Named behavioral red, preservation and reviewed obligations remain reconciled
+claim. Original preparation and host plan are reread after image/Git I/O, and authorization
+and cancellation are rechecked after current-binding collection. A still-reserved baseline
+publishes a cleanup-pending ticket observation before managed-entry refusal, without tracker
+collection or probe execution, and retains its exact capacity ownership.
+Named behavioral red, preservation and reviewed obligations remain reconciled
 by the original runner policy; already-green changed criteria require review.
 
 Preparation is explicit host action, not a new CLI command, automatic scheduler probe,

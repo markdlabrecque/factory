@@ -62,6 +62,17 @@ async function current(iid: number, base: string) {
   const binding = {ticket:frozenTicketIdentity(bundle.ticket),bundle:bundle.pointer,approvalDigest:bundle.manifest.approvalDigest,sha,
     runtime:context.manifest.id,dependencies:context.manifest.dependencies,policyIdentity:context.policyIdentity,configDigest,planDigest:acceptanceHash(plan)};
   context.assertCurrent();
+  // Tracker/image/Git are external I/O boundaries. Recollect static originals and host plan
+  // after those reads, rather than letting the last image inspection revoke an earlier snapshot.
+  try {
+    const finalInput = freezeTicketInput(tracker.contextSource,iid);
+    const finalBundle = readPreparedAcceptance(state,[context.projectRoot,context.runtimeRoot],finalInput);
+    const finalSha = execFileSync('git',['--no-replace-objects','rev-parse','--verify',`origin/${base}^{commit}`],{cwd:context.projectRoot,encoding:'utf8',timeout:10000}).trim();
+    if (!same(frozenTicketIdentity(finalBundle.ticket),binding.ticket) || !same(finalBundle.pointer,binding.bundle)
+      || finalBundle.manifest.approvalDigest !== binding.approvalDigest || finalSha !== sha
+      || !same(plan,privateRecord(root,`baseline-plan-${input.hash}.json`))) throw Error('Revoked current preparation');
+    context.assertCurrent();
+  } catch { throw new AcceptanceBaselineHold('changed-input'); }
   return {root,input:bundle.ticket,request:r,binding};
 }
 
