@@ -1,5 +1,7 @@
 // Shared recovery lifecycle fixture: copied-install acceptance and legacy regression scenarios use isolated fake external boundaries.
 import { bindExecution } from '../cli/test/execution-fixture.mts';
+import {prepareFixtureBaseline} from './fixtures/acceptance-baseline-preparation.mts';
+import { prepareFixtureAcceptance, prepareFixtureFromRuntime } from './fixtures/acceptance-preparation.mts';
 import {preparedFixture} from '../cli/test/prepared-fixture.mts';
 import { commandContextSource } from './ticket-context-source.mts';
 import {prepareRecovery} from '../cli/src/recovery-prepare.mts';
@@ -36,7 +38,7 @@ const ID = "5b1f3c2a-9d8e-4f70-8a6b-0c1d2e3f4a5b";
 const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 const at = (m: number) => new Date(Date.UTC(2026, 10, 12, 0, m)).toISOString();
 
-export async function recoveryEntrypointFixture(t: TestContext, scenario: string, tier: string, copied = false) {
+export async function recoveryEntrypointFixture(t: TestContext, scenario: string, tier: string, copied = false, baselineFault = '') {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-entry-")));
   const children: ChildProcess[] = [];
   t.after(() => { for (const c of children) c.kill("SIGKILL"); rmSync(home, { recursive: true, force: true }); });
@@ -53,6 +55,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   git(root, "add", "app.txt");
   git(root, "commit", "-qm", "init");
   git(root, "push", "-q", "origin", "main");
+  const originalBaseline=git(root,'rev-parse','main');
   git(root, "branch", "7-fix-login");
   git(root, "branch", "8-other");
   const worktree = join(root, ".factory/worktrees/7-fix-login");
@@ -139,9 +142,18 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const { loadExecutionContext } = await import('./context.mts');
   const policy = (await loadExecutionContext({ env: runtime.env, cwd: root, moduleRoot: runtime.directory })).policyIdentity;
   // The dispatcher's analysis of #7, with the same explicit runtime context.
-  const hash = execFileSync(process.execPath, ["--input-type=module", "-e",
-    `const t = await import(${JSON.stringify(join(runtime.directory, 'tracker.mts'))}); const g = await import(${JSON.stringify(join(runtime.directory, 'ticket-input.mts'))}); process.stdout.write(g.freezeTicketInput(t.contextSource, 7).hash);`],
-  { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
+  const preparedInput = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
+    `const t = await import(${JSON.stringify(join(runtime.directory, 'tracker.mts'))}); const g = await import(${JSON.stringify(join(runtime.directory, 'ticket-input.mts'))}); process.stdout.write(JSON.stringify(g.freezeTicketInput(t.contextSource, 7)));`],
+  { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } }));
+  const hash = preparedInput.hash;
+  prepareFixtureAcceptance(state, preparedInput);
+  prepareFixtureBaseline(runtime.directory,root,{...process.env,...env,SANDCASTLE_STATE_DIR:state});
+  const baselineIdentity=JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',`const a=await import(${JSON.stringify(join(runtime.directory,'acceptance-baseline-admission.mts'))});process.stdout.write(JSON.stringify(await a.requireAcceptanceBaselineForTicket(7,'main')));`],{cwd:root,env:{...process.env,...env,SANDCASTLE_STATE_DIR:state},encoding:'utf8',timeout:20000}));
+  const runFile=join(state,'owner_repo--7.json');
+  writeFileSync(runFile,JSON.stringify({...JSON.parse(readFileSync(runFile,'utf8')),acceptanceBaseline:baselineIdentity}));
+  const baselineRoot=join(state,'acceptance'), grantPath=join(baselineRoot,readdirSync(baselineRoot).find(n=>n.startsWith('execution-authorization-'))!);
+  if(baselineFault==='revoked')rmSync(grantPath);
+  if(baselineFault==='origin-advanced') {git(root,'commit','--allow-empty','-qm','Advance integration without changing original fullscope');git(root,'push','-q','origin','main');}
   mkdirSync(join(state, "graph"), { recursive: true });
   writeFileSync(join(state, "graph", "owner_repo--7.json"), JSON.stringify({ iid: 7, project: "owner/repo", hash, policyIdentity: policy, analyzedAt: at(1), base: "main", baseSha: "",
     provides: [], requires: scenario === 'dependency-unknown' ? [{ providedBy: 12, what: 'provider', evidence: 'ticket', confidence: 1 }] : [], footprint: ["app.txt"], catalogueIids: [], blockerHashes: {} }));
@@ -150,6 +162,8 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   let child!: ChildProcess;
   const spawner: Spawner = (cmd, args, o) => {
     assert.deepEqual([cmd, args[0], args[1]], [process.execPath, join(runtime.directory, 'node_modules/tsx/dist/cli.mjs'), join(runtime.directory, 'main.mts')]);
+    if(baselineFault==='child-revoked')rmSync(grantPath);
+    if(baselineFault==='child-binding-changed')writeFileSync(runFile,JSON.stringify({...JSON.parse(readFileSync(runFile,'utf8')),acceptanceBaseline:{version:1,bindingDigest:'0'.repeat(64)}}));
     const out = openSync(o.log, "a");
     child = spawn(process.execPath, copied ? args : [join(runtime.directory, 'main.mts'), ...args.slice(2)], { cwd: o.cwd, env: { ...o.env, ...env }, stdio: ["ignore", out, out] });
     children.push(child);
@@ -182,22 +196,37 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.equal(readFileSync(join(evidence,'verdict.md'),'utf8'),'VERDICT: FAIL\nold\n');
   }
   let readinessChecked = false;
-  const launch = await launchRecovery(p, { root, preparation, tracker: "owner/repo", ticket: 7, dir: state,
+  const launch = await launchRecovery(p, { root, preparation, workflowEnv:env, tracker: "owner/repo", ticket: 7, dir: state,
     contextSource: commandContextSource({kind:'github',host:'github.com',project:'owner/repo'}, undefined, {...process.env,...env}),
     capabilities: o => {
       readinessChecked = true;
+      if(baselineFault==='late-host-revoked')rmSync(grantPath);
       assert.equal(readRecovery(p, root).attempts.length, 0, 'readiness precedes admission and charge');
       return checkImageCapabilities({ ...o, docker: async args => {
       const r = docker(args); if (r.status !== 0) throw Error('offline Docker failure'); return r.stdout;
     } }); }, docker, spawn: spawner, npx: "npx", uuid: () => ID, at: at(10) });
   assert.equal(readinessChecked, true);
+  if(['revoked','late-host-revoked'].includes(baselineFault) || scenario==='missing-baseline') {
+    assert.equal(launch.ok,false,JSON.stringify(launch));
+    assert.equal(launch.admitted,false,'no recovery attempt charged before authentic original baseline');
+    assert.equal(readRecovery(p,root).attempts.length,0);
+    assert.equal(existsSync(join(fake,'models.log')),false);
+    assert.equal(git(worktree,'rev-parse','HEAD'),savedStart);
+    return;
+  }
   assert.equal(launch.ok, true, (launch as { reason?: string }).reason);
   const [code] = await once(child, "exit");
   const log = readFileSync(join(root, ".factory/logs/recover-7.log"), "utf8");
+  if(['child-revoked','child-binding-changed'].includes(baselineFault)) {
+    assert.notEqual(code,0,log);assert.match(log,baselineFault==='child-revoked'?/Acceptance baseline hold: authorization-unavailable/:/Acceptance baseline hold: changed-input/);
+    assert.equal(existsSync(join(fake,'models.log')),false,'child independently rechecks before repair');
+    assert.equal(readRecovery(p,root).attempts.length,1,'host charge is preserved, not refunded');
+    assert.equal(git(worktree,'rev-parse','HEAD'),savedStart);return;
+  }
   if (scenario !== 'pass') {
     assert.notEqual(code, 0, log);
     assert.equal(git(origin, 'branch', '--list', '7-fix-login'), '', log);
-    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/requirements changed/,'parent-plan':/requirements changed/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
+    const expected = ({'missing-baseline':/Missing recorded implementation baseline/,title:/Acceptance static hold: missing-preparation/,'parent-plan':/Acceptance static hold: missing-preparation/,'closed-before':/is closed/,dirty:/Verifier changed the branch/,'legacy-prompt':/verification.json/, 'dependency-unknown':/Dependency information unavailable for #12/, 'setup-bad':/Playwright\/Chromium provisioning failure/} as Record<string, RegExp>)[scenario];
     assert.match(log, scenario.startsWith('sandbox-') ? /[Ss]andbox readiness/ : expected);
     const calls = existsSync(join(fake, 'docker.jsonl')) ? readFileSync(join(fake, 'docker.jsonl'), 'utf8') : '';
     if (scenario === 'missing-baseline') assert.ok(!calls.includes('"run"'), log);
@@ -242,7 +271,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const record = (readAttemptRecord(join(p.recovery, "attempts", `${ID}.json`)) as { record: AttemptRecord }).record;
   assert.equal(record.outcome, "delivered", record.reason);
   const tip = git(root, "rev-parse", "7-fix-login");
-  const baseline = git(root, 'rev-parse', 'main');
+  const baseline = originalBaseline;
   assert.equal(record.startSha, savedStart);
   assert.equal(record.tip, tip);
   assert.ok(prompts[1].includes(`Full ticket scope is always \`${baseline}\` to \`${tip}\``));
@@ -316,6 +345,13 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
 
   // A dispatched normal run adopts its launch claim and writes its ownership receipt before Sandcastle creates anything
   // (here the stubbed Sandcastle docker() throws, as a crash right after the receipt would leave it); stopping releases the claim.
+  prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state }, 9);
+  prepareFixtureBaseline(runtime.directory,root,{...process.env,...env,SANDCASTLE_STATE_DIR:state},9);
+  // Prepare all later positive starts before n9 deliberately leaves uncertain payload custody.
+  for(const [n,body] of [[10,'Model tier: large'],[13,'No model tier declaration']] as const) {
+    const e={...process.env,...env,SANDCASTLE_STATE_DIR:state,FAKE_TICKET_BODY:body};
+    prepareFixtureFromRuntime(runtime.directory,root,e,n);prepareFixtureBaseline(runtime.directory,root,e,n);
+  }
   const pre = claimRun({ dir: state, project: "owner/repo", iid: "9", pid: process.pid, cap: 99 });
   assert.equal(pre.ok, true);
   const n9 = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "9", "--base", "main"],
@@ -335,6 +371,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     [12, "Model tier: small\nModel tier: large", "conflicting"]] as const) {
     const pending = claimRun({ dir: state, project: "owner/repo", iid: String(n), pid: process.pid, cap: 99 });
     assert.equal(pending.ok, true);
+    prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: body }, n);
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", String(n), "--base", "main"],
       { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: body,
         FACTORY_LAUNCH_CLAIM: pending.ok ? pending.run.claim : '' } });
@@ -348,10 +385,14 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
     assert.equal(readAdmission(state).claims[`owner_repo--${n}`], undefined);
     assert.equal(git(root, "branch", "--list", `${n}-*`), "");
   }
+  prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: large' }, 10);
+  prepareFixtureBaseline(runtime.directory,root,{...process.env,...env,SANDCASTLE_STATE_DIR:state,FAKE_TICKET_BODY:'Model tier: large'},10);
   const fixed = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), "--issue", "10", "--base", "main"],
     { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: large' } });
   assert.match(fixed.stderr, /docker\(\) must not be used/);
   assert.equal(readRuns(state).find(r => r.iid === '10')?.implementationModel, 'pi-claude-subscription/claude-opus-5-5');
+  prepareFixtureFromRuntime(runtime.directory, root, { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'No model tier declaration' }, 13);
+  prepareFixtureBaseline(runtime.directory,root,{...process.env,...env,SANDCASTLE_STATE_DIR:state,FAKE_TICKET_BODY:'No model tier declaration'},13);
   const defaulted = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '13', '--base', 'main'],
     { cwd: root, encoding: 'utf8', env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'No model tier declaration' } });
   assert.match(defaulted.stderr, /docker\(\) must not be used/);

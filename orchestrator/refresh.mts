@@ -1,4 +1,5 @@
-// Read-only refresh uses explicit project settings and runtime/template policy identity in assessment freshness.
+// Read-only refresh checks current frozen acceptance before analysis/cache reuse and records revocation after analyst I/O.
+// Explicit project settings and runtime/template policy identity bind assessment freshness, not launch authority.
 // Read-only current assessment adapter (#78). Description models use the shared resolver (#126). Shared by scheduled dispatch and --refresh-only (one card with --ticket,
 // else every card of the project, #93), which exits before
 // tracker writes, run updates, admission or launches. Analysis results go only to assessments; execution manifests
@@ -9,7 +10,9 @@
 // #149: assessment uses the same fail-closed dependency evaluator as execution.
 import { freezeTicketInput, TicketInputHold, type FrozenTicketInput } from './ticket-input.mts';
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
-import { recordTicketInput } from './launch-readiness.mts';
+import { recordTicketInput, recordReadinessCheck } from './launch-readiness.mts';
+import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
+import { resolve } from 'node:path';
 import type { ReadinessReport } from './readiness-schema.mts';
 import { analyse, analysisWorktree } from "./analyze.mts";
 import { readRuns, stateDir } from "./board.mts";
@@ -54,6 +57,13 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
         try { input = freezeTicketInput(tracker.contextSource, iid); }
         catch (error) { if (error instanceof TicketInputHold && o.readiness) recordTicketInput(dir, o.readiness, error); throw error; }
         if (o.readiness) recordTicketInput(dir, o.readiness, input);
+        try {
+          input = readPreparedAcceptance(dir, [context.projectRoot, context.runtimeRoot, resolve(dir, 'worktrees')], input).ticket;
+          if (o.readiness) recordReadinessCheck(dir, o.readiness, acceptanceStaticCheck(input));
+        } catch (error) {
+          if (error instanceof AcceptanceAdmissionHold && o.readiness) recordReadinessCheck(dir, o.readiness, acceptanceStaticCheck(input, error));
+          throw error;
+        }
         inputs.set(iid, input);
         const t = { ...tracker.ticket(iid), title: input.context.child.title, description: input.context.child.description }, parent = input.context.parent?.iid;
         if (parent === undefined) return t;
@@ -76,8 +86,13 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
         for (const iid of ids) if (!catalogue.some((t) => t.iid === iid)) {
           try { knownProviders.push(tracker.ticket(iid)); } catch { /* leave unresolved, never infer satisfied */ }
         }
-        return analyse({ project: TRACKER.project, base: o.base, worktree, ticket, input: inputs.get(ticket.iid)!, notes, catalogue, manifests,
-          knownProviders, keepImplementerBlockers: true });
+        try {
+          return analyse({ project: TRACKER.project, base: o.base, worktree, ticket, input: inputs.get(ticket.iid)!, notes, catalogue, manifests,
+            knownProviders, keepImplementerBlockers: true });
+        } catch (error) {
+          if (error instanceof AcceptanceAdmissionHold && o.readiness) recordReadinessCheck(dir, o.readiness, acceptanceStaticCheck(inputs.get(ticket.iid)!, error));
+          throw error;
+        }
       },
       historicalBlockers: (iid) => manifests.get(iid),
       dependency: (iid) => {

@@ -678,6 +678,131 @@ No live Docker, paid model, production, credentials or external reset is needed 
 authorized by the tests. A supported-image/CMS runtime smoke remains separate
 unperformed acceptance evidence, not inferred from synthetic success.
 
+## Current host preparation reference
+
+`acceptance-admission.mts` supplies the active static reader used by the standard
+analysis, dispatch, direct main, assessment refresh and recovery-analysis adapters.
+Before launching preparation, an authorized preparer
+uses the custody API's exact-ticket trusted approval ingress and immutable publication.
+The host's current reference lives at
+`<state>/acceptance/prepared-<included-source-content-hash>.json`; bundle directories
+are also under this private `acceptance` store. The reference is a bounded (4096-byte),
+host-owned private regular single-link UTF-8 JSON file, with exactly these fields:
+
+- `version: 1`
+- `bundle`: the published `AcceptanceBundlePointer`
+- `ticket`: the original bundle's complete `{ contentHash, renderedSha256 }`
+- `acceptance`: the original complete acceptance identity
+- `approvalDigest`: the original manifest's exact approval digest
+
+This file is trusted preparation state, never a tracker approval claim or a candidate
+file. Publish it atomically and durably only after independent exact-content approval
+and custody publication; no launch path creates, repairs, approves or renews it. Revoking
+or changing the current reference prevents old preparation reuse. There is no operator
+publication command or automatic migration in this slice. Do not create a reference to
+bypass missing approval. Store and reference aliases, unsafe permissions, links,
+oversize/invalid records and unavailable originals hold. The reader rechecks reference
+identity after the custody read; custody itself rehashes all retained originals and
+rejects overlap with the supplied agent-mount inventory.
+
+Fresh tracker collection is compared using the included-source content hash. Collection
+timestamps are not requirements, but they do affect the rendered hash: therefore the
+analyst receives the **original independently approved rendering** returned from custody,
+not a newly rendered snapshot rebound to an old approval. Both original hashes remain
+bound to the reference and approval. Child/parent/comment edits require fresh independent
+preparation. The adapter repeats this lookup on cached/fresh preparation and both
+post-I/O rechecks. It publishes safe `validate-prepared-acceptance` observations; passive
+status/Board/readiness reads never invoke this active custody reader (which includes
+durability fsync), models or probes.
+
+Dispatch checks even cached candidates before selection, live/stale analysis and fresh
+pre-claim input; assessment refresh checks its input before cache reuse. Direct main
+checks before normal/recovery claim adoption and subsequent input boundaries. Common
+analysis independently checks at entry, immediately before the model and after its I/O.
+No caller callback or tracker declaration can approve acceptance. Static refusals remain
+ticket-scoped preparation/migration holds, not stopped implementation runs.
+
+**Partial integration only:** dispatch now consumes current authenticated owned baseline
+before its implementation claim/child launch. Direct main independently consumes the same
+current authentic evidence after host/Git I/O, before acquiring a claim; dispatched children
+repeat this check before adoption against the dispatch-saved binding, regardless of dispatch
+observations. Standard recovery host authentication runs before claim/charge and again inside
+claim validation; the child independently authenticates before adoption and after Git/input I/O.
+Recovery uses the ORIGINAL saved implementation SHA and admission binding, not origin's current
+integration tip or the repair worktree. CLI/Board expose safe stored categories and baseline
+SHA/binding digest, without reading private runner authority or executing on passive views.
+Static preparation `ready` does not attest to runner/reset capability, explicit execution
+authorization, a baseline reservation or an authenticated matching baseline receipt.
+No baseline is executed or claimed here. Original full-scope baseline, saved work,
+existing admission/ownership/dependency/image fences and charges remain unchanged.
+Candidate replay/proof and installed-release/override protocol coverage remain separate.
+
+Normal admission saves `{version:1,bindingDigest,sha}` as `acceptanceBaseline` on the run;
+the digest covers the full current binding including original bundle/approval, full-scope SHA,
+runtime/dependencies and full policy/reset plan. Recovery cannot replace that binding with a
+newer approved bundle or runtime. A legacy saved run lacking its original admission identity
+holds for explicit host preparation/migration; historical PASS, saved work and budgets are not
+rewritten to manufacture provenance. Automatic legacy identity reconstruction and a public
+operator preparation command are not supplied here. Complete custom overrides are prominently
+**outside this standard guarantee**: host recovery does not infer protocol adoption from a
+valid manifest, and arbitrary override internals remain opaque. Candidate replay/proof and
+installed-release/override protocol adoption remain separate work, not acceptance from this stage.
+
+## Explicit host baseline preparation and dispatch admission
+
+`acceptance-baseline-admission.mts` extends the trusted-host local protocol. It does
+not grant execution from tracker text, static approval, readiness or caller receipt JSON.
+An authorized host preparer provisions these private, regular, single-link bounded UTF-8
+records under `<state>/acceptance` (same host-private trust boundary as custody):
+
+- `baseline-plan-<ticket-content-hash>.json`: exactly `{version:1, request,
+  policyIdentity, configDigest}`. `request` is the complete existing `BaselineRequest`;
+  `policyIdentity` is the selected context's complete policy identity and `configDigest`
+  is `acceptanceHash` of the raw current `.factory/factory.toml` string. Host plan setup,
+  reset recipe, transport and resource limits are explicit reviewed host configuration,
+  not values inferred from tracker commands. Unsupported reset holds.
+- `execution-authorization-<intent-digest>.json`: the exact existing runner execution
+authorization (`id`, `intentDigest`, finite `expiresAt`, optional independently retained
+criterion `evidence`). The digest is `acceptanceHash` of the runner's documented intent:
+`{version:1, request, runtime, dependencies, approval, setup, reset}`. The entire deadline
+must fit the host-supplied grant; preparation never manufactures or renews a grant.
+
+The explicit local host API `prepareAcceptanceBaselineForTicket(iid, base, signal?)`
+recollects tracker child/parent originals and current preparation, independently resolves
+`origin/<base>` with replacement objects disabled, revalidates selected runtime/private
+dependencies/full policy/raw configuration, and inspects the current configured image.
+The host plan must match project/tracker/ticket/bundle/SHA/runtime/cap and observed image.
+It calls the existing separate durable reserve/start/cancel/read APIs, never `claimRun`.
+A private immutable `baseline-current-<ticket-content-hash>.json` containing the exact
+handle and complete current binding is durable before start. Failure or cancellation
+retains that handle and reservation for exact-owned inspection; no automatic retry,
+rotation, cleanup assumption or force-settlement is offered. Explicit host preparation
+must occur before managed launch entry; baseline reservation does not bypass existing
+managed-entry, capacity or project-exclusion fences.
+
+Dispatch's active `requireAcceptanceBaselineForTicket` authenticates retained producer
+index/spec/seal/output and released reservation through `readAcceptanceBaseline`. That
+reader authenticates the **historical request**, so admission additionally compares the
+complete independently resolved CURRENT binding before and after the read. Runner
+`config` is only its bounds digest, not full project policy; the additional policy,
+raw config and full host-plan digest bind setup/reset/transport and all request fields.
+Current exact host authorization must still exist, match the retained grant and remain
+unexpired. Revoked/cancelled/unknown/cleanup-held execution grants no implementation
+claim. Original preparation and host plan are reread after image/Git I/O, and authorization
+and cancellation are rechecked after current-binding collection. A still-reserved baseline
+publishes a cleanup-pending ticket observation before managed-entry refusal, without tracker
+collection or probe execution, and retains its exact capacity ownership.
+Named behavioral red, preservation and reviewed obligations remain reconciled
+by the original runner policy; already-green changed criteria require review.
+
+Preparation is explicit host action, not a new CLI command, automatic scheduler probe,
+tracker mutation or installed-release guarantee. Passive views only read stored
+`validate-current-acceptance-baseline` observations. The current dispatch vertical has
+safe preparation-required, changed-input, authorization-unavailable, cancelled,
+cleanup-pending, review-required, behavior-mismatch and infrastructure categories.
+Remaining direct/adopted/recovery and projection coverage must not be inferred from
+this API. Original roles, full baseline, bundle, work and budgets are unchanged.
+
 ## Verification
 
 ```sh

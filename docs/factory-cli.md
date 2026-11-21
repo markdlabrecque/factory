@@ -30,6 +30,38 @@ The same host-owned project gate precedes explicit complete overrides, including
 
 Recovery host checks run within the existing preparation/pre-charge flow and repeat after image readiness. Complete input must still match the existing preparation before charge, including parent planning comments. A failed source or changed hash publishes a ticket-input hold without replacing the preparation. Host-known failure charges no attempt. Capacity, activity-generation, ownership and admission-time local checks still apply; no budget is refunded or reset. After a container starts, existing charged-attempt and exact-container cleanup rules remain. Settlement and scheduled local maintenance run independently of the new-launch gate, including during project holds or pauses under the existing global-off/unknown/cancellation policy. Unconfirmed cleanup continues to hold ownership, and report state-write failures are reported directly.
 
+Standard dispatch, direct run, explicit assessment refresh, `refreshProject`, common
+analysis and recovery preparation require a [current host acceptance
+preparation reference](acceptance-contract.md#current-host-preparation-reference).
+Missing legacy preparation, malformed state, changed requirements or unavailable/tampered
+original approval/bundle returns ticket-scoped `acceptance-static` before fresh analysis
+or cached-analysis reuse, without charging an attempt or manufacturing a stopped run.
+The safe readiness operation `validate-prepared-acceptance` names the preparer/reviewer's
+next action. Passive status, ticket and Board reads only display the saved observation;
+they never prepare approval, run acceptance probes or invoke an analyst. Existing saved
+work, original baseline, budgets and ownership fences remain intact.
+
+Static checks also cover cached execution/assessment selection and direct/adopted main
+before claim adoption. Analyses use the original full child/parent rendering from custody,
+not a newly timestamped rendering rebound to old approval. Common analysis rechecks
+custody immediately before and after model I/O; recovery's existing rechecks remain.
+
+This is **partial source integration**, not the complete acceptance guarantee. Dispatch
+now requires a separately host-prepared, authentic CURRENT matching owned baseline before
+its implementation claim/child launch. The [explicit host preparation protocol](acceptance-contract.md#explicit-host-baseline-preparation-and-dispatch-admission)
+uses exact private execution grants and the existing separate reservation/lifecycle APIs;
+it never auto-grants execution or uses an implementation claim for preparation. Direct main
+rechecks before claim; dispatched children independently recheck their dispatch-saved original
+binding before adoption. Standard recovery authenticates before claim/repair charge and the
+child rechecks before adoption, retaining ORIGINAL saved baseline/bundle/fullscope/runtime,
+not replacing them with current integration HEAD or saved repair start. Missing original
+admission identities on legacy runs are explicit preparation/migration holds, not blanket
+needs-human or a budget reset. CLI status/Board show safe stored baseline reasons, next actor/
+action and observed SHA/binding digest (unknown is explicit); passive reads never prepare,
+reserve, start, claim or execute even when an observation is ready. Recovery preparation
+`ready` is not baseline receipt authority. There is no new CLI publication command, automatic migration
+or compliance claim for arbitrary complete overrides in this slice.
+
 ## Local persistence durability
 
 Authority and receipt writes use atomic private files with strict file/directory

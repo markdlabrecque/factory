@@ -7,9 +7,43 @@ Readiness is an observation, not permission to execute, verify or deliver. A sav
 The [versioned portable acceptance contract](acceptance-contract.md) defines exact-content
 identity, trusted approval ingress and changed/preservation/reviewed non-transition policy.
 Its pure validators establish structure and record binding, **not** English adequacy or
-launch authority. The module ships in the runtime inventory; custody, bounded execution,
-admission and proof integration are separate work and are not enabled by this foundation.
-Existing readiness observations do not claim to enforce that future protocol.
+launch authority. Contract, custody and the bounded runner ship in the runtime inventory.
+Standard dispatch, direct run, explicit assessment refresh, `refreshProject`, common
+analysis and recovery preparation read current host preparation and rehash original
+acceptance before analysis or cached-analysis reuse. Common analysis repeats the check
+immediately before model invocation and after model I/O; recovery retains its post-I/O checks.
+Revocation during analyst I/O discards that output and records a blocked static observation,
+without creating a queued implementation record. Direct main repeats static validation
+after host/Git I/O before acquiring or adopting a normal claim. Missing,
+malformed, unapproved/tampered or changed preparation returns ticket-scoped
+`acceptance-static`, without an analysis invocation, implementation record or recovery
+charge. Its `validate-prepared-acceptance` observation uses `ticket-input` scope and names
+the preparer/reviewer action; CLI/Board readers only display it.
+
+This is a partial admission integration, **not the complete acceptance guarantee**:
+Dispatch validates current preparation before candidate selection, stale/live analysis
+selection and the fresh pre-claim input read, so cached execution analysis cannot bypass
+static refusal. Direct main checks before claim/adoption and on subsequent input reads.
+Dispatch additionally authenticates a separately host-prepared owned baseline against
+CURRENT ticket/bundle/approval/SHA/runtime/dependencies/full policy/config and host reset
+plan before its implementation claim/child launch. Missing or revoked host execution
+grants, mismatches, review-required already-green, behavioral mismatch, infrastructure
+and cleanup uncertainty are separate safe `validate-current-acceptance-baseline` holds.
+Passive readers display those observations and never invoke the host preparation API.
+Direct/adopted main independently authenticates before claim/adoption; dispatch retains the
+original baseline binding for its child. Standard recovery host authenticates before claim/
+charge and inside atomic claim validation; the child independently rechecks before adoption
+and after Git/input reads, always using saved ORIGINAL full-scope SHA/bundle/runtime rather
+than current integration HEAD or repair start. Missing legacy original admission identity
+holds for explicit host preparation/migration, preserving work and budgets. Stored checks
+carry only safe baseline SHA/binding digest (or explicit null/unknown), not private grants,
+paths or receipt bodies. CLI status JSON/text, Board and ticket-scoped projections preserve
+these categories/identities and never prepare/reserve/start/claim/execute on passive reads,
+including stored ready observations. Static validation does not substitute for baseline authority. The preparation result's `ready`
+means current analysis/prerequisites, not a trusted baseline receipt or permission to
+implement. Full overrides remain opaque, not compliant merely because their manifests
+validate. See [current host preparation](acceptance-contract.md#current-host-preparation-reference).
+Saved observations never approve acceptance or execute probes/models.
 
 ## Start with the observation, not a retry
 

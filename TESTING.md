@@ -85,6 +85,54 @@ these fixtures. All four commit-tier shards, docs checks and the independent bro
 lifecycle gate remain unchanged.
 See [runner contract](docs/acceptance-contract.md#owned-baseline-producer).
 
+## Acceptance static admission (partial integration)
+
+```sh
+node --test orchestrator/acceptance-admission*.test.mts orchestrator/recovery-entrypoint.test.mts
+```
+
+The approved analysis/implementation admission seam is exercised through the actual
+selected common analysis, dispatch, direct, explicit-refresh, `refreshProject` and
+recovery-preparation entrypoints with disposable Git and fixture-owned rejecting
+tracker/Pi boundaries. Missing preparation covers both trackers and configured families;
+malformed references/contracts, unapproved/tampered originals and changed input stop
+before analysis or implementation records. Cached dispatch selection, cached assessment
+revocation, a pending dispatched child and direct post-Git/pre-adoption revocation are covered.
+Actual analyst-I/O revocation discards results and retains static diagnostics without new queue
+records. An authentic custody publication reaches the
+analyst, reuses cached analysis without another call, and is revoked by removing current
+preparation while preserving the saved manifest. Passive stored-readiness reads retain
+the safe ticket-specific reason/action without recreating state or invoking models.
+`fixtures/acceptance-preparation.mts` supplies synthetic independent approval **before**
+launch, never production authority or baseline execution. The existing recovery fixture
+also prepares its exact complete child/parent input before its analysis pass.
+
+These are focused filesystem/process integrations, not helper-only schema tests, browser
+E2E or installed release acceptance. `acceptance-baseline-entrypoints.test.mts` additionally
+exercises actual dispatch with real separate reserve/start/read, durable private grants,
+disposable Git and the existing owned engine transport. Explicit host preparation occurs
+before managed entry; valid current evidence permits the actual claim and child launch
+for both trackers/configured families, including cached selection. Actual dispatch denies
+missing/stale/current-SHA/ticket/config/reset changes, revoked/expired grants, unknown,
+already-green, wrong behavioral failure, actual API cancellation, unknown engine cleanup
+and tampered retained output before claim/child. Final image-I/O revocation is rechecked.
+Stored reads preserve records/reservations and invoke no preparation. Pending cleanup
+publishes its ticket observation before managed-entry refusal, with no tracker collection.
+`fixtures/acceptance-baseline-preparation.mts` is test-only and simulates sandbox output,
+not CMS reset or production authority. Direct/adopted main now independently denies missing
+or revoked baselines before claim/adoption, preserving pending run bytes and admission;
+normal positive model-family/tier journeys explicitly prepare actual owned baselines.
+`acceptance-baseline-recovery.test.mts` proves authorized dispatched-child adoption, host
+revocation and late image-read revocation before recovery charge, independent child revocation/
+saved-binding change before repair, and successful original-fullscope recovery after integration
+HEAD advances. Existing recovery journeys retain independent verifier, work and charge assertions;
+all positive baselines are prepared before intentionally uncertain managed payload ownership.
+CLI status/Board/ticket projections cover every baseline hold category plus ready observations,
+retained safe SHA/binding identities and zero model/container/claim effects on passive reads.
+These are standard source/offline admission proofs, not override adoption or candidate replay. No
+real provider, tracker, credentials, Docker, shared daemon or package install runs.
+The four full shards, documentation and independent lifecycle gates remain unchanged.
+
 ## Standard implementation continuation
 
 `orchestrator/implementation-outcome.test.mts` covers bounded execution/turn reports and fail-closed eligibility. `orchestrator/payload-custody.test.mts` verifies durable one-time reservation without treating it as cleanup. `orchestrator/verification-entrypoint-continuation.test.mts` exercises the flat normal runner with stubbed SDK, tracker and container boundaries and disposable real Git. It checks that a resumed commit keeps the original baseline and requires the independent verifier; second incompletion, a stalled or failed resume, false success, wrong checkout, an unexplained Git delta and superseded execution do not push. A stalled SDK resume or post-resume Git probe retains unsealed custody even when the container is gone. The fixture supplies the inspected Sandcastle resume contract, not a live Pi transport or a production rollout test.
