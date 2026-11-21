@@ -1,12 +1,13 @@
 // Execute one fixed Pi workflow with durable managed admission before readiness/tracker/model work.
 // A pinned leased runtime binds explicit project assets and state; immutable payload custody retains uncertain admission ownership.
 // Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
-// Current host preparation and rehashed original acceptance gate direct/adopted input before claims and subsequent input boundaries.
+// Current original acceptance and authentic authorized baselines gate direct/adopted claims and recovery adoption.
 // Original approved full child/parent bytes bind prompts/evidence; static validity grants no baseline authority.
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
 import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
+import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket } from './acceptance-baseline-admission.mts';
 import { beginPayloadCustody } from './payload-custody.mts';
 import { ownerOf } from './admission.mts';
 import { probeSandbox, sandboxReadinessHold, recordSandboxCleanup } from './sandbox-readiness.mts';
@@ -199,6 +200,15 @@ const currentTicketInput = (): FrozenTicketInput => {
     throw error;
   }
 };
+async function requireBaseline(): Promise<void> {
+  try {
+    await requireAcceptanceBaselineForTicket(Number(iid), base);
+    recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid)));
+  } catch(error) {
+    if(error instanceof AcceptanceBaselineHold) recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid),error));
+    throw error;
+  }
+}
 const frozenInput = currentTicketInput();
 recordTicketInput(stateDir(), inputReport, frozenInput);
 const parentIid = frozenInput.context.parent?.iid;
@@ -396,6 +406,7 @@ if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads"
 }
 // Static authority must survive host readiness and Git I/O before ANY claim/adoption.
 if (ticketHash().hash !== startVersion.hash) fail('Ticket-input changed before admission; retry collection before launch');
+await requireBaseline();
 setProject(PROJECT);
 // Adopt dispatch ownership or atomically acquire a normal claim for a tokenless manual run.
 let claimToken: string | undefined;

@@ -32,6 +32,7 @@ import { claimSupervisorHold, checkSupervisorHold } from '../cli/src/supervisor-
 import { readPayloadCustody, payloadRunClosed } from './payload-custody.mts';
 import { readAdmission } from '../board/admission.mts';
 import { prepareFixtureFromRuntime } from './fixtures/acceptance-preparation.mts';
+import { prepareFixtureBaseline } from './fixtures/acceptance-baseline-preparation.mts';
 
 
 export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false, publicJourney?: (context: any) => Promise<void>) {
@@ -304,6 +305,7 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(selected.root, override); assert.notEqual(selected.id, runtime.id);
       const env = { ...runtime.env, ...selected.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: mid\nThe login form must work.' };
       prepareFixtureFromRuntime(selected.root, root, env);
+      prepareFixtureBaseline(selected.root, root, env);
       const result = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env, timeout: 15000 });
       assert.equal(result.status, 0, result.stdout + result.stderr);
       for (const role of ['implementer', 'verifier']) {
@@ -367,6 +369,7 @@ console.log('sha256:'+'a'.repeat(64));
       const launch = (project: string, fakeDir: string, binDir: string, ticket: string, label: string) => {
         const env = { ...runtime.env, FACTORY_PROJECT_ROOT: project, PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fakeDir, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: ticket, FIXTURE_ARTIFACT: `${label}-artifact` };
         prepareFixtureFromRuntime(runtime.directory, project, env);
+        prepareFixtureBaseline(runtime.directory, project, env);
         const child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
         let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
         t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
@@ -406,6 +409,7 @@ console.log('sha256:'+'a'.repeat(64));
       assert.ok(copied);
       const env = { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: mid\nThe login form must work.', FIXTURE_BARRIER: 'yes' };
       prepareFixtureFromRuntime(runtime.directory, root, env);
+      prepareFixtureBaseline(runtime.directory, root, env);
       const child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
       let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
       t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
@@ -469,7 +473,10 @@ console.log('sha256:'+'a'.repeat(64));
     }
     const runEnv = { ...runtime.env, GIT_ALLOW_PROTOCOL: 'file', PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' };
-    if (!['instruction-missing', 'parent-read-failed', 'image-bad', 'image-changed'].includes(scenario)) prepareFixtureFromRuntime(runtime.directory, root, runEnv);
+    if (!['instruction-missing', 'parent-read-failed', 'image-bad', 'image-changed'].includes(scenario)) {
+      prepareFixtureFromRuntime(runtime.directory, root, runEnv);
+      prepareFixtureBaseline(runtime.directory, root, runEnv);
+    }
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
       cwd: root, encoding: 'utf8', env: runEnv, timeout: 15000,
     });

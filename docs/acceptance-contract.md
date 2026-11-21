@@ -723,7 +723,9 @@ No caller callback or tracker declaration can approve acceptance. Static refusal
 ticket-scoped preparation/migration holds, not stopped implementation runs.
 
 **Partial integration only:** dispatch now consumes current authenticated owned baseline
-before its implementation claim/child launch. Direct/adopted main and recovery precharge
+before its implementation claim/child launch. Direct main independently consumes the same
+current authentic evidence after host/Git I/O, before acquiring a claim; dispatched children
+repeat this check before adoption, regardless of dispatch observations. Recovery precharge
 integration and full passive baseline diagnostics still need integration.
 Static preparation `ready` does not attest to runner/reset capability, explicit execution
 authorization, a baseline reservation or an authenticated matching baseline receipt.

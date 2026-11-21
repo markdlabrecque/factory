@@ -8,6 +8,8 @@ import {readAdmission,readBaselineReservations} from '../board/admission.mts';
 import {readStoredReadiness} from '../board/readiness.mts';
 import {acceptanceHash} from './acceptance-contract.mts';
 import {executionSnapshot} from '../cli/test/execution-fixture.mts';
+import {spawnSync} from 'node:child_process';
+import {claimRun} from '../board/board.mts';
 
 for(const kind of ['github','gitlab'])for(const family of ['openai','anthropic']) {
   test(`${kind}/${family}: real dispatch claim/launch requires the current exact host execution grant`,t=>{
@@ -97,5 +99,19 @@ test('dispatch discards an authentic baseline when original preparation is revok
   const result=f.pass();
   assert.equal(existsSync(join(f.fake,'launches')),false,'no child after final I/O revocation: '+result.stdout+result.stderr);
   assert.equal(existsSync(join(f.dir,'owner_repo--7.json')),false,'no implementation claim after revocation');
+});
+for (const route of ['direct','adopted']) test(`${route} main refuses missing or revoked baseline before acquiring/adopting ownership`, t => {
+  const f=fixture(t); f.data.tickets[0].description='Model tier: mid\nStandalone requirement';f.save();
+  writeFileSync(join(f.home,'bin/docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs',import.meta.url).pathname)};const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE);if(out===undefined)process.exit(90);console.log(out);\n`,{mode:0o755});
+  if(route==='adopted') f.baseline();
+  if(route==='adopted') {const {root}=reference(f);rmSync(join(root,readdirSync(root).find(n=>n.startsWith('execution-authorization-'))!));}
+  const claim=route==='adopted'?claimRun({dir:f.dir,project:'owner/repo',iid:'7',pid:process.pid,cap:2,patch:{base:'main',note:'pending saved work'}}):undefined;
+  if(claim)assert.ok(claim.ok);
+  const file=join(f.dir,'owner_repo--7.json'),before=f.bytes(file),admission=readAdmission(f.dir);
+  const result=spawnSync(f.node,[join(f.runtime.directory,'main.mts'),'--issue','7','--base','main'],{cwd:f.root,env:{...f.env,...(claim?.ok?{FACTORY_LAUNCH_CLAIM:claim.run.claim}:{})},encoding:'utf8',timeout:20000});
+  assert.match(result.stderr,/Acceptance baseline hold:/,result.stdout+result.stderr);
+  assert.equal(f.bytes(file),before,'denial preserves pending work byte-for-byte');
+  assert.deepEqual(readAdmission(f.dir),admission,'no claim, adoption, generation or charge');
+  assert.equal(existsSync(join(f.fake,'models.log')),false);
 });
 function readFileSyncSafe(path:string) {try{return readFileSync(path,'utf8');}catch{return 'directory';}}

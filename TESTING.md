@@ -119,8 +119,10 @@ and tampered retained output before claim/child. Final image-I/O revocation is r
 Stored reads preserve records/reservations and invoke no preparation. Pending cleanup
 publishes its ticket observation before managed-entry refusal, with no tracker collection.
 `fixtures/acceptance-baseline-preparation.mts` is test-only and simulates sandbox output,
-not CMS reset or production authority. Direct/adopted main, recovery precharge and full
-baseline diagnostic projections remain unproved/unimplemented in this partial slice. No
+not CMS reset or production authority. Direct/adopted main now independently denies missing
+or revoked baselines before claim/adoption, preserving pending run bytes and admission;
+normal positive model-family/tier journeys explicitly prepare actual owned baselines.
+Recovery precharge and full baseline diagnostic projections remain outstanding. No
 real provider, tracker, credentials, Docker, shared daemon or package install runs.
 The four full shards, documentation and independent lifecycle gates remain unchanged.
 
