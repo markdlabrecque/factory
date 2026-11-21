@@ -273,6 +273,33 @@ settings or templates requires fresh authority; TOML comments alone do not.
 Requirement, historical baseline, immutable verifier, independent browser probe,
 claim, exact-SHA CI and merge checks remain separate mandatory gates.
 
+Standard normal/recovery main retain the original authenticated custody criterion
+IDs separately from verifier report text and pass them through the existing verifier
+entrypoint. The runtime-owned `ACCEPTANCE_CRITERIA` prompt argument exposes only
+that identity inventory. PASS reports must reconcile every original `criterionId`
+exactly once; the host validates IDs and explicit evidence obligations after verifier immutability checks. The
+existing runtime inventory already ships all touched modules and verifier template;
+no new helper or dependency asset is introduced. Normal and recovery main perform
+separately authorized owned exact-candidate
+replay after payload teardown, reusing the detached producer and original frozen bundle.
+The candidate reserves separate capacity and composes only with its exact live claim and
+managed entry. Normal runs authenticate their payload journal; repair authenticates its
+attempt record and exact repair-container absence. No foreign ownership or cap is bypassed.
+Version 3/policy 3 proofs retain authenticated baseline/candidate handles plus the
+original full policy/raw-config binding; writer and shared proof readers authenticate both
+producer seals, exact SHAs, independent owners, original bytes, current grants and cleanup.
+The current host preparation and baseline reference must still match. Writer and reader
+also check the project/state, requirements hash, image and normal or exact-recovery-attempt replay purpose,
+and derive mandatory semantic criterion IDs and typed obligations from the authenticated
+original bundle. The report and frozen media bind browser and interactive obligations;
+manual links resolve to the independently authorized candidate receipt, not agent output.
+All changed modules were already shipped by the complete runtime inventory; the test
+host is fixture-only. Nonexecuting CI continuation requires modern replay proof and
+compares it to the run's saved original admission. Legacy PASS holds with explicit
+migration guidance; it is not rewritten. Unsettled candidate reservations retain recovery claim
+ownership and charges.
+Baseline admission identity, full-scope baseline and saved repair-start comparison stay separate.
+
 ### Supervisor and independent review inputs
 
 The additive roles `supervisor` and `gateReview` use the same contained Markdown loader as existing roles: common files first, canonical deduplication, literal frozen text and hashes, no secret-path aliases. Their ordered hash maps and normalized supervisor policy participate in `identity`/`policyIdentity` and `assertCurrent`. Edits invalidate authority without rewriting the existing snapshot. These are additional guidelines, not replacement Factory prompts or constraints.

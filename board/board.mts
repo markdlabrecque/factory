@@ -77,6 +77,7 @@ export interface RunState {
   executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
   payloadCustody?: { version: 1; nonce: string }; // private source journal pointer; never readiness/projection authority
   implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
+  acceptanceBaseline?: { version: 1; bindingDigest: string; sha: string }; // original full-scope/current-host admission binding, never replaced by repair
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
   delivery?: DeliveryCheckpoint; // host-only current pointer; never reconstructed from note prose
   implementationModel?: string; // chosen once by main.mts, never updated by description refresh

@@ -20,7 +20,7 @@ import { structuredContextSource } from './ticket-context-source.mts';
 import { install } from '../cli/src/commands/install.mts';
 import { pathToFileURL } from 'node:url';
 import { fixtureReport } from './fixtures/verification.mts';
-import { proofRoot } from './verification.mts';
+import { createProof, proofRoot, readProof } from './verification.mts';
 import { createHash } from 'node:crypto';
 import { MODEL_POLICY } from './model-policy.mts';
 import { supervisorHash } from './supervisor-contract.mts';
@@ -31,9 +31,15 @@ import { resolveWorkflow } from './workflow.mts';
 import { claimSupervisorHold, checkSupervisorHold } from '../cli/src/supervisor-admission.mts';
 import { readPayloadCustody, payloadRunClosed } from './payload-custody.mts';
 import { readAdmission } from '../board/admission.mts';
+import {claimRun} from '../board/board.mts';
+import { prepareFixtureFromRuntime } from './fixtures/acceptance-preparation.mts';
+import { prepareFixtureBaseline } from './fixtures/acceptance-baseline-preparation.mts';
+import { startCandidateHost } from './fixtures/acceptance-candidate-host.mts';
 
+// Harness watchdog for main paths that run implementation, replay and delivery.
+const workflowChildTimeoutMs = 90_000;
 
-export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false, publicJourney?: (context: any) => Promise<void>) {
+export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false, publicJourney?: (context: any) => Promise<void>, adopted = false) {
     const home = mkdtempSync(join(tmpdir(), 'verification-entry-'));
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const root = join(home, 'site'), origin = join(home, 'origin.git'), p = paths(home), state = copied ? p.state : join(home, 'state'), fake = join(home, 'fake'), bin = join(home, 'bin');
@@ -43,11 +49,12 @@ export async function normalEntrypointFixture(t: TestContext, scenario: string, 
     git(root, 'config', 'user.name', 't'); git(root, 'config', 'user.email', 't@t');
     writeFileSync(join(root, 'app.txt'), 'before'); git(root, 'add', '.'); git(root, 'commit', '-qm', 'init'); git(root, 'push', '-q', 'origin', 'main');
     const baseline = git(root, 'rev-parse', 'main');
+    if(scenario==='acceptance-replay-pass')writeFileSync(join(root,'site.rows'),'implementer/source dirt must not be transported');
     const sdk = join(home, 'fixture-sdk');
     cpSync(join(import.meta.dirname, 'fixtures/entrypoint/sandcastle'), sdk, { recursive: true });
     writeFileSync(join(sdk, 'index.mjs'), `
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, rmSync, existsSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import net from 'node:net'; import tls from 'node:tls'; import http from 'node:http'; import https from 'node:https';
 import { syncBuiltinESMExports } from 'node:module';
@@ -161,7 +168,13 @@ export async function createSandbox(o) {
           }
           return {commits:[], iterations:[{sessionFilePath:session}], stdout:'arbitrary raw log must never be reported'};
         }
-        writeFileSync(join(worktree,'app.txt'),'after'); git(worktree,['commit','-qam','implementation']);
+        if (scenario === 'acceptance-implementer-tamper') {
+          mkdirSync(join(worktree,'probes'));
+          const dishonest = {version:1,assertions:['A-summary','A-order'].map(assertionId=>({assertionId,status:'pass',failureId:null}))};
+          writeFileSync(join(worktree,'probes/export.mjs'),'process.stdout.write('+JSON.stringify(JSON.stringify(dishonest))+');');
+          git(worktree,['add','probes/export.mjs']);
+        } else writeFileSync(join(worktree,'app.txt'),'after');
+        git(worktree,['commit','-qam','implementation']);
         if (scenario === 'instruction-edit') { writeFileSync(join(root,'common.md'),'changed after invocation'); writeFileSync(join(fake,'frozen-after-edit.txt'),o.promptArgs.ADDITIVE_INSTRUCTIONS); }
         if (scenario === 'config-family') { const file=join(root,'.factory/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('family = "openai"','family = "anthropic"')); }
         if (scenario === 'config-setup') { const file=join(root,'.factory/factory.toml'); writeFileSync(file,readFileSync(file,'utf8').replace('setup = []','setup = [{command="changed setup"}]')); }
@@ -174,10 +187,39 @@ export async function createSandbox(o) {
       writeFileSync(join(fake,'verifier-started'),'yes');
       if (scenario === 'continuation-failed-verification') throw Error('fixture verifier failure');
       writeFileSync(join(evidence,'verdict.md'),'VERDICT: PASS\\nSynthetic checks');
-      if (scenario !== 'legacy-prompt') writeFileSync(join(evidence,'verification.json'),${JSON.stringify(JSON.stringify(fixtureReport()))});
+      if (scenario !== 'legacy-prompt') {
+        const report = ${JSON.stringify(fixtureReport())};
+        if (scenario === 'acceptance-omitted-criterion') report.criteria.pop();
+        if (['acceptance-replay-pass','acceptance-manual-evidence-missing'].includes(scenario)) {
+          // The independent SDK stub supplies synthetic verifier output, not live browser/human acceptance.
+          const frozenCriteria = JSON.parse(o.promptArgs.ACCEPTANCE_CRITERIA);
+          const feature = frozenCriteria.find(c => c.id === 'C-feature');
+          if (feature?.verificationEvidence.map(o => o.kind).join(',') !== 'browser,interactive') throw Error('Verifier did not receive its original evidence obligations');
+          report.criteria[0].obligations = [
+            { requirement: 'Summary panel screenshot', observation: 'Synthetic summary panel', evidence: ['after-summary.png'] },
+            { requirement: 'Keyboard submission recording', observation: 'Synthetic keyboard submission', evidence: ['after-keyboard.png','after-keyboard.webm'] },
+          ];
+          report.criteria[2].obligations = [
+            { requirement: 'independent documentation review', observation: 'Synthetic scope for host-retained review', evidence: [] },
+          ];
+          for (const path of report.criteria[0].obligations.flatMap(o => o.evidence)) {
+            report.criteria[0].evidence.push(path);
+            report.artifacts.push({ path, kind: path.endsWith('.png') ? 'image' : 'video', phase: 'after' });
+            // Only container headers and distinct bytes are relevant to this host-policy fixture.
+            const header = Buffer.from(path.endsWith('.png') ? '89504e470d0a1a0a' : '1a45dfa3', 'hex');
+            writeFileSync(join(evidence,path), Buffer.concat([header, Buffer.from('synthetic fixture: ' + path)]));
+          }
+        }
+        writeFileSync(join(evidence,'verification.json'),JSON.stringify(report));
+      }
       writeFileSync(join(evidence,'check.txt'),process.env.FIXTURE_ARTIFACT ?? 'Assertions passed');
       if (scenario === 'dirty') writeFileSync(join(worktree,'app.txt'),'verifier changed tracked output');
       writeFileSync(join(fake,'changed'),'yes');
+      if(['pass','readiness-acceptance','publication','shared-projects','project-override','continuation-pass','acceptance-replay-pass','acceptance-manual-evidence-missing','acceptance-replay-unknown','acceptance-replay-infrastructure','acceptance-replay-mismatched-bundle','acceptance-replay-changed-candidate','acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(scenario)) await new Promise(resolve=>{
+        const watcher=watch(fake,()=>{if(existsSync(join(fake,'candidate-ready'))){watcher.close();resolve();}});
+        writeFileSync(join(fake,'candidate-request'),'host observation requested');
+        if(existsSync(join(fake,'candidate-ready'))){watcher.close();resolve();}
+      });
       return {commits:[]};
     },
     close: async () => {
@@ -230,7 +272,7 @@ max_calls = 5
 timeout_seconds = 600
 `);
     const completeAcceptance = scenario === 'readiness-acceptance';
-    if (scenario === 'pass' || completeAcceptance || scenario === 'instruction-edit' || scenario === 'publication') {
+    if (scenario === 'pass' || scenario === 'acceptance-replay-pass' || completeAcceptance || scenario === 'instruction-edit' || scenario === 'publication') {
       writeFileSync(join(root, 'common.md'), 'Common {{TICKET}} $(literal) !`shell`');
       writeFileSync(join(root, 'impl.md'), 'implementation only');
       writeFileSync(join(root, 'verify.md'), 'verification only');
@@ -302,7 +344,10 @@ console.log('sha256:'+'a'.repeat(64));
       const selected = resolveWorkflow(root, p.runtimeDescriptor);
       assert.equal(selected.root, override); assert.notEqual(selected.id, runtime.id);
       const env = { ...runtime.env, ...selected.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: mid\nThe login form must work.' };
-      const result = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env, timeout: 15000 });
+      prepareFixtureFromRuntime(selected.root, root, env);
+      prepareFixtureBaseline(selected.root, root, env);
+      await startCandidateHost(t,selected.root,root,env);
+      const result = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env, timeout: workflowChildTimeoutMs });
       assert.equal(result.status, 0, result.stdout + result.stderr);
       for (const role of ['implementer', 'verifier']) {
         const identity = JSON.parse(readFileSync(join(fake, `${role}-identity.json`), 'utf8'));
@@ -362,8 +407,12 @@ console.log('sha256:'+'a'.repeat(64));
       for (const name of ['docker', 'pi']) cpSync(join(bin, name), join(secondBin, name));
       writeFileSync(join(secondBin, 'npm'), `#!${process.execPath}\nimport {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(secondFake, 'npm-called'))}, 'unexpected npm'); process.exit(91);\n`, { mode: 0o755 });
       writeFileSync(join(secondBin, 'gh'), readFileSync(join(bin, 'gh'), 'utf8').replaceAll('owner/repo', 'other/project'), { mode: 0o755 });
-      const launch = (project: string, fakeDir: string, binDir: string, ticket: string, label: string) => {
-        const child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], { cwd: project, env: { ...runtime.env, FACTORY_PROJECT_ROOT: project, PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fakeDir, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: ticket, FIXTURE_ARTIFACT: `${label}-artifact` }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const launch = async (project: string, fakeDir: string, binDir: string, ticket: string, label: string) => {
+        const env = { ...runtime.env, FACTORY_PROJECT_ROOT: project, PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fakeDir, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: ticket, FIXTURE_ARTIFACT: `${label}-artifact` };
+        prepareFixtureFromRuntime(runtime.directory, project, env);
+        prepareFixtureBaseline(runtime.directory, project, env);
+        await startCandidateHost(t,runtime.directory,project,env);
+        const child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
         let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
         t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
         return once(child, 'exit').then(([code]) => assert.equal(code, 0, output));
@@ -401,11 +450,14 @@ console.log('sha256:'+'a'.repeat(64));
     if (scenario === 'publication') {
       assert.ok(copied);
       const env = { ...runtime.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_TICKET_BODY: 'Model tier: mid\nThe login form must work.', FIXTURE_BARRIER: 'yes' };
+      prepareFixtureFromRuntime(runtime.directory, root, env);
+      prepareFixtureBaseline(runtime.directory, root, env);
+      await startCandidateHost(t,runtime.directory,root,env);
       const child = spawn(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
       let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
       t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
       const exited = once(child, 'exit');
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 60_000;
       while (!existsSync(join(fake, 'implementer-started'))) {
         assert.ok(child.exitCode === null && child.signalCode === null && Date.now() < deadline, output || 'implementer did not reach barrier');
         await new Promise(resolve => setTimeout(resolve, 10));
@@ -435,7 +487,11 @@ console.log('sha256:'+'a'.repeat(64));
       git(root, 'branch', '-D', '7-fix-login');
       rmSync(state, { recursive: true, force: true }); mkdirSync(state, { recursive: true });
       rmSync(join(fake, 'changed'), { force: true });
-      const fresh = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env: { ...env, ...selected.env, FIXTURE_BARRIER: '' }, timeout: 15000 });
+      prepareFixtureFromRuntime(selected.root, root, { ...env, ...selected.env, FIXTURE_BARRIER: '' });
+      prepareFixtureBaseline(selected.root,root,{...env,...selected.env,FIXTURE_BARRIER:''});
+      rmSync(join(fake,'candidate-request'),{force:true});rmSync(join(fake,'candidate-ready'),{force:true});
+      await startCandidateHost(t,selected.root,root,{...env,...selected.env,FIXTURE_BARRIER:''});
+      const fresh = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env: { ...env, ...selected.env, FIXTURE_BARRIER: '' }, timeout: workflowChildTimeoutMs });
       assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
       const bImpl = JSON.parse(readFileSync(join(fake, 'implementer-identity.json'), 'utf8'));
       const bVerify = JSON.parse(readFileSync(join(fake, 'verifier-identity.json'), 'utf8'));
@@ -461,9 +517,18 @@ console.log('sha256:'+'a'.repeat(64));
       writeFileSync(join(oldEvidence,'no-commit.json'), JSON.stringify({agentReply:'old explanation must not be reused'}));
       writeFileSync(join(state,'owner_repo--7.json'), JSON.stringify({iid:'7',project:'owner/repo',stage:'stopped',executionId:'old-execution',evidenceDir:oldEvidence,note:'old explanation must not be reused'}));
     }
+    const runEnv = { ...runtime.env, GIT_ALLOW_PROTOCOL: 'file', PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','acceptance-replay-pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
+        FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' };
+    let preparedBaseline: import('./acceptance-baseline-admission.mts').BaselineAdmissionIdentity | undefined;
+    if (!['instruction-missing', 'parent-read-failed', 'image-bad', 'image-changed'].includes(scenario)) {
+      prepareFixtureFromRuntime(runtime.directory, root, runEnv);
+      preparedBaseline=prepareFixtureBaseline(runtime.directory, root, runEnv);
+      await startCandidateHost(t,runtime.directory,root,runEnv);
+    }
+    const pending=adopted?claimRun({dir:state,project:'owner/repo',iid:'7',pid:process.pid,cap:2,patch:{base:'main',acceptanceBaseline:preparedBaseline,implementationBaseSha:preparedBaseline?.sha}}):undefined;
+    if(pending)assert.ok(pending.ok);
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: { ...runtime.env, GIT_ALLOW_PROTOCOL: 'file', PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
-        FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' }, timeout: 15000,
+      cwd: root, encoding: 'utf8', env: {...runEnv,...(pending?.ok?{FACTORY_LAUNCH_CLAIM:pending.run.claim}:{})}, timeout: workflowChildTimeoutMs,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
     if (copied) {
@@ -721,7 +786,7 @@ console.log('sha256:'+'a'.repeat(64));
       assert.equal(calls.includes('/issues/7/labels'), scenario === 'no-commit-malformed-report', 'no new diagnostic labels');
       return;
     }
-    if (scenario === 'pass' || completeAcceptance) {
+    if (scenario === 'pass' || completeAcceptance || scenario === 'acceptance-replay-pass') {
       assert.equal(result.status, 0, result.stdout + result.stderr);
       const tip = git(origin, 'rev-parse', '7-fix-login');
       const run = JSON.parse(readFileSync(join(state, 'owner_repo--7.json'), 'utf8'));
@@ -758,6 +823,147 @@ console.log('sha256:'+'a'.repeat(64));
       assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: expectedModel, thinking: 'high' });
       assert.deepEqual(JSON.parse(readFileSync(join(fake, 'verifier-agent.json'), 'utf8')), { model: MODEL_POLICY[family].large, thinking: 'high' });
       const proof = JSON.parse(readFileSync(join(proofRoot(state, 'owner/repo', '7', run.verification.id), 'proof.json'), 'utf8'));
+      if (scenario === 'acceptance-replay-pass') {
+        assert.ok(proof.candidateReplay,'delivery proof retains authenticated baseline/candidate handles');
+        const candidate=JSON.parse(readFileSync(join(fake,'candidate-input.json'),'utf8'));
+        const driver=JSON.parse(readFileSync(join(fake,'candidate-driver.json'),'utf8'));
+        assert.equal(driver.status,0,driver.stderr);
+        assert.equal(candidate.phase,'candidate');assert.equal(candidate.sha,tip);
+        assert.equal(JSON.parse(driver.stdout).results.assertions[0].status,'pass');
+        const baselineHandle=proof.candidateReplay.baseline;
+        t.diagnostic(JSON.stringify({candidateDriver:driver,baselineDriver:JSON.parse(readFileSync(join(dirname(baselineHandle.directory),'baseline-driver.json'),'utf8'))}));
+        assert.equal(JSON.parse(readFileSync(join(baselineHandle.directory,'sandbox-output.json'),'utf8')).results.assertions[0].status,'expected-behavioral-fail');
+        assert.notEqual(baselineHandle.ownerId,proof.candidateReplay.candidate.ownerId);
+        assert.notEqual(baselineHandle.executionId,proof.candidateReplay.candidate.executionId);
+        const { project, ticket, executionId, branch, base, requirementsHash } = proof;
+        const identity = { project, ticket, executionId, branch, base, baseline, tip, requirementsHash };
+        const provenance = proof.provenance;
+        const replay = proof.candidateReplay;
+        for (const [mutate, reason] of [
+          [(r: any) => delete r.criteria[0].obligations, /authoritative evidence obligation.*inventory/],
+          [(r: any) => r.criteria[0].obligations[0].requirement = 'Wrong obligation', /missing authoritative evidence obligation/],
+          [(r: any) => r.criteria[0].obligations[0].evidence = ['check.txt'], /needs matching browser media/],
+          [(r: any) => r.artifacts.find((a: any) => a.path === 'after-summary.png').phase = 'before', /needs matching browser media/],
+          [(r: any) => r.criteria[0].obligations[1].evidence = ['after-keyboard.png'], /needs matching interactive media/],
+          [(r: any) => r.criteria[0].obligations[1].evidence = ['after-summary.png', 'after-keyboard.webm'], /reuses another obligation/],
+          [(r: any) => r.criteria[2].obligations[0].evidence = ['check.txt'], /needs independently authorized manual evidence/],
+          [(r: any) => delete r.criteria[2].obligations, /authoritative evidence obligation \(C-manual\).*inventory/],
+        ] as const) {
+          const report = structuredClone(proof.report);
+          mutate(report);
+          writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify(report));
+          assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), reason);
+        }
+        const visual = join(run.evidenceDir, 'after-summary.png');
+        const visualBytes = readFileSync(visual);
+        writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify(proof.report));
+        writeFileSync(visual, 'command output with a misleading extension');
+        assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /needs matching browser media/);
+        writeFileSync(visual, visualBytes);
+        assert.throws(() => createProof(state, run.evidenceDir, { ...identity, project: 'foreign/project' }, provenance, undefined, replay), /replay.*project/i);
+        assert.throws(() => createProof(state, run.evidenceDir, identity, { ...provenance, imageId: `sha256:${'b'.repeat(64)}` }, undefined, replay), /replay.*image/i);
+        const unrelatedAttempt = 'd5135819-dad4-4942-aa99-393592637af8';
+        assert.throws(() => createProof(state, run.evidenceDir, { ...identity, attemptId: unrelatedAttempt }, provenance, undefined, replay), /replay.*attempt/i);
+        for (const verdict of ['FAIL', 'INCONCLUSIVE']) {
+          writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify({ ...proof.report, verdict }));
+          writeFileSync(join(run.evidenceDir, 'verdict.md'), `VERDICT: ${verdict}\nSynthetic independent verdict`);
+          assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /replay.*semantic PASS/i);
+        }
+        writeFileSync(join(run.evidenceDir, 'verification.json'), JSON.stringify({ ...proof.report, criteria: proof.report.criteria.slice(1) }));
+        writeFileSync(join(run.evidenceDir, 'verdict.md'), 'VERDICT: PASS\nSynthetic independent verdict');
+        assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /authoritative criterion inventory/);
+        const accepted = readProof(state, identity, run.verification.id);
+        assert.equal(accepted.report.verdict, 'PASS');
+        // Even internally consistent hashes are insufficient if the frozen report loses an obligation.
+        const frozenReportPath = join(accepted.root, 'verification.json');
+        const frozenProofPath = join(accepted.root, 'proof.json');
+        const originalFrozen = [frozenReportPath, frozenProofPath].map(path => readFileSync(path));
+        const mismatched = structuredClone(proof.report);
+        mismatched.criteria[0].obligations[0].evidence = ['check.txt'];
+        const malformedReport = JSON.stringify(mismatched);
+        for (const path of [frozenReportPath, frozenProofPath]) chmodSync(path, 0o600);
+        try {
+          writeFileSync(frozenProofPath, JSON.stringify({ ...proof, candidateReplay: null }));
+          assert.throws(() => readProof(state, identity, run.verification.id), /missing replay proof|independent execution missing/);
+          writeFileSync(frozenReportPath, malformedReport);
+          writeFileSync(frozenProofPath, JSON.stringify({ ...proof, report: mismatched, reportHash: createHash('sha256').update(malformedReport).digest('hex') }));
+          assert.throws(() => readProof(state, identity, run.verification.id), /needs matching browser media/);
+        } finally {
+          for (const [i, path] of [frozenReportPath, frozenProofPath].entries()) {
+            writeFileSync(path, originalFrozen[i]); chmodSync(path, 0o400);
+          }
+        }
+
+        // Same exact proof can authorize observation of the same PR without another producer.
+        const { observeWaitingDelivery, RetryableDeliveryRead } = await import(join(runtime.directory, 'delivery-followup.mts'));
+        const waiting = { ...run, stage: 'waiting', delivery: { ...run.delivery, state: 'ci-waiting', reasonCode: 'opened' } };
+        delete waiting.delivery.mergedAt;
+        let observed = 0, checkpoint = waiting.delivery;
+        const host = {
+          state, workflow: runtime.directory, inventory: provenance.code, settings: provenance.settings,
+          claim: r => ({ ok: true, run: { ...r, claim: 'fixture-delivery-claim' } }),
+          finish: (_r, _token, next) => { checkpoint = next; return true; },
+          authorize: () => undefined,
+          merge: async (d, authorize) => {
+            assert.equal(d.proofId, run.verification.id);
+            assert.equal(d.sha, tip);
+            assert.equal(authorize(), undefined);
+            return ++observed === 1
+              ? { state: 'ci-waiting', reasonCode: 'checks-pending', reason: 'fixture pending' }
+              : { state: 'merged', reasonCode: 'merged', reason: 'fixture merged', mergedAt: new Date().toISOString() };
+          },
+        };
+        // A historical criterion-only replay proof is not a same-PR authority upgrade.
+        chmodSync(frozenProofPath, 0o600);
+        try {
+          writeFileSync(frozenProofPath, JSON.stringify({ ...proof, version: 2, policyVersion: 2 }));
+          assert.match(await observeWaitingDelivery(waiting, host), /Legacy proof cannot authorize CI continuation/);
+          assert.equal(observed, 0);
+        } finally { writeFileSync(frozenProofPath, originalFrozen[1]); chmodSync(frozenProofPath, 0o400); }
+        const pending = await observeWaitingDelivery(waiting, host);
+        assert.match(pending, /Pending CI/);
+        assert.equal(checkpoint.state, 'ci-waiting');
+        assert.match(await observeWaitingDelivery({ ...waiting, delivery: checkpoint }, host), /Merged/);
+        assert.equal(checkpoint.state, 'merged');
+        assert.equal(observed, 2);
+        for (const changed of [
+          { run: { ...waiting, acceptanceBaseline: { ...waiting.acceptanceBaseline, bindingDigest: '0'.repeat(64) } }, host, reason: /original acceptance baseline/i },
+          { run: waiting, host: { ...host, settings: { ...host.settings, image: 'changed' } }, reason: /settings changed/i },
+          { run: waiting, host: { ...host, inventory: {} }, reason: /workflow proof inputs/i },
+          { run: waiting, host: { ...host, authorize: () => 'Requirements changed' }, reason: /Requirements changed/ },
+          { run: waiting, host: { ...host, authorize: () => 'Local/remote branch changed' }, reason: /branch changed/ },
+        ]) {
+          assert.match(await observeWaitingDelivery(changed.run, changed.host), changed.reason);
+          assert.equal(checkpoint.state, 'operator-required');
+        }
+        await observeWaitingDelivery(waiting, { ...host, authorize: () => { throw new RetryableDeliveryRead('tracker unavailable'); } });
+        assert.equal(checkpoint.reasonCode, 'transport-unknown');
+        assert.equal(checkpoint.state, 'ci-waiting');
+        await observeWaitingDelivery(waiting, { ...host, merge: async (_d, authorize) => {
+          let scheduler = true;
+          const getHold = () => scheduler ? authorize() : 'Scheduler paused during observation';
+          assert.equal(getHold(), undefined);
+          scheduler = false;
+          return { state: 'operator-required', reasonCode: 'authorization', reason: getHold() };
+        } });
+        assert.equal(checkpoint.state, 'operator-required');
+        const planPath = join(state, 'acceptance', `baseline-plan-${requirementsHash}.json`);
+        const originalPlan = readFileSync(planPath);
+        try {
+          writeFileSync(planPath, JSON.stringify({ ...JSON.parse(originalPlan.toString()), configDigest: '0'.repeat(64) }));
+          assert.match(await observeWaitingDelivery(waiting, host), /preparation\/config\/approval changed/);
+          assert.equal(checkpoint.state, 'operator-required');
+        } finally { writeFileSync(planPath, originalPlan); }
+        const candidateOutput = join(replay.candidate.directory, 'sandbox-output.json');
+        const raw = readFileSync(candidateOutput);
+        chmodSync(candidateOutput, 0o600);
+        try {
+          writeFileSync(candidateOutput, Buffer.concat([raw, Buffer.from('\n')]));
+          assert.match(await observeWaitingDelivery(waiting, host), /output.*(changed|integrity|mismatch)/i);
+          assert.equal(checkpoint.state, 'operator-required');
+        } finally { writeFileSync(candidateOutput, raw); chmodSync(candidateOutput, 0o400); }
+        assert.equal(observed, 2);
+      }
       if (copied) {
         assert.match(result.stdout, /implementer openai\/gpt-6\.1-terra/);
         assert.equal(proof.report.verdict, 'PASS');
@@ -859,7 +1065,28 @@ console.log('sha256:'+'a'.repeat(64));
         assert.equal(record.modelChoice.family, 'openai'); assert.equal(record.modelChoice.tier, 'mid');
         assert.deepEqual(JSON.parse(readFileSync(join(fake, 'implementer-agent.json'), 'utf8')), { model: MODEL_POLICY.openai.mid, thinking: 'high' });
       }
-      const reason = ({'parent-plan':/Requirements changed/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Requirements changed/,title:/Requirements changed/,body:/Requirements changed/,comment:/Requirements changed/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/} as Record<string, RegExp>)[scenario];
+      if (['acceptance-implementer-tamper','acceptance-reset-unsupported'].includes(scenario)) {
+        const record = JSON.parse(readFileSync(join(state,'owner_repo--7.json'),'utf8'));
+        assert.equal(record.verification,undefined,'no accepting proof is published');
+        const actual = JSON.parse(readFileSync(join(fake,'candidate-driver.json'),'utf8'));
+        if (scenario === 'acceptance-implementer-tamper') {
+          assert.ok(git(root,'show','7-fix-login:probes/export.mjs').includes('A-summary'));
+          assert.equal(actual.status,0,'the original probe can still execute');
+          assert.deepEqual(JSON.parse(actual.stdout).results.assertions.map((a:any)=>[a.assertionId,a.status,a.failureId]),[
+            ['A-summary','expected-behavioral-fail','summary-unavailable-or-wrong'],['A-order','pass',null],
+          ]);
+        } else {
+          assert.notEqual(actual.status,0);
+          assert.match(actual.stderr,/Synthetic local setup failed/);
+          assert.equal(actual.stdout,'','unsupported reset cannot publish an assertion observation');
+        }
+      }
+      if (['acceptance-obligation-omitted', 'acceptance-manual-evidence-missing'].includes(scenario)) {
+        const record = JSON.parse(readFileSync(join(state,'owner_repo--7.json'),'utf8'));
+        assert.equal(record.verification, undefined, 'no accepting proof is published');
+        assert.equal(existsSync(join(fake, 'candidate-input.json')), scenario === 'acceptance-manual-evidence-missing');
+      }
+      const reason = ({'acceptance-manual-evidence-missing':/Acceptance candidate hold:.*missing-evidence/,'acceptance-implementer-tamper':/Acceptance candidate hold:.*behavior-mismatch/,'acceptance-reset-unsupported':/Acceptance candidate hold:.*invalid-results/,'parent-plan':/Acceptance static hold: missing-preparation/,'instruction-edit':/inputs changed/,'config-family':/inputs changed/,'config-setup':/inputs changed/,'runtime-template':/mismatch/,'tier-edit':/Acceptance static hold: missing-preparation/,title:/Acceptance static hold: missing-preparation/,body:/Acceptance static hold: missing-preparation/,comment:/Acceptance static hold: missing-preparation/,parent:/parent changed/,closed:/is closed/,excluded:/excluded or needs human/,claim:/claim is no longer held/,dirty:/Verifier changed the branch/,branch:/moved from verified tip/,'missing-baseline':/bad object|missing|invalid|not a valid|unable to read/i,'legacy-prompt':/verification.json/,'acceptance-omitted-criterion':/authoritative criterion inventory/,'acceptance-obligation-omitted':/authoritative evidence obligation.*inventory/,'acceptance-missing-replay':/Acceptance candidate hold/,'acceptance-replay-unknown':/Acceptance candidate hold/,'acceptance-replay-infrastructure':/Acceptance candidate hold/,'acceptance-replay-mismatched-bundle':/Acceptance candidate hold/,'acceptance-replay-changed-candidate':/moved from verified tip|tip|branch/i} as Record<string, RegExp>)[scenario];
       assert.match(result.stdout + result.stderr, reason);
     }
 }

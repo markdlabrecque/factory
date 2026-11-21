@@ -266,5 +266,6 @@ console.log('synthetic-chatgpt-not-a-token');
     t.diagnostic(JSON.stringify({copiedCLI:cli,runtime:runtime.id,journey:unknown?'B':'A',requests:1,artifact:artifact??'not retained'}));
   });
 }
-test('copied public diagnosis retains non-executing advice and unchanged fresh CLI reuses it without another charge', {timeout:120000},t=>journey(t,false));
-test('copied public stop retains owned pending work and durable human request across controller loss with unknown usage', {timeout:120000},t=>journey(t,true));
+// These journeys include the shared normal-entrypoint fixture before the public CLI calls.
+test('copied public diagnosis retains non-executing advice and unchanged fresh CLI reuses it without another charge', {timeout:480_000},t=>journey(t,false));
+test('copied public stop retains owned pending work and durable human request across controller loss with unknown usage', {timeout:480_000},t=>journey(t,true));

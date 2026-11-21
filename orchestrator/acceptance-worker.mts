@@ -1,4 +1,4 @@
-// Detached baseline lifecycle owner. All untrusted executable bytes remain in read-only sandbox inputs.
+// Detached baseline/candidate lifecycle owner. All untrusted executable bytes remain in read-only sandbox inputs.
 // Ambiguous create, foreign engine/container, crash, late output or cleanup failure retain durable admission.
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { acceptanceHash } from './acceptance-contract.mts';
 import { copyAcceptanceForRunner, readAcceptanceBundle } from './acceptance-custody.mts';
-import { baselineHash, exactBaseline, immutableBaselineFile, privateDirectory, readBaselineSpec, type BaselineHandle } from './acceptance-runner.mts';
+import { baselineHash, exactBaseline, immutableBaselineFile, privateDirectory, readBaselineSpec, assertCandidateOwner, type BaselineHandle } from './acceptance-runner.mts';
 const flat=existsSync(new URL('./admission.mts',import.meta.url));
 const admission=await import(flat?'./admission.mts':'../board/admission.mts');
 const {validateRuntimeBundle}=await import(flat?'./runtime-bundle.mts':'../cli/src/runtime-bundle.mts');
@@ -53,6 +53,7 @@ async function main(directory:string):Promise<number>{
   };
   try{
     admission.withAdmission(h.stateDir,()=>{if(!exactBaseline(admission.readBaselineReservations(h.stateDir).find(b=>b.executionId===h.executionId),h))throw Error('Foreign reservation');});
+    if(r.candidate) admission.withAdmission(h.stateDir,tx=>assertCandidateOwner(r,tx.state));
     const runtime=validateRuntimeBundle(r.runtimeRoot);if(runtime.id!==s.intent.runtime||runtime.dependencies!==s.intent.dependencies)throw Error('Selected runtime changed');
     const bundle=readAcceptanceBundle(r.custodyRoot,r.agentMounts,r.pointer);
     if(bundle.manifest.approvalDigest!==s.intent.approval||acceptanceHash(bundle.contract)!==acceptanceHash(s.contract))throw Error('Frozen bundle changed');
@@ -72,7 +73,7 @@ async function main(directory:string):Promise<number>{
     if(sizes.length!==ids.length||sizes.some(n=>!Number.isSafeInteger(n)||n<0)||sizes.reduce((a,b)=>a+b,0)>r.bounds.diskMiB*1024*1024/2)throw Error('Git disk bound');
     const pack=await git(['-C',r.source,'pack-objects','--stdout','--no-reuse-delta','--no-reuse-object'],ids.join('\n')+'\n');
     immutableBaselineFile(join(inputs,'baseline.pack'),pack);
-    const plan={version:1,executionId:h.executionId,sha:r.sha,deadline,setup:r.setup,reset:r.reset,bounds:r.bounds,contract:bundle.contract,identity:bundle.manifest.acceptance};
+    const plan={version:1,phase:r.candidate?'candidate':'baseline',executionId:h.executionId,sha:r.sha,deadline,setup:r.setup,reset:r.reset,bounds:r.bounds,contract:bundle.contract,identity:bundle.manifest.acceptance};
     immutableBaselineFile(join(inputs,'plan.json'),JSON.stringify(plan));
     immutableBaselineFile(join(inputs,'acceptance-sandbox.mjs'),readFileSync(join(r.runtimeRoot,'acceptance-sandbox.mjs'),'utf8'));
     if(control.signal.aborted||remaining()<=0)throw Error('Cancelled before create');
@@ -110,7 +111,8 @@ async function main(directory:string):Promise<number>{
   clearTimeout(timer);watcher.close();
   immutableBaselineFile(join(directory,'outcome.json'),JSON.stringify({problem,cleanup:clean?'confirmed':'unknown',engineId,containerId,outputBytes:bytes}));
   if(!clean)return 2;
-  return admission.withAdmission(h.stateDir,()=>{
+  return admission.withAdmission(h.stateDir,tx=>{
+    if(r.candidate) assertCandidateOwner(r,tx.state);
     const reservations=admission.readBaselineReservations(h.stateDir),current=reservations.find(b=>b.executionId===h.executionId);
     if(!exactBaseline(current,h)||current!.intentDigest!==s.reservation.intentDigest||Date.now()>deadline)return 2;
     const cancelled=existsSync(join(directory,'cancel.json'));

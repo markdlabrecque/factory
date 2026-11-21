@@ -30,6 +30,7 @@ test('dispatch incomplete parent input creates no run or analysis; the next comp
   assert.equal(f.bytes(join(f.dir,`${f.key(7)}.json`)),'absent','no stopped or queued run is manufactured');
   f.data.errors = [];
   f.data.tickets[0].description = 'Model tier: mid\nSelf-contained requirement';
+  f.baseline();
   f.pass();
   assert.match(f.bytes(join(f.fake,'launches')),/--issue 7/);
 });
@@ -39,6 +40,7 @@ test('unknown stopped-ticket input cannot count a jam, renew budgets or block an
   f.data.parents[7] = 90;
   f.data.tickets.push(ticket(90, {description:'Parent plan',contextOnly:true}), ticket(8, {description:'Model tier: mid\nSelf-contained work'}));
   f.data.ready = [7,8]; f.data.errors = [90];
+  f.baseline(8);
   const report = join(f.home,'jam.json');
   const result = f.pass([], {FACTORY_JAM_REPORT:report,FACTORY_PASS_ID:'fixture-pass'});
   assert.match(result.stdout,/jam observation not counted/);

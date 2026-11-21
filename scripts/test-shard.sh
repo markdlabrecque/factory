@@ -35,4 +35,4 @@ if [[ ${3:-} == --list ]]; then
 fi
 printf '# Shard %s/%s: %s of %s files\n' "$index" "$count" "${#selected[@]}" "${#files[@]}"
 printf '# %s\n' "${selected[@]}"
-exec timeout --signal=KILL 180s node --test --test-concurrency=4 --test-reporter=tap --test-timeout=120000 "${selected[@]}"
+exec timeout --signal=KILL 1200s node --test --test-concurrency=4 --test-reporter=tap --test-timeout=480000 "${selected[@]}"

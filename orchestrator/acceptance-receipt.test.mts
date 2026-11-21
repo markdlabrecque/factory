@@ -58,6 +58,38 @@ test('receipt boundary preserves exact inventory, transition taxonomy and requir
     (r: ReturnType<typeof receipt>) => { r.results.phase = 'candidate'; },
   ]) { const r = receipt(); alter(r); assert.equal(codeOf(r), 'invalid-results'); }
 });
+test('candidate receipt needs original transition identities and exact reviewed evidence for each criterion', () => {
+  const candidate = receipt();
+  candidate.results.phase = 'candidate';
+  candidate.results.assertions[0] = { assertionId: 'A-summary', status: 'pass', failureId: null, evidence: ['owned:candidate'] };
+  candidate.results.evidence.push(
+    { criterionId: 'C-feature', requirement: 'independent replay transcript', reference: 'host-review:feature' },
+    { criterionId: 'C-preserve', requirement: 'independent replay transcript', reference: 'host-review:preservation' },
+  );
+  const check = (r: typeof candidate) => checkAcceptanceReceipt(contract, { lookup: () => approval }, r, binding, 160, 'candidate');
+  assert.equal(check(candidate).status, 'valid');
+  const holdCode = (r: typeof candidate) => {
+    const result = check(r);
+    if (result.status !== 'hold') throw Error('Expected held candidate receipt');
+    return result.code;
+  };
+  for (const missing of ['C-feature', 'C-preserve', 'C-manual']) {
+    const r = structuredClone(candidate);
+    r.results.evidence = r.results.evidence.filter(e => e.criterionId !== missing);
+    assert.equal(holdCode(r), 'missing-evidence', missing);
+  }
+  const wrongCriterion = structuredClone(candidate);
+  wrongCriterion.results.evidence[0].criterionId = 'C-feature';
+  assert.equal(holdCode(wrongCriterion), 'invalid-results');
+  const duplicated = structuredClone(candidate);
+  duplicated.results.evidence.push({ ...duplicated.results.evidence[0] });
+  assert.equal(holdCode(duplicated), 'invalid-results');
+  for (const key of ['contractDigest', 'fixtureDigest', 'probeDigest'] as const) {
+    const r = structuredClone(candidate);
+    r.results.identity[key] = '0'.repeat(64);
+    assert.equal(holdCode(r), 'invalid-results', key);
+  }
+});
 test('receipt approval is the exact retained approval, not another review of identical acceptance', () => {
   assert.equal(checkAcceptanceReceipt(contract, { lookup: () => ({ ...approval, id: 'review-18' }) }, receipt(), binding, 160).status, 'hold');
   assert.equal(checkAcceptanceReceipt(contract, { lookup: () => ({ ...approval, provenance: 'different-host-review' }) }, receipt(), binding, 160).status, 'hold');

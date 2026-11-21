@@ -1,8 +1,11 @@
-// Fresh host/project and ticket gates precede analysis/admission. Pinned runtime children keep independent leases and explicit project artifacts.
+// Fresh host/project, complete ticket and current frozen acceptance gates precede analysis, cached selection and claim.
+// Pinned runtime children keep independent leases and explicit project artifacts; authenticated current owned baseline precedes claim.
 // Only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
 import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthorization } from './delivery-followup.mts';
 import { validDelivery } from './delivery.mts';
-import { readAdmission } from './admission.mts';
+import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
+import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket } from './acceptance-baseline-admission.mts';
+import { readAdmission, readBaselineReservations } from './admission.mts';
 import { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordReadinessCheck, recordTicketInput, ticketBranch, ticketWorkspaceProblem } from './launch-readiness.mts';
 // #149: cache full three-state dependency results per pass; unknown reads hold dispatch.
 import { dependencyState, type DependencyResult } from "./dependencies.mts";
@@ -65,6 +68,15 @@ import type { Ticket } from "./tracker.mts";
 
 // All filters and launch limits come from validated v2 data. --max overrides only the cap.
 const entryTracker = context.config.TRACKER;
+// Pending owned baseline cleanup already excludes managed entry. Publish only the safe retained
+// owner/ticket observation; do not collect tracker input, execute probes or prune that reservation.
+const pendingBaselines = readBaselineReservations(stateDir()).filter(b => b.project.root === context.projectRoot && b.project.tracker.project === entryTracker.project);
+if (pendingBaselines.length) {
+  const report = await projectLaunchReadiness({projectRoot:context.projectRoot,runtimeRoot:context.runtimeRoot,runtimeIdentity:context.manifest.id,runtimeDependencies:context.manifest.dependencies,config:effectiveConfig,stateRoot:stateDir()});
+  for (const pending of pendingBaselines) recordReadinessCheck(stateDir(),report,acceptanceBaselineCheck(Number(pending.iid),new AcceptanceBaselineHold('cleanup-pending')));
+  console.log('Acceptance baseline hold: cleanup-pending. Preserve exact-owned reservation; trusted host preparer must inspect retained execution.');
+  process.exit(0);
+}
 const managedEntry = claimManagedEntry(stateDir(), { root: context.projectRoot, tracker: {
   kind: entryTracker.kind, host: entryTracker.gitlabHost ?? entryTracker.host!, project: entryTracker.project } });
 process.on('exit', code => { if (code === 0) releaseManagedEntry(stateDir(), managedEntry); });
@@ -264,6 +276,14 @@ const candidates = unstarted.filter((i) => {
     heldTickets.add(i.iid); log(`#${i.iid} held: ${(error as Error).message}`); return false;
   }
   recordTicketInput(stateDir(), projectReadiness, input);
+  try {
+    input = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], input).ticket;
+    inputs.set(i.iid, input);
+    recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(input));
+  } catch (error) {
+    if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(input, error));
+    heldTickets.add(i.iid); log(`#${i.iid} held: ${(error as Error).message}`); return false;
+  }
   const problem = ticketWorkspaceProblem(context.projectRoot, ticketBranch(i.iid, input.context.child.title));
   recordTicketLaunch(stateDir(), projectReadiness, i.iid, problem);
   if (problem) { heldTickets.add(i.iid); log(`#${i.iid} held: ${problem}`); return false; }
@@ -292,7 +312,15 @@ const inputHolds = new Set<number>();
 const hashOf = new Map<number, string>();
 for (const t of tracked) {
   try {
-    const input = inputs.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid);
+    const fresh = inputs.get(t.iid) ?? freezeTicketInput(tracker.contextSource, t.iid);
+    let input: FrozenTicketInput;
+    try {
+      input = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], fresh).ticket;
+      recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(input));
+    } catch (error) {
+      if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(fresh, error));
+      throw error;
+    }
     inputs.set(t.iid, input);
     notesOf.set(t.iid, input.context.child.notes);
     hashOf.set(t.iid, input.hash);
@@ -324,6 +352,10 @@ if (batch.length) {
       const deps = edgesOf(m).map((e) => `#${e.from}`);
       log(`  depends on ${deps.join(", ") || "nothing"}; footprint ${m.footprint.length} path(s)`);
     } catch (e) {
+      if (e instanceof AcceptanceAdmissionHold) {
+        inputHolds.add(t.iid);
+        recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(inputs.get(t.iid)!, e));
+      }
       log(`  ${(e as Error).message}`);
     }
   }
@@ -421,11 +453,20 @@ const logDir = context.projectPath('.factory/logs');
 mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);
-  const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base };
+  const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base,
+    acceptanceBaseline: undefined as import('./acceptance-baseline-admission.mts').BaselineAdmissionIdentity | undefined, implementationBaseSha: undefined as string | undefined };
   // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
   try {
     context.assertCurrent();
-    const freshInput = freezeTicketInput(tracker.contextSource, d.iid);
+    const collectedInput = freezeTicketInput(tracker.contextSource, d.iid);
+    let freshInput: FrozenTicketInput;
+    try {
+      freshInput = readPreparedAcceptance(stateDir(), [context.projectRoot, context.runtimeRoot, resolve(stateDir(), 'worktrees')], collectedInput).ticket;
+      recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(freshInput));
+    } catch (error) {
+      if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(collectedInput, error));
+      throw error;
+    }
     if (freshInput.hash !== hashOf.get(d.iid)) {
       recordTicketInput(stateDir(), projectReadiness, freshInput, hashOf.get(d.iid));
       log(`#${iid} ticket-input changed before admission; retry next pass`);
@@ -433,7 +474,11 @@ for (const [n, d] of launch.entries()) {
     }
     const problem = ticketWorkspaceProblem(context.projectRoot, ticketBranch(d.iid, freshInput.context.child.title));
     if (problem) { recordTicketLaunch(stateDir(), projectReadiness, d.iid, problem); log(`#${iid} held before admission: ${problem}`); continue; }
+    const baseline = await requireAcceptanceBaselineForTicket(d.iid, base);
+    meta.acceptanceBaseline=baseline;meta.implementationBaseSha=baseline.sha;
+    recordReadinessCheck(stateDir(), projectReadiness, acceptanceBaselineCheck(d.iid,undefined,undefined,baseline));
   } catch (e) {
+    if (e instanceof AcceptanceBaselineHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceBaselineCheck(d.iid, e));
     try { if (e instanceof TicketInputHold) recordReadinessCheck(stateDir(), projectReadiness, e.check); }
     catch (writeError) { console.error(`Ticket readiness report write failed; launch held: ${(writeError as Error).message}`); }
     log(`#${iid}: ${(e as Error).message}`); continue;
@@ -444,6 +489,7 @@ for (const [n, d] of launch.entries()) {
     if (claim.reason.startsWith("no capacity")) break;
     continue;
   }
+  log(`#${iid}: launching owned implementation child`);
   const out = openSync(resolve(logDir, `run-${iid}.log`), "a");
   const childRuntime = runtimeLease.childLease();
   const child = spawn(process.execPath, [context.tsx, context.codePath('main.mts'), "--base", base, "--issue", iid, ...(opts["whole-issues"] ? ["--whole-issues"] : [])], {

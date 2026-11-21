@@ -27,6 +27,8 @@ export interface ReadinessCheck {
   nextAction: string;
   automaticRecheck: 'next-launch' | 'none';
   capacity?: { bytesAvailable: string | null; inodesAvailable: string | null };
+  /** Display-only baseline identities; null explicitly means no authenticated observation is available. */
+  baseline?: { sha: string | null; bindingDigest: string | null };
 }
 export interface ReadinessReport {
   version: 1;
@@ -60,6 +62,9 @@ const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 4
 const nonempty = (v: unknown): v is string => text(v) && v.length > 0;
 const date = (v: unknown) => nonempty(v) && Number.isFinite(Date.parse(v));
 const one = (v: unknown, values: string[]) => values.includes(v as string);
+const baseline = (v: any) => v === undefined || (keys(v,['sha','bindingDigest']) &&
+  (v.sha === null || typeof v.sha === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(v.sha)) &&
+  (v.bindingDigest === null || typeof v.bindingDigest === 'string' && /^[a-f0-9]{64}$/.test(v.bindingDigest)));
 const capacity = (v: any) => v === undefined || (keys(v, ['bytesAvailable', 'inodesAvailable']) && ['bytesAvailable', 'inodesAvailable'].every(k => v[k] === null || (typeof v[k] === 'string' && /^\d{1,40}$/.test(v[k]))));
 export function validIdentity(v: any): v is ReadinessIdentity {
   return keys(v, ['projectRoot', 'runtimeIdentity', 'configIdentity', 'contextFingerprint']) && nonempty(v.projectRoot) && v.projectRoot.startsWith('/') &&
@@ -69,13 +74,13 @@ export function validReport(v: any): v is ReadinessReport {
   return !!(keys(v, ['version', 'identity', 'owner', 'observedAt', 'phase', 'status', 'checks']) && v.version === 1 && validIdentity(v.identity) && keys(v.owner, ['invocationId', 'ownerId', 'generation']) &&
     ['invocationId', 'ownerId', 'generation'].every(k => nonempty(v.owner[k])) && date(v.observedAt) &&
     one(v.phase, ['passive', 'active', 'sandbox']) && Array.isArray(v.checks) && v.checks.length <= 256 &&
-    v.checks.every((c: any) => keys(c, ['id', 'scope', 'ticket', 'phase', 'observedAt', 'status', 'required', 'operation', 'path', 'errno', 'reason', 'nextActor', 'nextAction', 'automaticRecheck', 'capacity']) && nonempty(c.id) && one(c.scope, ['project', 'ticket-input', 'ticket-workspace', 'sandbox']) &&
+    v.checks.every((c: any) => keys(c, ['id', 'scope', 'ticket', 'phase', 'observedAt', 'status', 'required', 'operation', 'path', 'errno', 'reason', 'nextActor', 'nextAction', 'automaticRecheck', 'capacity', 'baseline']) && nonempty(c.id) && one(c.scope, ['project', 'ticket-input', 'ticket-workspace', 'sandbox']) &&
       (c.ticket === undefined || (c.scope !== 'project' && typeof c.ticket === 'string' && /^[1-9]\d{0,19}$/.test(c.ticket))) &&
       c.phase === v.phase && date(c.observedAt) && one(c.status, ['ready', 'blocked', 'unknown']) && typeof c.required === 'boolean' &&
       nonempty(c.operation) && text(c.path) && text(c.reason) && text(c.nextAction) &&
       one(c.nextActor, ['operator', 'factory', 'none']) && one(c.automaticRecheck, ['next-launch', 'none']) &&
       (c.errno === undefined || /^[A-Z][A-Z0-9_]{0,39}$/.test(c.errno)) &&
-      capacity(c.capacity)) &&
+      capacity(c.capacity) && baseline(c.baseline)) &&
     v.status === reportStatus(v.checks));
 }
 /** Display-only policy, including future timestamps. Never use this as launch authority. */

@@ -1,4 +1,4 @@
-// Check CI's exact-once inventory partition and unchanged deadlines without running external services.
+// Check CI's exact-once inventory partition and bounded gates without running external services.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -80,8 +80,10 @@ test('runner executes temporary tests and propagates assertion failures', () => 
   }
 });
 
-test('CI retains deadlines, independent lifecycle check and fail-closed aggregate', () => {
-  assert.match(runner, /exec timeout --signal=KILL 180s node --test --test-concurrency=4 --test-reporter=tap --test-timeout=120000 "\$\{selected\[@\]\}"/);
+test('CI bounds suite jobs and preserves the independent lifecycle check and fail-closed aggregate', () => {
+  assert.match(runner, /exec timeout --signal=KILL 1200s node --test --test-concurrency=4 --test-reporter=tap --test-timeout=480000 "\$\{selected\[@\]\}"/);
+  assert.match(workflow, /^  suite:\n    runs-on: ubuntu-latest\n    timeout-minutes: 25\b/m);
+  assert.match(workflow, /- name: Run complete suite shard\n        timeout-minutes: 22\b/);
   assert.match(workflow, /timeout --signal=KILL 30s node --test --test-reporter=tap --test-timeout=15000 orchestrator\/browser-provisioning.test.mts/);
   assert.match(workflow, /fail-fast: false/);
   assert.match(workflow, /needs: \[browser-lifecycle, suite\]\n    if: always\(\)/);

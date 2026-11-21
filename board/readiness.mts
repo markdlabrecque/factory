@@ -22,7 +22,7 @@ export function readinessLines(read: ReadinessRead, label = 'Readiness'): string
     `  Identity: ${r.identity.runtimeIdentity} / ${r.identity.configIdentity} / ${r.identity.contextFingerprint}`,
     `  Observation: ${r.owner.invocationId} / ${r.owner.generation}; not launch authorization.`];
   for (const c of r.checks) lines.push(`  ${c.scope}/${c.phase}${c.ticket ? ` ticket #${c.ticket}` : c.scope === 'project' ? '' : ' unattributed'} ${c.id}: ${c.status}; ${c.operation} ${JSON.stringify(c.path)}${c.errno ? ` [${c.errno}]` : ''}; ${c.reason}`,
-    `    Next actor: ${c.nextActor}; ${c.nextAction}. Automatic recheck: ${c.automaticRecheck}.`);
+    `    Next actor: ${c.nextActor}; ${c.nextAction}. Automatic recheck: ${c.automaticRecheck}.${c.baseline ? ` Baseline SHA: ${c.baseline.sha ?? 'unknown'}; binding: ${c.baseline.bindingDigest ?? 'unknown'}.` : ''}`);
   return lines;
 }
 export type ReadinessToken = { identity: ReadinessIdentity; owner: ObservationOwner };

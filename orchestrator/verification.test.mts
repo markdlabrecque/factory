@@ -22,7 +22,7 @@ test('exact verdict and report agreement; no legacy or prefix authorization', ()
 test('strict schema, criterion references and bounds', () => {
   for (const change of [(r: any) => r.extra = true, (r: any) => r.criteria = [], (r: any) => r.criteria[0].evidence = [],
     (r: any) => r.criteria[0].evidence = ['missing'], (r: any) => r.artifacts.push(r.artifacts[0]),
-    (r: any) => r.criteria = Array(201).fill(r.criteria[0]), (r: any) => r.interactive = 'false']) {
+    (r: any) => r.criteria = Array(257).fill(r.criteria[0]), (r: any) => r.interactive = 'false']) {
     const r = report(); change(r); assert.throws(() => validateEvidence(fixture(r)));
   }
   const r = report(); r.verdict = 'FAIL'; r.criteria[0] = { requirement: 'Works', result: 'fail', evidence: [], reason: 'Observed failure' } as any;
@@ -60,6 +60,37 @@ test('browser bugfix needs both images and interactive video; bounds apply to no
   assert.throws(() => validateEvidence(large), /1 MiB/);
   r.artifacts = Array(129).fill(r.artifacts[0]);
   assert.throws(() => validateEvidence(fixture(r)), /128/);
+});
+
+test('host original criterion inventory refuses omitted, duplicate, unknown and absent IDs without discarding diagnostic FAIL', () => {
+  const ids = ['C-feature', 'C-preserve', 'C-manual'];
+  const complete = () => ({ ...report(), criteria: ids.map(criterionId => ({ criterionId, requirement: 'Observed behavior', result: 'pass', evidence: ['check.txt'] })) });
+  assert.equal(validateEvidence(fixture(complete()), ids).report.verdict, 'PASS');
+  for (const alter of [
+    (r: any) => r.criteria.pop(),
+    (r: any) => r.criteria[1].criterionId = 'C-feature',
+    (r: any) => r.criteria[1].criterionId = 'C-unknown',
+    (r: any) => delete r.criteria[1].criterionId,
+  ]) {
+    const r = complete(); alter(r);
+    assert.throws(() => validateEvidence(fixture(r), ids), /authoritative criterion inventory/);
+  }
+  const diagnostic = report(); diagnostic.verdict = 'FAIL'; diagnostic.criteria[0].result = 'fail';
+  assert.equal(validateEvidence(fixture(diagnostic), ids).report.verdict, 'FAIL');
+  const state = mkdtempSync(join(tmpdir(), 'inventory-proof-'));
+  const identity = { project: 'o/r', ticket: '7', executionId: 'execution', branch: '7-fix', base: 'main', baseline: 'a'.repeat(40), tip: 'b'.repeat(40), requirementsHash: 'c'.repeat(64) };
+  const provenance = { imageId: 'sha256:' + 'd'.repeat(64), nodeVersion: 'v24', code: {}, settings: {} };
+  assert.throws(() => createProof(state, fixture(), identity, provenance, ids), /authoritative criterion inventory/);
+  const historical = createProof(state, fixture(), identity, provenance);
+  assert.equal(readProof(state, identity, historical.id).report.verdict, 'PASS', 'historical inspection does not invent criterion provenance');
+  assert.throws(() => readProof(state, identity, historical.id, ids), /authoritative criterion inventory/);
+  const completeProof = createProof(state, fixture(complete()), identity, provenance, ids);
+  assert.equal(readProof(state, identity, completeProof.id, ids).report.criteria.length, 3);
+});
+test('all 256 authoritative criteria fit the semantic report boundary', () => {
+  const ids = Array.from({ length: 256 }, (_, i) => `C-${i}`);
+  const r = { ...report(), criteria: ids.map(criterionId => ({ criterionId, requirement: 'Observed behavior', result: 'pass', evidence: ['check.txt'] })) };
+  assert.equal(validateEvidence(fixture(r), ids).report.criteria.length, 256);
 });
 
 test('frozen proofs survive subsequent attempts and detect tampering', () => {

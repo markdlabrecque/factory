@@ -14,7 +14,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
-import { fixtureTicketHash } from './fixtures/ticket-input.mts';
+import { fixtureTicketHash, fixtureTicketInput } from './fixtures/ticket-input.mts';
+import { prepareFixtureAcceptance } from './fixtures/acceptance-preparation.mts';
+import { prepareFixtureBaseline } from './fixtures/acceptance-baseline-preparation.mts';
 
 import { readAdmission } from '../board/admission.mts';
 /** Refresh may own a durable managed entry, never an implementation/recovery admission or generation. */
@@ -28,7 +30,7 @@ export const FIXTURES = join(import.meta.dirname, "fixtures/entrypoint");
 export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 // Selected fixtures use v2 model tiers. No model label is required.
 export const ticket = (iid: number, extra = {}) => ({ iid, title: `Ticket ${iid}`, description: "Model tier: mid\nRequirement DEP:20", state: "open", labels: ["ready-for-agent"], ...extra });
-export function fixture(t: any, kind = "github") {
+export function fixture(t: any, kind = "github", prepareAcceptance = true) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "factory-refresh-")));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const origin = join(home, "origin.git"), root = join(home, "site"), dir = join(home, "runs"), bin = join(home, "bin"), fake = join(home, "fake");
@@ -56,7 +58,7 @@ export function fixture(t: any, kind = "github") {
   writeFileSync(extension, 'throw new Error("Fixture extension must not execute");\n');
   const env = { ...process.env, HOME: home, FACTORY_HOME: home, SANDCASTLE_STATE_DIR: dir, FAKE_STATE: fake, FAKE_TRACKER: kind,
     FACTORY_PI_SUBSCRIPTION_EXTENSION: extension, PATH: `${bin}:/usr/bin:/bin` };
-  const runtime = bindExecution(root, env, { install: dir => {
+  const runtime = bindExecution(root, env, { sdk: join(FIXTURES, 'sandcastle'), install: dir => {
     writeFileSync(join(dir, 'node_modules/tsx/dist/cli.mjs'), `import {appendFileSync,writeFileSync} from 'node:fs'; writeFileSync(process.env.FAKE_STATE+'/launch-context',JSON.stringify({project:process.env.FACTORY_PROJECT_ROOT,runtime:process.env.FACTORY_RUNTIME_ROOT,id:process.env.FACTORY_RUNTIME_ID})); appendFileSync(process.env.FAKE_STATE+'/launches',process.argv.slice(2).join(' ')+'\\n'); await new Promise(r=>setTimeout(r,1000));`);
   } });
   Object.assign(env, runtime.env);
@@ -64,7 +66,15 @@ export function fixture(t: any, kind = "github") {
   // Temporary caller bridge for Board routing, which is owned by the next task.
   writeFileSync(join(root, '.factory/dispatch.mts'), `await import(${JSON.stringify(join(runtime.directory, 'dispatch.mts'))});`);
   const data: any = { tickets: [ticket(7), ticket(20, { description: "Provider", labels: [] }), ticket(21, { description: "New provider", labels: [] })], ready: [7], notes: {}, parents: {} };
-  const save = () => writeFileSync(join(fake, "tracker.json"), JSON.stringify(data));
+  const prepared = new Set<string>();
+  const save = () => {
+    writeFileSync(join(fake, "tracker.json"), JSON.stringify(data));
+    // Existing positive journeys explicitly get fixture-owned preparation before entry, not launcher approval.
+    if (prepareAcceptance) for (const ticket of data.tickets) {
+      const input = fixtureTicketInput(data, ticket.iid, kind);
+      if (!prepared.has(input.hash)) { prepareFixtureAcceptance(dir, input); prepared.add(input.hash); }
+    }
+  };
   const key = (iid: number) => `owner_repo--${iid}`;
   const record = (iid: number, stage: string) => {
     const r = { iid: String(iid), project: "owner/repo", title: `old ${iid}`, stage, pid: process.pid, base: "main", verdict: "FAIL", branch: `${iid}-topic`,
@@ -86,7 +96,7 @@ export function fixture(t: any, kind = "github") {
     save();
     const r = spawnSync(node, [join(runtime.directory, 'dispatch.mts'), "--base", "main", ...args], { cwd: root, encoding: "utf8", env: { ...env, ...extra }, timeout: 20_000 });
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    if (/launching/.test(r.stdout) && !/not launched/.test(r.stdout)) {
+    if (/launching owned implementation child/.test(r.stdout)) {
       const deadline = Date.now() + 2000;
       // The detached stub creates the file before writing a newline-terminated record.
       const completeAppend = (log: string | undefined) => {
@@ -103,7 +113,12 @@ export function fixture(t: any, kind = "github") {
     }
     return r;
   };
+  const baseline = (iid=7, fault='') => {
+    save();
+    writeFileSync(join(bin,'docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs',import.meta.url).pathname)}; const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE); if(out===undefined)process.exit(90); console.log(out);\n`, {mode:0o755});
+    return prepareFixtureBaseline(runtime.directory,root,env,iid,'main',fault);
+  };
   const bytes = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "absent";
-  return { home, root, dir, fake, env, runtime, snapshot, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
+  return { home, root, dir, fake, env, runtime, snapshot, data, save, baseline, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
 }
 

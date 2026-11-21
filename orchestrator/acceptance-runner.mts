@@ -1,13 +1,15 @@
-// Host-only baseline producer: exact trusted grants, durable mixed-workload reservations, detached ownership,
-// private inputs and authenticated immutable receipts. No implementation launch or candidate-proof authority.
+// Host-only baseline/candidate producer: exact grants, separate durable capacity, detached ownership,
+// private exact inputs and authenticated receipts. Candidate admission composes only with its exact owned workflow.
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { constants, existsSync, fstatSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { acceptanceHash, type AcceptanceContract } from './acceptance-contract.mts';
 import { readAcceptanceBundle, type AcceptanceBundlePointer } from './acceptance-custody.mts';
 import { checkAcceptanceReceipt, type AcceptanceReceipt } from './acceptance-receipt.mts';
-import type { AdmissionIdentity, BaselineReservation } from '../board/admission.mts';
+import type { AdmissionIdentity, AdmissionState, BaselineReservation } from '../board/admission.mts';
+import type { PayloadPointer } from './payload-custody.mts';
+import type { AttemptRecord } from './recovery.mts';
 const flat = existsSync(new URL('./admission.mts', import.meta.url));
 const admission = await import(flat ? './admission.mts' : '../board/admission.mts');
 const { readRuns, TERMINAL, PARKED } = await import(flat ? './board.mts' : '../board/board.mts');
@@ -21,6 +23,9 @@ export interface BaselineRequest {
   reset: { kind: 'project-local-synthetic-v1'; recipe: string };
   bounds: { totalMs: number; outputBytes: number; memoryMiB: number; cpus: number; pids: number; diskMiB: number };
   cap: number;
+  candidate?: { key: string; executionId: string; claim: string; entry: string; baseline: string; bindingDigest: string } & (
+    { custody: PayloadPointer; recovery?: never } |
+    { custody?: never; recovery: { attemptId: string; record: string; startSha: string; branch: string } });
 }
 export interface ExecutionAuthorization { id: string; intentDigest: string; expiresAt: number;
   /** Independently reviewed host-retained non-transition evidence; NEVER obtained from sandbox strings. */
@@ -50,6 +55,46 @@ export function readBaselineSpec(h: BaselineHandle): any {
   if (acceptanceHash(s.handle) !== acceptanceHash(h)) throw Error('Foreign baseline handle');
   return s;
 }
+/** Candidate work composes only with its own live normal/recovery claim and managed entry.
+ * It still consumes separate capacity and cannot displace foreign or uncertain work. */
+export function assertCandidateOwner(r: BaselineRequest, state: AdmissionState): void {
+  const c = r.candidate;
+  if (!c) throw Error('Candidate workflow identity missing');
+  const run = readRuns(r.stateDir,false).find(run=>run.key===c.key);
+  const claim = state.claims[c.key], entry = state.entries[c.entry];
+  const same = (a: unknown,b: unknown)=>acceptanceHash(a)===acceptanceHash(b);
+  const refuse = () => { throw Error('Candidate workflow ownership/cleanup changed'); };
+  if (!run || run.project!==r.project.tracker.project || run.iid!==r.iid || run.executionId!==c.executionId || run.claim!==c.claim
+    || run.implementationBaseSha!==c.baseline || run.acceptanceBaseline?.bindingDigest!==c.bindingDigest
+    || !claim || claim.token!==c.claim || claim.project!==r.project.tracker.project || claim.iid!==r.iid
+    || !entry || !same(entry.project,r.project) || !same(entry.owner,claim.owner) || admission.ownerState(claim.owner)!=='alive') return refuse();
+  if (c.recovery) {
+    const a = c.recovery, directory = dirname(a.record);
+    if (c.custody || claim.kind!=='recovery' || claim.attempt!==a.attemptId || run.recovery?.id!==a.attemptId || run.branch!==a.branch
+      || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(a.attemptId) || a.record!==join(directory,`${a.attemptId}.json`)
+      || [...r.agentMounts,r.source,r.runtimeRoot].some(p=>overlap(p,directory)||overlap(directory,p))) return refuse();
+    privateDirectory(directory);
+    const fd = openSync(a.record,constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let rec: AttemptRecord;
+    try {
+      const file = fstatSync(fd);
+      if (!file.isFile() || file.nlink!==1 || file.uid!==process.getuid?.() || file.mode&0o077 || file.size>1024*1024) return refuse();
+      rec = JSON.parse(readFileSync(fd,'utf8'));
+    } finally { closeSync(fd); }
+    if (rec?.version!==1 || rec.id!==a.attemptId || rec.seq!==run.recovery.attempt || rec.startSha!==a.startSha || rec.branch!==a.branch
+      || rec.executionId!==c.executionId || rec.implementationBaseSha!==c.baseline || rec.project!==claim.project || rec.iid!==r.iid
+      || rec.phase!=='verifying' || rec.container!==`factory-recovery-${a.attemptId}` || rec.repairClosed!==rec.container || rec.owner?.pid!==claim.owner.pid
+      || rec.tip!==r.sha || rec.verifier?.tip!==r.sha || rec.verifier.refused) return refuse();
+    return;
+  }
+  if (claim.kind!=='normal' || !c.custody || run.payloadCustody?.nonce!==c.custody.nonce) return refuse();
+  const custody = readPayloadCustody(r.stateDir,c.custody);
+  const b = custody.binding;
+  if (!b || b.executionId!==c.executionId || b.claim!==c.claim || b.entry!==c.entry || b.key!==c.key || b.ticket!==r.iid
+    || b.baseline!==c.baseline || !same(b.project,r.project) || !same(b.owner,claim.owner)
+    || custody.sealed || !custody.payloads.size || [...custody.payloads.values()].some(p=>!p.container||!p.absent)) return refuse();
+}
+const { readPayloadCustody } = await import('./payload-custody.mts');
 export function reserveAcceptanceBaseline(input: BaselineRequest, authorization: TrustedExecutionAuthorization, now = Date.now()): BaselineHandle {
   const r = structuredClone(input);
   privateDirectory(r.ownedRoot);
@@ -80,10 +125,14 @@ export function reserveAcceptanceBaseline(input: BaselineRequest, authorization:
   const reservation: BaselineReservation = { executionId:handle.executionId,ownerId:handle.ownerId,generation:handle.generation,tokenDigest:baselineHash(handle.token),project:r.project,iid:r.iid,engine:acceptanceHash(r.engine),name:`factory-baseline-${handle.executionId}`,intentDigest:digest,deadline:now+r.bounds.totalMs };
   admission.withAdmission(r.stateDir,tx=>{
     const baselines=admission.readBaselineReservations(r.stateDir);
-    if (admission.supervisorExclusion(tx.state,r.project.tracker.project,r.project.root) || Object.values(tx.state.entries).some(e=>admission.admissionConflict(e.project,r.project))) throw Error('Baseline project held by managed/supervisor work');
+    if (r.candidate) {
+      assertCandidateOwner(r,tx.state);
+      if (acceptanceHash(tx.state.claims[r.candidate.key].owner)!==acceptanceHash(admission.ownerOf(process.pid))) throw Error('Candidate reserver is not workflow owner');
+    }
+    if (admission.supervisorExclusion(tx.state,r.project.tracker.project,r.project.root) || Object.values(tx.state.entries).some(e=>admission.admissionConflict(e.project,r.project) && e.id!==r.candidate?.entry)) throw Error('Baseline project held by managed/supervisor work');
     const runs=readRuns(r.stateDir,false).filter(run=>![...TERMINAL,...PARKED].includes(run.stage));
     const claims=Object.entries(tx.state.claims).filter(([,c])=>admission.claimLive(c));
-    if (baselines.some(b=>admission.admissionConflict(b.project,r.project)) || claims.some(([,c])=>c.project===r.project.tracker.project) || runs.some(run=>run.project===r.project.tracker.project)) throw Error('Baseline project held by work/cleanup');
+    if (baselines.some(b=>admission.admissionConflict(b.project,r.project)) || claims.some(([k,c])=>c.project===r.project.tracker.project && k!==r.candidate?.key) || runs.some(run=>run.project===r.project.tracker.project && run.key!==r.candidate?.key)) throw Error('Baseline project held by work/cleanup');
     if (new Set([...claims.map(([k])=>k),...runs.map(run=>run.key)]).size+baselines.length>=r.cap) throw Error('Baseline capacity held');
     // Reserve FIRST. Any crash or filesystem failure from here retains capacity; no rollback by PID/age.
     admission.writeBaselineReservations(r.stateDir,[...baselines,reservation]);
@@ -95,12 +144,12 @@ export function reserveAcceptanceBaseline(input: BaselineRequest, authorization:
 }
 /** The worker owns creation through cleanup; it is detached from the initiating controller/session.
  * Failure to start remains a durable hold, never an automatic release/retry. */
-export function startAcceptanceBaseline(h: BaselineHandle): { pid: number; finished: Promise<number | null> } {
+export function startAcceptanceBaseline(h: BaselineHandle, waitForSettlement = false): { pid: number; finished: Promise<number | null> } {
   const s=readBaselineSpec(h);
   const fd=openSync(join(h.directory,'worker.started'),'wx',0o400); closeSync(fd); admission.syncDirectory(h.directory);
   const child=spawn(process.execPath,[join(s.intent.request.runtimeRoot,'acceptance-worker.mts'),h.directory],{detached:true,stdio:'ignore',env:{PATH:'/usr/bin:/bin',HOME:h.directory,LANG:'C.UTF-8'}});
   const finished=new Promise<number|null>((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
-  child.unref(); return {pid:child.pid!,finished};
+  if (!waitForSettlement) child.unref(); return {pid:child.pid!,finished};
 }
 /** Exact authenticated cancellation is durable. No foreign/stale token can cancel or settle a successor. */
 export function cancelAcceptanceBaseline(h: BaselineHandle): boolean {
@@ -113,8 +162,10 @@ export function cancelAcceptanceBaseline(h: BaselineHandle): boolean {
   });
 }
 /** Read only the producer seal retained outside all sandbox mounts. Arbitrary receipt JSON is not authority. */
-export function readAcceptanceBaseline(h: BaselineHandle, now=Date.now()): { receipt: AcceptanceReceipt; policy: ReturnType<typeof checkAcceptanceReceipt> } {
-  const s=readBaselineSpec(h), sealed=readFileSync(join(h.directory,'receipt.json'),'utf8'), seal=JSON.parse(sealed);
+export function readAcceptanceBaseline(h: BaselineHandle, now=Date.now(), phase: 'baseline' | 'candidate' = 'baseline'): { receipt: AcceptanceReceipt; policy: ReturnType<typeof checkAcceptanceReceipt> } {
+  const s=readBaselineSpec(h);
+  if ((s.intent.request.candidate ? 'candidate' : 'baseline') !== phase) throw Error('Acceptance producer purpose mismatch');
+  const sealed=readFileSync(join(h.directory,'receipt.json'),'utf8'), seal=JSON.parse(sealed);
   const retained=JSON.parse(readFileSync(join(admission.admissionDir(h.stateDir),`baseline-${h.executionId}.sealed`),'utf8'));
   if (!exactBaseline(retained,h) || retained.directory!==h.directory || retained.receiptDigest!==baselineHash(sealed) || retained.specDigest!==baselineHash(readFileSync(join(h.directory,'spec.json')))) throw Error('Unauthenticated baseline producer publication');
   const key=readFileSync(join(h.directory,'producer.key'));
@@ -124,5 +175,5 @@ export function readAcceptanceBaseline(h: BaselineHandle, now=Date.now()): { rec
   if (seal.provenance?.intentDigest!==s.reservation.intentDigest || seal.provenance?.generation!==h.generation || seal.provenance?.authorizationId!==s.grant.id) throw Error('Foreign producer provenance');
   if (admission.readBaselineReservations(h.stateDir).some(r=>r.executionId===h.executionId)) throw Error('Baseline cleanup still held');
   const binding={executionId:h.executionId,bundleId:s.intent.request.pointer.id,approvalId:s.approval.id,approvalDigest:s.intent.approval,sha:s.intent.request.sha,runtime:s.intent.runtime,dependencies:s.intent.dependencies,image:s.intent.request.image,config:acceptanceHash(s.intent.request.bounds),setup:s.intent.setup,reset:s.intent.reset,ownerId:h.ownerId};
-  return {receipt:seal.receipt,policy:checkAcceptanceReceipt(s.contract as AcceptanceContract,{lookup:()=>s.approval},seal.receipt,binding,now)};
+  return {receipt:seal.receipt,policy:checkAcceptanceReceipt(s.contract as AcceptanceContract,{lookup:()=>s.approval},seal.receipt,binding,now,phase)};
 }

@@ -1,5 +1,6 @@
 // Read-only analysis uses selected-runtime templates and complete frozen ticket bytes, saved as host evidence.
 // Project manifests bind included child/parent sources and frozen execution policy, including exact scoped verification guidance when explicitly authorized.
+// Current host preparation and rehashed approved originals gate every analyst call; static validity is not baseline authority.
 // Analysis uses the family's fixed Mid policy model and validated v2 graph settings.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
@@ -13,6 +14,7 @@ import type { Ticket } from "./tracker.mts";
 import { randomUUID } from 'node:crypto';
 import { saveTicketInput, type FrozenTicketInput } from './ticket-input.mts';
 import { ticketContextHash } from './ticket-context.mts';
+import { readPreparedAcceptance } from './acceptance-admission.mts';
 
 // Ticket analysis: one read-only agent run on the host per ticket, against a detached worktree at
 // origin/<base>, with GRAPH.model. Pi runs with read, grep, find and ls, no discovered extensions,
@@ -124,10 +126,11 @@ export function analyse(args: {
   const { ticket: t, catalogue: cat } = args;
   const selectedContext = args.executionContext ?? context;
   selectedContext.assertScope(t.iid,args.runId ?? '');
-  const input = args.input;
+  const approvedInput = () => readPreparedAcceptance(stateDir(), [selectedContext.projectRoot, selectedContext.runtimeRoot, resolve(stateDir(), 'worktrees')], args.input).ticket;
   const gate=selectedContext.identity.gate;
-  if(gate && (input.hash!==gate.ticketInput || ticketContextHash(input.context)!==gate.ticketInput || args.project!==selectedContext.config.TRACKER.project
+  if(gate && (args.input.hash!==gate.ticketInput || ticketContextHash(args.input.context)!==gate.ticketInput || args.project!==selectedContext.config.TRACKER.project
     || args.worktree.path!==gate.workspace || args.worktree.sha!==gate.candidate || args.base!==gate.base)) throw Error('Scoped gate analysis requires exact reviewed ticket input and owned candidate');
+  const input = approvedInput();
   const vars: Record<string, string> = {
     ADDITIVE_INSTRUCTIONS: selectedContext.additive.analysis.text,
     ISSUE_IID: String(t.iid),
@@ -147,7 +150,9 @@ export function analyse(args: {
       + JSON.stringify({scope:selectedContext.identity.gate,verificationInstructions:selectedContext.additive.verification.text}) : '');
 
   saveTicketInput(resolve(stateDir(), 'ticket-inputs', keyFor(String(t.iid), args.project), 'analysis', randomUUID()), input);
+  approvedInput(); // Recheck current custody after prompt/evidence I/O, immediately before model spend.
   const so = runPi(t.iid, prompt, args.worktree.path);
+  approvedInput(); // Revoked preparation cannot publish a usable analysis.
 
   // Ordinary execution uses the open catalogue; assessment/preparation can retain a known closed provider's identity.
   const open = new Map([...cat, ...(args.knownProviders ?? [])].map((c) => [c.iid, c]));
