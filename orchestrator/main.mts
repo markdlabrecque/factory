@@ -1,7 +1,8 @@
 // Execute one fixed Pi workflow with durable managed admission before readiness/tracker/model work.
 // A pinned leased runtime binds explicit project assets and state; immutable payload custody retains uncertain admission ownership.
 // Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
-// Host-frozen complete ticket bytes bind prompts/evidence and live verification/delivery freshness.
+// Current host preparation and rehashed original acceptance gate direct/adopted input before claims and subsequent input boundaries.
+// Original approved full child/parent bytes bind prompts/evidence; static validity grants no baseline authority.
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
 import { browserPreflight, checkImageCapabilities } from './capabilities.mts';
@@ -393,6 +394,8 @@ const baseSha = sh("git", ["rev-parse", `origin/${base}`]);
 if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads", "origin", branch])) {
   fail(`Branch ${branch} already exists locally or on origin; preserve saved work and inspect this ticket's workspace.`);
 }
+// Static authority must survive host readiness and Git I/O before ANY claim/adoption.
+if (ticketHash().hash !== startVersion.hash) fail('Ticket-input changed before admission; retry collection before launch');
 setProject(PROJECT);
 // Adopt dispatch ownership or atomically acquire a normal claim for a tokenless manual run.
 let claimToken: string | undefined;

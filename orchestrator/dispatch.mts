@@ -1,4 +1,5 @@
-// Fresh host/project and ticket gates precede analysis/admission. Pinned runtime children keep independent leases and explicit project artifacts.
+// Fresh host/project, complete ticket and current frozen acceptance gates precede analysis, cached selection and claim.
+// Pinned runtime children keep independent leases and explicit project artifacts; static validity is not baseline authorization.
 // Only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
 import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthorization } from './delivery-followup.mts';
 import { validDelivery } from './delivery.mts';
@@ -341,6 +342,10 @@ if (batch.length) {
       const deps = edgesOf(m).map((e) => `#${e.from}`);
       log(`  depends on ${deps.join(", ") || "nothing"}; footprint ${m.footprint.length} path(s)`);
     } catch (e) {
+      if (e instanceof AcceptanceAdmissionHold) {
+        inputHolds.add(t.iid);
+        recordReadinessCheck(stateDir(), projectReadiness, acceptanceStaticCheck(inputs.get(t.iid)!, e));
+      }
       log(`  ${(e as Error).message}`);
     }
   }

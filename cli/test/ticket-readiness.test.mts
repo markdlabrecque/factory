@@ -172,6 +172,8 @@ test('complete custom workflow gets fresh host gates but its internal input and 
 test('ticket branch collision is ticket-only, preserves the ref and starts no agent or admission', async t => {
   const f = readinessFixture(t); f.git('branch', '7-fix-login');
   const before = f.git('rev-parse', '7-fix-login');
+  const {prepareFixtureFromRuntime} = await import('../../orchestrator/fixtures/acceptance-preparation.mts');
+  prepareFixtureFromRuntime(f.runtime.directory, f.root, {...process.env, SCENARIO:'pass'});
   const result = f.main('pass'); assert.notEqual(result.status, 0, result.stdout + result.stderr);
   const report = await agreement(f);
   assert.ok(report.checks.filter(c => c.scope === 'project' && c.required).every(c => c.status === 'ready'));

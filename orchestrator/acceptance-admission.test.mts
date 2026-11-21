@@ -9,6 +9,8 @@ import { fixture } from './refresh-fixture.mts';
 import { prepareFixtureAcceptance } from './fixtures/acceptance-preparation.mts';
 import { execFileSync } from 'node:child_process';
 import { readStoredReadiness } from '../board/readiness.mts';
+import { claimRun } from '../board/board.mts';
+import { readAdmission } from '../board/admission.mts';
 
 function inputFor(f: ReturnType<typeof fixture>) {
   return JSON.parse(execFileSync(f.node, ['--input-type=module', '-e',
@@ -107,6 +109,63 @@ for (const fault of ['malformed-record', 'malformed-contract', 'unapproved', 'ch
     assert.equal(existsSync(join(f.dir, 'owner_repo--7.json')), false, 'no manufactured implementation record');
   });
 }
+
+test('direct run rechecks preparation after Git I/O before acquiring its normal claim', t => {
+  const f = fixture(t, 'github', false);
+  f.save();
+  const file = prepareFixtureAcceptance(f.dir, inputFor(f));
+  writeFileSync(join(f.home,'bin/docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs',import.meta.url).pathname)}; const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE); if(out===undefined) process.exit(90); console.log(out);\n`, {mode:0o755});
+  writeFileSync(join(f.home,'bin/git'), `#!${process.execPath}\nimport {spawnSync} from 'node:child_process'; import {rmSync} from 'node:fs'; const a=process.argv.slice(2);const r=spawnSync('/usr/bin/git',a,{stdio:'inherit'}); if(a.join(' ')==='ls-remote --heads origin 7-ticket-7') rmSync(${JSON.stringify(file)}); process.exit(r.status??90);\n`, {mode:0o755});
+  const result=spawnSync(f.node,[join(f.runtime.directory,'main.mts'),'--issue','7','--base','main'],{cwd:f.root,env:f.env,encoding:'utf8',timeout:20_000});
+  assert.match(result.stderr,/Acceptance static hold: missing-preparation/);
+  assert.equal(existsSync(join(f.dir,'owner_repo--7.json')),false,'no claim-created implementation record');
+  assert.equal(existsSync(join(f.fake,'models.log')),false);
+});
+
+for (const route of ['dispatch', 'refresh']) test(`${route}: revocation during actual analyst I/O discards output and retains a static hold`, t => {
+  const f = fixture(t, 'github', false);
+  f.data.parents[7] = 20;
+  f.data.notes[20] = [{body:'Original approved parent decisions and full ordered plan',system:false}];
+  f.save();
+  const input = inputFor(f), file = prepareFixtureAcceptance(f.dir, input);
+  const prior = route === 'refresh' ? f.record(7, 'stopped') : undefined;
+  writeFileSync(join(f.home,'bin/pi'), `#!${process.execPath}\nimport {writeFileSync,readFileSync,rmSync} from 'node:fs'; writeFileSync(process.env.FAKE_STATE+'/analyst-input',readFileSync(0)); rmSync(${JSON.stringify(file)}); console.log(JSON.stringify({provides:[],requires:[],footprint:[]}));\n`, {mode:0o755});
+  const result = f.pass(route === 'refresh' ? ['--refresh-only','--ticket','7'] : []);
+  assert.ok(readFileSync(join(f.fake,'analyst-input'),'utf8').includes(input.text), 'analyst gets exact original approved full child/parent rendering');
+  assert.equal(existsSync(join(f.fake,'launches')),false);
+  assert.equal(f.bytes(join(f.dir,'owner_repo--7.json')),prior ?? 'absent');
+  assert.equal(existsSync(join(f.dir,'graph/owner_repo--7.json')),false);
+  const stored = readStoredReadiness(f.dir,f.root);
+  assert.ok('report' in stored, JSON.stringify(stored));
+  assert.equal(stored.report.checks.find(c=>c.id==='acceptance-static-7')?.status,'blocked', result.stdout + result.stderr);
+});
+
+test('a dispatched child with missing preparation cannot adopt or rewrite a pending run or its budgets', t => {
+  const f=fixture(t,'github',false); f.save();
+  const claimed=claimRun({dir:f.dir,project:'owner/repo',iid:'7',pid:process.pid,cap:2,patch:{base:'main',note:'pending preserved work'}});
+  assert.ok(claimed.ok);
+  const file=join(f.dir,'owner_repo--7.json'), before=readFileSync(file,'utf8'), authority=readAdmission(f.dir);
+  writeFileSync(join(f.home,'bin/docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs',import.meta.url).pathname)}; const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE); if(out===undefined) process.exit(90); console.log(out);\n`, {mode:0o755});
+  const result=spawnSync(f.node,[join(f.runtime.directory,'main.mts'),'--issue','7','--base','main'],{cwd:f.root,env:{...f.env,FACTORY_LAUNCH_CLAIM:claimed.run.claim},encoding:'utf8',timeout:20_000});
+  assert.match(result.stderr,/Acceptance static hold: missing-preparation/);
+  assert.equal(readFileSync(file,'utf8'),before);
+  assert.deepEqual(readAdmission(f.dir),authority);
+  assert.equal(existsSync(join(f.fake,'models.log')),false);
+});
+
+test('cached explicit assessment cannot bypass revoked preparation and preserves saved run bytes', t => {
+  const f=fixture(t,'github',false);
+  f.save(); const input=inputFor(f), file=prepareFixtureAcceptance(f.dir,input), prior=f.record(7,'stopped');
+  f.pass(['--refresh-only','--ticket','7']);
+  assert.equal(f.assessment().analysisState,'current');
+  const calls=readFileSync(join(f.fake,'analysis.jsonl'),'utf8');
+  assert.ok(JSON.parse(calls.trim()).input.includes(input.text));
+  rmSync(file);
+  f.pass(['--refresh-only','--ticket','7']);
+  assert.match(f.assessment().error!,/Acceptance static hold: missing-preparation/);
+  assert.equal(readFileSync(join(f.fake,'analysis.jsonl'),'utf8'),calls);
+  assert.equal(readFileSync(join(f.dir,'owner_repo--7.json'),'utf8'),prior);
+});
 
 test('authentic preparation reaches the analyst; cached analysis is still revoked by current preparation', t => {
   const f = fixture(t, 'github', false);

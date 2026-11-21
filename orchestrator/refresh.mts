@@ -1,4 +1,5 @@
-// Read-only refresh uses explicit project settings and runtime/template policy identity in assessment freshness.
+// Read-only refresh checks current frozen acceptance before analysis/cache reuse and records revocation after analyst I/O.
+// Explicit project settings and runtime/template policy identity bind assessment freshness, not launch authority.
 // Read-only current assessment adapter (#78). Description models use the shared resolver (#126). Shared by scheduled dispatch and --refresh-only (one card with --ticket,
 // else every card of the project, #93), which exits before
 // tracker writes, run updates, admission or launches. Analysis results go only to assessments; execution manifests
@@ -85,8 +86,13 @@ export function refreshProject(o: { base: string; ticket?: string; budget?: numb
         for (const iid of ids) if (!catalogue.some((t) => t.iid === iid)) {
           try { knownProviders.push(tracker.ticket(iid)); } catch { /* leave unresolved, never infer satisfied */ }
         }
-        return analyse({ project: TRACKER.project, base: o.base, worktree, ticket, input: inputs.get(ticket.iid)!, notes, catalogue, manifests,
-          knownProviders, keepImplementerBlockers: true });
+        try {
+          return analyse({ project: TRACKER.project, base: o.base, worktree, ticket, input: inputs.get(ticket.iid)!, notes, catalogue, manifests,
+            knownProviders, keepImplementerBlockers: true });
+        } catch (error) {
+          if (error instanceof AcceptanceAdmissionHold && o.readiness) recordReadinessCheck(dir, o.readiness, acceptanceStaticCheck(inputs.get(ticket.iid)!, error));
+          throw error;
+        }
       },
       historicalBlockers: (iid) => manifests.get(iid),
       dependency: (iid) => {

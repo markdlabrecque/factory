@@ -11,7 +11,10 @@ launch authority. Contract, custody and the bounded runner ship in the runtime i
 Standard dispatch, direct run, explicit assessment refresh, `refreshProject`, common
 analysis and recovery preparation read current host preparation and rehash original
 acceptance before analysis or cached-analysis reuse. Common analysis repeats the check
-immediately before model invocation and after model I/O; recovery retains its post-I/O checks. Missing,
+immediately before model invocation and after model I/O; recovery retains its post-I/O checks.
+Revocation during analyst I/O discards that output and records a blocked static observation,
+without creating a queued implementation record. Direct main repeats static validation
+after host/Git I/O before acquiring or adopting a normal claim. Missing,
 malformed, unapproved/tampered or changed preparation returns ticket-scoped
 `acceptance-static`, without an analysis invocation, implementation record or recovery
 charge. Its `validate-prepared-acceptance` observation uses `ticket-input` scope and names

@@ -88,7 +88,7 @@ See [runner contract](docs/acceptance-contract.md#owned-baseline-producer).
 ## Acceptance static admission (partial integration)
 
 ```sh
-node --test orchestrator/acceptance-admission.test.mts orchestrator/recovery-entrypoint.test.mts
+node --test orchestrator/acceptance-admission*.test.mts orchestrator/recovery-entrypoint.test.mts
 ```
 
 The approved analysis/implementation admission seam is exercised through the actual
@@ -96,7 +96,10 @@ selected common analysis, dispatch, direct, explicit-refresh, `refreshProject` a
 recovery-preparation entrypoints with disposable Git and fixture-owned rejecting
 tracker/Pi boundaries. Missing preparation covers both trackers and configured families;
 malformed references/contracts, unapproved/tampered originals and changed input stop
-before analysis or implementation records. An authentic custody publication reaches the
+before analysis or implementation records. Cached dispatch selection, cached assessment
+revocation, a pending dispatched child and direct post-Git/pre-adoption revocation are covered.
+Actual analyst-I/O revocation discards results and retains static diagnostics without new queue
+records. An authentic custody publication reaches the
 analyst, reuses cached analysis without another call, and is revoked by removing current
 preparation while preserving the saved manifest. Passive stored-readiness reads retain
 the safe ticket-specific reason/action without recreating state or invoking models.
