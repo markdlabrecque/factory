@@ -1,4 +1,5 @@
-// Owned-runner seam: real private files, Git and admission; only the external engine is simulated.
+// Owned-runner seam: real private files, Git and admission; engine lifecycle is simulated.
+// One namespace transport executes the real copied driver/setup/probe against disposable synthetic state.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
@@ -16,19 +17,22 @@ import { claimSupervisorHold } from '../cli/src/supervisor-admission.mts';
 import { reserveAcceptanceBaseline, startAcceptanceBaseline, readAcceptanceBaseline, cancelAcceptanceBaseline } from './acceptance-runner.mts';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
+import { namespaceTransport } from './fixtures/acceptance-namespace.mts';
 
-function fixture(t: any) {
+function fixture(t: any, localDriver = false) {
   const root = mkdtempSync(join(tmpdir(), 'baseline-runner-')); t.after(() => rmSync(root, { recursive: true, force: true }));
   const paths = Object.fromEntries(['project','custody','owned','state','runtime'].map(n => [n, join(root,n)]));
   for (const p of Object.values(paths)) mkdirSync(p, { mode: 0o700 });
   const git = (...args: string[]) => execFileSync('git', args, { cwd: paths.project, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
   git('init','-q'); git('config','user.email','fixture@example.invalid'); git('config','user.name','Fixture');
-  writeFileSync(join(paths.project,'setup.mjs'), '// project-local synthetic CMS setup; engine stub never executes this on host\n');
+  writeFileSync(join(paths.project,'setup.mjs'), localDriver ? readFileSync(new URL('./fixtures/acceptance-local-setup.mjs',import.meta.url)) : '// project-local synthetic CMS setup; engine stub never executes this on host\n');
+  if(localDriver)writeFileSync(join(paths.project,'export.mjs'),'export const rows = values => [...values];\n');
   git('add','.'); git('commit','-qm','Exact baseline'); const sha = git('rev-parse','HEAD');
   const contract = JSON.parse(readFileSync(new URL('../docs/acceptance-contract.md', import.meta.url),'utf8').match(/```json\n([\s\S]*?)\n```/)![1]) as AcceptanceContract;
-  const artifacts = [{path:'probes/export.mjs',bytes:Buffer.from('throw new Error("MUST NOT RUN ON HOST")')},{path:'fixtures/rows.json',bytes:Buffer.from('[1,2]')}];
+  const artifacts = [{path:'probes/export.mjs',bytes:localDriver ? readFileSync(new URL('./fixtures/acceptance-local-probe.mjs',import.meta.url)) : Buffer.from('throw new Error("MUST NOT RUN ON HOST")')},{path:'fixtures/rows.json',bytes:Buffer.from('[1,2]')}];
   const hash = (bytes: Buffer) => { const { createHash } = requireCrypto; return createHash('sha256').update(bytes).digest('hex'); };
   contract.probes[0].bundle[0].sha256=hash(artifacts[0].bytes); contract.fixtures[0].sha256=hash(artifacts[1].bytes);
+  if(localDriver)contract.probes[0].argv.push(paths.project); // Known-existing host sentinel; never a mount.
   const ticket = freezeTicketInput({ identity:{kind:'github',host:'github.test',project:'owner/repo'}, ticket:iid=>({bytes:1,value:{iid,title:'Baseline',description:'Exact behavior',url:'https://github.test/owner/repo/issues/7'}}),parentOf:()=>({bytes:1,value:null}),notes:()=>({bytes:1,value:{notes:[],nextPage:null}})},7);
   const pointer=freezeAcceptanceBundle({root:paths.custody,agentMounts:[paths.project],contract,ticket,artifacts,approvals:{lookup:()=>({version:1,id:'review-17',identity:acceptanceIdentity(contract),approvedRevision:1,reviewer:{kind:'human',name:'reviewer@example.invalid'},decision:'approve',semanticAdequacy:true,provenance:'host-store:17',reviewedAt:'2026-11-20T16:00:00.000Z'})}});
   const runtime=prepareRuntimeBundle({sourceRoot:resolve('.'),runtimeStore:paths.runtime,install:installPackages});
@@ -126,6 +130,63 @@ test('owned worker retains a real exact-SHA pack and frozen copies, removes only
   assert.equal(cancelAcceptanceBaseline(h),false,'late cancellation cannot alter an immutable receipt');
   const receipt=join(h.directory,'receipt.json');const seal=JSON.parse(readFileSync(receipt,'utf8'));seal.receipt.binding.sha='f'.repeat(40);chmodSync(receipt,0o600);writeFileSync(receipt,JSON.stringify(seal));
   assert.throws(()=>readAcceptanceBaseline(h),/Unauthenticated/);
+});
+
+test('real sandbox driver observes pinned setup/frozen probes twice in fresh state and refuses persistent dirty synthetic state',async t=>{
+  const f=fixture(t,true);
+  const sourceSetup=Buffer.from('throw Error("DIRTY SOURCE SETUP MUST NEVER EXECUTE")');
+  writeFileSync(join(f.paths.project,'setup.mjs'),sourceSetup);
+  writeFileSync(join(f.paths.project,'export.mjs'),'export const summary = () => 3;\n');
+  writeFileSync(join(f.paths.project,'cms-state.json'),'{"rows":[999],"secret":"implementer dirt"}');
+  const before=f.git('status','--porcelain=v1');
+  const grant={lookup:(intent:unknown)=>({...f.authorization.lookup(intent),evidence:[{criterionId:'C-manual',requirement:'independent documentation review',reference:'synthetic-host-review:17'}]})};
+  const runDriver=namespaceTransport(f.root);
+  const states=[join(f.root,'synthetic-state-1'),join(f.root,'synthetic-state-2')];
+  for(const state of states)mkdirSync(state,{mode:0o700});
+  let input='',invocation=0;
+  const runs:ReturnType<typeof runDriver>[]=[];
+  await ownedEngine(t,f,(args)=>{
+    if(args[0]==='create')input=args[args.indexOf('--mount')+1].match(/src=([^,]+)/)![1];
+    if(args[0]==='start'){
+      const actual=runDriver(input,states[invocation===1?1:0]);invocation++;
+      t.diagnostic(JSON.stringify({namespaceRun:invocation,...actual}));
+      assert.deepEqual(readFileSync(join(input,'acceptance/probes/export.mjs')),readFileSync(new URL('./fixtures/acceptance-local-probe.mjs',import.meta.url)));
+      assert.equal(readFileSync(join(input,'acceptance/fixtures/rows.json'),'utf8'),'[1,2]');
+      runs.push(actual);return actual;
+    }
+  });
+  const outputs:any[]=[];
+  for(let run=0;run<2;run++){
+    const h=reserveAcceptanceBaseline(f.request,grant);
+    assert.equal(await startAcceptanceBaseline(h).finished,0);
+    const observed=readAcceptanceBaseline(h);
+    assert.equal(observed.policy.status,'valid');
+    const output=JSON.parse(readFileSync(join(h.directory,'sandbox-output.json'),'utf8'));
+    assert.equal(output.observations?.length,1,'real driver must retain actual probe stdout/stderr, not a synthetic engine result');
+    const probe=output.observations[0];
+    assert.equal(probe.status,0);
+    assert.deepEqual(JSON.parse(probe.stderr),{sha:f.request.sha,seed:[1,2],upload:'seed upload',setup:'pinned setup executed',readOnlyInput:true,hostProjectVisible:false,syntheticOnly:true});
+    assert.deepEqual(JSON.parse(probe.stdout),{version:1,assertions:[{assertionId:'A-summary',status:'expected-behavioral-fail',failureId:'summary-unavailable-or-wrong'},{assertionId:'A-order',status:'pass',failureId:null}]});
+    assert.equal(output.sha,f.request.sha);assert.equal(output.reset.executionId,h.executionId);
+    assert.ok(observed.receipt.results!.assertions.every(a=>a.evidence.every(ref=>ref.startsWith(`baseline:${h.executionId}/P-export/`))));
+    outputs.push(output);
+  }
+  assert.notEqual(outputs[0].reset.executionId,outputs[1].reset.executionId);
+  // Reusing the first run's actual dirty site is unsupported, not successful reset or behavioral red.
+  const h=reserveAcceptanceBaseline(f.request,grant);
+  assert.equal(await startAcceptanceBaseline(h).finished,0);
+  const refused=readAcceptanceBaseline(h);
+  assert.equal(refused.policy.status,'hold');assert.equal(refused.receipt.results,null);
+  assert.equal(refused.receipt.cleanup,'confirmed');
+  assert.deepEqual(runs.map(r=>r.status),[0,0,1]);
+  assert.equal(runs[2].stderr,'Error: Synthetic local setup failed','real driver refuses failed reset; it intentionally does not forward setup stderr');
+  assert.equal(runs[2].stdout,'','setup failure cannot fabricate a reset/assertion envelope');
+  assert.equal(readFileSync(join(states[0],'site/rows.json'),'utf8'),'[999]');
+  assert.equal(readFileSync(join(states[0],'site/uploads/dirty.txt'),'utf8'),'prior-run dirt');
+  assert.equal(readBaselineReservations(f.paths.state).length,0);
+  assert.equal(f.git('status','--porcelain=v1'),before);
+  assert.deepEqual(readFileSync(join(f.paths.project,'setup.mjs')),sourceSetup);
+  assert.equal(f.git('rev-parse','HEAD'),f.request.sha);
 });
 
 function deferred<T=void>() { let resolve!: (v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}; }

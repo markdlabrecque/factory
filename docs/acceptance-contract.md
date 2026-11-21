@@ -649,14 +649,34 @@ mandatory; this producer alone activates neither.
 ### Evidence limits
 
 Runner integration tests use real disposable Git, private filesystem stores, locks
-and native detached/controller/engine processes. **Only the engine is simulated**;
-it never runs artifact commands on the host and never decides admission or release.
-They prove producer plumbing, fresh input transport, prescribed private mount/state
-policy, crash/cancel fencing and authenticated retention. They do not prove a real
-container engine's cgroup/tmpfs/watchdog behavior or successfully install/seed a real
-CMS database. No live Docker, paid model, production, credentials or external reset
-is needed or authorized by those tests. A real supported-image/CMS runtime smoke
-remains separate unperformed acceptance evidence, not inferred from stub success.
+and native detached/controller/engine processes. Engine identity/lifecycle responses
+are simulated; they never decide admission or release. One case executes the unchanged
+copied driver, pinned baseline setup and frozen probe through a real local rootless
+user/mount/PID/network namespace transport, not computed result JSON. Read-only frozen
+inputs and a narrow copied executable/library closure are the only read-only mounts;
+only fixture-private synthetic state is writable, with fresh private Git/work/tmp/run.
+No source, custody originals, host sockets, credential/configuration directories or
+host network are exposed. Missing namespace capability fails without host fallback.
+
+The probe observes the exact checked-out SHA and seeded rows/uploads through the
+existing baseline API, then dirties the filesystem-backed synthetic site. A second
+independent fresh execution must observe the original seed and same SHA despite dirty
+source. A third execution deliberately reuses the first run's persistent dirty state:
+the pinned setup refuses it, actual driver exit is nonzero, and the real producer
+publishes a policy hold without assertion results. Actual driver stdout/stderr and
+assertions are retained in test diagnostics and successful sealed output; no reset or
+ownership boolean stands in for those observations. This proves the real-driver
+synthetic reset boundary, alongside existing crash/cancel and authenticated-retention
+evidence. See [test prerequisites and bounds](../TESTING.md#owned-acceptance-baseline-runner).
+
+It does **not** prove a real container engine's cgroup/memory/PID/tmpfs enforcement,
+different-UID watchdog, or successful CMS/SQL installation and database seeding.
+The synthetic rows are JSON, not MariaDB/MySQL; available local binaries do not
+establish a PHP/CMS/database runtime. These are outstanding actual-runtime proof
+limits, not a narrowed supported-project contract: unsupported reset still holds.
+No live Docker, paid model, production, credentials or external reset is needed or
+authorized by the tests. A supported-image/CMS runtime smoke remains separate
+unperformed acceptance evidence, not inferred from synthetic success.
 
 ## Verification
 
