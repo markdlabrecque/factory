@@ -824,6 +824,69 @@ console.log('sha256:'+'a'.repeat(64));
         writeFileSync(join(run.evidenceDir, 'verdict.md'), 'VERDICT: PASS\nSynthetic independent verdict');
         assert.throws(() => createProof(state, run.evidenceDir, identity, provenance, undefined, replay), /authoritative criterion inventory/);
         assert.equal(readProof(state, identity, run.verification.id).report.verdict, 'PASS');
+
+        // Same exact proof can authorize observation of the same PR without another producer.
+        const { observeWaitingDelivery, RetryableDeliveryRead } = await import(join(runtime.directory, 'delivery-followup.mts'));
+        const waiting = { ...run, stage: 'waiting', delivery: { ...run.delivery, state: 'ci-waiting', reasonCode: 'opened' } };
+        delete waiting.delivery.mergedAt;
+        let observed = 0, checkpoint = waiting.delivery;
+        const host = {
+          state, workflow: runtime.directory, inventory: provenance.code, settings: provenance.settings,
+          claim: r => ({ ok: true, run: { ...r, claim: 'fixture-delivery-claim' } }),
+          finish: (_r, _token, next) => { checkpoint = next; return true; },
+          authorize: () => undefined,
+          merge: async (d, authorize) => {
+            assert.equal(d.proofId, run.verification.id);
+            assert.equal(d.sha, tip);
+            assert.equal(authorize(), undefined);
+            return ++observed === 1
+              ? { state: 'ci-waiting', reasonCode: 'checks-pending', reason: 'fixture pending' }
+              : { state: 'merged', reasonCode: 'merged', reason: 'fixture merged', mergedAt: new Date().toISOString() };
+          },
+        };
+        const pending = await observeWaitingDelivery(waiting, host);
+        assert.match(pending, /Pending CI/);
+        assert.equal(checkpoint.state, 'ci-waiting');
+        assert.match(await observeWaitingDelivery({ ...waiting, delivery: checkpoint }, host), /Merged/);
+        assert.equal(checkpoint.state, 'merged');
+        assert.equal(observed, 2);
+        for (const changed of [
+          { run: { ...waiting, acceptanceBaseline: { ...waiting.acceptanceBaseline, bindingDigest: '0'.repeat(64) } }, host, reason: /original acceptance baseline/i },
+          { run: waiting, host: { ...host, settings: { ...host.settings, image: 'changed' } }, reason: /settings changed/i },
+          { run: waiting, host: { ...host, inventory: {} }, reason: /workflow proof inputs/i },
+          { run: waiting, host: { ...host, authorize: () => 'Requirements changed' }, reason: /Requirements changed/ },
+          { run: waiting, host: { ...host, authorize: () => 'Local/remote branch changed' }, reason: /branch changed/ },
+        ]) {
+          assert.match(await observeWaitingDelivery(changed.run, changed.host), changed.reason);
+          assert.equal(checkpoint.state, 'operator-required');
+        }
+        await observeWaitingDelivery(waiting, { ...host, authorize: () => { throw new RetryableDeliveryRead('tracker unavailable'); } });
+        assert.equal(checkpoint.reasonCode, 'transport-unknown');
+        assert.equal(checkpoint.state, 'ci-waiting');
+        await observeWaitingDelivery(waiting, { ...host, merge: async (_d, authorize) => {
+          let scheduler = true;
+          const getHold = () => scheduler ? authorize() : 'Scheduler paused during observation';
+          assert.equal(getHold(), undefined);
+          scheduler = false;
+          return { state: 'operator-required', reasonCode: 'authorization', reason: getHold() };
+        } });
+        assert.equal(checkpoint.state, 'operator-required');
+        const planPath = join(state, 'acceptance', `baseline-plan-${requirementsHash}.json`);
+        const originalPlan = readFileSync(planPath);
+        try {
+          writeFileSync(planPath, JSON.stringify({ ...JSON.parse(originalPlan.toString()), configDigest: '0'.repeat(64) }));
+          assert.match(await observeWaitingDelivery(waiting, host), /preparation\/config\/approval changed/);
+          assert.equal(checkpoint.state, 'operator-required');
+        } finally { writeFileSync(planPath, originalPlan); }
+        const candidateOutput = join(replay.candidate.directory, 'sandbox-output.json');
+        const raw = readFileSync(candidateOutput);
+        chmodSync(candidateOutput, 0o600);
+        try {
+          writeFileSync(candidateOutput, Buffer.concat([raw, Buffer.from('\n')]));
+          assert.match(await observeWaitingDelivery(waiting, host), /output.*(changed|integrity|mismatch)/i);
+          assert.equal(checkpoint.state, 'operator-required');
+        } finally { writeFileSync(candidateOutput, raw); chmodSync(candidateOutput, 0o400); }
+        assert.equal(observed, 2);
       }
       if (copied) {
         assert.match(result.stdout, /implementer openai\/gpt-6\.1-terra/);

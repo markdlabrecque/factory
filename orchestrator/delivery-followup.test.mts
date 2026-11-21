@@ -1,7 +1,7 @@
 // #153: synthetic host proof, ownership and tracker boundaries; no agents, containers or live services.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { RUNTIME_ASSETS } from '../cli/src/runtime-assets.mts';
@@ -9,9 +9,10 @@ import { pathToFileURL } from 'node:url';
 import { createProof, sha256 } from './verification.mts';
 import { claimDelivery, finishDelivery, readRuns, writeRecord } from '../board/board.mts';
 const runtime = mkdtempSync(join(tmpdir(), 'followup-runtime-'));
-for (const f of ['delivery-followup.mts', 'verification.mts']) copyFileSync(new URL(f, import.meta.url), join(runtime, f));
-copyFileSync(new URL('../board/delivery.mts', import.meta.url), join(runtime, 'delivery.mts'));
-const { observeWaitingDelivery, RetryableDeliveryRead } = await import(pathToFileURL(join(runtime, 'delivery-followup.mts')).href);
+for (const { source, destination } of RUNTIME_ASSETS.filter(asset => asset.destination.endsWith('.mts'))) {
+  copyFileSync(new URL(`../${source}`, import.meta.url), join(runtime, destination));
+}
+const { observeWaitingDelivery } = await import(pathToFileURL(join(runtime, 'delivery-followup.mts')).href);
 process.on('exit', () => rmSync(runtime, { recursive: true, force: true }));
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'followup-')), state = join(root, 'state'), evidence = join(root, 'evidence'), workflow = join(root, 'workflow');
@@ -40,47 +41,14 @@ function fixture() {
   };
   return {root,read,host,frozen,workflow,setRefusal:(s:string)=>{refusal=s;},counts:()=>({observations,merges})};
 }
-test('one observation per pass then green merge once; original verification survives', async () => {
-  const f=fixture(); try {
-    await observeWaitingDelivery(f.read(),f.host); assert.deepEqual(f.counts(),{observations:1,merges:0}); assert.equal(f.read().delivery?.state,'ci-waiting');
-    await observeWaitingDelivery(f.read(),f.host); assert.deepEqual(f.counts(),{observations:2,merges:1}); assert.equal(f.read().stage,'done'); assert.equal(f.read().verification?.id,f.frozen.id);
-    await observeWaitingDelivery(f.read(),f.host); assert.deepEqual(f.counts(),{observations:2,merges:1});
-  } finally {rmSync(f.root,{recursive:true,force:true});}
-});
-test('changed requirements, artifacts, workflow, settings or head stop before tracker observation', async () => {
-  for(const change of ['requirements','artifact','workflow','settings','head','inventory','runtime','family','template-hash','additive-hash']) {
-    const f=fixture(); try {
-      if(change==='requirements'||change==='head') f.setRefusal(`${change} changed`);
-      if(change==='artifact') { chmodSync(join(f.frozen.root,'output.txt'),0o600); writeFileSync(join(f.frozen.root,'output.txt'),'changed'); }
-      if(change==='workflow') writeFileSync(join(f.workflow,'main.mts'),'changed');
-      if(change==='settings') f.host.settings.image='changed';
-      if(change==='inventory') delete f.host.inventory['context.mts'];
-      if(change==='runtime') f.host.settings.execution.runtime.id='different-runtime';
-      if(change==='family') f.host.settings.execution.settings.AGENT.family='anthropic';
-      if(change==='template-hash') f.host.settings.execution.templates['prompt.verify.md']='changed';
-      if(change==='additive-hash') f.host.settings.execution.additive['instructions.md']='changed';
-      await observeWaitingDelivery(f.read(),f.host); assert.equal(f.read().delivery?.state,'operator-required',change); assert.deepEqual(f.counts(),{observations:0,merges:0});
-    } finally {rmSync(f.root,{recursive:true,force:true});}
-  }
-});
-test('failed current tracker reads stay retryable, while a pause during CI prevents merge', async () => {
-  for (const phase of ['read', 'pause']) {
-    const f = fixture(); try {
-      if (phase === 'read') f.host.authorize = () => { throw new RetryableDeliveryRead('tracker unavailable'); };
-      else f.host.merge = async (_d, authorize) => {
-        f.setRefusal('scheduler paused during CI observation');
-        return { state: 'operator-required', reasonCode: 'authorization', reason: authorize()! };
-      };
-      await observeWaitingDelivery(f.read(), f.host);
-      assert.equal(f.read().delivery?.state, phase === 'read' ? 'ci-waiting' : 'operator-required');
-      assert.equal(f.counts().merges, 0);
-    } finally { rmSync(f.root, {recursive:true,force:true}); }
-  }
-});
-test('legacy records are not adopted; tracker read failures stay retryable on same identity', async () => {
+// Positive continuation and freshness/transport cases use authentic version-2 proof in
+// verification-entrypoint-proof.test.mts, not historical PASS repackaged as modern authority.
+test('a same-SHA historical PASS requires explicit migration even with a valid CI checkpoint', async () => {
   const f=fixture(); try {
     assert.match(await observeWaitingDelivery({...f.read(),delivery:undefined},f.host),/Not a host-recorded/);
-    f.host.merge=async()=>{throw Error('transport down');};
-    await observeWaitingDelivery(f.read(),f.host); assert.equal(f.read().delivery?.state,'ci-waiting'); assert.equal(f.read().delivery?.reasonCode,'transport-unknown'); assert.equal(f.read().delivery?.number,1);
+    assert.match(await observeWaitingDelivery(f.read(),f.host),/legacy proof.*fresh verification/i);
+    assert.equal(f.read().delivery?.state,'operator-required');
+    assert.equal(f.read().delivery?.number,1);
+    assert.deepEqual(f.counts(),{observations:0,merges:0});
   } finally {rmSync(f.root,{recursive:true,force:true});}
 });

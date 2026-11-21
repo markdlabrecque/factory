@@ -863,10 +863,13 @@ normal delivery reauthenticates the retained chain as well as its existing exact
 requirements, claim, local/remote SHA and CI gates. Unknown, infrastructure, mismatched
 bundle or changed candidate cannot deliver. Replay never overrides semantic non-PASS.
 
-This tracer is **not** completed T5: recovery has no fresh attempt-bound candidate replay;
-legacy policy1 migration/refusal and complete current-original/criterion-obligation checking
-in CI continuation remain open. Policy1 records remain readable by existing historical/
-recovery consumers; that compatibility must not be presented as modern replay authority.
+CI continuation requires version2/policy2 and the run's matching saved original admission
+binding. It reauthenticates the retained replay and selected inputs before observation/merge;
+it does not execute a replay. Same-SHA policy1 proof remains inspectable but cannot
+continue a CI wait. The checkpoint and evidence remain intact for explicit fresh verification.
+
+This tracer is **not** completed T5: recovery has no fresh attempt-bound candidate replay,
+and complete per-criterion semantic evidence obligations are not yet enforced.
 All touched runtime modules were already in the complete asset inventory; no new shipped
 module, dependency or sandbox lifecycle was introduced. Evidence proves disposable Git and
 filesystem-backed synthetic reset through the actual copied driver in rootless namespaces,

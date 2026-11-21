@@ -1034,14 +1034,16 @@ Run the changed boundary first:
 
 ```sh
 node --test board/delivery.test.mts orchestrator/delivery*.test.mts cli/test/delivery-followup-schedule.test.mts
+node --test --test-name-pattern='independently replays' orchestrator/verification-entrypoint-proof.test.mts
 node --test orchestrator/refresh*.test.mts cli/test/init.test.mts cli/test/update.test.mts cli/test/recovery-command.test.mts cli/test/recovery-run.test.mts cli/test/jam-detect.test.mts
 ```
 
 Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
-holds and lost merge responses without live trackers. Proof fixtures use synthetic
-command evidence and frozen host records. The selected-runtime dispatch fixture runs local Git
-against a temporary bare origin and a fixture-owned absolute read-only scheduler CLI;
-manual/dry-run/refresh-only passes must perform no continuation. Admission tests cover
+holds and lost merge responses without live trackers. The exact replay fixture reuses a
+genuine version2 proof for pending then green CI observation of the same PR, and checks
+admission, configuration, raw output, current requirements and transport holds. The
+selected-runtime dispatch fixture checks explicit legacy migration against a temporary
+bare origin and fixture scheduler CLI; manual/dry-run/refresh-only do not continue it. Admission tests cover
 capacity, conflicting claims, stale tokens and PID reuse without repairing anything.
 Scheduler tests assert the exact trusted command and malformed/off/paused/base-switch
 refusals; they never run the host CLI against the user's service manager. These tests

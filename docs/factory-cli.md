@@ -800,8 +800,8 @@ replay; accepting proof requires the exact original criterion inventory and a se
 Candidate execution consumes a separate capacity slot; no spare slot means hold. There is
 no automatic grant, preparation command, retry or budget exemption. Inspect retained private
 candidate handles and original baseline/custody with the trusted host preparer; never edit
-receipts or approve from tracker/agent JSON. Recovery candidate replay, full evidence-obligation
-reconciliation and legacy/current-original CI migration remain incomplete, not acceptance.
+receipts or approve from tracker/agent JSON. Recovery candidate replay and full
+semantic evidence-obligation reconciliation remain incomplete.
 See the [normal replay tracer and remaining limits](acceptance-contract.md#normal-exact-candidate-replay-tracer-partial-integration).
 
 A repaired branch goes through the same hand-off as an implemented one (#58, `orchestrator/handoff.mts` in the selected runtime). `main.mts` calls it after its implementer, and `main.mts --recover` (#60) after its repair agent.
@@ -819,7 +819,7 @@ A verified branch can have an open PR/MR whose required checks are not ready whe
 
 Only a non-dry scheduled dispatch with automatic merge enabled continues `ci-waiting` checkpoints. Manual dispatch, direct runs, dry runs and read-only refresh do not perform this continuation. Each pass considers at most ten waits, oldest observation first. It starts no implementer, repair agent or verifier, spends no recovery attempt, posts no new evidence comment and creates no replacement PR/MR.
 
-Continuation takes a delivery admission claim and revalidates the frozen PASS proof, historical baseline, execution/branch identity, complete selected runtime inventory and normalized settings. It also requires unchanged local and remote head SHAs, current complete ticket/parent input, selection/eligibility, no exclusion or needs-human label, the same checked-out base, and live scheduler/project authorization through the trusted saved CLI/Node. Capacity and conflicting ownership can hold the observation. Current checks, review and merge restrictions still apply. Both tracker adapters reauthorize immediately before exact-head merge; a remote ticket edit can still race the last read.
+Continuation takes a delivery admission claim and revalidates the frozen version2/policy2 PASS proof, authenticated replay, the run's original acceptance admission binding, execution/branch identity, complete selected runtime inventory and normalized settings. Historical proof, even for the same SHA, holds for migration and fresh verification; no replay is started by the observer. It also requires unchanged local and remote head SHAs, current complete ticket/parent input, selection/eligibility, no exclusion or needs-human label, the same checked-out base, and live scheduler/project authorization through the trusted saved CLI/Node. Capacity and conflicting ownership can hold the observation. Current checks, review and merge restrictions still apply. Both tracker adapters reauthorize immediately before exact-head merge; a remote ticket edit can still race the last read.
 
 One observation has a total 30-second deadline and at most 10 seconds per subprocess. Pending or missing checks and unknown tracker responses stay retryable on the same recorded PR/MR. Failed checks, identity/proof/settings changes, draft/closed PRs or merge restrictions can require operator action. An ambiguous merge response does not justify a second PR or a blind repair; the next eligible pass observes the same identity. Token-fenced completion discards stale observers. Only confirmed merge records completion.
 

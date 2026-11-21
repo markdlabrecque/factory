@@ -291,8 +291,10 @@ The current host preparation and baseline reference must still match. Writer and
 also check the project/state, requirements hash, image and normal-only replay purpose,
 and derive mandatory semantic criterion IDs from the authenticated original bundle.
 All changed modules were already shipped by the complete runtime inventory; the new test
-host is fixture-only. This is not full T5 migration: recovery attempt-bound replay, complete
-evidence obligations and current-original/legacy CI continuation policy remain outstanding.
+host is fixture-only. Nonexecuting CI continuation requires modern replay proof and
+compares it to the run's saved original admission. Legacy PASS holds with explicit
+migration guidance; it is not rewritten. This is not full T5 migration: recovery
+attempt-bound replay and complete semantic evidence obligations remain outstanding.
 Baseline admission identity, full-scope baseline and saved repair-start comparison stay separate.
 
 ### Supervisor and independent review inputs
