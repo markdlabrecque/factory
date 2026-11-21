@@ -30,8 +30,16 @@ plan before its implementation claim/child launch. Missing or revoked host execu
 grants, mismatches, review-required already-green, behavioral mismatch, infrastructure
 and cleanup uncertainty are separate safe `validate-current-acceptance-baseline` holds.
 Passive readers display those observations and never invoke the host preparation API.
-Direct/adopted main, recovery precharge and complete projection coverage remain outstanding;
-static validation does not substitute for them. The preparation result's `ready`
+Direct/adopted main independently authenticates before claim/adoption; dispatch retains the
+original baseline binding for its child. Standard recovery host authenticates before claim/
+charge and inside atomic claim validation; the child independently rechecks before adoption
+and after Git/input reads, always using saved ORIGINAL full-scope SHA/bundle/runtime rather
+than current integration HEAD or repair start. Missing legacy original admission identity
+holds for explicit host preparation/migration, preserving work and budgets. Stored checks
+carry only safe baseline SHA/binding digest (or explicit null/unknown), not private grants,
+paths or receipt bodies. CLI status JSON/text, Board and ticket-scoped projections preserve
+these categories/identities and never prepare/reserve/start/claim/execute on passive reads,
+including stored ready observations. Static validation does not substitute for baseline authority. The preparation result's `ready`
 means current analysis/prerequisites, not a trusted baseline receipt or permission to
 implement. Full overrides remain opaque, not compliant merely because their manifests
 validate. See [current host preparation](acceptance-contract.md#current-host-preparation-reference).

@@ -102,7 +102,7 @@ export function fixture(t: any, kind = "github", prepareAcceptance = true) {
   const baseline = (iid=7, fault='') => {
     save();
     writeFileSync(join(bin,'docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs',import.meta.url).pathname)}; const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE); if(out===undefined)process.exit(90); console.log(out);\n`, {mode:0o755});
-    prepareFixtureBaseline(runtime.directory,root,env,iid,'main',fault);
+    return prepareFixtureBaseline(runtime.directory,root,env,iid,'main',fault);
   };
   const bytes = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "absent";
   return { home, root, dir, fake, env, runtime, snapshot, data, save, baseline, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };

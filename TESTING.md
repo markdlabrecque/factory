@@ -122,7 +122,14 @@ publishes its ticket observation before managed-entry refusal, with no tracker c
 not CMS reset or production authority. Direct/adopted main now independently denies missing
 or revoked baselines before claim/adoption, preserving pending run bytes and admission;
 normal positive model-family/tier journeys explicitly prepare actual owned baselines.
-Recovery precharge and full baseline diagnostic projections remain outstanding. No
+`acceptance-baseline-recovery.test.mts` proves authorized dispatched-child adoption, host
+revocation and late image-read revocation before recovery charge, independent child revocation/
+saved-binding change before repair, and successful original-fullscope recovery after integration
+HEAD advances. Existing recovery journeys retain independent verifier, work and charge assertions;
+all positive baselines are prepared before intentionally uncertain managed payload ownership.
+CLI status/Board/ticket projections cover every baseline hold category plus ready observations,
+retained safe SHA/binding identities and zero model/container/claim effects on passive reads.
+These are standard source/offline admission proofs, not override adoption or candidate replay. No
 real provider, tracker, credentials, Docker, shared daemon or package install runs.
 The four full shards, documentation and independent lifecycle gates remain unchanged.
 

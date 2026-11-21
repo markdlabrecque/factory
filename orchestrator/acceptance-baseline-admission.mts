@@ -3,6 +3,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { acceptanceHash } from './acceptance-contract.mts';
 import { readPreparedAcceptance } from './acceptance-admission.mts';
 import { frozenTicketIdentity, freezeTicketInput } from './ticket-input.mts';
@@ -12,6 +13,7 @@ import type { ReadinessCheck } from './readiness-schema.mts';
 export type BaselineHoldReason = 'preparation-required' | 'changed-input' | 'authorization-unavailable' | 'cancelled' | 'cleanup-pending' | 'review-required' | 'behavior-mismatch' | 'infrastructure';
 export class AcceptanceBaselineHold extends Error {
   readonly reason: BaselineHoldReason;
+  baseline?: {sha:string;bindingDigest:string};
   constructor(reason: BaselineHoldReason) {
     super(`Acceptance baseline hold: ${reason}. Trusted host preparer must inspect retained execution and current inputs; preserve work and charges, with no automatic retry or reclassification.`);
     this.reason = reason;
@@ -33,7 +35,9 @@ const same = (a: unknown, b: unknown) => acceptanceHash(a) === acceptanceHash(b)
 /** Host installs this plan and an exact execution-authorization-<intentDigest>.json independently.
  * The plan's policy/config pins supplement (not replace) the runner's bounds-only config digest. */
 export interface BaselinePreparationPlan { version: 1; request: BaselineRequest; policyIdentity: string; configDigest: string }
-async function current(iid: number, base: string) {
+export interface BaselineAdmissionIdentity { version: 1; bindingDigest: string; sha: string }
+export interface OriginalBaseline { sha: string; admission: BaselineAdmissionIdentity }
+async function current(iid: number, base: string, originalSha?: string) {
   const {context, effectiveConfig, TRACKER} = await import('./runtime-config.mts');
   const tracker = await import('./tracker.mts');
   context.assertCurrent();
@@ -43,7 +47,10 @@ async function current(iid: number, base: string) {
   let plan: BaselinePreparationPlan;
   try { plan = privateRecord(root, `baseline-plan-${input.hash}.json`); }
   catch { throw new AcceptanceBaselineHold('preparation-required'); }
-  const sha = execFileSync('git', ['--no-replace-objects','rev-parse','--verify',`origin/${base}^{commit}`], {cwd:context.projectRoot,encoding:'utf8',timeout:10000}).trim();
+  if (originalSha !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(originalSha)) throw new AcceptanceBaselineHold('changed-input');
+  const revision = originalSha ?? `origin/${base}`;
+  const sha = execFileSync('git', ['--no-replace-objects','rev-parse','--verify',`${revision}^{commit}`], {cwd:context.projectRoot,encoding:'utf8',timeout:10000}).trim();
+  if (originalSha !== undefined && sha !== originalSha) throw new AcceptanceBaselineHold('changed-input');
   const configDigest = acceptanceHash(readFileSync(context.projectPath('.factory/factory.toml'),'utf8'));
   if (!plan || typeof plan !== 'object') throw new AcceptanceBaselineHold('preparation-required');
   const r = plan.request;
@@ -67,7 +74,7 @@ async function current(iid: number, base: string) {
   try {
     const finalInput = freezeTicketInput(tracker.contextSource,iid);
     const finalBundle = readPreparedAcceptance(state,[context.projectRoot,context.runtimeRoot],finalInput);
-    const finalSha = execFileSync('git',['--no-replace-objects','rev-parse','--verify',`origin/${base}^{commit}`],{cwd:context.projectRoot,encoding:'utf8',timeout:10000}).trim();
+    const finalSha = execFileSync('git',['--no-replace-objects','rev-parse','--verify',`${revision}^{commit}`],{cwd:context.projectRoot,encoding:'utf8',timeout:10000}).trim();
     if (!same(frozenTicketIdentity(finalBundle.ticket),binding.ticket) || !same(finalBundle.pointer,binding.bundle)
       || finalBundle.manifest.approvalDigest !== binding.approvalDigest || finalSha !== sha
       || !same(plan,privateRecord(root,`baseline-plan-${input.hash}.json`))) throw Error('Revoked current preparation');
@@ -103,8 +110,12 @@ export async function prepareAcceptanceBaselineForTicket(iid: number, base: stri
 
 /** Active read: the runner authenticates historical request binding; this consumer additionally
  * resolves CURRENT ticket/full bundle/approval/SHA/runtime/dependencies/full config and host reset plan. */
-export async function requireAcceptanceBaselineForTicket(iid: number, base: string): Promise<void> {
-  const before = await current(iid,base);
+export async function requireAcceptanceBaselineForTicket(iid: number, base: string, original?: OriginalBaseline): Promise<BaselineAdmissionIdentity> {
+  if (original && (original.admission?.version !== 1 || !/^[a-f0-9]{64}$/.test(original.admission.bindingDigest))) throw new AcceptanceBaselineHold('preparation-required');
+  const before = await current(iid,base,original?.sha);
+  const identity: BaselineAdmissionIdentity = {version:1,bindingDigest:acceptanceHash(before.binding),sha:before.binding.sha};
+  try {
+  if (original && !same(original.admission,identity)) throw new AcceptanceBaselineHold('changed-input');
   let reference: any;
   try { reference = privateRecord(before.root,`baseline-current-${before.input.hash}.json`); }
   catch { throw new AcceptanceBaselineHold('preparation-required'); }
@@ -128,16 +139,31 @@ export async function requireAcceptanceBaselineForTicket(iid: number, base: stri
     const code = observed.policy.code;
     throw new AcceptanceBaselineHold(code === 'already-green' ? 'review-required' : code === 'behavior-mismatch' ? 'behavior-mismatch' : 'infrastructure');
   }
-  const after = await current(iid,base);
+  const after = await current(iid,base,original?.sha);
   if (!same(before.binding,after.binding) || !same(reference,privateRecord(before.root,`baseline-current-${before.input.hash}.json`))) throw new AcceptanceBaselineHold('changed-input');
   try {
     if (!same(grant,privateRecord(before.root,`execution-authorization-${acceptanceHash(spec.intent)}.json`)) || grant.expiresAt < Date.now()) throw Error('Revoked grant');
   } catch { throw new AcceptanceBaselineHold('authorization-unavailable'); }
   if (existsSync(join(h.directory,'cancel.json'))) throw new AcceptanceBaselineHold('cancelled');
+  return identity;
+  } catch(error) {
+    if(error instanceof AcceptanceBaselineHold)error.baseline={sha:identity.sha,bindingDigest:identity.bindingDigest};
+    throw error;
+  }
 }
 
-export function acceptanceBaselineCheck(iid: number, hold?: AcceptanceBaselineHold, observedAt = new Date().toISOString()): ReadinessCheck {
-  return {id:`acceptance-baseline-${iid}`,ticket:String(iid),scope:'ticket-input',phase:'active',observedAt,status:hold?'blocked':'ready',required:true,
+// Selected-runtime host ingress is an active authentication read, never a preparation/grant writer.
+// The host supplies only original saved-run identities; actual authority remains the private producer records.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [mode,iid,base,sha,bindingDigest] = process.argv.slice(2);
+  if(mode !== '--require-recovery' || !/^[1-9]\d*$/.test(iid ?? '') || !base) throw new AcceptanceBaselineHold('preparation-required');
+  const result=await requireAcceptanceBaselineForTicket(Number(iid),base,{sha,admission:{version:1,bindingDigest,sha}});
+  process.stdout.write(JSON.stringify(result));
+}
+
+export function acceptanceBaselineCheck(iid: number, hold?: AcceptanceBaselineHold, observedAt = new Date().toISOString(), baseline?: {sha:string;bindingDigest:string}): ReadinessCheck {
+  const identity=hold?.baseline ?? baseline;
+  return {baseline:{sha:identity?.sha ?? null,bindingDigest:identity?.bindingDigest ?? null},id:`acceptance-baseline-${iid}`,ticket:String(iid),scope:'ticket-input',phase:'active',observedAt,status:hold?'blocked':'ready',required:true,
     operation:'validate-current-acceptance-baseline',path:'host-private acceptance baseline',reason:hold?`Acceptance baseline: ${hold.reason}`:'Authenticated owned baseline matches current complete input and host execution authorization',
     nextActor:hold?'operator':'none',nextAction:hold?'Trusted host preparer/reviewer: inspect exact retained baseline, current plan and authorization; prepare explicitly if missing. Preserve work, budgets and cleanup ownership; never retry or reclassify automatically.':'Observation only; revalidate current evidence before claim and adoption',automaticRecheck:'next-launch'};
 }

@@ -67,7 +67,7 @@ export function readRecoveryRuns(dir: string) {
 
 /** Identity of the recorded work validated before preparation. Admission must still see this exact work. */
 export const recoveryWork = (r: RunState) => JSON.stringify([r.iid, r.project, r.branch, r.base, r.evidenceDir,
-  r.startedAt, r.executionId, r.implementationBaseSha, r.claim, r.recovery]);
+  r.startedAt, r.executionId, r.implementationBaseSha, r.acceptanceBaseline, r.claim, r.recovery]);
 
 /** Claim capacity, ticket and project ownership for one repair attempt by process `pid`, or nothing. `tracker` is the
  *  project's TRACKER.project, the name its run records carry; `id` the attempt's UUID. */

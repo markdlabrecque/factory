@@ -50,10 +50,16 @@ This is **partial source integration**, not the complete acceptance guarantee. D
 now requires a separately host-prepared, authentic CURRENT matching owned baseline before
 its implementation claim/child launch. The [explicit host preparation protocol](acceptance-contract.md#explicit-host-baseline-preparation-and-dispatch-admission)
 uses exact private execution grants and the existing separate reservation/lifecycle APIs;
-it never auto-grants execution or uses an implementation claim for preparation. Direct/
-adopted main, recovery precharge and complete passive baseline diagnostics remain outstanding. Static validity alone does not block all approved valid launches as
-a substitute for that missing work. Recovery preparation `ready` is not
-baseline receipt authority. There is no new CLI publication command, automatic migration
+it never auto-grants execution or uses an implementation claim for preparation. Direct main
+rechecks before claim; dispatched children independently recheck their dispatch-saved original
+binding before adoption. Standard recovery authenticates before claim/repair charge and the
+child rechecks before adoption, retaining ORIGINAL saved baseline/bundle/fullscope/runtime,
+not replacing them with current integration HEAD or saved repair start. Missing original
+admission identities on legacy runs are explicit preparation/migration holds, not blanket
+needs-human or a budget reset. CLI status/Board show safe stored baseline reasons, next actor/
+action and observed SHA/binding digest (unknown is explicit); passive reads never prepare,
+reserve, start, claim or execute even when an observation is ready. Recovery preparation
+`ready` is not baseline receipt authority. There is no new CLI publication command, automatic migration
 or compliance claim for arbitrary complete overrides in this slice.
 
 ## Local persistence durability

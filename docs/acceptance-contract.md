@@ -725,13 +725,28 @@ ticket-scoped preparation/migration holds, not stopped implementation runs.
 **Partial integration only:** dispatch now consumes current authenticated owned baseline
 before its implementation claim/child launch. Direct main independently consumes the same
 current authentic evidence after host/Git I/O, before acquiring a claim; dispatched children
-repeat this check before adoption, regardless of dispatch observations. Recovery precharge
-integration and full passive baseline diagnostics still need integration.
+repeat this check before adoption against the dispatch-saved binding, regardless of dispatch
+observations. Standard recovery host authentication runs before claim/charge and again inside
+claim validation; the child independently authenticates before adoption and after Git/input I/O.
+Recovery uses the ORIGINAL saved implementation SHA and admission binding, not origin's current
+integration tip or the repair worktree. CLI/Board expose safe stored categories and baseline
+SHA/binding digest, without reading private runner authority or executing on passive views.
 Static preparation `ready` does not attest to runner/reset capability, explicit execution
 authorization, a baseline reservation or an authenticated matching baseline receipt.
 No baseline is executed or claimed here. Original full-scope baseline, saved work,
 existing admission/ownership/dependency/image fences and charges remain unchanged.
 Candidate replay/proof and installed-release/override protocol coverage remain separate.
+
+Normal admission saves `{version:1,bindingDigest,sha}` as `acceptanceBaseline` on the run;
+the digest covers the full current binding including original bundle/approval, full-scope SHA,
+runtime/dependencies and full policy/reset plan. Recovery cannot replace that binding with a
+newer approved bundle or runtime. A legacy saved run lacking its original admission identity
+holds for explicit host preparation/migration; historical PASS, saved work and budgets are not
+rewritten to manufacture provenance. Automatic legacy identity reconstruction and a public
+operator preparation command are not supplied here. Complete custom overrides are prominently
+**outside this standard guarantee**: host recovery does not infer protocol adoption from a
+valid manifest, and arbitrary override internals remain opaque. Candidate replay/proof and
+installed-release/override protocol adoption remain separate work, not acceptance from this stage.
 
 ## Explicit host baseline preparation and dispatch admission
 

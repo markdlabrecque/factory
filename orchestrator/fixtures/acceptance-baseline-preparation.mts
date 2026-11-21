@@ -7,8 +7,9 @@ import {createServer} from 'node:net';
 import {once} from 'node:events';
 import {acceptanceHash} from '../acceptance-contract.mts';
 
-export function prepareFixtureBaseline(runtime: string, cwd: string, env: NodeJS.ProcessEnv, iid=7, base='main', fault=''): void {
-  execFileSync(process.execPath,[import.meta.filename,'--prepare',runtime,String(iid),base,fault],{cwd,env,encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
+export function prepareFixtureBaseline(runtime: string, cwd: string, env: NodeJS.ProcessEnv, iid=7, base='main', fault=''): import('../acceptance-baseline-admission.mts').BaselineAdmissionIdentity | undefined {
+  const output=execFileSync(process.execPath,[import.meta.filename,'--prepare',runtime,String(iid),base,fault],{cwd,env,encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
+  return output?JSON.parse(output):undefined;
 }
 if (process.argv[2] === '--prepare') {
   const [runtime,iidText,base,fault='']=process.argv.slice(3), iid=Number(iidText);
@@ -58,5 +59,9 @@ if (process.argv[2] === '--prepare') {
       try { await prepareAcceptanceBaselineForTicket(iid,base); }
       catch(error) { if(!fault || !String(error).includes('Acceptance baseline hold:'))throw error; }
     } finally {server.close();}
+  }
+  if(!fault) {
+    const {requireAcceptanceBaselineForTicket}=await import(join(runtime,'acceptance-baseline-admission.mts'));
+    process.stdout.write(JSON.stringify(await requireAcceptanceBaselineForTicket(iid,base)));
   }
 }

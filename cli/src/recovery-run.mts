@@ -60,6 +60,7 @@ import { attemptEvidence, attemptGitDir, containerFor, ownedContainerGone, readA
 import type { AttemptRecord, RecoveryOutcome } from '../../orchestrator/recovery.mts';
 import type { Docker } from '../../orchestrator/recovery.mts';
 import type { Paths } from './paths.mts';
+import {AcceptanceBaselineHold,acceptanceBaselineCheck,type BaselineHoldReason} from '../../orchestrator/acceptance-baseline-admission.mts';
 import { claimRecovery, DEFAULT_CAP, readRecoveryRuns, replayAdmitted } from './recovery-claim.mts';
 import { recoveryCopyProblem } from './recovery-review.mts';
 import { attemptProblem, finishAttempt, readRecovery, runningAttempt } from './recovery-state.mts';
@@ -244,7 +245,7 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   const entryTracker = workflow.config.TRACKER;
   entry = claimManagedEntry(dir, { root: o.root, tracker: { kind: entryTracker.kind, host: entryTracker.gitlabHost ?? entryTracker.host!, project: entryTracker.project } });
   const hostInput = { projectRoot: o.root, runtimeRoot: workflow.root, runtimeIdentity: workflow.id, runtimeDependencies: workflow.manifest.dependencies, config: workflow.config, stateRoot: dir, base: o.preparation.base, signal: o.signal };
-  const { projectLaunchReadiness, readinessReason, recordTicketInput } = await import('../../orchestrator/launch-readiness.mts');
+  const { projectLaunchReadiness, readinessReason, recordTicketInput, recordReadinessCheck } = await import('../../orchestrator/launch-readiness.mts');
   const config = workflow.config;
   const cap = o.cap ?? config?.dispatch.maxConcurrent ?? DEFAULT_CAP;
   if (!Number.isSafeInteger(cap) || cap <= 0) return stop('capacity-invalid', 'Recovery cap must be a positive safe integer');
@@ -331,6 +332,27 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
     return stop('ticket-input', error.message, 'ticket');
   }
   if (!(await allowed())) return stop('scheduled-stopped', 'Scheduled recovery was stopped during ticket input readiness.');
+  // Opaque complete overrides remain outside the standard acceptance guarantee; manifest validity
+  // is not protocol adoption. Standard selected runtime independently authenticates original evidence.
+  const requireOriginalBaseline = () => {
+    if (workflow.mode !== 'factory') return;
+    if (!run.implementationBaseSha || !run.acceptanceBaseline) throw new AcceptanceBaselineHold('preparation-required');
+    try { execFileSync(o.node ?? process.execPath,[workflow.tsx,join(workflow.root,'acceptance-baseline-admission.mts'),'--require-recovery',String(o.ticket),target.base!,run.implementationBaseSha,run.acceptanceBaseline.bindingDigest],{
+      cwd:o.root,env:{...process.env,...o.workflowEnv,...workflow.env,PATH:o.path ?? o.workflowEnv?.PATH ?? process.env.PATH,SANDCASTLE_STATE_DIR:dir},encoding:'utf8',timeout:30000,maxBuffer:65536,stdio:['ignore','pipe','pipe']}); }
+    catch(error) {
+      const stderr=String((error as {stderr?:unknown}).stderr ?? '');
+      const code=stderr.match(/Acceptance baseline hold: (preparation-required|changed-input|authorization-unavailable|cancelled|cleanup-pending|review-required|behavior-mismatch|infrastructure)\./)?.[1] as BaselineHoldReason | undefined;
+      const hold=new AcceptanceBaselineHold(code ?? 'infrastructure');
+      hold.baseline={sha:run.implementationBaseSha,bindingDigest:run.acceptanceBaseline.bindingDigest};
+      throw hold;
+    }
+  };
+  try { requireOriginalBaseline(); }
+  catch(error) {
+    if(error instanceof AcceptanceBaselineHold)recordReadinessCheck(dir,lateReport,acceptanceBaselineCheck(o.ticket,error));
+    return stop('acceptance-baseline',error instanceof AcceptanceBaselineHold?error.message:'Acceptance baseline hold: infrastructure','ticket');
+  }
+  if (!(await allowed())) return stop('scheduled-stopped','Scheduled recovery stopped during baseline authentication.');
   const log = join(o.root, '.factory/logs', `recover-${o.ticket}.log`);
   const container = containerFor(id);
   const record = join(attemptsDir(p), `${id}.json`);
@@ -340,6 +362,7 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
     id, container, record, preparation:o.preparation, expected: run, generation, episode: state.episode?.id, candidateId: o.candidate?.id,
     validate: () => {
       if (o.signal?.aborted || !candidateAllowed()) throw new Error('Scheduled recovery or advisory candidate was fenced before admission');
+      requireOriginalBaseline();
       const currentImage = readImageConfig(o.root);
       if (!currentImage.ok || currentImage.image !== image.image) throw new Error('Image configuration changed during readiness; not admitted');
       projectWorkflow(p, o.root, workflow.env);

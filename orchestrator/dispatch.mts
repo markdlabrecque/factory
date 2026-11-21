@@ -453,7 +453,8 @@ const logDir = context.projectPath('.factory/logs');
 mkdirSync(logDir, { recursive: true });
 for (const [n, d] of launch.entries()) {
   const iid = String(d.iid);
-  const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base };
+  const meta = { title: byIid.get(d.iid)!.title, ticketUrl: tracker.ticketUrl(d.iid), base,
+    acceptanceBaseline: undefined as import('./acceptance-baseline-admission.mts').BaselineAdmissionIdentity | undefined, implementationBaseSha: undefined as string | undefined };
   // Held by this pass's pid until the child is spawned; if this pass dies first, readers drop the unstarted claim.
   try {
     context.assertCurrent();
@@ -473,8 +474,9 @@ for (const [n, d] of launch.entries()) {
     }
     const problem = ticketWorkspaceProblem(context.projectRoot, ticketBranch(d.iid, freshInput.context.child.title));
     if (problem) { recordTicketLaunch(stateDir(), projectReadiness, d.iid, problem); log(`#${iid} held before admission: ${problem}`); continue; }
-    await requireAcceptanceBaselineForTicket(d.iid, base);
-    recordReadinessCheck(stateDir(), projectReadiness, acceptanceBaselineCheck(d.iid));
+    const baseline = await requireAcceptanceBaselineForTicket(d.iid, base);
+    meta.acceptanceBaseline=baseline;meta.implementationBaseSha=baseline.sha;
+    recordReadinessCheck(stateDir(), projectReadiness, acceptanceBaselineCheck(d.iid,undefined,undefined,baseline));
   } catch (e) {
     if (e instanceof AcceptanceBaselineHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceBaselineCheck(d.iid, e));
     try { if (e instanceof TicketInputHold) recordReadinessCheck(stateDir(), projectReadiness, e.check); }

@@ -200,10 +200,11 @@ const currentTicketInput = (): FrozenTicketInput => {
     throw error;
   }
 };
-async function requireBaseline(): Promise<void> {
+async function requireBaseline(original?: import('./acceptance-baseline-admission.mts').OriginalBaseline) {
   try {
-    await requireAcceptanceBaselineForTicket(Number(iid), base);
-    recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid)));
+    const identity = await requireAcceptanceBaselineForTicket(Number(iid), base, original);
+    recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid),undefined,undefined,identity));
+    return identity;
   } catch(error) {
     if(error instanceof AcceptanceBaselineHold) recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid),error));
     throw error;
@@ -278,6 +279,9 @@ if (recovering) {
     || admitted?.kind !== "recovery" || admitted.attempt !== rec.id || admitted.token !== claimed.claim) {
     fail(`#${iid} is not claimed for recovery attempt ${seq} (${rec.id}); only Factory's recovery launcher starts --recover, once per attempt.`);
   }
+  if (!claimed?.implementationBaseSha || !claimed.acceptanceBaseline) fail('Acceptance baseline hold: preparation-required; original saved fullscope baseline admission is missing. Preserve work and charges; prepare explicitly.');
+  const original = {sha:claimed.implementationBaseSha,admission:claimed.acceptanceBaseline};
+  await requireBaseline(original);
   let token: string | undefined;
   try {
     token = adoptClaim(iid);
@@ -328,6 +332,7 @@ if (recovering) {
   };
   const inputHold = recheck();
   if (inputHold) fail(inputHold);
+  await requireBaseline(original);
   saveTicketInput(inputEvidence(claimed.executionId!, rec.id), frozenInput);
   setStage(iid, { ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash, attemptId: rec.id } });
   entryCleanupConfirmed = false;
@@ -406,7 +411,12 @@ if (sh("git", ["branch", "--list", branch]) || sh("git", ["ls-remote", "--heads"
 }
 // Static authority must survive host readiness and Git I/O before ANY claim/adoption.
 if (ticketHash().hash !== startVersion.hash) fail('Ticket-input changed before admission; retry collection before launch');
-await requireBaseline();
+const pendingRun=readRuns().find(r=>r.project===PROJECT && r.iid===iid);
+if(process.env.FACTORY_LAUNCH_CLAIM && (!pendingRun?.acceptanceBaseline || !pendingRun.implementationBaseSha)) throw new AcceptanceBaselineHold('preparation-required');
+const dispatchedOriginal=process.env.FACTORY_LAUNCH_CLAIM && pendingRun?.acceptanceBaseline && pendingRun.implementationBaseSha
+  ? {sha:pendingRun.implementationBaseSha,admission:pendingRun.acceptanceBaseline} : undefined;
+const acceptanceBaseline = await requireBaseline(dispatchedOriginal);
+if (acceptanceBaseline.sha !== baseSha) throw new AcceptanceBaselineHold('changed-input');
 setProject(PROJECT);
 // Adopt dispatch ownership or atomically acquire a normal claim for a tokenless manual run.
 let claimToken: string | undefined;
@@ -424,7 +434,7 @@ saveTicketInput(inputEvidence(executionId), frozenInput);
 setStage(iid, {
   title: String(issue.title), ticketUrl: tracker.ticketUrl(iid), branch, base, stage: "setup", startedAt: new Date().toISOString(), note: "",
   implementationModel: implementerModel, modelChoice: picked.choice,
-  implementationBaseSha: baseSha, verification: undefined,
+  implementationBaseSha: baseSha, acceptanceBaseline, verification: undefined,
   executionId,
   evidenceDir: resolve(layout.evidence, iid, executionId), ticketHash: startVersion.hash,
   ticketInput: { hash: frozenInput.hash, renderedSha256: frozenInput.textHash }, verdict: undefined, mr: undefined,

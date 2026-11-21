@@ -31,11 +31,12 @@ import { resolveWorkflow } from './workflow.mts';
 import { claimSupervisorHold, checkSupervisorHold } from '../cli/src/supervisor-admission.mts';
 import { readPayloadCustody, payloadRunClosed } from './payload-custody.mts';
 import { readAdmission } from '../board/admission.mts';
+import {claimRun} from '../board/board.mts';
 import { prepareFixtureFromRuntime } from './fixtures/acceptance-preparation.mts';
 import { prepareFixtureBaseline } from './fixtures/acceptance-baseline-preparation.mts';
 
 
-export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false, publicJourney?: (context: any) => Promise<void>) {
+export async function normalEntrypointFixture(t: TestContext, scenario: string, family: 'openai' | 'anthropic', tier?: string, copied = false, publicJourney?: (context: any) => Promise<void>, adopted = false) {
     const home = mkdtempSync(join(tmpdir(), 'verification-entry-'));
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const root = join(home, 'site'), origin = join(home, 'origin.git'), p = paths(home), state = copied ? p.state : join(home, 'state'), fake = join(home, 'fake'), bin = join(home, 'bin');
@@ -473,12 +474,15 @@ console.log('sha256:'+'a'.repeat(64));
     }
     const runEnv = { ...runtime.env, GIT_ALLOW_PROTOCOL: 'file', PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, FAKE_STATE: fake, SCENARIO: scenario, SANDCASTLE_STATE_DIR: state, FAKE_CONTEXT_PARENT: ['pass','readiness-acceptance','parent-plan','parent-read-failed'].includes(scenario) ? '90' : '', FAKE_TICKET_BODY: completeAcceptance ? `Model tier: mid\n\n## Full child specification\nPackage the login form using the parent decisions and ordered implementation plan.\n\n## Acceptance\n- Validate empty input without submitting.\n- Preserve the selected return URL.\n- Test keyboard submission.\n\nLiteral task data: {{TICKET}} !\`not a command\` $(not-a-command)` : tier ? `Model tier: ${tier}\nThe login form must work.` : 'The login form must work.',
         FACTORY_FAKE_CAPABILITY: scenario === 'image-bad' ? 'bad' : '', FACTORY_READY_IMAGE: scenario === 'image-changed' ? `sha256:${'b'.repeat(64)}` : '' };
+    let preparedBaseline: import('./acceptance-baseline-admission.mts').BaselineAdmissionIdentity | undefined;
     if (!['instruction-missing', 'parent-read-failed', 'image-bad', 'image-changed'].includes(scenario)) {
       prepareFixtureFromRuntime(runtime.directory, root, runEnv);
-      prepareFixtureBaseline(runtime.directory, root, runEnv);
+      preparedBaseline=prepareFixtureBaseline(runtime.directory, root, runEnv);
     }
+    const pending=adopted?claimRun({dir:state,project:'owner/repo',iid:'7',pid:process.pid,cap:2,patch:{base:'main',acceptanceBaseline:preparedBaseline,implementationBaseSha:preparedBaseline?.sha}}):undefined;
+    if(pending)assert.ok(pending.ok);
     const result = spawnSync(process.execPath, [join(runtime.directory, 'main.mts'), '--issue', '7', '--base', 'main'], {
-      cwd: root, encoding: 'utf8', env: runEnv, timeout: 15000,
+      cwd: root, encoding: 'utf8', env: {...runEnv,...(pending?.ok?{FACTORY_LAUNCH_CLAIM:pending.run.claim}:{})}, timeout: 15000,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
     if (copied) {

@@ -17,7 +17,8 @@ import { setProjectSchedule, writeScheduleConfig } from '../src/schedule.mts';
 import { readAdmission } from '../../board/admission.mts';
 import { readReadiness, readStoredReadiness, scopedReadiness } from '../../board/readiness.mts';
 import { handleRequest } from '../../board/board-server.mts';
-import { projectLaunchReadiness } from '../../orchestrator/launch-readiness.mts';
+import { projectLaunchReadiness,recordReadinessCheck } from '../../orchestrator/launch-readiness.mts';
+import {AcceptanceBaselineHold,acceptanceBaselineCheck,type BaselineHoldReason} from '../../orchestrator/acceptance-baseline-admission.mts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ReadinessRead } from '../../board/readiness.mts';
 
@@ -67,6 +68,23 @@ function noLaunch(f: ReturnType<typeof readinessFixture>) {
     assert.deepEqual(admission.recovery, {}); assert.deepEqual(admission.supervisorHolds, {});
   }
 }
+
+test('baseline categories and observed original identity remain passive across CLI status, Board and ticket projections',async t=>{
+  const f=readinessFixture(t),report=await freshHost(f);
+  const baseline={sha:'a'.repeat(40),bindingDigest:'b'.repeat(64)};
+  for(const reason of ['preparation-required','changed-input','authorization-unavailable','cancelled','cleanup-pending','review-required','behavior-mismatch','infrastructure'] as BaselineHoldReason[]) {
+    const hold=new AcceptanceBaselineHold(reason);hold.baseline=baseline;
+    recordReadinessCheck(f.p.state,report,acceptanceBaselineCheck(7,hold));
+    const observed=await agreement(f),ticket=scopedReadiness({state:'current',report:observed},'ticket-input');
+    const check=ticket.report?.checks.find(c=>c.id==='acceptance-baseline-7');
+    assert.deepEqual(check?.baseline,baseline);assert.equal(check?.reason,`Acceptance baseline: ${reason}`);
+    assert.equal(check?.nextActor,'operator');assert.match(check?.nextAction??'',/Preserve work, budgets and cleanup ownership/);
+    noLaunch(f);
+  }
+  // A prepared observation is also passive, never permission to reserve/start/claim on read.
+  recordReadinessCheck(f.p.state,report,acceptanceBaselineCheck(7,undefined,undefined,baseline));
+  const observed=await agreement(f);assert.equal(observed.checks.find(c=>c.id==='acceptance-baseline-7')?.status,'ready');noLaunch(f);
+});
 
 for (const path of ['evidence', 'worktrees']) test(`clean Git ${path} filesystem hold across manual, dispatch and real tick; next pass fails separately on incomplete parent input`, async t => {
   const f = readinessFixture(t), obstruction = join(f.root, '.factory', path);
