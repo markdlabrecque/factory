@@ -881,6 +881,8 @@ console.log('sha256:'+'a'.repeat(64));
         const malformedReport = JSON.stringify(mismatched);
         for (const path of [frozenReportPath, frozenProofPath]) chmodSync(path, 0o600);
         try {
+          writeFileSync(frozenProofPath, JSON.stringify({ ...proof, candidateReplay: null }));
+          assert.throws(() => readProof(state, identity, run.verification.id), /missing replay proof|independent execution missing/);
           writeFileSync(frozenReportPath, malformedReport);
           writeFileSync(frozenProofPath, JSON.stringify({ ...proof, report: mismatched, reportHash: createHash('sha256').update(malformedReport).digest('hex') }));
           assert.throws(() => readProof(state, identity, run.verification.id), /needs matching browser media/);

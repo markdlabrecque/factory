@@ -221,7 +221,7 @@ export function readProof(state: string, identity: Identity, id: string, criteri
   const root = proofRoot(state, identity.project, identity.ticket, id);
   const proof: Proof = JSON.parse(file(root, 'proof.json').toString('utf8'));
   demand(proof.id === id && (proof.version===1 && proof.policyVersion===1 && proof.candidateReplay===undefined
-    || [2, EXACT_PROOF_POLICY].includes(proof.version) && proof.policyVersion===proof.version && proof.candidateReplay!==undefined), 'unsupported or missing replay proof');
+    || [2, EXACT_PROOF_POLICY].includes(proof.version) && proof.policyVersion===proof.version && !!proof.candidateReplay), 'unsupported or missing replay proof');
   for (const k of ['project', 'ticket', 'executionId', 'attemptId', 'branch', 'base', 'baseline', 'tip', 'requirementsHash'] as const)
     demand(proof[k] === identity[k], `proof identity mismatch: ${k}`);
   demand(proof.provenance?.settingsHash === sha256(JSON.stringify(proof.provenance?.settings)), 'proof settings integrity mismatch');
