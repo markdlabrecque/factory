@@ -51,6 +51,20 @@ read-only access does not migrate on disk. Actual older v1 readers reject v2. Mi
 mandatory exclusions, corrupt stores and unknown versions hold without overwrite.
 Downgrade and optional exclusion-field rollback are unsupported.
 
+The owned baseline source API also requires the v1
+`admission/baselines.json` sidecar. Under the same shared lock, retained baseline
+reservations count against normal/recovery/delivery capacity; conflicting managed
+entries refuse them and supervisor acquisition requires their quiescence. Baselines
+are not implementation claims, run records or recovery attempts/charges. They survive
+controller/worker death, cancellation and ambiguous cleanup until exact-owned engine
+settlement. There is no age reaping or public force-release/retry command. Immutable
+publication indexes remain under `admission/` after confirmed release.
+**Older v2 code ignores this sidecar**: quiesce old/unmanaged work and select the
+complete updated admission/board/supervisor runtime before calling this source API.
+No new CLI, automatic baseline, implementation admission or candidate proof is enabled
+by this increment. See [owned baseline producer](acceptance-contract.md#owned-baseline-producer)
+for trusted execution grants, synthetic project-local reset and retained evidence.
+
 Managed run/dispatch, standard direct entrypoints, recovery launch and delivery
 admission honor durable supervisor exclusion before effecting work. Tokenless manual
 starts acquire normal ownership, rather than bypassing admission. Durable preflight

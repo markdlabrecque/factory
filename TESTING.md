@@ -1,4 +1,4 @@
-<!-- Commit checks use fixture-owned runtimes and external boundaries across four bounded CI shards plus a separate browser-lifecycle gate. Exact-package offline verification and real browser-image/service-manager smoke checks are distinct opt-in boundaries. -->
+<!-- Commit checks use fixture-owned runtimes, a local namespace-backed acceptance driver and external boundaries across four bounded CI shards plus a separate browser-lifecycle gate. Exact-package offline verification and real browser-image/service-manager smoke checks are distinct opt-in boundaries. -->
 # Testing
 
 ## Run the tests
@@ -35,6 +35,55 @@ The independent browser lifecycle job below remains mandatory. Its file also rem
 Automated tests use temporary homes, synthetic projects, fake clocks and stubbed external commands. Browser-probe fixtures expose the running Node executable in their isolated PATH rather than assuming a system installation path. They must not control real user services, contact trackers, run agents, build Docker images or fetch credentials.
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
+
+## Owned acceptance baseline runner
+
+`orchestrator/acceptance-runner.test.mts` exercises the approved owned-runner seam
+with real private filesystem stores, shared interprocess admission locks, disposable
+Git and native detached/controller processes. The external engine lifecycle is emulated
+by `orchestrator/fixtures/acceptance-engine.mjs`; the fixture never executes project,
+setup or frozen probe argv on the host and never supplies admission/cleanup authority.
+IPC/socket barriers and an injected reservation clock cover competing reservations,
+controller death, worker death, cancellation, late results, foreign owner/engine,
+ambiguous creation, output overflow, image-volume refusal and retained sealed output.
+The exact Git pack excludes dirty CMS-like site/database files; frozen copies and
+fresh bounded state/mount policy are inspected independently. The receipt units
+cover full assertion inventory and transition/failure/manual-evidence taxonomy.
+
+```sh
+node --test orchestrator/acceptance-{contract,custody,receipt,runner}.test.mts orchestrator/ticket-input.test.mts
+```
+
+One case replaces only the engine's start response with actual execution of the
+unchanged copied `acceptance-sandbox.mjs` inside rootless user/mount/PID/network
+namespaces (`fixtures/acceptance-namespace.mts`). It requires Linux, working rootless
+Bubblewrap (`/usr/bin/bwrap`), local Git, `ldd`, `prlimit` and GNU `timeout`, plus the
+running Node executable. The helper freezes only those executable/library bytes,
+mounts that private closure and `/input` read-only, creates fresh `/work`, `/tmp`,
+`/run`, `/proc`, `/dev`, and mounts only fixture-private disposable synthetic state
+writable. It clears the environment, denies host network/mounts/sockets, and uses a
+10-second outer kill deadline, CPU/file-size/fd guards and a 1 MiB captured-output
+ceiling. Capability failure **fails**, never skips or falls back to host execution;
+no test installs tools or changes host namespace policy.
+
+The pinned setup seeds filesystem-backed synthetic rows/site/uploads, not SQL/CMS.
+The frozen probe imports the baseline API, observes actual seed/SHA, tests read-only
+inputs and hidden host source, then dirties state. Two independent runs must observe
+the same seed and exact baseline despite dirty source; reuse of the first run's
+persistent dirt must produce an actual driver failure and a sealed policy hold with
+no results. TAP diagnostics retain real driver exit/stdout/stderr (including actual
+assertions); the driver currently reports setup failure without forwarding setup
+stderr. Reservation/start/read and retained receipt authentication are real.
+
+This closes real-driver synthetic execution evidence, **not** real container/cgroup/
+different-UID watchdog or actual CMS installation/database-seeding evidence. The
+namespace fixture's resource guards are not proof of the engine's memory/PID/tmpfs
+limits. A supported-image/CMS runtime smoke remains unperformed; absent local PHP
+and MariaDB/MySQL cannot be replaced by synthetic JSON state, and unsupported reset
+still holds. No production, network DB, credentials or paid provider is part of
+these fixtures. All four commit-tier shards, docs checks and the independent browser
+lifecycle gate remain unchanged.
+See [runner contract](docs/acceptance-contract.md#owned-baseline-producer).
 
 ## Standard implementation continuation
 
