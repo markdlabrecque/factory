@@ -63,7 +63,7 @@ for (const kind of ["github", "gitlab"]) {
     assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);
   });
 
-  test(`${kind}: implementer lookup errors persist waitable blockers without needs-human`, t => {
+  test(`${kind}: implementer lookup errors persist waitable blockers without needs-human`, async t => {
     const f = fixture(t, kind);
     f.data.tickets[0].description = "Model tier: mid\nRequirement DEP:20";
     f.data.tickets[1].contextOnly = true;
@@ -89,6 +89,8 @@ for (const kind of ["github", "gitlab"]) {
       };
     `);
     const mainRuntime = bindExecution(f.root, f.env, { overlays: false });
+    const {prepareFixtureBaseline}=await import('./fixtures/acceptance-baseline-preparation.mts');
+    prepareFixtureBaseline(mainRuntime.directory,f.root,mainRuntime.env);
     for (const errorMessage of ["authentication failed secret-token", "rate limit exceeded secret-token", "transport timeout secret-token"]) {
       f.data.errorMessage = errorMessage; f.save();
       const r = spawnSync(f.node, [join(mainRuntime.directory, 'main.mts'), "--issue", "7", "--base", "main"], { cwd: f.root, env: mainRuntime.env, encoding: "utf8", timeout: 20_000 });
@@ -103,6 +105,10 @@ for (const kind of ["github", "gitlab"]) {
     }
     assert.doesNotMatch(f.bytes(join(f.fake, "tracker.jsonl")), /"(?:edit|comment|close|create)"/);
     f.data.errors = []; f.data.tickets[1].state = "closed";
+    // Explicit fixture host rotates only its current baseline reference when switching from
+    // the implementation runtime back to the distinct dispatch runtime; retained receipts stay.
+    const fs=await import('node:fs');
+    for(const name of fs.readdirSync(join(f.dir,'acceptance')).filter(n=>n.startsWith('baseline-current-') || n.startsWith('baseline-plan-')))fs.rmSync(join(f.dir,'acceptance',name));
     f.baseline();
     f.pass();
     assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);

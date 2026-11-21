@@ -118,6 +118,16 @@ for (const mode of ['factory', 'project'] as const) {
     t.after(() => child?.kill('SIGKILL'));
     const result = await launchRecovery(p, { root, tracker: 'owner/repo', contextSource: preparedContextSource('owner/repo'), dir: p.state, ticket: 7, preparation: ready, node: process.execPath, path: env.PATH, workflowEnv: selected.env,
       spawn: (cmd, args, o) => { launch = { cmd, args, ...o }; child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' }); return child.pid!; } });
+    if(mode==='factory') {
+      // This routing-only saved run predates baseline admission. Do not manufacture an original
+      // receipt or replace the real selected gate with a recorder to preserve a synthetic launch.
+      // Authentic standard host/child launch is covered by acceptance-baseline-recovery.test.mts.
+      assert.equal(result.ok,false,JSON.stringify(result));assert.equal(result.admitted,false);
+      assert.equal(result.code,'acceptance-baseline');assert.match(result.reason,/preparation-required/);
+      assert.equal(launch,undefined);assert.equal(readRecovery(p,root).attempts.length,0);
+      assert.equal(projectWorkflow(p,root,selected.env).id,selected.id,'the held recovery still retains selected A');
+      return;
+    }
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(launch.cmd, process.execPath); assert.equal(launch.cwd, root); assert.equal(launch.env.PATH, env.PATH);
     assert.deepEqual(launch.args.slice(0, 2), [selected.tsx, selected.entrypoints.main]);

@@ -446,6 +446,7 @@ console.log('sha256:'+'a'.repeat(64));
       rmSync(state, { recursive: true, force: true }); mkdirSync(state, { recursive: true });
       rmSync(join(fake, 'changed'), { force: true });
       prepareFixtureFromRuntime(selected.root, root, { ...env, ...selected.env, FIXTURE_BARRIER: '' });
+      prepareFixtureBaseline(selected.root,root,{...env,...selected.env,FIXTURE_BARRIER:''});
       const fresh = spawnSync(process.execPath, [selected.entrypoints.main, '--issue', '7', '--base', 'main'], { cwd: root, encoding: 'utf8', env: { ...env, ...selected.env, FIXTURE_BARRIER: '' }, timeout: 15000 });
       assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
       const bImpl = JSON.parse(readFileSync(join(fake, 'implementer-identity.json'), 'utf8'));
