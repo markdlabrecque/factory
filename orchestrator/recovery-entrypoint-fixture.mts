@@ -1,5 +1,6 @@
 // Shared recovery lifecycle fixture: copied-install acceptance and legacy regression scenarios use isolated fake external boundaries.
 import { bindExecution } from '../cli/test/execution-fixture.mts';
+import { prepareFixtureAcceptance } from './fixtures/acceptance-preparation.mts';
 import {preparedFixture} from '../cli/test/prepared-fixture.mts';
 import { commandContextSource } from './ticket-context-source.mts';
 import {prepareRecovery} from '../cli/src/recovery-prepare.mts';
@@ -139,9 +140,11 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const { loadExecutionContext } = await import('./context.mts');
   const policy = (await loadExecutionContext({ env: runtime.env, cwd: root, moduleRoot: runtime.directory })).policyIdentity;
   // The dispatcher's analysis of #7, with the same explicit runtime context.
-  const hash = execFileSync(process.execPath, ["--input-type=module", "-e",
-    `const t = await import(${JSON.stringify(join(runtime.directory, 'tracker.mts'))}); const g = await import(${JSON.stringify(join(runtime.directory, 'ticket-input.mts'))}); process.stdout.write(g.freezeTicketInput(t.contextSource, 7).hash);`],
-  { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } });
+  const preparedInput = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
+    `const t = await import(${JSON.stringify(join(runtime.directory, 'tracker.mts'))}); const g = await import(${JSON.stringify(join(runtime.directory, 'ticket-input.mts'))}); process.stdout.write(JSON.stringify(g.freezeTicketInput(t.contextSource, 7)));`],
+  { cwd: root, encoding: "utf8", env: { ...process.env, ...env, SANDCASTLE_STATE_DIR: state } }));
+  const hash = preparedInput.hash;
+  prepareFixtureAcceptance(state, preparedInput);
   mkdirSync(join(state, "graph"), { recursive: true });
   writeFileSync(join(state, "graph", "owner_repo--7.json"), JSON.stringify({ iid: 7, project: "owner/repo", hash, policyIdentity: policy, analyzedAt: at(1), base: "main", baseSha: "",
     provides: [], requires: scenario === 'dependency-unknown' ? [{ providedBy: 12, what: 'provider', evidence: 'ticket', confidence: 1 }] : [], footprint: ["app.txt"], catalogueIids: [], blockerHashes: {} }));

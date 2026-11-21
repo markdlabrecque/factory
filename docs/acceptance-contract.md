@@ -678,6 +678,50 @@ No live Docker, paid model, production, credentials or external reset is needed 
 authorized by the tests. A supported-image/CMS runtime smoke remains separate
 unperformed acceptance evidence, not inferred from synthetic success.
 
+## Current host preparation reference
+
+`acceptance-admission.mts` supplies the active static reader used by the standard
+`recovery-analysis.mts` adapter. Before launching preparation, an authorized preparer
+uses the custody API's exact-ticket trusted approval ingress and immutable publication.
+The host's current reference lives at
+`<state>/acceptance/prepared-<included-source-content-hash>.json`; bundle directories
+are also under this private `acceptance` store. The reference is a bounded (4096-byte),
+host-owned private regular single-link UTF-8 JSON file, with exactly these fields:
+
+- `version: 1`
+- `bundle`: the published `AcceptanceBundlePointer`
+- `ticket`: the original bundle's complete `{ contentHash, renderedSha256 }`
+- `acceptance`: the original complete acceptance identity
+- `approvalDigest`: the original manifest's exact approval digest
+
+This file is trusted preparation state, never a tracker approval claim or a candidate
+file. Publish it atomically and durably only after independent exact-content approval
+and custody publication; no launch path creates, repairs, approves or renews it. Revoking
+or changing the current reference prevents old preparation reuse. There is no operator
+publication command or automatic migration in this slice. Do not create a reference to
+bypass missing approval. Store and reference aliases, unsafe permissions, links,
+oversize/invalid records and unavailable originals hold. The reader rechecks reference
+identity after the custody read; custody itself rehashes all retained originals and
+rejects overlap with the supplied agent-mount inventory.
+
+Fresh tracker collection is compared using the included-source content hash. Collection
+timestamps are not requirements, but they do affect the rendered hash: therefore the
+analyst receives the **original independently approved rendering** returned from custody,
+not a newly rendered snapshot rebound to an old approval. Both original hashes remain
+bound to the reference and approval. Child/parent/comment edits require fresh independent
+preparation. The adapter repeats this lookup on cached/fresh preparation and both
+post-I/O rechecks. It publishes safe `validate-prepared-acceptance` observations; passive
+status/Board/readiness reads never invoke this active custody reader (which includes
+durability fsync), models or probes.
+
+**Partial integration only:** the common analysis consumer, dispatch, direct main,
+explicit refresh and preclaim/recovery-launch baseline admission still need integration.
+Static preparation `ready` does not attest to runner/reset capability, explicit execution
+authorization, a baseline reservation or an authenticated matching baseline receipt.
+No baseline is executed or claimed here. Original full-scope baseline, saved work,
+existing admission/ownership/dependency/image fences and charges remain unchanged.
+Candidate replay/proof and installed-release/override protocol coverage remain separate.
+
 ## Verification
 
 ```sh

@@ -85,6 +85,30 @@ these fixtures. All four commit-tier shards, docs checks and the independent bro
 lifecycle gate remain unchanged.
 See [runner contract](docs/acceptance-contract.md#owned-baseline-producer).
 
+## Acceptance static admission (partial integration)
+
+```sh
+node --test orchestrator/acceptance-admission.test.mts orchestrator/recovery-entrypoint.test.mts
+```
+
+The approved analysis/implementation admission seam is exercised through the actual
+selected recovery-preparation helper with disposable Git and fixture-owned rejecting
+tracker/Pi boundaries. Missing preparation covers both trackers and configured families;
+malformed references/contracts, unapproved/tampered originals and changed input stop
+before analysis or implementation records. An authentic custody publication reaches the
+analyst, reuses cached analysis without another call, and is revoked by removing current
+preparation while preserving the saved manifest. Passive stored-readiness reads retain
+the safe ticket-specific reason/action without recreating state or invoking models.
+`fixtures/acceptance-preparation.mts` supplies synthetic independent approval **before**
+launch, never production authority or baseline execution. The existing recovery fixture
+also prepares its exact complete child/parent input before its analysis pass.
+
+These are focused filesystem/process integrations, not helper-only schema tests, browser
+E2E or installed release acceptance. Dispatch/direct/refresh static and authorized
+baseline-before-claim wiring remain unproved/unimplemented in this partial slice. No
+real provider, tracker, credentials, Docker, shared daemon or package install runs.
+The four full shards, documentation and independent lifecycle gates remain unchanged.
+
 ## Standard implementation continuation
 
 `orchestrator/implementation-outcome.test.mts` covers bounded execution/turn reports and fail-closed eligibility. `orchestrator/payload-custody.test.mts` verifies durable one-time reservation without treating it as cleanup. `orchestrator/verification-entrypoint-continuation.test.mts` exercises the flat normal runner with stubbed SDK, tracker and container boundaries and disposable real Git. It checks that a resumed commit keeps the original baseline and requires the independent verifier; second incompletion, a stalled or failed resume, false success, wrong checkout, an unexplained Git delta and superseded execution do not push. A stalled SDK resume or post-resume Git probe retains unsealed custody even when the container is gone. The fixture supplies the inspected Sandcastle resume contract, not a live Pi transport or a production rollout test.

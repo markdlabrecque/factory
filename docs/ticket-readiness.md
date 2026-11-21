@@ -7,9 +7,21 @@ Readiness is an observation, not permission to execute, verify or deliver. A sav
 The [versioned portable acceptance contract](acceptance-contract.md) defines exact-content
 identity, trusted approval ingress and changed/preservation/reviewed non-transition policy.
 Its pure validators establish structure and record binding, **not** English adequacy or
-launch authority. The module ships in the runtime inventory; custody, bounded execution,
-admission and proof integration are separate work and are not enabled by this foundation.
-Existing readiness observations do not claim to enforce that future protocol.
+launch authority. Contract, custody and the bounded runner ship in the runtime inventory.
+Standard **recovery preparation** now reads current host preparation and rehashes original
+acceptance before fresh analysis, cached-analysis reuse and post-I/O rechecks. Missing,
+malformed, unapproved/tampered or changed preparation returns ticket-scoped
+`acceptance-static`, without an analysis invocation, implementation record or recovery
+charge. Its `validate-prepared-acceptance` observation uses `ticket-input` scope and names
+the preparer/reviewer action; CLI/Board readers only display it.
+
+This is a partial admission integration, **not the complete acceptance guarantee**:
+dispatch, direct implementation, explicit assessment refresh and preclaim baseline
+admission are not yet gated by this static adapter. The preparation result's `ready`
+means current analysis/prerequisites, not a trusted baseline receipt or permission to
+implement. Full overrides remain opaque, not compliant merely because their manifests
+validate. See [current host preparation](acceptance-contract.md#current-host-preparation-reference).
+Saved observations never approve acceptance or execute probes/models.
 
 ## Start with the observation, not a retry
 
