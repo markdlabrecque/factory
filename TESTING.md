@@ -108,8 +108,13 @@ launch, never production authority or baseline execution. The existing recovery 
 also prepares its exact complete child/parent input before its analysis pass.
 
 These are focused filesystem/process integrations, not helper-only schema tests, browser
-E2E or installed release acceptance. Authorized baseline lifecycle/preclaim/charge/adoption
-wiring and full baseline diagnostics remain unproved/unimplemented in this partial slice. No
+E2E or installed release acceptance. `acceptance-baseline-entrypoints.test.mts` additionally
+exercises actual dispatch with real separate reserve/start/read, durable private grants,
+disposable Git and the existing owned engine transport. Explicit host preparation occurs
+before managed entry; valid current evidence permits the actual claim and child launch.
+`fixtures/acceptance-baseline-preparation.mts` is test-only and simulates sandbox output,
+not CMS reset or production authority. Direct/adopted main, recovery precharge and full
+baseline diagnostic projections remain unproved/unimplemented in this partial slice. No
 real provider, tracker, credentials, Docker, shared daemon or package install runs.
 The four full shards, documentation and independent lifecycle gates remain unchanged.
 

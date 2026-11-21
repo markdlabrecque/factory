@@ -38,6 +38,7 @@ for (const kind of ["github", "gitlab"]) {
     assert.equal(f.assessment().dependencies?.find(d => d.iid === 20)?.state, "unknown");
     f.data.errors = [];
     f.data.tickets[1].state = "closed";
+    f.baseline();
     f.pass();
     assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);
     assert.equal(f.assessment().dependencies?.find(d => d.iid === 20)?.state, "satisfied");
@@ -57,6 +58,7 @@ for (const kind of ["github", "gitlab"]) {
     assert.equal(existsSync(join(f.fake, "launches")), false);
     assert.equal(f.assessment().dependencies?.find(d => d.iid === 20)?.state, "unknown");
     f.data.mergeErrors = []; f.data.merged = ["20-topic"];
+    f.baseline();
     f.pass();
     assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);
   });
@@ -101,6 +103,7 @@ for (const kind of ["github", "gitlab"]) {
     }
     assert.doesNotMatch(f.bytes(join(f.fake, "tracker.jsonl")), /"(?:edit|comment|close|create)"/);
     f.data.errors = []; f.data.tickets[1].state = "closed";
+    f.baseline();
     f.pass();
     assert.match(f.bytes(join(f.fake, "launches")), /--issue 7/);
   });
@@ -137,6 +140,10 @@ for (const kind of ["github", "gitlab"]) {
       assert.ok(f.assessment(n).modelResolution?.revision);
     }
     assert.equal(existsSync(join(f.fake, "launches")), false);
+    // Prepare the later independent ticket before the fixture starts other project work.
+    const oldDescription = f.data.tickets[1].description;
+    f.data.tickets[1].description = 'No declaration defaults to mid'; f.baseline(8);
+    f.data.tickets[1].description = oldDescription;
     const original = JSON.parse(f.record(7, "implementing"));
     original.implementationModel = "attempt-original-model";
     writeFileSync(join(f.dir, `${f.key(7)}.json`), JSON.stringify(original));

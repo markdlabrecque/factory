@@ -24,8 +24,14 @@ This is a partial admission integration, **not the complete acceptance guarantee
 Dispatch validates current preparation before candidate selection, stale/live analysis
 selection and the fresh pre-claim input read, so cached execution analysis cannot bypass
 static refusal. Direct main checks before claim/adoption and on subsequent input reads.
-Authorized baseline lifecycle/preclaim/charge/adoption admission and full baseline
-diagnostics are still outstanding; static validation does not substitute for them. The preparation result's `ready`
+Dispatch additionally authenticates a separately host-prepared owned baseline against
+CURRENT ticket/bundle/approval/SHA/runtime/dependencies/full policy/config and host reset
+plan before its implementation claim/child launch. Missing or revoked host execution
+grants, mismatches, review-required already-green, behavioral mismatch, infrastructure
+and cleanup uncertainty are separate safe `validate-current-acceptance-baseline` holds.
+Passive readers display those observations and never invoke the host preparation API.
+Direct/adopted main, recovery precharge and complete projection coverage remain outstanding;
+static validation does not substitute for them. The preparation result's `ready`
 means current analysis/prerequisites, not a trusted baseline receipt or permission to
 implement. Full overrides remain opaque, not compliant merely because their manifests
 validate. See [current host preparation](acceptance-contract.md#current-host-preparation-reference).

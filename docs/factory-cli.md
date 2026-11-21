@@ -46,9 +46,12 @@ before claim adoption. Analyses use the original full child/parent rendering fro
 not a newly timestamped rendering rebound to old approval. Common analysis rechecks
 custody immediately before and after model I/O; recovery's existing rechecks remain.
 
-This is **partial source integration**, not the complete acceptance guarantee. Authorized
-baseline lifecycle/preclaim/charge/adoption admission and full baseline diagnostics
-remain outstanding. Static validity alone does not block all approved valid launches as
+This is **partial source integration**, not the complete acceptance guarantee. Dispatch
+now requires a separately host-prepared, authentic CURRENT matching owned baseline before
+its implementation claim/child launch. The [explicit host preparation protocol](acceptance-contract.md#explicit-host-baseline-preparation-and-dispatch-admission)
+uses exact private execution grants and the existing separate reservation/lifecycle APIs;
+it never auto-grants execution or uses an implementation claim for preparation. Direct/
+adopted main, recovery precharge and complete passive baseline diagnostics remain outstanding. Static validity alone does not block all approved valid launches as
 a substitute for that missing work. Recovery preparation `ready` is not
 baseline receipt authority. There is no new CLI publication command, automatic migration
 or compliance claim for arbitrary complete overrides in this slice.

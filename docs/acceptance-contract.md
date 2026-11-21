@@ -722,13 +722,65 @@ analysis independently checks at entry, immediately before the model and after i
 No caller callback or tracker declaration can approve acceptance. Static refusals remain
 ticket-scoped preparation/migration holds, not stopped implementation runs.
 
-**Partial integration only:** authorized baseline lifecycle/preclaim/charge/adoption
-admission and full baseline diagnostics still need integration.
+**Partial integration only:** dispatch now consumes current authenticated owned baseline
+before its implementation claim/child launch. Direct/adopted main and recovery precharge
+integration and full passive baseline diagnostics still need integration.
 Static preparation `ready` does not attest to runner/reset capability, explicit execution
 authorization, a baseline reservation or an authenticated matching baseline receipt.
 No baseline is executed or claimed here. Original full-scope baseline, saved work,
 existing admission/ownership/dependency/image fences and charges remain unchanged.
 Candidate replay/proof and installed-release/override protocol coverage remain separate.
+
+## Explicit host baseline preparation and dispatch admission
+
+`acceptance-baseline-admission.mts` extends the trusted-host local protocol. It does
+not grant execution from tracker text, static approval, readiness or caller receipt JSON.
+An authorized host preparer provisions these private, regular, single-link bounded UTF-8
+records under `<state>/acceptance` (same host-private trust boundary as custody):
+
+- `baseline-plan-<ticket-content-hash>.json`: exactly `{version:1, request,
+  policyIdentity, configDigest}`. `request` is the complete existing `BaselineRequest`;
+  `policyIdentity` is the selected context's complete policy identity and `configDigest`
+  is `acceptanceHash` of the raw current `.factory/factory.toml` string. Host plan setup,
+  reset recipe, transport and resource limits are explicit reviewed host configuration,
+  not values inferred from tracker commands. Unsupported reset holds.
+- `execution-authorization-<intent-digest>.json`: the exact existing runner execution
+authorization (`id`, `intentDigest`, finite `expiresAt`, optional independently retained
+criterion `evidence`). The digest is `acceptanceHash` of the runner's documented intent:
+`{version:1, request, runtime, dependencies, approval, setup, reset}`. The entire deadline
+must fit the host-supplied grant; preparation never manufactures or renews a grant.
+
+The explicit local host API `prepareAcceptanceBaselineForTicket(iid, base, signal?)`
+recollects tracker child/parent originals and current preparation, independently resolves
+`origin/<base>` with replacement objects disabled, revalidates selected runtime/private
+dependencies/full policy/raw configuration, and inspects the current configured image.
+The host plan must match project/tracker/ticket/bundle/SHA/runtime/cap and observed image.
+It calls the existing separate durable reserve/start/cancel/read APIs, never `claimRun`.
+A private immutable `baseline-current-<ticket-content-hash>.json` containing the exact
+handle and complete current binding is durable before start. Failure or cancellation
+retains that handle and reservation for exact-owned inspection; no automatic retry,
+rotation, cleanup assumption or force-settlement is offered. Explicit host preparation
+must occur before managed launch entry; baseline reservation does not bypass existing
+managed-entry, capacity or project-exclusion fences.
+
+Dispatch's active `requireAcceptanceBaselineForTicket` authenticates retained producer
+index/spec/seal/output and released reservation through `readAcceptanceBaseline`. That
+reader authenticates the **historical request**, so admission additionally compares the
+complete independently resolved CURRENT binding before and after the read. Runner
+`config` is only its bounds digest, not full project policy; the additional policy,
+raw config and full host-plan digest bind setup/reset/transport and all request fields.
+Current exact host authorization must still exist, match the retained grant and remain
+unexpired. Revoked/cancelled/unknown/cleanup-held execution grants no implementation
+claim. Named behavioral red, preservation and reviewed obligations remain reconciled
+by the original runner policy; already-green changed criteria require review.
+
+Preparation is explicit host action, not a new CLI command, automatic scheduler probe,
+tracker mutation or installed-release guarantee. Passive views only read stored
+`validate-current-acceptance-baseline` observations. The current dispatch vertical has
+safe preparation-required, changed-input, authorization-unavailable, cancelled,
+cleanup-pending, review-required, behavior-mismatch and infrastructure categories.
+Remaining direct/adopted/recovery and projection coverage must not be inferred from
+this API. Original roles, full baseline, bundle, work and budgets are unchanged.
 
 ## Verification
 

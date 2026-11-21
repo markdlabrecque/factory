@@ -1,9 +1,10 @@
 // Fresh host/project, complete ticket and current frozen acceptance gates precede analysis, cached selection and claim.
-// Pinned runtime children keep independent leases and explicit project artifacts; static validity is not baseline authorization.
+// Pinned runtime children keep independent leases and explicit project artifacts; authenticated current owned baseline precedes claim.
 // Only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
 import { observeWaitingDelivery, bounded, RetryableDeliveryRead, schedulerAuthorization } from './delivery-followup.mts';
 import { validDelivery } from './delivery.mts';
 import { AcceptanceAdmissionHold, acceptanceStaticCheck, readPreparedAcceptance } from './acceptance-admission.mts';
+import { AcceptanceBaselineHold, acceptanceBaselineCheck, requireAcceptanceBaselineForTicket } from './acceptance-baseline-admission.mts';
 import { readAdmission } from './admission.mts';
 import { projectLaunchReadiness, readinessReason, recordTicketLaunch, recordReadinessCheck, recordTicketInput, ticketBranch, ticketWorkspaceProblem } from './launch-readiness.mts';
 // #149: cache full three-state dependency results per pass; unknown reads hold dispatch.
@@ -463,7 +464,10 @@ for (const [n, d] of launch.entries()) {
     }
     const problem = ticketWorkspaceProblem(context.projectRoot, ticketBranch(d.iid, freshInput.context.child.title));
     if (problem) { recordTicketLaunch(stateDir(), projectReadiness, d.iid, problem); log(`#${iid} held before admission: ${problem}`); continue; }
+    await requireAcceptanceBaselineForTicket(d.iid, base);
+    recordReadinessCheck(stateDir(), projectReadiness, acceptanceBaselineCheck(d.iid));
   } catch (e) {
+    if (e instanceof AcceptanceBaselineHold) recordReadinessCheck(stateDir(), projectReadiness, acceptanceBaselineCheck(d.iid, e));
     try { if (e instanceof TicketInputHold) recordReadinessCheck(stateDir(), projectReadiness, e.check); }
     catch (writeError) { console.error(`Ticket readiness report write failed; launch held: ${(writeError as Error).message}`); }
     log(`#${iid}: ${(e as Error).message}`); continue;

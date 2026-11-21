@@ -16,6 +16,7 @@ import { buildAssets } from "../cli/src/scaffold.mts";
 import { readAssessment, requestRefresh } from "../board/assessment.mts";
 import { fixtureTicketHash, fixtureTicketInput } from './fixtures/ticket-input.mts';
 import { prepareFixtureAcceptance } from './fixtures/acceptance-preparation.mts';
+import { prepareFixtureBaseline } from './fixtures/acceptance-baseline-preparation.mts';
 
 import { readAdmission } from '../board/admission.mts';
 /** Refresh may own a durable managed entry, never an implementation/recovery admission or generation. */
@@ -98,7 +99,12 @@ export function fixture(t: any, kind = "github", prepareAcceptance = true) {
     }
     return r;
   };
+  const baseline = (iid=7) => {
+    save();
+    writeFileSync(join(bin,'docker'), `#!${process.execPath}\nimport {capabilityDocker} from ${JSON.stringify(new URL('./fixtures/capability-docker.mjs',import.meta.url).pathname)}; const out=capabilityDocker(process.argv.slice(2),process.env.FAKE_STATE); if(out===undefined)process.exit(90); console.log(out);\n`, {mode:0o755});
+    prepareFixtureBaseline(runtime.directory,root,env,iid);
+  };
   const bytes = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "absent";
-  return { home, root, dir, fake, env, runtime, snapshot, data, save, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
+  return { home, root, dir, fake, env, runtime, snapshot, data, save, baseline, key, record, manifest, pass, bytes, node, assessment: (iid = 7) => readAssessment(dir, key(iid))! };
 }
 
