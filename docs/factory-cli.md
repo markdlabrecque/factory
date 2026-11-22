@@ -1,4 +1,4 @@
-<!-- Operator contracts for shared runtime selection, scheduling, recovery and read-only diagnostics. -->
+<!-- Operator contracts for batch ownership, shared runtime selection, scheduling, recovery and read-only diagnostics. -->
 <!-- Recovery maintenance settles locally before project pause gates; status reprojects saved-work followups without writes.
 Live read-only scheduler authorization and delivery claims continue existing exact-head PRs. -->
 <!-- Scheduled passes use each project's configured dispatch cap, counted across the shared board. -->
@@ -61,6 +61,23 @@ action and observed SHA/binding digest (unknown is explicit); passive reads neve
 reserve, start, claim or execute even when an observation is ready. Recovery preparation
 `ready` is not baseline receipt authority. There is no new CLI publication command, automatic migration
 or compliance claim for arbitrary complete overrides in this slice.
+
+## Explicit batch submission and resume
+
+```text
+factory batch submit <project> <ticket-id>...
+factory batch resume <project> <batch-id>
+```
+
+For example, `factory batch submit web 41 38` selects exactly those two tickets. Use a registered checkout name or root path and distinct positive decimal ticket numbers, not tracker URLs or repository-qualified IDs. The host checks each named open ticket against the configured tracker repository before creating a batch. No ready label is required. In subtask mode a container with Tasks (GitLab) or sub-issues (GitHub) is not runnable; name the intended units individually. Unknown hierarchy is not evidence that a parent is runnable. There is no label search, dependency expansion, claim, agent launch or tracker write. Complete workflow overrides are not converted.
+
+Submission pins the remote tip of the registry's saved schedule branch (even when paused), or origin's symbolic default branch if none was saved. It never uses checkout HEAD or asks the scheduler to turn on. Origin must expose one matching fetch/push repository with a directly identifiable tracker host and project path. Ambiguous SSH aliases, different push URLs and missing base refs hold. A new UUID and generated `refs/heads/factory/batch/<uuid>` are reserved in private host state at `<factory-state>/batches/<uuid>/batch.json`. The CLI prints the reserved ID to stderr before creating the ref; on success stdout is the version-1 batch identity as JSON. A new submit means **a new batch**. After interruption use **resume with the original ID**, not another submit.
+
+Resume checks the canonical checkout, repository and remote branch against the saved record. It does not select more tickets, fetch a new base or change a ready branch. Creation intent without a started push can complete from the original SHA. A matching head alone does **not** prove ownership: after an interrupted push, recovery requires Git's positive per-attempt new-ref/fast-forward receipt and exact remote readback. Even an existing branch pointing at the original SHA is a collision, not a successful creation. Missing ownership, deletion, unconfirmed attempted writes and unexplained drift hold. Preserve the private record, push receipt and remote refs for inspection; do not edit `expectedHead`, force-update a branch, or reset the batch to retry.
+
+**Host API for dispatch and delivery:** the installed app's `cli/src/batch.mts` exports `readOwnedBatch(paths, project, id)` for a passive, checked `BatchIdentity`. Supply host-owned `paths.state` and `paths.projects`, not paths from ticket/worker input. The result contains `version`, `id`, canonical `root`, `repository`, fixed `members`, `baseRef`, original `sourceSha`, generated `destinationRef` and `expectedHead`. Re-read for each decision; a saved copy is not current authority. After independently authorizing a particular candidate, a trusted host delivery caller can invoke `advanceBatch(paths, project, id, expectedOld, nextCommit)`. It derives the target from the record, checks ancestry and the exact old head, and settles only an observed host fast-forward. It takes **no destination ref** and has **no CLI command**. Use `resumeBatch(paths, project, id)` for explicit reconciliation; it does not retry an uncertain advance. Use the installed host module at the coordinator boundary, not inside project code or an agent. The legacy/override runtime inventory is unchanged.
+
+These commands establish selection and branch ownership only. An identity is neither a passing gate nor an observed ticket delivery; this command does not dispatch work, merge to the onward base, or modify existing runs.
 
 ## Local persistence durability
 

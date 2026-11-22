@@ -1,5 +1,5 @@
-// Shared strict read-only registry reader. Missing registry is empty, malformed data is held and never repaired.
-import { existsSync, readFileSync } from 'node:fs';
+// Read-only project registry. Batch authority requires one exact registered checkout, not a linked-worktree alias.
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { Paths } from './paths.mts';
 export type ProjectSchedule = { enabled: boolean; branch: string; since: string };
@@ -14,4 +14,16 @@ export function readRegistry(p: Pick<Paths, 'projects'>): Registry {
       && (x.schedule === undefined || (typeof x.schedule?.enabled === 'boolean' && typeof x.schedule.branch === 'string' && x.schedule.branch !== '' && typeof x.schedule.since === 'string')));
   if (!ok) throw new Error(`Unsupported project registry: ${p.projects}. Fix or remove it; Factory will not overwrite it.`);
   return data;
+}
+
+export function batchRegistration(p: Pick<Paths, 'projects'>, selector: string): Project {
+  const projects = readRegistry(p).projects;
+  let rows = projects.filter(row => row.name === selector);
+  if (!rows.length && existsSync(selector)) {
+    const root = realpathSync(selector);
+    rows = projects.filter(row => row.root === root);
+  }
+  if (rows.length !== 1 || projects.filter(row => row.root === rows[0].root).length !== 1)
+    throw Error('Batch requires one exact registered checkout (name or root path)');
+  return rows[0];
 }

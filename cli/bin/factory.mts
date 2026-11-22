@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Batch submit/resume select explicit tickets and reconcile their owned integration ref without dispatching work.
 // Telemetry exports local observations as JSON/JSONL without recording controls or reconciling state.
 // workflow status compares source/app/project content and local image identity without changing state.
 // config explain reads data-only configuration and runtime identity without starting work.
@@ -21,6 +22,7 @@ import { backend } from '../src/platform/index.mts';
 import { install } from '../src/commands/install.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { doctor } from '../src/commands/doctor.mts';
+import { batch } from '../src/commands/batch.mts';
 import { board } from '../src/commands/board.mts';
 import { project } from '../src/commands/project.mts';
 import { init } from '../src/commands/init.mts';
@@ -46,6 +48,8 @@ import { scheduleBackend } from '../src/platform/scheduler.mts';
 const USAGE = `factory install [--link]
 factory doctor [--project <name|path>] [--probe-filesystem] [--json]
 factory board start|stop|status
+factory batch submit <project> <ticket-id>...
+factory batch resume <project> <batch-id>
 factory uninstall [--dry-run] [--purge | --keep-state]
 factory project add|ls|rm [path] [--json (ls)]
 factory init [path] --profile personal|client --repo <namespace/project> --image <image> [--host <gitlab host> --project-id <n>]
@@ -94,7 +98,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   selection: { project: { type: 'string' }, json: { type: 'boolean' } },
   config: { project: { type: 'string' }, json: { type: 'boolean' } },
   telemetry: { project: { type: 'string' }, ticket: { type: 'string' }, since: { type: 'string' }, format: { type: 'string' } },
-  tick: {}, supervise: {},
+  batch: {}, tick: {}, supervise: {},
 };
 try {
   const [command, ...rest] = process.argv.slice(2);
@@ -105,7 +109,8 @@ try {
     const v = values as Record<string, any>;
     const [first, second, ...extra] = positionals;
     const p = paths();
-    if (command === 'init') {
+    if (command === 'batch') batch(p, positionals);
+    else if (command === 'init') {
       if (second || extra.length) throw new Error('Unexpected arguments');
       await init(p, first, v);
     } else if (command === 'logs') {
