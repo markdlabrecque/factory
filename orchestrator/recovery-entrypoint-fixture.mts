@@ -165,6 +165,8 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   prepareFixtureBaseline(runtime.directory,root,{...process.env,...env,SANDCASTLE_STATE_DIR:state});
   const baselineIdentity=JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',`const a=await import(${JSON.stringify(join(runtime.directory,'acceptance-baseline-admission.mts'))});process.stdout.write(JSON.stringify(await a.requireAcceptanceBaselineForTicket(7,'main')));`],{cwd:root,env:{...process.env,...env,SANDCASTLE_STATE_DIR:state},encoding:'utf8',timeout:60_000}));
   const runFile=join(state,'owner_repo--7.json');
+  if (baselineFault === 'saved-version-invalid') baselineIdentity.version = 2;
+  if (baselineFault === 'saved-sha-invalid') baselineIdentity.sha = '0'.repeat(40);
   writeFileSync(runFile,JSON.stringify({...JSON.parse(readFileSync(runFile,'utf8')),acceptanceBaseline:baselineIdentity}));
   const baselineRoot=join(state,'acceptance'), grantPath=join(baselineRoot,readdirSync(baselineRoot).find(n=>n.startsWith('execution-authorization-'))!);
   if(baselineFault==='revoked')rmSync(grantPath);
@@ -178,7 +180,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   const spawner: Spawner = (cmd, args, o) => {
     assert.deepEqual([cmd, args[0], args[1]], [process.execPath, join(runtime.directory, 'node_modules/tsx/dist/cli.mjs'), join(runtime.directory, 'main.mts')]);
     if(baselineFault==='child-revoked')rmSync(grantPath);
-    if(baselineFault==='child-binding-changed')writeFileSync(runFile,JSON.stringify({...JSON.parse(readFileSync(runFile,'utf8')),acceptanceBaseline:{version:1,bindingDigest:'0'.repeat(64)}}));
+    if(baselineFault==='child-binding-changed')writeFileSync(runFile,JSON.stringify({...JSON.parse(readFileSync(runFile,'utf8')),acceptanceBaseline:{...baselineIdentity,bindingDigest:'0'.repeat(64)}}));
     const out = openSync(o.log, "a");
     child = spawn(process.execPath, copied ? args : [join(runtime.directory, 'main.mts'), ...args.slice(2)], { cwd: o.cwd, env: { ...o.env, ...env }, stdio: ["ignore", out, out] });
     children.push(child);
@@ -222,10 +224,14 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
       const r = docker(args); if (r.status !== 0) throw Error('offline Docker failure'); return r.stdout;
     } }); }, docker, spawn: spawner, npx: "npx", uuid: () => ID, at: at(10) });
   assert.equal(readinessChecked, true);
-  if(['revoked','late-host-revoked'].includes(baselineFault) || scenario==='missing-baseline') {
+  if(['revoked','late-host-revoked','saved-version-invalid','saved-sha-invalid'].includes(baselineFault) || scenario==='missing-baseline') {
+    assert.equal(readRecovery(p,root).attempts.length,0,'invalid or unavailable original baseline spends no recovery attempt');
     assert.equal(launch.ok,false,JSON.stringify(launch));
+    if (baselineFault.startsWith('saved-')) {
+      assert.equal(launch.code, 'acceptance-baseline');
+      assert.equal(child, undefined, 'host refuses before spawning the recovery child');
+    }
     assert.equal(launch.admitted,false,'no recovery attempt charged before authentic original baseline');
-    assert.equal(readRecovery(p,root).attempts.length,0);
     assert.equal(existsSync(join(fake,'models.log')),false);
     assert.equal(git(worktree,'rev-parse','HEAD'),savedStart);
     return;

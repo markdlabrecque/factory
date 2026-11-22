@@ -975,8 +975,13 @@ project pause, exhausted budgets and authoritative merged completion keep priori
 refuse. Before admission commits its charge, it checks the target is still stopped,
 the exact manifest digest/key and recorded base match, and the local origin-base
 SHA still matches. These additional checks use file reads under admission and
-publication locks, with no tracker or agent subprocess. External tracker edits can
-still race after preparation, so the existing requirements/prerequisite checks before
+publication locks, with no tracker or agent subprocess for the manifest checks.
+The standard workflow also actively authenticates the complete saved original
+[acceptance baseline](acceptance-contract.md#explicit-host-baseline-preparation-and-dispatch-admission)
+against the immutable readiness image before charge and again during admission;
+a malformed saved identity holds without spending an attempt. Static preparation
+revoked during analyst I/O leaves a blocked ticket readiness observation, not a
+usable analysis. External tracker edits can still race after preparation, so the existing requirements/prerequisite checks before
 verification and delivery remain required. This is not an atomic remote-ticket
 transaction or permission to bypass independent verification.
 

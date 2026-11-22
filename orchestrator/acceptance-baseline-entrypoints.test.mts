@@ -84,7 +84,7 @@ for (const fault of ['missing','stale-sha','current-sha','changed-ticket','chang
     const stored=readStoredReadiness(f.dir,f.root);assert.ok('report' in stored,result.stdout+result.stderr);
     const check=stored.report.checks.find(c=>c.id==='acceptance-baseline-7');
     assert.equal(check?.status,'blocked');assert.equal(check?.nextActor,'operator');assert.match(check?.nextAction??'',/Preserve work, budgets and cleanup ownership/);
-    const expected:Record<string,string>={'missing':'preparation-required','stale-sha':'changed-input','current-sha':'changed-input','changed-reset':'changed-input','changed-ticket':'preparation-required','changed-config':'changed-input','revoked-grant':'authorization-unavailable','expired-grant':'authorization-unavailable','unknown':'infrastructure','already-green':'review-required','mismatch':'behavior-mismatch','cancelled':'cancelled','cleanup-uncertain':'cleanup-pending','tampered-output':'cleanup-pending'};
+    const expected:Record<string,string>={'missing':'preparation-required','stale-sha':'changed-input','current-sha':'changed-input','changed-reset':'changed-input','changed-ticket':'preparation-required','changed-config':'changed-input','revoked-grant':'authorization-unavailable','expired-grant':'authorization-unavailable','unknown':'infrastructure','already-green':'review-required','mismatch':'behavior-mismatch','cancelled':'cancelled','cleanup-uncertain':'cleanup-pending','tampered-output':'changed-input'};
     assert.equal(check?.reason,`Acceptance baseline: ${expected[fault]}`,result.stdout+result.stderr);
     const files=readdirSync(root).sort(), saved=acceptanceHash(files.map(n=>[n,readFileSyncSafe(join(root,n))]));
     assert.deepEqual(readStoredReadiness(f.dir,f.root),stored);

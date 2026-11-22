@@ -161,6 +161,9 @@ export function cancelAcceptanceBaseline(h: BaselineHandle): boolean {
     return true;
   });
 }
+/** Output could not be authenticated after exact producer publication and cleanup were confirmed. */
+export class InvalidRetainedBaselineOutput extends Error {}
+
 /** Read only the producer seal retained outside all sandbox mounts. Arbitrary receipt JSON is not authority. */
 export function readAcceptanceBaseline(h: BaselineHandle, now=Date.now(), phase: 'baseline' | 'candidate' = 'baseline'): { receipt: AcceptanceReceipt; policy: ReturnType<typeof checkAcceptanceReceipt> } {
   const s=readBaselineSpec(h);
@@ -171,9 +174,14 @@ export function readAcceptanceBaseline(h: BaselineHandle, now=Date.now(), phase:
   const key=readFileSync(join(h.directory,'producer.key'));
   const expected=createHmac('sha256',key).update(JSON.stringify({receipt:seal.receipt,provenance:seal.provenance})).digest('hex');
   if (typeof seal.mac!=='string'||seal.mac.length!==64||!timingSafeEqual(Buffer.from(seal.mac),Buffer.from(expected))) throw Error('Unauthenticated baseline receipt');
-  if (seal.provenance?.outputDigest && baselineHash(readFileSync(join(h.directory,'sandbox-output.json')))!==seal.provenance.outputDigest) throw Error('Retained sandbox output changed');
   if (seal.provenance?.intentDigest!==s.reservation.intentDigest || seal.provenance?.generation!==h.generation || seal.provenance?.authorizationId!==s.grant.id) throw Error('Foreign producer provenance');
   if (admission.readBaselineReservations(h.stateDir).some(r=>r.executionId===h.executionId)) throw Error('Baseline cleanup still held');
+  if (seal.provenance?.outputDigest) {
+    let digest: string;
+    try { digest = baselineHash(readFileSync(join(h.directory,'sandbox-output.json'))); }
+    catch { throw new InvalidRetainedBaselineOutput('Retained sandbox output unavailable'); }
+    if (digest !== seal.provenance.outputDigest) throw new InvalidRetainedBaselineOutput('Retained sandbox output changed');
+  }
   const binding={executionId:h.executionId,bundleId:s.intent.request.pointer.id,approvalId:s.approval.id,approvalDigest:s.intent.approval,sha:s.intent.request.sha,runtime:s.intent.runtime,dependencies:s.intent.dependencies,image:s.intent.request.image,config:acceptanceHash(s.intent.request.bounds),setup:s.intent.setup,reset:s.intent.reset,ownerId:h.ownerId};
   return {receipt:seal.receipt,policy:checkAcceptanceReceipt(s.contract as AcceptanceContract,{lookup:()=>s.approval},seal.receipt,binding,now,phase)};
 }

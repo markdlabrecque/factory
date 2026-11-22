@@ -9,7 +9,7 @@ import { acceptanceHash } from './acceptance-contract.mts';
 import { readAcceptanceBundle } from './acceptance-custody.mts';
 import { readPreparedAcceptance } from './acceptance-admission.mts';
 import { frozenTicketIdentity, freezeTicketInput } from './ticket-input.mts';
-import { reserveAcceptanceBaseline, startAcceptanceBaseline, cancelAcceptanceBaseline, readAcceptanceBaseline, readBaselineSpec, immutableBaselineFile, privateDirectory, type BaselineRequest, type BaselineHandle } from './acceptance-runner.mts';
+import { reserveAcceptanceBaseline, startAcceptanceBaseline, cancelAcceptanceBaseline, readAcceptanceBaseline, readBaselineSpec, immutableBaselineFile, privateDirectory, InvalidRetainedBaselineOutput, type BaselineRequest, type BaselineHandle } from './acceptance-runner.mts';
 import type { ReadinessCheck } from './readiness-schema.mts';
 
 export type BaselineHoldReason = 'preparation-required' | 'changed-input' | 'authorization-unavailable' | 'cancelled' | 'cleanup-pending' | 'review-required' | 'behavior-mismatch' | 'infrastructure';
@@ -39,7 +39,7 @@ const same = (a: unknown, b: unknown) => acceptanceHash(a) === acceptanceHash(b)
 export interface BaselinePreparationPlan { version: 1; request: BaselineRequest; policyIdentity: string; configDigest: string }
 export interface BaselineAdmissionIdentity { version: 1; bindingDigest: string; sha: string }
 export interface OriginalBaseline { sha: string; admission: BaselineAdmissionIdentity }
-async function current(iid: number, base: string, originalSha?: string) {
+async function current(iid: number, base: string, originalSha?: string, launchImageId?: string) {
   const {context, effectiveConfig, TRACKER} = await import('./runtime-config.mts');
   const tracker = await import('./tracker.mts');
   context.assertCurrent();
@@ -67,7 +67,8 @@ async function current(iid: number, base: string, originalSha?: string) {
   let image: any;
   try { image = JSON.parse(execFileSync('docker',['image','inspect',effectiveConfig.config.image],{encoding:'utf8',timeout:10000,stdio:['ignore','pipe','ignore']})); }
   catch { throw new AcceptanceBaselineHold('infrastructure'); }
-  if (!Array.isArray(image) || image.length !== 1 || !/^sha256:[a-f0-9]{64}$/.test(image[0]?.Id) || !r.image.endsWith(`@${image[0].Id}`)) throw new AcceptanceBaselineHold('changed-input');
+  if (!Array.isArray(image) || image.length !== 1 || !/^sha256:[a-f0-9]{64}$/.test(image[0]?.Id) || !r.image.endsWith(`@${image[0].Id}`)
+    || (launchImageId !== undefined && image[0].Id !== launchImageId)) throw new AcceptanceBaselineHold('changed-input');
   const binding = {ticket:frozenTicketIdentity(bundle.ticket),bundle:bundle.pointer,approvalDigest:bundle.manifest.approvalDigest,sha,
     runtime:context.manifest.id,dependencies:context.manifest.dependencies,policyIdentity:context.policyIdentity,configDigest,planDigest:acceptanceHash(plan)};
   context.assertCurrent();
@@ -111,10 +112,16 @@ export async function prepareAcceptanceBaselineForTicket(iid: number, base: stri
 }
 
 /** Active read: the runner authenticates historical request binding; this consumer additionally
- * resolves CURRENT ticket/full bundle/approval/SHA/runtime/dependencies/full config and host reset plan. */
-export async function requireAcceptanceBaselineForTicket(iid: number, base: string, original?: OriginalBaseline): Promise<BaselineAdmissionIdentity> {
-  if (original && (original.admission?.version !== 1 || !/^[a-f0-9]{64}$/.test(original.admission.bindingDigest))) throw new AcceptanceBaselineHold('preparation-required');
-  const before = await current(iid,base,original?.sha);
+ * resolves CURRENT ticket/full bundle/approval/SHA/runtime/dependencies/full config and host reset plan.
+ * A launch also requires both image observations to match its immutable readiness selection. */
+export async function requireAcceptanceBaselineForTicket(iid: number, base: string, original?: OriginalBaseline, launchImageId?: string): Promise<BaselineAdmissionIdentity> {
+  if (original) {
+    const saved = original.admission;
+    if (!saved || Object.keys(saved).sort().join() !== 'bindingDigest,sha,version' || saved.version !== 1
+      || typeof saved.bindingDigest !== 'string' || !/^[a-f0-9]{64}$/.test(saved.bindingDigest)) throw new AcceptanceBaselineHold('preparation-required');
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(original.sha) || saved.sha !== original.sha) throw new AcceptanceBaselineHold('changed-input');
+  }
+  const before = await current(iid,base,original?.sha,launchImageId);
   const identity: BaselineAdmissionIdentity = {version:1,bindingDigest:acceptanceHash(before.binding),sha:before.binding.sha};
   try {
   if (original && !same(original.admission,identity)) throw new AcceptanceBaselineHold('changed-input');
@@ -136,12 +143,12 @@ export async function requireAcceptanceBaselineForTicket(iid: number, base: stri
   if (!same(grant,spec.grant) || grant.expiresAt < Date.now()) throw new AcceptanceBaselineHold('authorization-unavailable');
   let observed: ReturnType<typeof readAcceptanceBaseline>;
   try { observed = readAcceptanceBaseline(h); }
-  catch { throw new AcceptanceBaselineHold('cleanup-pending'); }
+  catch (error) { throw new AcceptanceBaselineHold(error instanceof InvalidRetainedBaselineOutput ? 'changed-input' : 'cleanup-pending'); }
   if (observed.policy.status !== 'valid') {
     const code = observed.policy.code;
     throw new AcceptanceBaselineHold(code === 'already-green' ? 'review-required' : code === 'behavior-mismatch' ? 'behavior-mismatch' : 'infrastructure');
   }
-  const after = await current(iid,base,original?.sha);
+  const after = await current(iid,base,original?.sha,launchImageId);
   if (!same(before.binding,after.binding) || !same(reference,privateRecord(before.root,`baseline-current-${before.input.hash}.json`))) throw new AcceptanceBaselineHold('changed-input');
   try {
     if (!same(grant,privateRecord(before.root,`execution-authorization-${acceptanceHash(spec.intent)}.json`)) || grant.expiresAt < Date.now()) throw Error('Revoked grant');
@@ -157,9 +164,12 @@ export async function requireAcceptanceBaselineForTicket(iid: number, base: stri
 // Selected-runtime host ingress is an active authentication read, never a preparation/grant writer.
 // The host supplies only original saved-run identities; actual authority remains the private producer records.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [mode,iid,base,sha,bindingDigest] = process.argv.slice(2);
-  if(mode !== '--require-recovery' || !/^[1-9]\d*$/.test(iid ?? '') || !base) throw new AcceptanceBaselineHold('preparation-required');
-  const result=await requireAcceptanceBaselineForTicket(Number(iid),base,{sha,admission:{version:1,bindingDigest,sha}});
+  const [mode,iid,base,sha,saved,launchImageId] = process.argv.slice(2);
+  if (mode !== '--require-recovery' || !/^[1-9]\d*$/.test(iid ?? '') || !base || !sha
+    || !saved || !/^sha256:[a-f0-9]{64}$/.test(launchImageId ?? '')) throw new AcceptanceBaselineHold('preparation-required');
+  let admission: BaselineAdmissionIdentity;
+  try { admission = JSON.parse(saved); } catch { throw new AcceptanceBaselineHold('preparation-required'); }
+  const result=await requireAcceptanceBaselineForTicket(Number(iid),base,{sha,admission},launchImageId);
   process.stdout.write(JSON.stringify(result));
 }
 

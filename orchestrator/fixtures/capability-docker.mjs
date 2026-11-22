@@ -26,7 +26,7 @@ export function capabilityDocker(args, dir) {
   const file = join(dir, 'capability-containers.json');
   const state = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
   if (args[1] === 'create') {
-    state[name] = { Name: `/${name}`, Id: id, Image: fixtureImage, Config: { Labels: { 'com.factory.preflight': args[args.indexOf('--label') + 1].split('=')[1] } }, State: { Status: 'exited', ExitCode: 0, OOMKilled: false, Error: '' } };
+    state[name] = { Name: `/${name}`, Id: id, Image: args[args.indexOf('--entrypoint') + 2], Config: { Labels: { 'com.factory.preflight': args[args.indexOf('--label') + 1].split('=')[1] } }, State: { Status: 'exited', ExitCode: 0, OOMKilled: false, Error: '' } };
     writeFileSync(file, JSON.stringify(state));
     return id;
   }

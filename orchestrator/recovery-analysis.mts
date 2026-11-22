@@ -1,5 +1,5 @@
 // Host-only stopped-work preparation. Import-safe core; the CLI adapter acquires managed admission before tracker/model work.
-// No assessments, run verdicts, saved implementation, ownership receipts or recovery budgets are written here.
+// Records input readiness and publishes current analysis; never rewrites assessments, saved implementation or recovery budgets.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -51,7 +51,10 @@ function prepareCore(d: PreparationDeps): Preparation {
       try { next = { ...d.analyse(input), recoveryAnalysisKey:key,
         ...(previous?.actualFootprint ? {actualFootprint:previous.actualFootprint} : {}),
         ...(previous?.implementerBlockers ? {implementerBlockers:previous.implementerBlockers} : {}) }; }
-      catch (e) { return held(/timeout|timed out|ETIMEDOUT/i.test(String(e)) ? 'timeout' : 'analysis-failed',String(e)); }
+      catch (e) {
+        if (e instanceof AcceptanceAdmissionHold) throw e;
+        return held(/timeout|timed out|ETIMEDOUT/i.test(String(e)) ? 'timeout' : 'analysis-failed',String(e));
+      }
     }
     const cleanupProblem = d.cleanup();
     if (cleanupProblem) return held('ownership',cleanupProblem,'project');
@@ -155,8 +158,14 @@ async function main(): Promise<Preparation> {
       entryCleanupConfirmed = false;
       lease.pendingCleanup();
       workspace = analysisWorktree(project,base,workspace.path);
-      return analyse({project,base,worktree:workspace,ticket:i.ticket,input:i.input,
-      notes:i.notes,catalogue:i.catalogue,manifests:store.readManifests(project),knownProviders:i.knownProviders,keepImplementerBlockers:true}); },
+      try {
+        return analyse({project,base,worktree:workspace,ticket:i.ticket,input:i.input,
+          notes:i.notes,catalogue:i.catalogue,manifests:store.readManifests(project),knownProviders:i.knownProviders,keepImplementerBlockers:true});
+      } catch (error) {
+        if (error instanceof AcceptanceAdmissionHold) recordReadinessCheck(stateDir(), hostReport, acceptanceStaticCheck(i.input, error));
+        throw error;
+      }
+    },
     publish:store.publishManifest,
     dependency:iid => { tracker.setDeliveryDeadline(Date.now()+20_000); return dependencyState(iid,{ticket:tracker.ticket,mergedInto:tracker.mergedInto,base,
       run:id => readRuns(stateDir(),false).find(r => r.project === project && Number(r.iid) === id)}); },
