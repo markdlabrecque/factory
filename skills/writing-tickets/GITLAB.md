@@ -75,20 +75,14 @@ Each entry names the blocker and the technical reason: the file, function, or ou
 
 ## Acceptance and ready
 
-After filing hierarchy, dependencies and estimate, attach the [acceptance preparation](ACCEPTANCE.md) summary to each runnable work item. Link its immutable package revision/digests, trusted human/independent approval record and bounded baseline receipt or reviewed non-transition evidence. A note or description is an index, not approval/custody authority. Review mixed work per criterion; missing approval, already-green changed behavior or invalid/unavailable execution leaves the item held without the ready label.
+File and read back scope, plan, model metadata, native child relationships and description-only blockers before [submitting the package](ACCEPTANCE.md#automated-handoff). Use only target-supported model selectors. For Factory, read back the ready label after the trusted preparation workflow applies it. If the workflow is unavailable or reports a hold, leave the item unlabelled. Do not post ordinary receipt notes after freeze; they can change the requirements hash.
+
+Before changing existing ready scope or acceptance, remove readiness without changing other labels:
 
 ```
-glab issue note <N> -m "$(cat acceptance.md)"
-glab issue view <N> --comments
+glab issue update <N> --unlabel ready-for-agent
 ```
 
-Read back scope, plan, model metadata, acceptance identities, native child relationships and description-only blockers. Verify referenced bytes and approval/evidence, not just the presence of a note. Use implementation Model tier and distinct actual Planning model; emit an exact implementation selector only if the target runtime supports it. No Factory installation is needed.
-
-Apply readiness last, only for reviewed runnable units. A split parent's readiness must not dispatch held children. For changed scope or acceptance on an existing ready item, remove the label before editing, then refreeze/reapprove and repeat evidence review before restoring it. Keep other labels intact.
-
-```
-glab issue update <N> --unlabel ready-for-agent   # before changing existing ready acceptance
-glab issue update <N> -l ready-for-agent           # only after all readiness checks pass
-```
+Repeat the automated handoff for the new inputs. For other runtimes, use the target's documented readiness workflow.
 
 Link format for the report: `[#N](https://<host>/<group>/<project>/-/issues/N)`.
