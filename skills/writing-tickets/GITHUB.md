@@ -81,20 +81,14 @@ Every blocker must appear. If one is missing, add it again.
 
 ## Acceptance and ready
 
-After filing relationships and estimate, attach the [acceptance preparation](ACCEPTANCE.md) summary to each runnable issue. It must link the immutable package revision/digests, trusted human/independent approval record and bounded baseline receipt or reviewed non-transition evidence. Editable issue text is an index, not trusted approval/custody authority. Mixed work is reviewed per criterion; missing approval, already-green changed behavior or invalid/unavailable execution keeps the issue held without the ready label.
+File and read back the body, model metadata, plan, children and blockers before [submitting the package](ACCEPTANCE.md#automated-handoff). Use only target-supported model selectors. For Factory, read back the ready label after the trusted preparation workflow applies it. If the workflow is unavailable or reports a hold, leave the issue unlabelled. Do not post ordinary receipt comments after freeze; they can change the requirements hash.
+
+Before changing existing ready scope or acceptance, remove readiness:
 
 ```
-gh issue comment <N> -F acceptance.md
-gh issue view <N> --comments
+gh issue edit <N> --remove-label ready-for-agent
 ```
 
-Read back the body, model metadata, plan, acceptance references, children and blockers. Confirm that the referenced bytes and approval/evidence identities actually match; merely posting links is insufficient. Use only runtime-supported selectors: implementation Model tier and distinct actual Planning model; add Pi model only for a target that supports it. No Factory dependency is required.
-
-Apply readiness last, only to runnable units whose review passes. A split parent's readiness must not dispatch held children. If changing an existing ready issue's scope or frozen acceptance, remove readiness first, refreeze/reapprove and repeat evidence review before restoring it.
-
-```
-gh issue edit <N> --remove-label ready-for-agent   # before changing existing ready acceptance
-gh issue edit <N> --add-label ready-for-agent      # only after all readiness checks pass
-```
+Repeat the automated handoff for the new inputs. For other runtimes, use the target's documented readiness workflow.
 
 Link format for the report: `[#N](https://github.com/<owner>/<repo>/issues/N)`.

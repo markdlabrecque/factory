@@ -1,6 +1,6 @@
 ---
 name: writing-tickets
-description: Turn a request into an agent-ready Request Ticket, resolve consequential choices, plan and split work, prepare independently approved frozen acceptance, estimate, and label ready-for-agent only after evidence review. Use when asked to write, file, or open a ticket or issue, to review or prepare an existing ticket for agents, to break work into tickets.
+description: Write, file, or prepare tickets for agents. Plan and split the work, produce executable acceptance packages, and mark tickets ready only after automated independent review and baseline validation.
 ---
 
 # Writing tickets
@@ -13,8 +13,8 @@ One request produces:
 - a **Decisions and assumptions** comment on it, when applicable: consequential choices, justified defaults, and bounded investigations;
 - an **Implementation plan** comment on it: behaviour, affected components, constraints, tests, and deploy requirements;
 - one **Task ticket** per piece, as a child of the Request Ticket, each naming its implementation tier and target-supported model metadata, unless the request is small enough to stay **unsplit** (step 4);
-- an **approved frozen acceptance package** per runnable ticket: stable criteria, executable probes/fixtures where appropriate, reviewed evidence obligations otherwise;
-- an estimate on the Request Ticket, then the `ready-for-agent` label only after acceptance preparation passes.
+- an **acceptance draft** per runnable ticket: stable criteria, actual executable probe and fixture bytes where appropriate, and explicit evidence obligations otherwise;
+- an estimate on the Request Ticket and a **readiness result** per runnable ticket: ready after independent automated review and accepted baseline evidence, or held with a reason.
 
 The request arrives either as a description from the user or as an **existing ticket** (a number or URL, often written by someone else). An existing ticket becomes the Request Ticket: the steps are the same, and steps 1 and 7 note where they differ.
 
@@ -66,13 +66,15 @@ For follow-up work after a failed or blocked run, use [ticket-run-recovery](../t
 
    **Model metadata:** record `**Model tier:** small|mid|large` for implementation size and a distinct `**Planning model:** <actual planner provider/model-id>` as provenance, not a runtime selector. Check the target runtime's supported selectors before emitting any exact implementation selector. For example, Factory-compatible tickets use Model tier and Planning model, not standalone Pi model; the runtime resolves implementation from its configured tier mapping. A different target that explicitly supports `**Pi model:**` may additionally use the table's exact implementation model there. Do not infer runtime support from tracker support or misreport the selected implementation model as the model that planned the ticket. Done when every plan line has exactly one runnable owner (or the request is unsplit), with implementation tier, actual planning provenance and only supported selectors.
 
-5. **Prepare acceptance.** For every runnable ticket, read [ACCEPTANCE.md](ACCEPTANCE.md) for the package format, freeze/approval sequence, bounded baseline decisions and examples, including changed behavior, preservation/refactor, docs/manual, investigation and mixed work. Classify each stable criterion; freeze actual probe/helper/fixture bytes and dependencies outside implementer authority; obtain human or independent semantic approval of that exact identity. Execute appropriate baseline probes only in an explicitly authorized bounded sandbox and retain evidence. Already-green changed behavior or unavailable/invalid execution holds for review, never fabricated red. Reviewed non-transition evidence must explain what can and cannot be proved. Done when each runnable ticket has an immutable package reference, identity-bound approval and a reviewed baseline/evidence decision that permits readiness; otherwise file it as held without the ready label. Schema validity alone cannot establish semantic adequacy. Acceptance preparation adds no runtime test-writer role; implementers own implementation tests and independent verifiers still judge the exact candidate.
+5. **Draft acceptance.** For every runnable ticket, read [ACCEPTANCE.md](ACCEPTANCE.md). Write the target's versioned acceptance contract when available and create the actual probe, helper and fixture files alongside it, outside the implementation checkout. A Markdown checklist alone is not a package. Done when each criterion has a stable ID and an executable assertion or explicit evidence obligation, and every executable artifact has available bytes, a digest and a bounded run specification. If a draft cannot be completed, retain what exists and record the missing input.
 
 6. **Estimate.** Hours for a human developer to implement the whole request without AI: orienting in the code, writing it, testing, QA, review, deploy. Sum the activities; when the range is genuine, use its top.
 
-7. **File**, in this order: Request Ticket, Decisions and assumptions comment when applicable, Implementation plan comment, Task tickets as children (skip when unsplit), blockers (see [Blockers](#blockers)), estimate, acceptance package/approval/evidence references, read-back review, then `ready-for-agent`. The label goes last because it tells agents everything is in place; held tickets remain unlabelled. Readiness applies to each runnable unit, not approval inherited from its parent; label a split parent only if the target's expansion policy cannot dispatch held children. For an existing ticket, preserve its scope/decisions while updating title/body to the Request Ticket format. If an existing ready ticket's scope or acceptance changes, remove readiness first, then reapprove the new frozen identity before restoring it. Creating an issue before approval to obtain an ID is allowed; readiness still waits.
+7. **File without readiness.** Write the Request Ticket, Decisions and assumptions comment when applicable, Implementation plan comment, Task tickets as children (skip when unsplit), blockers (see [Blockers](#blockers)) and estimate. Verify the final requirements and relationships in the tracker before submitting acceptance. For an existing ticket, preserve its scope and decisions; remove readiness before changing its scope or acceptance inputs. Creating an issue to obtain an ID does not make it ready.
 
-8. **Report** the Request Ticket as a Markdown link when unsplit, otherwise each Task ticket link, with implementation tier, intended implementation model (or configured tier selection), planning provenance and acceptance ready/held status with reason. The skill ends here.
+8. **Submit and check readiness.** Follow [Automated handoff](ACCEPTANCE.md#automated-handoff). Submit the draft to the target's documented preparation workflow; the independent reviewer and host policy, not the ticket writer or a human approval queue, supply review and execution authority. For Factory, preparation owns the ready label; do not apply it via tracker commands. Readiness is per runnable unit, not inherited from a parent. If automation is unsupported or cannot complete, leave the ticket unlabelled and retain the draft and specific hold reason. Never label a split parent if doing so can dispatch held children.
+
+9. **Report** the Request Ticket as a Markdown link when unsplit, otherwise each Task ticket link, with implementation tier, intended model or configured tier selection, planning provenance, and the observed ready/held status. For a hold, give the reason and where the draft is retained.
 
 ## Request Ticket
 
@@ -164,16 +166,9 @@ Written for an implementor that has only this ticket and the repo.
 
 - <test and what it asserts>
 
-## Acceptance preparation
-
-- Package: <immutable reference, revision and inventory/probe/fixture digests>
-- Approval: <human/independent reviewer and trusted identity-bound record>
-- Baseline/evidence: <exact baseline SHA, bounded sandbox receipt or reviewed non-transition evidence>
-- Readiness: <ready or held, with reason and next actor>
-
 ## Done when
 
-- [ ] <stable criterion ID: checkable condition, matching the approved inventory>
+- [ ] <stable criterion ID: checkable condition, matching the submitted acceptance inventory>
 ```
 
 Title Task tickets by the concrete change ("Add CSV export command for page sorting results"); they are read by implementors, not the client.

@@ -1,6 +1,6 @@
 # Writing-tickets tracked development workspace
 
-For [issue 314](https://github.com/markdlabrecque/factory/issues/314), the owner explicitly authorized the Factory repository as the tracked development workspace for the portable writing-tickets skill. This supersedes the ticket and parent plan's external/global-edit workspace hold and requirement that a repository copy cannot count as delivery. Global installation, symlinks and install/update automation are deferred. This repository copy is a development proposal, not a claim that the live skill has been updated.
+For [issue 314](https://github.com/markdlabrecque/factory/issues/314), the owner explicitly authorized the Factory repository as the tracked development workspace for the portable writing-tickets skill. This supersedes the ticket and parent plan's external/global-edit workspace hold and requirement that a repository copy cannot count as delivery. The initial proposal deferred global installation and synchronization. The tracked skill now describes an unattended acceptance handoff: draft executable artifacts while writing the ticket, let trusted target automation perform review and baseline execution, and leave the ticket held if that automation is absent. Factory's copied install already bundles `skills/`; that packaging does not register or update the independently discovered user skill.
 
 ## Unchanged import provenance
 
@@ -14,7 +14,7 @@ The initial import copies the complete live directory's three regular files from
 
 The separate import commit `16cb180d2f853f2a7d5f52688be457136d5a6100` contains only these unchanged files and this provenance note. `cmp` passed for all three files before that commit; source SHA-256 values were checked again after the proposal edits and remained unchanged. Review the later proposal against that commit, not just against develop, to see the actual guidance changes.
 
-## Review boundary
+## Initial proposal review boundary
 
 The skill remains portable across projects and trackers. The repository houses its development; it does not make Factory mandatory for consumers. [SKILL.md](../skills/writing-tickets/SKILL.md) owns the workflow, sibling tracker references own tracker mechanics, and [ACCEPTANCE.md](../skills/writing-tickets/ACCEPTANCE.md) owns preparation details. The existing `ticket-run-recovery` pointer is an external skill dependency retained from the live source, not a bundled or installed dependency.
 
@@ -53,6 +53,6 @@ No scenario requires Factory: the target supplies its own trusted immutable stor
 - Reviewed the approved six-model table and provider fallback against the unchanged import: preserved. Runtime-supported tier resolution remains separate from actual planning provenance.
 - All new relative skill/document links resolve within the proposal. The pre-existing external recovery-skill dependency remains intentionally unbundled, as noted above.
 
-### Remaining limits
+### Current limits
 
-Global skill bytes remain at the import hashes; no symlinks, installation hooks or updater were added. This is an uninstalled proposal awaiting fresh independent review. Runtime custody, baseline admission and role prompts belong to sibling work; no claims are made that the pure acceptance parser already supplies those layers. No overlap with the custody or prompt implementation footprints was found; this proposal touches only `skills/writing-tickets/` and this development note.
+The skill requires a documented submission interface and trusted automated review for unattended readiness. The host custody and baseline APIs are not that interface; without it the skill retains the draft and leaves the ticket held. No installer hook, reviewer service, or execution-policy integration is supplied by the skill.
