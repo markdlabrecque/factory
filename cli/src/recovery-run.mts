@@ -1,4 +1,4 @@
-// Recovery requires fresh host/filesystem, complete input matching preparation, and image readiness before admission.
+// Recovery requires fresh readiness and matching prepared input; standard recovery authenticates its saved original baseline before charge.
 // Only typed read-only ticket refusals permit scanning. Environment holds stop the pass without spending attempts.
 // Settlement retains ownership until both the repair sandbox and any independent replay reservation are cleared.
 // Advisory candidates share the bounded recovery claim and charge.
@@ -343,13 +343,15 @@ export async function launchRecovery(p: Paths, o: Common & { ticket: number; pre
   const requireOriginalBaseline = () => {
     if (workflow.mode !== 'factory') return;
     if (!run.implementationBaseSha || !run.acceptanceBaseline) throw new AcceptanceBaselineHold('preparation-required');
-    try { execFileSync(o.node ?? process.execPath,[workflow.tsx,join(workflow.root,'acceptance-baseline-admission.mts'),'--require-recovery',String(o.ticket),target.base!,run.implementationBaseSha,run.acceptanceBaseline.bindingDigest],{
+    try { execFileSync(o.node ?? process.execPath,[workflow.tsx,join(workflow.root,'acceptance-baseline-admission.mts'),'--require-recovery',String(o.ticket),target.base!,run.implementationBaseSha,JSON.stringify(run.acceptanceBaseline),readiness.imageId],{
       cwd:o.root,env:{...process.env,...o.workflowEnv,...workflow.env,PATH:o.path ?? o.workflowEnv?.PATH ?? process.env.PATH,SANDCASTLE_STATE_DIR:dir},encoding:'utf8',timeout:30000,maxBuffer:65536,stdio:['ignore','pipe','pipe']}); }
     catch(error) {
       const stderr=String((error as {stderr?:unknown}).stderr ?? '');
       const code=stderr.match(/Acceptance baseline hold: (preparation-required|changed-input|authorization-unavailable|cancelled|cleanup-pending|review-required|behavior-mismatch|infrastructure)\./)?.[1] as BaselineHoldReason | undefined;
       const hold=new AcceptanceBaselineHold(code ?? 'infrastructure');
-      hold.baseline={sha:run.implementationBaseSha,bindingDigest:run.acceptanceBaseline.bindingDigest};
+      const {bindingDigest}=run.acceptanceBaseline;
+      if (typeof bindingDigest==='string' && /^[a-f0-9]{64}$/.test(bindingDigest) && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(run.implementationBaseSha))
+        hold.baseline={sha:run.implementationBaseSha,bindingDigest};
       throw hold;
     }
   };

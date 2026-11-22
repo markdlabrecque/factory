@@ -1,7 +1,7 @@
 // Execute one fixed Pi workflow with durable managed admission before readiness/tracker/model work.
 // A pinned leased runtime binds explicit project assets and state; immutable payload custody retains uncertain admission ownership.
 // Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
-// Current original acceptance and authentic authorized baselines gate direct/adopted claims and recovery adoption.
+// Current original acceptance and authorized baselines matching the immutable launch image gate claims and adoption.
 // Original approved full child/parent bytes bind prompts/evidence; static validity grants no baseline authority.
 // Fresh host/project and ticket gates precede work. Image readiness pins construction; setup browser and actual-user filesystem probes precede agents and owned teardown.
 // Zero-commit diagnostics attribute Pi replies; only the current host execution can reserve a same-session continuation.
@@ -202,7 +202,7 @@ const currentTicketInput = (): FrozenTicketInput => {
 };
 async function requireBaseline(original?: import('./acceptance-baseline-admission.mts').OriginalBaseline) {
   try {
-    const identity = await requireAcceptanceBaselineForTicket(Number(iid), base, original);
+    const identity = await requireAcceptanceBaselineForTicket(Number(iid), base, original, IMAGE);
     recordReadinessCheck(stateDir(), inputReport, acceptanceBaselineCheck(Number(iid),undefined,undefined,identity));
     return identity;
   } catch(error) {

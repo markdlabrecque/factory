@@ -299,7 +299,12 @@ import * as fs from 'node:fs'; import * as path from 'node:path';
 import { capabilityDocker } from ${JSON.stringify(join(import.meta.dirname, 'fixtures/capability-docker.mjs'))};
 const a = process.argv.slice(2);
 fs.appendFileSync(path.join(process.env.FAKE_STATE, 'docker-calls.jsonl'), JSON.stringify(a)+'\\n');
+const nextImage = path.join(process.env.FAKE_STATE, 'next-image');
 const out = capabilityDocker(a, process.env.FAKE_STATE);
+if (a[0] === 'image' && a[1] === 'inspect' && !a.includes('--format') && fs.existsSync(nextImage)) {
+  const rows = JSON.parse(out); rows[0].Id = fs.readFileSync(nextImage, 'utf8'); fs.unlinkSync(nextImage);
+  console.log(JSON.stringify(rows)); process.exit(0);
+}
 if (out !== undefined) { console.log(out); process.exit(0); }
 if (a[0] !== 'container' || a[1] !== 'inspect') process.exit(90);
 if (!fs.existsSync(path.join(process.env.FAKE_STATE,'live'))) { console.error('No such container'); process.exit(1); }
@@ -523,7 +528,12 @@ console.log('sha256:'+'a'.repeat(64));
     if (!['instruction-missing', 'parent-read-failed', 'image-bad', 'image-changed'].includes(scenario)) {
       prepareFixtureFromRuntime(runtime.directory, root, runEnv);
       preparedBaseline=prepareFixtureBaseline(runtime.directory, root, runEnv);
-      await startCandidateHost(t,runtime.directory,root,runEnv);
+      if (scenario !== 'baseline-image-drift') await startCandidateHost(t,runtime.directory,root,runEnv);
+    }
+    if (scenario === 'baseline-image-drift') {
+      assert.ok(preparedBaseline, 'a real owned baseline was authenticated before launch');
+      // The next tag read selects a different image; every later read returns the baseline image.
+      writeFileSync(join(fake, 'next-image'), `sha256:${'c'.repeat(64)}`);
     }
     const pending=adopted?claimRun({dir:state,project:'owner/repo',iid:'7',pid:process.pid,cap:2,patch:{base:'main',acceptanceBaseline:preparedBaseline,implementationBaseSha:preparedBaseline?.sha}}):undefined;
     if(pending)assert.ok(pending.ok);
@@ -531,6 +541,16 @@ console.log('sha256:'+'a'.repeat(64));
       cwd: root, encoding: 'utf8', env: {...runEnv,...(pending?.ok?{FACTORY_LAUNCH_CLAIM:pending.run.claim}:{})}, timeout: workflowChildTimeoutMs,
     });
     writeFileSync(join(home, 'output.txt'), result.stdout + result.stderr);
+    if (scenario === 'baseline-image-drift') {
+      const calls = readFileSync(join(fake,'docker-calls.jsonl'),'utf8').trim().split('\n').map(line => JSON.parse(line));
+      assert.ok(calls.some(args => args[0] === 'container' && args[1] === 'create' && args.includes(`sha256:${'c'.repeat(64)}`)), 'readiness actually probed the different immutable image');
+      assert.equal(existsSync(join(fake,'sandbox-options.json')), false, 'the baseline for a different image must not authorize SDK sandbox creation');
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /Acceptance baseline hold: changed-input/);
+      assert.equal(existsSync(join(state,'owner_repo--7.json')), false, 'refusal precedes the run claim');
+      assert.deepEqual(readAdmission(state).claims, {});
+      return;
+    }
     if (copied) {
       assert.equal(existsSync(join(fake, 'npm-called')), false, 'execution must not invoke npm');
       assert.equal(existsSync(join(root, 'node_modules')), false, 'execution must not create project dependencies');

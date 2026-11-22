@@ -98,8 +98,8 @@ tracker/Pi boundaries. Missing preparation covers both trackers and configured f
 malformed references/contracts, unapproved/tampered originals and changed input stop
 before analysis or implementation records. Cached dispatch selection, cached assessment
 revocation, a pending dispatched child and direct post-Git/pre-adoption revocation are covered.
-Actual analyst-I/O revocation discards results and retains static diagnostics without new queue
-records. An authentic custody publication reaches the
+Actual analyst-I/O revocation in dispatch, refresh and recovery preparation discards results
+and records a blocked static observation without new queue records or recovery charges. An authentic custody publication reaches the
 analyst, reuses cached analysis without another call, and is revoked by removing current
 preparation while preserving the saved manifest. Passive stored-readiness reads retain
 the safe ticket-specific reason/action without recreating state or invoking models.
@@ -115,15 +115,18 @@ before managed entry; valid current evidence permits the actual claim and child 
 for both trackers/configured families, including cached selection. Actual dispatch denies
 missing/stale/current-SHA/ticket/config/reset changes, revoked/expired grants, unknown,
 already-green, wrong behavioral failure, actual API cancellation, unknown engine cleanup
-and tampered retained output before claim/child. Final image-I/O revocation is rechecked.
+and tampered retained output before claim/child. The latter reports changed input, not
+pending cleanup. Final image-I/O revocation is rechecked.
 Stored reads preserve records/reservations and invoke no preparation. Pending cleanup
 publishes its ticket observation before managed-entry refusal, with no tracker collection.
 `fixtures/acceptance-baseline-preparation.mts` is test-only and simulates sandbox output,
 not CMS reset or production authority. Direct/adopted main now independently denies missing
 or revoked baselines before claim/adoption, preserving pending run bytes and admission;
 normal positive model-family/tier journeys explicitly prepare actual owned baselines.
-`acceptance-baseline-recovery.test.mts` proves authorized dispatched-child adoption, host
-revocation and late image-read revocation before recovery charge, independent child revocation/
+`acceptance-baseline-recovery.test.mts` proves authorized dispatched-child adoption and
+normal refusal before claim/SDK sandbox creation when the image tag changes between readiness
+and baseline admission. It also proves host revocation, late image-read revocation and malformed
+original saved identity (version or embedded SHA) refuse before recovery charge, independent child revocation/
 saved-binding change before repair, and successful original-fullscope recovery after integration
 HEAD advances. Existing recovery journeys retain independent verifier, work and charge assertions;
 all positive baselines are prepared before intentionally uncertain managed payload ownership.

@@ -122,22 +122,28 @@ test('direct run rechecks preparation after Git I/O before acquiring its normal 
   assert.equal(existsSync(join(f.fake,'models.log')),false);
 });
 
-for (const route of ['dispatch', 'refresh']) test(`${route}: revocation during actual analyst I/O discards output and retains a static hold`, t => {
+for (const route of ['dispatch', 'refresh', 'recovery']) test(`${route}: revocation during actual analyst I/O discards output and retains a static hold`, t => {
   const f = fixture(t, 'github', false);
   f.data.parents[7] = 20;
   f.data.notes[20] = [{body:'Original approved parent decisions and full ordered plan',system:false}];
   f.save();
   const input = inputFor(f), file = prepareFixtureAcceptance(f.dir, input);
-  const prior = route === 'refresh' ? f.record(7, 'stopped') : undefined;
+  const prior = route === 'dispatch' ? undefined : f.record(7, 'stopped');
   writeFileSync(join(f.home,'bin/pi'), `#!${process.execPath}\nimport {writeFileSync,readFileSync,rmSync} from 'node:fs'; writeFileSync(process.env.FAKE_STATE+'/analyst-input',readFileSync(0)); rmSync(${JSON.stringify(file)}); console.log(JSON.stringify({provides:[],requires:[],footprint:[]}));\n`, {mode:0o755});
-  const result = f.pass(route === 'refresh' ? ['--refresh-only','--ticket','7'] : []);
+  const result = route === 'recovery' ? prepare(f) : f.pass(route === 'refresh' ? ['--refresh-only','--ticket','7'] : []);
   assert.ok(readFileSync(join(f.fake,'analyst-input'),'utf8').includes(input.text), 'analyst gets exact original approved full child/parent rendering');
   assert.equal(existsSync(join(f.fake,'launches')),false);
   assert.equal(f.bytes(join(f.dir,'owner_repo--7.json')),prior ?? 'absent');
   assert.equal(existsSync(join(f.dir,'graph/owner_repo--7.json')),false);
   const stored = readStoredReadiness(f.dir,f.root);
   assert.ok('report' in stored, JSON.stringify(stored));
-  assert.equal(stored.report.checks.find(c=>c.id==='acceptance-static-7')?.status,'blocked', result.stdout + result.stderr);
+  const check = stored.report.checks.find(c=>c.id==='acceptance-static-7');
+  if (route === 'recovery') {
+    const { state, code } = JSON.parse(result.stdout);
+    assert.deepEqual({ state, code, status: check?.status, reason: check?.reason },
+      { state: 'held', code: 'acceptance-static', status: 'blocked', reason: 'Acceptance static: missing-preparation' }, result.stdout + result.stderr);
+    assert.deepEqual(readAdmission(f.dir).recovery, {});
+  } else assert.equal(check?.status,'blocked', result.stdout + result.stderr);
 });
 
 test('a dispatched child with missing preparation cannot adopt or rewrite a pending run or its budgets', t => {

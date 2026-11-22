@@ -714,7 +714,9 @@ analyst receives the **original independently approved rendering** returned from
 not a newly rendered snapshot rebound to an old approval. Both original hashes remain
 bound to the reference and approval. Child/parent/comment edits require fresh independent
 preparation. The adapter repeats this lookup on cached/fresh preparation and both
-post-I/O rechecks. It publishes safe `validate-prepared-acceptance` observations; passive
+post-I/O rechecks. A static hold during recovery analysis discards the analysis and
+publishes a blocked `validate-prepared-acceptance` observation, just as dispatch and
+refresh do. Passive
 status/Board/readiness reads never invoke this active custody reader (which includes
 durability fsync), models or probes.
 
@@ -729,9 +731,12 @@ ticket-scoped preparation/migration holds, not stopped implementation runs.
 before its implementation claim/child launch. Direct main independently consumes the same
 current authentic evidence after host/Git I/O, before acquiring a claim; dispatched children
 repeat this check before adoption against the dispatch-saved binding, regardless of dispatch
-observations. Standard recovery host authentication runs before claim/charge and again inside
-claim validation; the child independently authenticates before adoption and after Git/input I/O.
-Recovery uses the ORIGINAL saved implementation SHA and admission binding, not origin's current
+observations. Baseline authentication must match the immutable image ID selected by
+launch readiness, in addition to rechecking the configured image. Standard recovery
+host authentication runs before claim/charge and again inside claim validation; the
+child independently authenticates before adoption and after Git/input I/O.
+Recovery validates the complete ORIGINAL saved admission identity, including its version
+and embedded SHA against the separately stored implementation SHA, not origin's current
 integration tip or the repair worktree. CLI/Board expose safe stored categories and baseline
 SHA/binding digest, without reading private runner authority or executing on passive views.
 Static preparation `ready` does not attest to runner/reset capability, explicit execution
@@ -794,17 +799,21 @@ unexpired. Revoked/cancelled/unknown/cleanup-held execution grants no implementa
 claim. Original preparation and host plan are reread after image/Git I/O, and authorization
 and cancellation are rechecked after current-binding collection. A still-reserved baseline
 publishes a cleanup-pending ticket observation before managed-entry refusal, without tracker
-collection or probe execution, and retains its exact capacity ownership.
+collection or probe execution, and retains its exact capacity ownership. When the
+exact producer publication and reservation release are confirmed but its sealed output
+is missing, unreadable or changed, admission holds for `changed-input`, not cleanup.
+Neither refusal permits implementation or changes ownership records.
 Named behavioral red, preservation and reviewed obligations remain reconciled
 by the original runner policy; already-green changed criteria require review.
 
 Preparation is explicit host action, not a new CLI command, automatic scheduler probe,
 tracker mutation or installed-release guarantee. Passive views only read stored
-`validate-current-acceptance-baseline` observations. The current dispatch vertical has
+`validate-current-acceptance-baseline` observations. The standard source admission
+paths described above (dispatch, direct and adopted children, and recovery) report
 safe preparation-required, changed-input, authorization-unavailable, cancelled,
 cleanup-pending, review-required, behavior-mismatch and infrastructure categories.
-Remaining direct/adopted/recovery and projection coverage must not be inferred from
-this API. Original roles, full baseline, bundle, work and budgets are unchanged.
+CLI and Board project stored observations, not launch authority. Separate installed-release
+and complete-override protocol coverage is not established by these paths.
 
 ## Semantic criterion inventory and evidence obligations
 
