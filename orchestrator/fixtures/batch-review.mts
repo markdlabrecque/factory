@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer, type Socket } from 'node:net';
-import { CHECKOUT_AND_TEST, IMPLEMENT_DELTA, type ReviewRole } from '../batch-sandbox.mts';
+import { CHECKOUT_AND_TEST, IMPLEMENT_DELTA, TEST_DRIVER, type ReviewRole } from '../batch-sandbox.mts';
 export async function installBatchFixture(root: string, testArgv: string[], decide: (role:ReviewRole, prompt:string) => unknown, implementSource?:string) {
   // Short loopback TCP address also works with deeply nested copied-install fixture roots.
   const waiting = new Map<ReviewRole,{socket:Socket; prompt:string}>();
@@ -11,7 +11,9 @@ export async function installBatchFixture(root: string, testArgv: string[], deci
     socket.setTimeout(8000,()=>socket.destroy());
     let text=''; socket.setEncoding('utf8'); socket.on('data',chunk=>{
       text+=chunk; if (!text.endsWith('\n')) return;
-      const {role,prompt}=JSON.parse(text); waiting.set(role,{socket,prompt});
+      const {role,prompt}=JSON.parse(text);
+      if(role==='test' && prompt.includes('\nFinal context stage: return a verdict now.\n')) {socket.end(JSON.stringify(decide(role,prompt))+'\n');return}
+      waiting.set(role,{socket,prompt});
       if (waiting.size===2) {
         const pair=[...waiting];waiting.clear();
         for (const [role,peer] of pair) peer.socket.end(JSON.stringify(decide(role,peer.prompt))+'\n');
@@ -36,7 +38,7 @@ export async function installBatchFixture(root: string, testArgv: string[], deci
     assert.deepEqual(args.slice(0,pos),['run','--rm','--pull=never','--network=none','--cap-drop=ALL','--security-opt=no-new-privileges','--read-only','--tmpfs','/tmp:rw,exec,nosuid,size=1g','--pids-limit=256','--memory=2g','--user=65534:65534','-e','HOME=/tmp','-i']);
     assert.deepEqual(args.slice(pos,pos+2),['--entrypoint','timeout']);assert.match(args[pos+2],/^sha256:[a-f0-9]{64}$/);
     assert.deepEqual(args.slice(pos+3,pos+9),['--signal=KILL','840s','sh','-c',${JSON.stringify(CHECKOUT_AND_TEST)},'sh']);assert.match(args[pos+9],/^[0-9a-f]{40}$/);
-    assert.deepEqual(args.slice(pos+10),${JSON.stringify(testArgv)});
+    assert.equal(args[pos+10],${JSON.stringify(TEST_DRIVER)});assert.deepEqual(args.slice(pos+11),${JSON.stringify(testArgv)});
     const r=require('node:child_process').spawnSync('sh',args.slice(pos+6),{stdio:'inherit',env:{PATH:process.env.PATH,TMPDIR:${JSON.stringify(root)},HOME:${JSON.stringify(root)}}});process.exit(r.status??1);`);
   stub('pi',`const fs=require('node:fs'),entry=args.includes('--no-tools')?'reviewer':'implementer';
     fs.appendFileSync(${JSON.stringify(entries)}, JSON.stringify({entry,pid:process.pid})+'\\n');

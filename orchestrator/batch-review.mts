@@ -4,7 +4,7 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'nod
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { frozenTicketIdentity, type FrozenTicketInput } from './ticket-input.mts';
-import { candidatePack, importImplementation, prospectiveCommit, reviewMaterial } from './batch-candidate.mts';
+import { candidatePack, importImplementation, prospectiveCommit, requestedContext, reviewMaterial } from './batch-candidate.mts';
 import { implementInContainer, standardBatchSandbox, type BatchSandbox, type ProcessResult, type ReviewRole } from './batch-sandbox.mts';
 import type { EffectiveConfig } from './project-config.mts';
 import { modelForRole } from './model-policy.mts';
@@ -32,7 +32,7 @@ export interface AttemptBinding {
   project: string; batch: string; ticket: number; run: string; attempt: string; destination: string; expectedHead: string;
   requirementsDigest: string; candidate: string; deltaBase: string; deltaTip: string;
 }
-export type ReviewReceipt = {binding: AttemptBinding; role: ReviewRole; invocation: string; verdict: 'approve'|'reject'|'inconclusive'; reason: string};
+export type ReviewReceipt = {binding: AttemptBinding; role: ReviewRole; invocation: string; followup?:{invocation:string;paths:string[]}; contextHold?:true; verdict: 'approve'|'reject'|'inconclusive'; reason: string};
 export const BATCH_EVIDENCE_VERSION = 'batch-review-v2' as const;
 export interface BatchEvidence {
   version: typeof BATCH_EVIDENCE_VERSION; binding: AttemptBinding;
@@ -50,6 +50,7 @@ function openStore(root: string, readOnly = false) {
   chmodSync(path,0o600);
   db.exec(`PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;
     CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, scope TEXT NOT NULL, binding TEXT NOT NULL, rejected INTEGER NOT NULL DEFAULT 0, result TEXT);
+    CREATE TABLE IF NOT EXISTS ready_deltas (scope TEXT PRIMARY KEY, payload TEXT NOT NULL);
     CREATE UNIQUE INDEX IF NOT EXISTS occupied ON attempts(scope) WHERE result IS NULL;`);
   return db;
 }
@@ -87,6 +88,12 @@ function verdict(result: ProcessResult): Pick<ReviewReceipt,'verdict'|'reason'> 
   } catch { /* Missing or malformed verdict is not approval. */ }
   return {verdict:'inconclusive', reason:'Reviewer returned no usable verdict'};
 }
+function contextRequest(result:ProcessResult):{paths:unknown}|undefined {
+  if(result.exit!==0 || Buffer.byteLength(result.stdout)>16384)return;
+  try {const parsed=JSON.parse(result.stdout);
+    if(parsed && typeof parsed==='object' && Object.hasOwn(parsed,'context'))return {paths:Object.keys(parsed).length===1?parsed.context:null};
+  } catch { /* Normal verdict parser handles unusable output. */ }
+}
 export function batchImplementationPrompt(ticket: FrozenTicketInput) {
   frozenTicketIdentity(ticket);
   return template('implementation') + '\n' + ticket.text;
@@ -101,29 +108,43 @@ export async function runStandardBatchMember(input: Omit<BatchAttemptInput,'delt
   if(resolve(input.state)===realpathSync(input.repo) || resolve(input.state).startsWith(realpathSync(input.repo)+'/')) throw Error('Gate store must be outside the project');
   const model=resolveTicketModel(input.ticket.context.child.description,config.AGENT.family);
   if(model.status!=='resolved') throw Error('Unresolved batch implementer model');
-  openStore(input.state).close();
+  const scope=JSON.stringify([project,input.batch,ticket]);
+  type Ready={id:string;run:string;requirements:string;destination:string;previous:string|null;base:string;start:string;delta:Awaited<ReturnType<typeof implementInContainer>>};
+  const store=openStore(input.state);
+  let ready:Ready|null;
+  try {const row=store.prepare('SELECT payload FROM ready_deltas WHERE scope=?').get(scope);ready=row?JSON.parse(String(row.payload)):null}finally{store.close()}
   const prior=latestBatchAttempt(input.state,project,input.batch,ticket);
   if (prior && (!prior.evidence || prior.binding.requirementsDigest!==input.ticket.hash || prior.binding.destination!==input.destination)) throw Error('Unresolved or changed batch original; reconcile before implementation');
-  let previous=prior?.evidence, base=prior?.binding.deltaBase??input.expectedHead, tip=prior?.binding.deltaTip??base;
+  if(ready && (ready.run!==input.run || ready.requirements!==input.ticket.hash || ready.destination!==input.destination || ready.previous!==(prior?.binding.attempt??null))) throw Error('Changed pending implementation binding; reconcile');
+  let previous=prior?.evidence, base=ready?.base??prior?.binding.deltaBase??input.expectedHead, tip=prior?.binding.deltaTip??base;
   // Bounded even if tests never pass or the host repeatedly advances. Only explicit review rejections spend the durable per-member rework budget.
   for(let step=0;step<8;step++) {
     const current=await input.observeHead();
-    if(current.kind!=='owned' || !/^[0-9a-f]{40}$/.test(current.head) || (!step && current.head!==input.expectedHead)) throw Error('Expected owned batch head not current');
+    if(current.kind!=='owned' || !/^[0-9a-f]{40}$/.test(current.head) || (!step && !ready && !prior && current.head!==input.expectedHead)) throw Error('Expected owned batch head not current');
     if(previous?.status==='stopped' || previous?.status==='held') return previous;
     if(previous?.status==='approved' && previous.binding.run===input.run && previous.binding.expectedHead===current.head) return previous;
-    if(!previous || previous.status==='implementation' || previous.status==='rework') {
+    if(!ready && (!previous || previous.status==='implementation' || previous.status==='rework')) {
       const feedback=previous?{attempt:previous.binding.attempt,candidate:previous.binding.candidate,reason:previous.reason,tests:{exit:previous.tests.exit,stdout:previous.tests.stdout,stderr:previous.tests.stderr},reviews:previous.reviews.map(({role,verdict,reason})=>({role,verdict,reason}))}:null;
       const task=prompt+'\nHost test argv and prior feedback:\n'+JSON.stringify({testArgv:checks.argv,feedback});
       const delta=await implementInContainer(image,model.model,providerCredential,tip,candidatePack(input.repo,tip),task);
-      tip=importImplementation(input.repo,tip,delta);
+      // Publish the complete bounded worker result before importing objects or sampling another head.
+      ready={id:randomUUID(),run:input.run,requirements:input.ticket.hash,destination:input.destination,previous:previous?.binding.attempt??null,base,start:tip,delta};
+      const db=openStore(input.state);try{db.prepare('INSERT INTO ready_deltas VALUES(?,?)').run(scope,JSON.stringify(ready))}finally{db.close()}
     }
-    previous=await runStandardBatchAttempt({...input,expectedHead:current.head,deltaBase:base,deltaTip:tip},config,image,providerCredential);
+    if(ready)tip=importImplementation(input.repo,ready.start,ready.delta);
+    previous=await evaluateAttempt({...input,expectedHead:current.head,deltaBase:base,deltaTip:tip,testArgv:checks.argv,testPaths:checks.paths},
+      standardBatchSandbox(image,modelForRole(config.AGENT.family,'verification').model,providerCredential),{ready:ready?.id});
+    ready=null;
     if(!['implementation','rework','rebuild'].includes(previous.status)) return previous;
   }
   return previous!;
 }
 export async function runBatchAttempt(input: BatchAttemptInput, sandbox: BatchSandbox): Promise<BatchEvidence> {
-  const {repo,state,batch,destination,expectedHead,run,deltaBase,deltaTip} = input;
+  return evaluateAttempt(input,sandbox);
+}
+async function evaluateAttempt(input:BatchAttemptInput,sandbox:BatchSandbox,member?:{ready?:string}):Promise<BatchEvidence> {
+  const {repo,state,batch,destination,run,deltaBase,deltaTip} = input;
+  let expectedHead=input.expectedHead;
   const {contentHash: requirementsDigest} = frozenTicketIdentity(input.ticket);
   const {identity,child} = input.ticket.context, project = `${identity.kind}://${identity.host}/${identity.project}`, ticket = child.iid;
   const requirements = input.ticket.text, testArgv = [...input.testArgv], testPaths = [...input.testPaths];
@@ -132,10 +153,13 @@ export async function runBatchAttempt(input: BatchAttemptInput, sandbox: BatchSa
   const attempt = randomUUID(), scope = JSON.stringify([project,batch,ticket]);
   if (resolve(state) === realpathSync(repo) || resolve(state).startsWith(realpathSync(repo) + '/')) throw Error('Gate store must be outside the project');
   const initial = await input.observeHead();
-  if (initial.kind !== 'owned' || initial.head !== expectedHead) throw Error('Expected owned batch head not current');
+  if (initial.kind !== 'owned' || !/^[a-f0-9]{40}$/.test(initial.head) || (!member && initial.head !== expectedHead)) throw Error('Expected owned batch head not current');
+  expectedHead=initial.head;
   const db = openStore(state);
   // Git may be slow. Check before construction, then reserve atomically; never hold the database writer during Git/process I/O.
   function available() {
+    const row=db.prepare('SELECT payload FROM ready_deltas WHERE scope=?').get(scope);
+    if ((row?JSON.parse(String(row.payload)).id:undefined)!==member?.ready) throw Error('Pending implementation belongs to another gate');
     const rejected = Number(db.prepare('SELECT count(*) AS n FROM attempts WHERE scope=? AND rejected=1').get(scope)!.n);
     if (rejected >= 3) throw Error('Both review reworks exhausted');
     const prior = db.prepare('SELECT result FROM attempts WHERE scope=? AND rejected=1 ORDER BY rowid DESC LIMIT 1').get(scope);
@@ -148,16 +172,40 @@ export async function runBatchAttempt(input: BatchAttemptInput, sandbox: BatchSa
   }
   try {
     available();
-    const candidate = prospectiveCommit(repo,expectedHead,deltaBase,deltaTip,attempt);
+    let candidate='';
+    for(let build=0;build<4;build++) {
+      let conflict:unknown;try {candidate=prospectiveCommit(repo,expectedHead,deltaBase,deltaTip,attempt)}catch(e){conflict=e}
+      if(member){
+        const observed=await input.observeHead();
+        if(observed.kind!=='owned'||!/^[a-f0-9]{40}$/.test(observed.head))throw Error('Unknown batch movement before testing; retain delta');
+        if(observed.head!==expectedHead){candidate='';expectedHead=observed.head;continue}
+      }
+      if(conflict)throw conflict;
+      break;
+    }
+    if(!candidate)throw Error('Batch head did not stabilize before testing; retain delta');
     db.exec('BEGIN IMMEDIATE');
     const rejected = available();
     const binding = {project,batch,ticket,run,attempt,destination,expectedHead,requirementsDigest,candidate,deltaBase,deltaTip};
-    db.prepare('INSERT INTO attempts(id,scope,binding) VALUES(?,?,?)').run(attempt,scope,JSON.stringify(binding)); db.exec('COMMIT');
+    db.prepare('INSERT INTO attempts(id,scope,binding) VALUES(?,?,?)').run(attempt,scope,JSON.stringify(binding));
+    if(member?.ready)db.prepare('DELETE FROM ready_deltas WHERE scope=?').run(scope);
+    db.exec('COMMIT');
     const observe = async (fn: () => Promise<ProcessResult>) => {
       try { return await fn(); } catch { return {exit:null,stdout:'',stderr:'Host could not observe process completion'}; }
     };
-    const observed = await observe(() => sandbox.test(candidate,candidatePack(repo,candidate),[...testArgv]));
-    const tests = {binding,argv:testArgv,exit:observed.exit,stdout:observed.stdout.slice(-32768),stderr:observed.stderr.slice(-32768)};
+    // Packing can outlast a head observation. If the head already moved, do not even start tests
+    // on this candidate. Movement after launch is still fenced by the independent final observation.
+    let beforeLaunch:Awaited<ReturnType<BatchAttemptInput['observeHead']>>|undefined;
+    const observed = await observe(async()=>{
+      const pack=candidatePack(repo,candidate);
+      if(member){
+        const check=await input.observeHead().catch(()=>({kind:'unknown' as const,head:''}));
+        if(check.kind!=='owned' || check.head!==expectedHead){beforeLaunch=check;return {exit:null,stdout:'',stderr:'Batch head no longer current before tests'}}
+      }
+      return sandbox.test(candidate,pack,[...testArgv]);
+    });
+    const completed=typeof observed?.exit==='number' && Number.isInteger(observed.exit) && observed.exit>=0 && observed.exit<124 && typeof observed.stdout==='string' && typeof observed.stderr==='string';
+    const tests = {binding,argv:testArgv,exit:completed?observed.exit:null,stdout:typeof observed?.stdout==='string'?observed.stdout.slice(-32768):'',stderr:typeof observed?.stderr==='string'?observed.stderr.slice(-32768):''};
     let reviews: ReviewReceipt[] = [], missingMaterial=false;
     const passed = tests.exit === 0;
     if (passed) {
@@ -169,14 +217,33 @@ export async function runBatchAttempt(input: BatchAttemptInput, sandbox: BatchSa
         if (Object.values(prompts).some(p=>Buffer.byteLength(p)>8*1024*1024)) throw Error('Review prompt exceeds limit');
         reviews = await Promise.all((['test','code'] as const).map(async role => {
           const invocation = randomUUID();
-          return {binding,role,invocation,...verdict(await observe(() => sandbox.review(role,invocation,prompts[role])))};
+          const first=await observe(()=>sandbox.review(role,invocation,prompts[role]));
+          const request=contextRequest(first);
+          if(!request)return {binding,role,invocation,...verdict(first)};
+          const hold={binding,role,invocation,contextHold:true as const,verdict:'inconclusive' as const,reason:'Unusable optional test-context request or response'};
+          if(role!=='test')return hold;
+          try {
+            const deadline=performance.now()+60_000, implementationContext=requestedContext(repo,candidate,request.paths,deadline);
+            const followup={invocation:randomUUID(),paths:implementationContext.map(x=>x.path)};
+            const prompt=template('test')+'\nFinal context stage: return a verdict now.\n'+JSON.stringify({requirements,tests:sources,candidate,implementationContext});
+            const left=Math.floor(deadline-performance.now());if(left<1 || Buffer.byteLength(prompt)>8*1024*1024)return hold;
+            // The production transport kills its child on this deadline. Also fence late/missing replies from injected transports.
+            let timer:ReturnType<typeof setTimeout>|undefined;
+            const expired=new Promise<ProcessResult>(resolve=>{timer=setTimeout(()=>resolve({exit:null,stdout:'',stderr:''}),left)});
+            let result:ReturnType<typeof verdict>;
+            try {result=verdict(await Promise.race([expired,observe(()=>sandbox.review('test',followup.invocation,prompt,left))]))}finally{clearTimeout(timer)}
+            if(performance.now()>deadline || result.verdict==='inconclusive')return {...hold,followup};
+            return {binding,role,invocation,followup,...result};
+          } catch {return hold}
         }));
       } catch { missingMaterial=true; }
     }
-    const final = await input.observeHead().catch(() => ({kind:'unknown',head:''}));
+    const final = beforeLaunch ?? await input.observeHead().catch(() => ({kind:'unknown',head:''}));
     const outcome: Pick<BatchEvidence,'status'|'reason'> = final.kind !== 'owned' ? {status:'held',reason:'Batch ownership or movement unknown'}
       : final.head !== expectedHead ? {status:'rebuild',reason:'Host advanced batch; construct and recheck on current head'}
+      : tests.exit===null ? {status:'held',reason:'Host could not observe completion of the configured test process'}
       : missingMaterial ? {status:'held',reason:'Exact review material missing, unrepresentable or over limit'}
+      : reviews.some(r=>r.contextHold) ? {status:'held',reason:'Requested test-review context or final verdict unavailable'}
       : classifyBatchReview(passed,reviews,rejected);
     const result: BatchEvidence = {version:BATCH_EVIDENCE_VERSION,binding,tests,reviews,...outcome};
     db.prepare('UPDATE attempts SET rejected=?,result=? WHERE id=? AND result IS NULL').run(Number(['rework','stopped'].includes(outcome.status)),JSON.stringify(result),attempt);

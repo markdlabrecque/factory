@@ -40,6 +40,14 @@ test('complete inventory, deterministic identity, private install and validation
   assert(!existsSync(join(a.directory, 'config.mts')));
   for (const path of ['recovery-triage.mts', 'recovery-triage-contract.mts', 'prompt.triage.md'])
     assert.ok(a.manifest.files.some(file => file.path === path), path);
+  // Explicit consumer contract: missing an asset from the inventory itself must break this test.
+  const batch=await import(pathToFileURL(join(a.directory,'batch-review.mts')).href);
+  assert.equal(typeof batch.runStandardBatchMember,'function');assert.equal(typeof batch.runStandardBatchAttempt,'function');
+  for(const name of ['prompt.batch-implementation.md','prompt.batch-test.md','prompt.batch-code.md'])
+    assert.deepEqual(readFileSync(join(a.directory,name)),readFileSync(join(repo,'orchestrator',name)));
+  const models=await import(pathToFileURL(join(a.directory,'model-policy.mts')).href);
+  assert.match(models.modelForRole('openai','verification').model,/^openai\//);
+  assert.match(models.modelForRole('anthropic','verification').model,/^pi-claude-subscription\//);
   const triage = await import(pathToFileURL(join(a.directory, 'recovery-triage.mts')).href);
   assert.equal(typeof triage.triageRecovery, 'function');
   const layout = await import(pathToFileURL(join(a.directory, 'project-layout.mts')).href);

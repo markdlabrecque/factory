@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const LIMIT = 64 * 1024 * 1024;
-function candidateGit(repo: string, args: string[], input?: string, objects?: string) {
+function candidateGit(repo: string, args: string[], input?: string, objects?: string, timeout=60_000) {
   return execFileSync('git', ['--no-replace-objects', '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', ...args], {
-    cwd: repo, input, maxBuffer: LIMIT, timeout: 60_000, stdio: ['pipe','pipe','pipe'],
+    cwd: repo, input, maxBuffer: LIMIT, timeout, killSignal:'SIGKILL', stdio: ['pipe','pipe','pipe'],
     env: { PATH: process.env.PATH, LC_ALL: 'C', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_NO_LAZY_FETCH: '1',
       ...(objects ? {GIT_OBJECT_DIRECTORY:objects} : {}), GIT_ALLOW_PROTOCOL: '', GIT_TERMINAL_PROMPT: '0', GIT_AUTHOR_NAME: 'Factory', GIT_AUTHOR_EMAIL: 'factory@localhost',
       GIT_COMMITTER_NAME: 'Factory', GIT_COMMITTER_EMAIL: 'factory@localhost' },
@@ -54,6 +54,25 @@ export function importImplementation(repo:string, start:string, delta:{tip:strin
   } finally {rmSync(bare,{recursive:true,force:true})}
 }
 const decode = (bytes:Buffer) => new TextDecoder('utf8',{fatal:true,ignoreBOM:true}).decode(bytes);
+// One staged test-role request. Only exact regular blobs in this commit; no pathspecs, traversal, links or working-tree reads.
+export function requestedContext(repo:string, candidate:string, paths:unknown, deadline:number) {
+  if(!Array.isArray(paths) || paths.length<1 || paths.length>4 || new Set(paths).size!==paths.length) throw Error('Invalid context request');
+  const git=(args:string[])=>{
+    const left=Math.floor(deadline-performance.now()); if(left<1)throw Error('Context deadline');
+    return candidateGit(repo,args,undefined,undefined,left);
+  };
+  let remaining=65536;
+  return paths.map(path=>{
+    if(typeof path!=='string'||Buffer.byteLength(path)>512||/[\x00-\x1f\\]/.test(path)||path.split('/').some(p=>!p||p==='.'||p==='..'||p==='.git'))throw Error('Invalid context path');
+    const entry=decode(git(['--literal-pathspecs','ls-tree','-z',candidate,'--',path]));
+    const m=/^(100644|100755) blob ([0-9a-f]{40})\t([^\0]+)\0$/.exec(entry);
+    if(!m||m[3]!==path)throw Error('Missing context blob');
+    const size=Number(git(['cat-file','-s',m[2]]).toString());
+    if(!Number.isSafeInteger(size)||size<0||(remaining-=size)<0)throw Error('Context too large');
+    const bytes=git(['cat-file','blob',m[2]]); if(bytes.length!==size||bytes.includes(0))throw Error('Unrepresentable context');
+    return {path,oid:m[2],content:decode(bytes)};
+  });
+}
 export function reviewMaterial(repo: string, head: string, sha: string, testPaths: string[]) {
   let remaining=1024*1024;
   function blob(oid:string) {
