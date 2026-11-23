@@ -206,16 +206,23 @@ export function supervisorExclusion(s: AdmissionState, tracker?: string, root?: 
   return hold ? `project held by supervisor ${hold.id} (${hold.invocationId}/${hold.fence})` : undefined;
 }
 /** Short synchronous admission transaction only; callers own subprocess lifetime outside this lock.
- * Entries survive owner death: an exited controller does not prove its descendants or handoff settled. */
-export function claimManagedEntry(dir: string, project: AdmissionIdentity): string {
+ * Entries survive owner death: an exited controller does not prove its descendants or handoff settled.
+ * A refusal observer runs under the same lock; no entry is created and no admission state committed. */
+export function claimManagedEntry(dir: string, project: AdmissionIdentity, onRefused?: (reason:string,state:Readonly<AdmissionState>)=>void): string {
   if (!validAdmissionIdentity(project)) throw Error('Managed entry identity unknown');
   project = { root: realpathSync(project.root), tracker: { ...project.tracker, host: project.tracker.host.toLowerCase() } };
   return withAdmission(dir, tx => {
     const reason = supervisorExclusion(tx.state, project.tracker.project, project.root);
-    if (reason) throw Error(reason);
-    if (readBaselineReservations(dir).some(b => admissionConflict(b.project, project))) throw Error('Project held by acceptance baseline cleanup');
+    const refuse=(message:string):never=>{
+      try { onRefused?.(message,tx.state); } catch(error) { throw Error(`${message}; cannot publish refusal observation: ${(error as Error).message}`); }
+      throw Error(message);
+    };
+    if (reason) refuse(reason);
+    let baselines:BaselineReservation[];
+    try { baselines=readBaselineReservations(dir); } catch(error) { return refuse((error as Error).message); }
+    if (baselines.some(b => admissionConflict(b.project, project))) refuse('Project held by acceptance baseline cleanup');
     const owner = ownerOf(process.pid);
-    if (!owner.start) throw Error('Managed entry owner unknown');
+    if (!owner.start) refuse('Managed entry owner unknown');
     const id = newToken(); tx.state.entries[id] = { id, project: structuredClone(project), owner }; tx.commit(); return id;
   });
 }

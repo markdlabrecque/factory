@@ -2,6 +2,7 @@
 // Keep native queries and pagination in step with the execution adapters.
 import { execFileSync, spawnSync } from 'node:child_process';
 import type { EffectiveConfig } from './project-config.mts';
+import { batchLinks } from './batch-links.mts';
 import type { Child } from './graph.mts';
 import type { Ticket, ReadyTicket, Select } from './tracker.mts';
 export function nativeGithub(config: EffectiveConfig) {
@@ -11,7 +12,7 @@ export function nativeGithub(config: EffectiveConfig) {
   const [OWNER, NAME] = REPO.split("/");
 
   function gh(args: string[]): string {
-    return execFileSync("gh", args, { encoding: "utf8", killSignal: 'SIGKILL', env: { ...process.env, GH_HOST: HOST }, stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
+    return execFileSync("gh", args, { encoding: "utf8", timeout:20_000, killSignal: 'SIGKILL', env: { ...process.env, GH_HOST: HOST }, stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
   }
   const json = <T,>(args: string[]): T => JSON.parse(gh(args));
 
@@ -67,8 +68,10 @@ export function nativeGithub(config: EffectiveConfig) {
     return issuesQuery<Hierarchy>([iid], HIERARCHY).get(iid)?.parent?.number;
   }
 
-  function ticket(iid: number): Ticket {
-    return slim(json<GhIssue>(["issue", "view", String(iid), "-R", REPO, "--json", FIELDS]));
+  function ticket(iid: number, strict = false): Ticket {
+    const issue=json<GhIssue>(["issue", "view", String(iid), "-R", REPO, "--json", FIELDS]);
+    if(strict && (issue.number!==iid || !['OPEN','CLOSED'].includes(issue.state) || !Array.isArray(issue.labels) || !issue.labels.every(l=>typeof l?.name==='string'))) throw Error(`Member state or exclusion facts unavailable for #${iid}`);
+    return slim(issue);
   }
 
   const ORDER: Record<string, string> = { created_at: "created", updated_at: "updated", popularity: "comments" };
@@ -94,5 +97,18 @@ export function nativeGithub(config: EffectiveConfig) {
     return issues.map((i) => ({ ...slim(i), assignees: (i.assignees ?? []).map((a) => ({ username: a.login })) }));
   }
 
-  return { ticket, readyList, currentUsername, parentOf, children };
+  function blockers(iid:number) {
+    const api=(path:string)=>json<any>(['api',path,'--hostname',HOST]);
+    const issue=api(`repos/${REPO}/issues/${iid}`);
+    const total=issue.issue_dependencies_summary?.total_blocked_by;
+    const ids=batchLinks(iid,{kind:'github',project:REPO,host:HOST},api);
+    if(issue.number!==iid || !Number.isSafeInteger(total) || total!==new Set(ids).size) throw Error(`Incomplete blocker inventory for #${iid}; check tracker permissions and retry`);
+    return ids;
+  }
+  const mergedInto = (branch:string,base:string) => {
+    const rows=json<unknown>(['pr','list','-R',REPO,'--state','merged','--head',branch,'--base',base,'--limit','1','--json','number,state,isCrossRepository,headRefName,baseRefName']);
+    if(!Array.isArray(rows)||rows.some(r=>!Number.isSafeInteger(r?.number) || typeof r.state!=='string' || typeof r.isCrossRepository!=='boolean' || typeof r.headRefName!=='string' || typeof r.baseRefName!=='string')) throw Error('Unknown merged PR state');
+    return rows.some(r=>!r.isCrossRepository && r.state==='MERGED' && r.headRefName===branch && r.baseRefName===base);
+  };
+  return { ticket, blockers, mergedInto, readyList, currentUsername, parentOf, children };
 }
