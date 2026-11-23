@@ -36,17 +36,52 @@ export function candidatePack(repo: string, sha: string) {
   const objects = candidateGit(repo, ['rev-list','--objects','--no-object-names',`${sha}^{tree}`]).toString();
   return candidateGit(repo,['pack-objects','--stdout','--no-reuse-delta','--no-reuse-object'],`${sha}\n${objects}`);
 }
+// Import only an isolated implementer's patch, never its .git/config, hooks, refs or repository path.
+export function importImplementation(repo:string, start:string, delta:{tip:string;commit:string;patch:string}) {
+  const {tip,commit,patch}=delta;
+  const headers=/^tree ([0-9a-f]{40})\nparent ([0-9a-f]{40})\nauthor [^\n]+\ncommitter [^\n]+\n\n/.exec(commit);
+  if (!headers || headers[2]!==start || !/^[0-9a-f]{40}$/.test(tip) || !patch || Buffer.byteLength(patch)>1024*1024) throw Error('Expected one ordinary implementation commit on the exact start');
+  const tree=headers[1];
+  const objects=candidateGit(repo,['rev-parse','--path-format=absolute','--git-path','objects']).toString().trim();
+  const bare=mkdtempSync(join(tmpdir(),'factory-delta-'));
+  try {
+    candidateGit(bare,['init','--bare','--template=','-q','.']);
+    const git=(args:string[],input?:string)=>candidateGit(bare,args,input,objects).toString().trim();
+    git(['read-tree',start]); git(['apply','--cached','--binary','--whitespace=nowarn','-'],patch);
+    if (git(['write-tree'])!==tree || tree===git(['rev-parse',`${start}^{tree}`])) throw Error('Incomplete or empty implementation delta');
+    if(git(['hash-object','-t','commit','-w','--stdin'],commit)!==tip) throw Error('Implementation commit identity mismatch');
+    return tip;
+  } finally {rmSync(bare,{recursive:true,force:true})}
+}
+const decode = (bytes:Buffer) => new TextDecoder('utf8',{fatal:true,ignoreBOM:true}).decode(bytes);
 export function reviewMaterial(repo: string, head: string, sha: string, testPaths: string[]) {
-  const listing = candidateGit(repo,['ls-tree','-rz',sha,'--',...testPaths]).toString().split('\0').filter(Boolean);
-  let size = 0;
+  let remaining=1024*1024;
+  function blob(oid:string) {
+    const size=Number(candidateGit(repo,['cat-file','-s',oid]).toString().trim());
+    if (!Number.isSafeInteger(size) || size<0 || (remaining-=size)<0) throw Error('Review input exceeds limit');
+    const bytes=candidateGit(repo,['cat-file','blob',oid]);
+    if (bytes.length!==size || bytes.includes(0)) throw Error('Unrepresentable review blob');
+    return decode(bytes);
+  }
+  const inventory=candidateGit(repo,['ls-tree','-rz',sha,'--',...testPaths]);
+  if(inventory.length>1024*1024) throw Error('Test inventory exceeds limit');
+  const listing = decode(inventory).split('\0').filter(Boolean);
+  if(listing.length>2048) throw Error('Too many test files');
   const tests = listing.map(entry => {
     const match = /^(100644|100755) blob ([a-f0-9]{40})\t([\s\S]+)$/.exec(entry);
     if (!match) throw Error('Unreadable test entry');
-    const bytes = candidateGit(repo,['cat-file','blob',match[2]]);
-    if ((size += bytes.length) > 1024 * 1024) throw Error('Test review input exceeds limit');
-    return {path: match[3], content: new TextDecoder('utf8',{fatal:true}).decode(bytes)};
+    return {path: match[3], content:blob(match[2])};
   });
-  const diff = candidateGit(repo,['diff','--no-ext-diff','--no-textconv','--no-color',head,sha,'--']);
-  if (diff.length > 1024 * 1024) throw Error('Code review input exceeds limit');
-  return {tests, diff: diff.toString()};
+  if(!testPaths.every(p=>tests.some(t=>t.path===p || t.path.startsWith(p+'/')))) throw Error('Configured test source missing');
+  // Raw object changes do not consult working-tree attributes, textconv or external diff drivers.
+  const fields=decode(candidateGit(repo,['diff-tree','--no-commit-id','-r','--raw','--no-abbrev','--no-renames','--ignore-submodules=none','-z',head,sha,'--'])).split('\0');
+  if (fields.pop()!=='' || !fields.length || fields.length%2 || fields.length>4096) throw Error('Incomplete or oversized change inventory');
+  const diff=[];
+  for(let i=0;i<fields.length;i+=2){
+    const m=/^:(000000|100644|100755|120000) (000000|100644|100755|120000) ([a-f0-9]{40}) ([a-f0-9]{40}) [ADMT]$/.exec(fields[i]);
+    if(!m || !fields[i+1]) throw Error('Unsupported Git change');
+    const side=(mode:string,oid:string)=>mode==='000000'?null:{mode,oid,content:blob(oid)};
+    diff.push({path:fields[i+1],before:side(m[1],m[3]),after:side(m[2],m[4])});
+  }
+  return {tests,diff};
 }

@@ -1,5 +1,5 @@
 // Execute the original non-batch Pi workflow with durable managed admission before readiness/tracker/model work.
-// Batch hosts use runBatchAttempt (batch-review.mts); a destination alone never selects the new rules.
+// Already-admitted batch members enter via runStandardBatchMember (batch-review.mts); a destination alone never selects the new rules.
 // A pinned leased runtime binds explicit project assets and state; immutable payload custody retains uncertain admission ownership.
 // Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
 // Current original acceptance and authorized baselines matching the immutable launch image gate claims and adoption.
