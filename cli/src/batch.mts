@@ -1,7 +1,7 @@
 // Bind batch ownership to the authenticated tracker repository ID and named Git origin. Only a positive push receipt and exact readback settle a write.
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, unlinkSync } from 'node:fs';
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path';
 import { durableDirectory, syncDirectory, withAdmissionLock, writeDurable } from '../../board/admission.mts';
 import { readBoundedText } from '../../orchestrator/ownership.mts';
@@ -131,7 +131,7 @@ function check(dir:string,c:Context,r:Record) {
   verifyRepository(c,r.repositoryId);
   if (r.phase === 'ready' && head === r.expectedHead) return 'ready';
   if (r.pending && receipt(dir,r) && head === r.pending.next) return 'settle';
-  if (r.phase === 'creating' && head === null && !receipt(dir,r)) return 'create';
+  if (r.phase === 'creating' && head === null && !lstatSync(join(dir,r.pending!.attempt+'.push'),{throwIfNoEntry:false})) return 'create';
   throw Error('Batch held: destination missing, collided, drifted, or lacks a confirmed host write');
 }
 function settle(dir:string,c:Context,r:Record):BatchIdentity {
@@ -144,14 +144,34 @@ function push(dir:string,c:Context,r:Record):BatchIdentity {
   // Last identity reads precede both the advance intent and receipt: a changed/unknown ID is not an attempted write.
   verifyRepository(c,r.repositoryId);
   const target = checkedOrigin(c);
-  if (r.phase === 'advancing') save(dir,r);
-  const fd = openSync(join(dir,attempt+'.push'),'wx',0o600);
+  const marker = join(dir,attempt+'.push');
+  if (lstatSync(marker,{throwIfNoEntry:false})) throw Error('Batch attempt already exists');
+  const args = [...gitArgs(c.root),'-c','push.pushOption=','push','--porcelain',`--force-with-lease=${r.destinationRef}:${r.phase === 'creating' ? '' : r.expectedHead}`,'--',target,`${next}:${r.destinationRef}`];
+  let fd:number|undefined, mayHaveLaunched = false;
   try {
+    if (r.phase === 'advancing') save(dir,r);
+    fd = openSync(marker,'wx',0o600);
     syncDirectory(dir);
-    // Exact absent/old lease, no '+' refspec, verified ancestry on advances. Up-to-date is NOT evidence of ownership.
-    spawnSync('git',[...gitArgs(c.root),'push','--porcelain',`--force-with-lease=${r.destinationRef}:${r.phase === 'creating' ? '' : r.expectedHead}`,'--',target,`${next}:${r.destinationRef}`],{stdio:['ignore',fd,'pipe'],timeout:30000,env:{...process.env,LC_ALL:'C'}});
+    mayHaveLaunched = true;
+    const result = spawnSync('git',args,{stdio:['ignore',fd,'pipe'],timeout:30000,env:{...process.env,LC_ALL:'C'}});
+    const error = result.error as NodeJS.ErrnoException|undefined;
+    if (error?.code === 'ENOENT' && error.syscall === 'spawnSync git' && result.pid === 0 && result.status === null && result.signal === null) {
+      mayHaveLaunched = false;
+      throw Error('Batch Git push executable not found');
+    }
     fsyncSync(fd);
-  } finally { closeSync(fd); }
+  } catch (error) {
+    if (!mayHaveLaunched) {
+      // Under the batch lock, restore the old authority even if saving intent failed after rename.
+      if (r.phase === 'advancing') save(dir,{...r,phase:'ready',pending:null});
+      if (fd !== undefined) {
+        const owned = fstatSync(fd,{bigint:true}), current = lstatSync(marker,{bigint:true});
+        if (owned.dev !== current.dev || owned.ino !== current.ino) throw Error('Batch attempt marker changed');
+        unlinkSync(marker); syncDirectory(dir);
+      }
+    }
+    throw error;
+  } finally { if (fd !== undefined) closeSync(fd); }
   return settle(dir,c,r);
 }
 export function submitBatch(p:Paths,project:string,ids:string[],onReserved?: (id:string)=>void):BatchIdentity {
@@ -188,7 +208,6 @@ export function resumeBatch(p:Paths,project:string,id:string):BatchIdentity {
     const current = load(dir,c,id), action = check(dir,c,current);
     if (action === 'ready') return identity(current);
     if (action === 'settle') return settle(dir,c,current);
-    if (existsSync(join(dir,current.pending!.attempt+'.push'))) throw Error('Unconfirmed creation attempt; refusing blind retry');
     return push(dir,c,current);
   });
 }

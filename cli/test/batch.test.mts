@@ -40,6 +40,16 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   // A claim that is acquired and released in the same CLI call is still observable. Batch-private locks use a different path.
   writeFileSync(preload,`const fs=require('node:fs'), dir=process.env.SANDCASTLE_STATE_DIR+'/admission';const mkdir=fs.mkdirSync;
     fs.mkdirSync=function(p,...args){if(p===dir){fs.appendFileSync(process.env.EFFECTS,'claim boundary\\n');throw Error('fixture claim denied')}return mkdir(p,...args)};
+    const fault=process.env.RECEIPT_FAULT,open=fs.openSync,sync=fs.fsyncSync;let marker;
+    fs.openSync=function(p,flags,...args){if(fault&&flags==='wx'&&p.endsWith('.push')){
+      if(fault==='collision'){const prior=open(p,'wx',0o600);fs.writeSync(prior,'prior attempt');fs.closeSync(prior);}
+      const fd=open(p,flags,...args);marker=p;return fd;
+    }return open(p,flags,...args)};
+    fs.fsyncSync=function(fd){if(marker&&fs.fstatSync(fd).isDirectory()){
+      marker=undefined;if(fault==='fsync')throw Error('fixture marker sync failure');
+      sync(fd);if(fault==='crash')process.kill(process.pid,'SIGKILL');
+      if(fault==='enoent')process.env.PATH='/absent-fixture-executable-directory';return;
+    }return sync(fd)};
     require('node:module').syncBuiltinESMExports();`);
   stub('ssh',`${recorder}const m=/^(git-upload-pack|git-receive-pack) '(org\\/(?:repo|other)\\.git)'$/.exec(a[1]);
     if(a.length!==2||a[0]!=='git@fixture.test'||!m)process.exit(92);
@@ -69,7 +79,13 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
     SANDCASTLE_STATE_DIR:p.state,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_SSH:join(bin,'ssh'),GIT_SSH_VARIANT:'simple',GIT_ALLOW_PROTOCOL:'file:ssh'};
   const git = (cwd:string,...args:string[]) => execFileSync('/usr/bin/git',['-c','user.name=Fixture','-c','user.email=f@example.test','-C',cwd,...args],{env,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
   git(root,'init','-b','main'); git(root,'commit','--allow-empty','-m','original'); const source = git(root,'rev-parse','HEAD');
-  git(root,'init','--bare','-b','main',server); git(root,'remote','add','origin',url); git(root,'remote','set-url','--push','origin',url); git(root,'push','origin','HEAD:main');
+  git(root,'init','--bare','-b','main',server); git(root,'remote','add','origin',url); git(root,'remote','set-url','--push','origin',url);
+  const optionLog=join(p.home,'received-options');
+  git(server,'config','receive.advertisePushOptions','true');
+  writeFileSync(join(server,'hooks/pre-receive'),`#!${process.execPath}\nconst count=process.env.GIT_PUSH_OPTION_COUNT;require('node:fs').appendFileSync(${JSON.stringify(optionLog)},JSON.stringify([count,...Array.from({length:Number(count)},(_,i)=>process.env['GIT_PUSH_OPTION_'+i])])+'\\n');`,{mode:0o755});
+  const received=()=>JSON.parse(readFileSync(optionLog,'utf8').trimEnd().split('\n').at(-1)!);
+  git(root,'config','--add','push.pushOption','fixture-one');git(root,'config','--add','push.pushOption','fixture-two');
+  git(root,'push','origin','HEAD:main');assert.deepEqual(received(),['2','fixture-one','fixture-two']);
   git(root,'commit','--allow-empty','-m','develop'); const dev = git(root,'rev-parse','HEAD'); git(root,'push','origin','HEAD:develop');
   git(root,'tag','unrelated',source); git(root,'push','origin','refs/tags/unrelated');
   git(root,'clone','--bare',server,otherServer); git(root,'commit','--allow-empty','-m','main advanced'); const moved=git(root,'rev-parse','HEAD'); assert.notEqual(dev,moved);
@@ -106,7 +122,7 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   assert.deepEqual(readdirSync(inert),[]); assert.deepEqual(checkout(),originalCheckout); assert.equal(text(reads),oldReads); assert.equal(text(transports),''); verifyRefs(initial);noWork();
 
   const b=success(cli(['submit','project','2','3'])); assert.equal(b.version,2);assert.equal(b.repositoryId,ghId);assert.deepEqual(b.members,[2,3]); assert.equal(b.baseRef,'refs/heads/main');assert.equal(b.sourceSha,source);assert.equal(b.expectedHead,source);
-  verifyRefs({...initial,[b.destinationRef]:source});noWork();
+  verifyRefs({...initial,[b.destinationRef]:source});assert.deepEqual(received(),['0']);noWork();
   git(root,'push','origin',`${moved}:main`); const resume=(id:string,project='project')=>cli(['resume',project,id]);
   assert.deepEqual(success(resume(b.id)),b); assert.deepEqual(success(host('readOwnedBatch',[b.id])),b);
   const record=(id:string)=>join(batchDir,id,'batch.json');
@@ -126,7 +142,12 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   git(root,'remote','set-url','origin',otherURL);git(root,'remote','set-url','--push','origin',otherURL);writeFileSync(toml,factoryToml('org/other',{host:'fixture.test'}));
   preserved(b.id,()=>resume(b.id));git(root,'remote','set-url','origin',url);git(root,'remote','set-url','--push','origin',url);writeFileSync(toml,githubConfig);
   const advance=(old:string,next:string,extra={})=>host('advanceBatch',[b.id,old,next],extra);
-  const prior=refMap(server); assert.equal(success(advance(source,dev)).expectedHead,dev);verifyRefs({...prior,[b.destinationRef]:dev});assert.equal(success(resume(b.id)).expectedHead,dev);
+  for(const fault of ['fsync','enoent','collision']) {
+    const before=refMap(server), count=pushes();refused(advance(source,dev,{RECEIPT_FAULT:fault}),fault==='fsync'?/fixture marker sync failure/:fault==='collision'?/EEXIST/:/push executable not found/);
+    assert.deepEqual(success(resume(b.id)),b);assert.equal(pushes(),count);verifyRefs(before);
+    if(fault==='collision')assert.ok(readdirSync(dirname(record(b.id))).some(f=>f.endsWith('.push')&&text(join(dirname(record(b.id)),f))==='prior attempt'));
+  }
+  const prior=refMap(server); assert.equal(success(advance(source,dev)).expectedHead,dev);verifyRefs({...prior,[b.destinationRef]:dev});assert.deepEqual(received(),['0']);assert.equal(success(resume(b.id)).expectedHead,dev);
   preserved(b.id,()=>advance(source,dev));
   preserved(b.id,()=>advance(dev,source)); // correct expected-old, but a rewind is not a fast-forward
   const replacement=join(p.home,'replacement.git'); git(root,'clone','--bare',server,replacement);
@@ -152,6 +173,8 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   const interrupted=cli(['submit','project','3'],{INTERRUPT:'1'});assert.equal(interrupted.signal,'SIGKILL');
   const reserved=(r:Result)=>{const match=/Reserved batch ([0-9a-f-]{36})/.exec(r.stderr);assert.ok(match,r.stderr);return match[1]};
   const id=reserved(interrupted);preserved(id,()=>host('readOwnedBatch',[id]));const owned=success(resume(id));assert.equal(owned.baseRef,'refs/heads/develop');assert.equal(owned.sourceSha,dev);assert.equal(owned.expectedHead,dev);verifyRefs({...beforeCreate,[owned.destinationRef]:dev});
+  const lost=host('advanceBatch',[id,dev,moved],{RECEIPT_FAULT:'crash'});assert.equal(lost.signal,'SIGKILL');
+  verifyRefs({...beforeCreate,[owned.destinationRef]:dev});preserved(id,()=>resume(id));preserved(id,()=>host('advanceBatch',[id,dev,moved]));
   for(const existing of [dev,moved]){
     const before=refMap(server), collision=cli(['submit','project','2'],{COMPETING_SHA:existing});refused(collision);const colliding=reserved(collision);
     verifyRefs({...before,[`refs/heads/factory/batch/${colliding}`]:existing});preserved(colliding,()=>resume(colliding));
@@ -161,10 +184,20 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   const stopped=cli(['submit','project','3'],{INTERRUPT_RESERVED:'1'});assert.equal(stopped.signal,'SIGKILL');
   const emptyId=reserved(stopped);assert.deepEqual(readdirSync(dirname(record(emptyId))),['batch.json']);assert.equal(JSON.parse(text(record(emptyId))).sourceSha,dev);assert.equal(pushes(),attempted);verifyRefs(beforeReservation);
   preserved(emptyId,()=>host('readOwnedBatch',[emptyId]));
+  const retryIds=['fsync','enoent'].map(fault=>{
+    const count=pushes(),failed=cli(['submit','project','3'],{RECEIPT_FAULT:fault});refused(failed,fault==='fsync'?/fixture marker sync failure/:/push executable not found/);assert.equal(pushes(),count);verifyRefs(beforeReservation);return reserved(failed);
+  });
+  const collision=cli(['submit','project','3'],{RECEIPT_FAULT:'collision'});refused(collision,/EEXIST/);
+  const foreign=reserved(collision), marker=JSON.parse(text(record(foreign))).pending.attempt+'.push';
+  assert.equal(text(join(dirname(record(foreign)),marker)),'prior attempt');preserved(foreign,()=>resume(foreign));
+  const crash=cli(['submit','project','3'],{RECEIPT_FAULT:'crash'});assert.equal(crash.signal,'SIGKILL');
+  const ambiguous=reserved(crash);verifyRefs(beforeReservation);preserved(ambiguous,()=>resume(ambiguous));
+  git(server,'update-ref',`refs/heads/factory/batch/${ambiguous}`,dev);preserved(ambiguous,()=>resume(ambiguous));
   git(root,'commit','--allow-empty','-m','new develop');const later=git(root,'rev-parse','HEAD');git(root,'push','origin','HEAD:develop');
   const beforeResume=refMap(server), ticketReads=text(reads), fromReservation=success(resume(emptyId));
   assert.equal(text(reads),ticketReads);assert.equal(fromReservation.id,emptyId);assert.equal(fromReservation.sourceSha,dev);assert.equal(fromReservation.expectedHead,dev);
   verifyRefs({...beforeResume,[`refs/heads/factory/batch/${emptyId}`]:dev});assert.notEqual(later,dev);
+  for(const retry of retryIds){const before=refMap(server),created=success(resume(retry));assert.equal(created.id,retry);assert.equal(created.expectedHead,dev);assert.equal(created.sourceSha,dev);verifyRefs({...before,[created.destinationRef]:dev});}
   const missing='eeeeeeee-1111-4444-8888-000000000000';preserved(missing,()=>resume(missing));assert.equal(existsSync(dirname(record(missing))),false);
   writeFileSync(toml,factoryToml('org/repo',{kind:'gitlab',host:'fixture.test',projectId:42}));preserved(id,()=>resume(id));
   const beforeLab=refMap(server), dirs=readdirSync(batchDir);
