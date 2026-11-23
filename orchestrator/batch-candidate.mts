@@ -36,21 +36,33 @@ export function candidatePack(repo: string, sha: string) {
   const objects = candidateGit(repo, ['rev-list','--objects','--no-object-names',`${sha}^{tree}`]).toString();
   return candidateGit(repo,['pack-objects','--stdout','--no-reuse-delta','--no-reuse-object'],`${sha}\n${objects}`);
 }
-// Import only an isolated implementer's patch, never its .git/config, hooks, refs or repository path.
-export function importImplementation(repo:string, start:string, delta:{tip:string;commit:string;patch:string}) {
-  const {tip,commit,patch}=delta;
-  const headers=/^tree ([0-9a-f]{40})\nparent ([0-9a-f]{40})\nauthor [^\n]+\ncommitter [^\n]+\n\n/.exec(commit);
-  if (!headers || headers[2]!==start || !/^[0-9a-f]{40}$/.test(tip) || !patch || Buffer.byteLength(patch)>1024*1024) throw Error('Expected one ordinary implementation commit on the exact start');
-  const tree=headers[1];
+// Apply model-proposed file replacements only to a private bare index. No checkout, hooks or project commands.
+export function applyProposal(repo:string,start:string,proposal:string) {
+  if(Buffer.byteLength(proposal)>1024*1024)throw Error('Implementation proposal too large');
+  const parsed=JSON.parse(proposal);
+  if(!parsed || Object.keys(parsed).join(',')!=='edits')throw Error('Invalid implementation proposal');
+  const edits=parsed.edits;
+  if(!Array.isArray(edits)||!edits.length||edits.length>256)throw Error('Invalid implementation proposal');
   const objects=candidateGit(repo,['rev-parse','--path-format=absolute','--git-path','objects']).toString().trim();
   const bare=mkdtempSync(join(tmpdir(),'factory-delta-'));
   try {
     candidateGit(bare,['init','--bare','--template=','-q','.']);
     const git=(args:string[],input?:string)=>candidateGit(bare,args,input,objects).toString().trim();
-    git(['read-tree',start]); git(['apply','--cached','--binary','--whitespace=nowarn','-'],patch);
-    if (git(['write-tree'])!==tree || tree===git(['rev-parse',`${start}^{tree}`])) throw Error('Incomplete or empty implementation delta');
-    if(git(['hash-object','-t','commit','-w','--stdin'],commit)!==tip) throw Error('Implementation commit identity mismatch');
-    return tip;
+    git(['read-tree',start]);const seen=new Set<string>();
+    for(const edit of edits){
+      if(!edit||Object.keys(edit).sort().join(',')!=='content,path')throw Error('Invalid implementation edit');
+      const {path,content}=edit;
+      if(typeof path!=='string'||Buffer.byteLength(path)>512||/[\x00-\x1f\\]/.test(path)||path.split('/').some(x=>!x||x==='.'||x==='..'||x.toLowerCase()==='.git')||seen.has(path))throw Error('Invalid implementation path');
+      seen.add(path);
+      const mode=git(['--literal-pathspecs','ls-tree',start,'--',path]).split(' ')[0];
+      if(mode && mode!=='100644' && mode!=='100755')throw Error('Not a regular implementation file');
+      if(content===null && mode){git(['update-index','-z','--index-info'],`0 ${'0'.repeat(40)}\t${path}\0`);continue}
+      if(typeof content!=='string'||content.includes('\0')||Buffer.from(content).toString()!==content)throw Error('Invalid implementation content');
+      const oid=git(['hash-object','-w','--no-filters','--stdin'],content);
+      git(['update-index','--add','--cacheinfo',mode||'100644',oid,path]);
+    }
+    const tree=git(['write-tree']);if(tree===git(['rev-parse',`${start}^{tree}`]))throw Error('Empty implementation delta');
+    return git(['commit-tree',tree,'-p',start,'-m','Factory implementation proposal']);
   } finally {rmSync(bare,{recursive:true,force:true})}
 }
 const decode = (bytes:Buffer) => new TextDecoder('utf8',{fatal:true,ignoreBOM:true}).decode(bytes);
@@ -73,7 +85,7 @@ export function requestedContext(repo:string, candidate:string, paths:unknown, d
     return {path,oid:m[2],content:decode(bytes)};
   });
 }
-export function reviewMaterial(repo: string, head: string, sha: string, testPaths: string[]) {
+function boundedReader(repo:string){
   let remaining=1024*1024;
   function blob(oid:string) {
     const size=Number(candidateGit(repo,['cat-file','-s',oid]).toString().trim());
@@ -82,15 +94,22 @@ export function reviewMaterial(repo: string, head: string, sha: string, testPath
     if (bytes.length!==size || bytes.includes(0)) throw Error('Unrepresentable review blob');
     return decode(bytes);
   }
-  const inventory=candidateGit(repo,['ls-tree','-rz',sha,'--',...testPaths]);
+  return blob;
+}
+function sources(repo:string,sha:string,paths:string[],blob:(oid:string)=>string){
+  const inventory=candidateGit(repo,['ls-tree','-rz',sha,'--',...paths]);
   if(inventory.length>1024*1024) throw Error('Test inventory exceeds limit');
   const listing = decode(inventory).split('\0').filter(Boolean);
   if(listing.length>2048) throw Error('Too many test files');
-  const tests = listing.map(entry => {
+  return listing.map(entry => {
     const match = /^(100644|100755) blob ([a-f0-9]{40})\t([\s\S]+)$/.exec(entry);
     if (!match) throw Error('Unreadable test entry');
     return {path: match[3], content:blob(match[2])};
   });
+}
+export function implementationSources(repo:string,sha:string){return sources(repo,sha,[],boundedReader(repo))}
+export function reviewMaterial(repo: string, head: string, sha: string, testPaths: string[]) {
+  const blob=boundedReader(repo),tests=sources(repo,sha,testPaths,blob);
   if(!testPaths.every(p=>tests.some(t=>t.path===p || t.path.startsWith(p+'/')))) throw Error('Configured test source missing');
   // Raw object changes do not consult working-tree attributes, textconv or external diff drivers.
   const fields=decode(candidateGit(repo,['diff-tree','--no-commit-id','-r','--raw','--no-abbrev','--no-renames','--ignore-submodules=none','-z',head,sha,'--'])).split('\0');

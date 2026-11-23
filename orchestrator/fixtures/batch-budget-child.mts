@@ -5,6 +5,6 @@ const input=JSON.parse(readFileSync(0,'utf8')); input.observeHead=async()=>({kin
 let processes=0;
 try {
   const result=await runBatchAttempt(input,{test:async()=>{processes++;return {exit:0,stdout:'',stderr:''}},review:async role=>{
-    processes++;return {exit:0,stdout:JSON.stringify(role==='test'?{context:['missing']}:{verdict:'reject',reason:'fresh process verdict'}),stderr:''}}});
+    processes++;return {exit:0,stdout:JSON.stringify(role==='test'?{assessment:'missing coverage context',context:['missing']}:{verdict:'reject',reason:'fresh process verdict'}),stderr:''}}});
   console.log(JSON.stringify({processes,result}));
 } catch(e){console.log(JSON.stringify({processes,error:String(e)}))}
