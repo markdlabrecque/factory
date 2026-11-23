@@ -1,5 +1,5 @@
 # Task
-<!-- Implementer owns behavior and implementation tests; acceptance preparation and trusted replay remain independent. -->
+<!-- Original non-batch workflow. New batch attempts use prompt.batch-implementation.md. -->
 
 You are an autonomous coding agent. Implement ONE ticket on the current branch, which was cut from `{{BASE_BRANCH}}`.
 

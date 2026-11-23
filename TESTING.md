@@ -36,6 +36,10 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 `FACTORY_HOME` changes Factory's filesystem paths. It does **not** isolate `systemctl`, D-Bus or another service manager. Inject the fake backend or place test-owned command stubs first on the child process's PATH. Ensure unhandled calls cannot fall through to the host's service manager.
 
+## Prospective batch producer
+
+`node --test orchestrator/batch-review.test.mts` covers the producer independently of selection and delivery. Disposable Git, the real shallow checkout driver, and exact-argv Docker/Pi doubles show which commit ran, that failures launch no reviewer, and that both separate reviewer processes must be active before either fixture verdict is released. `orchestrator/fixtures/batch-review.mts:installBatchFixture` supplies the reusable fixture-owned command directory and rendezvous for copied-install journeys; use it only with synthetic repositories and known fixture test argv. No real container/provider or installation is required. A cheaper SQLite/policy fixture covers resumed charges, interrupted/overlapping observations, branch movement and unusable results. Neither suite measures live agent judgment or claims a branch landed.
+
 ## Owned acceptance baseline runner
 
 `orchestrator/acceptance-runner.test.mts` exercises the approved owned-runner seam

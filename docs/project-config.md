@@ -101,6 +101,7 @@ are schema defaults; profiles explicitly override some of them.
 | `graph.analysis_timeout_minutes` | `10`, positive finite number |
 | `graph.conflict_ignore` | `[]`, existing footprint-ignore paths |
 | `graph.prune_after_days` | `30`, positive finite number |
+| `ci.batch_test_argv`, `ci.batch_test_paths` | Optional together for original workflows; required for prospective batch tests. Nonempty argv (no implicit shell) and literal repository-relative test files/directories. Use the host's pinned configuration, not a candidate-supplied command. |
 | `ci.wait_minutes` | `30`, positive finite number |
 | `ci.no_pipeline_minutes` | `5`, positive finite number |
 | `sandbox.image` | **required**, nonempty image name |
