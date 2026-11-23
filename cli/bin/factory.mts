@@ -113,9 +113,11 @@ try {
     const p = paths();
     if ((command==='dispatch' || command==='tick') && (v.batch!==undefined || command==='tick' && v.project!==undefined)) {
       if (!v.project || !v.batch || positionals.length || Object.keys(v).some(k=>!['project','batch'].includes(k))) throw Error('Explicit batch pass requires only --project <name> --batch <id>');
-      const {dispatchBatch}=await import('../src/batch-dispatch.mts');
-      process.exitCode=await dispatchBatch(p,v.project,v.batch);
-    } else if (command === 'batch') batch(p, positionals);
+      const {continueBatch}=await import('../src/batch-journey.mts');
+      const result=await continueBatch(p,v.project,v.batch,true);
+      console.log(JSON.stringify(result));
+      if(result.error)process.exitCode=1;
+    } else if (command === 'batch') await batch(p, positionals);
     else if (command === 'init') {
       if (second || extra.length) throw new Error('Unexpected arguments');
       await init(p, first, v);

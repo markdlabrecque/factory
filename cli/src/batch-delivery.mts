@@ -55,6 +55,11 @@ function load(m:ReturnType<typeof local>,key:Member):BatchDeliveryOutcome|null {
 }
 /** Passive historical outcome for dispatch/handoff. Only landed + complete is clean delivery. */
 export function readBatchDelivery(p:HostPaths,key:Member){return load(local(p,key),key)}
+/** A journal observation alone carries no publication authority. */
+export function readBatchGate(p:HostPaths,key:Member) {
+  const m=local(p,key),t=m.config.TRACKER;
+  return lstatSync(join(m.state,'batch-review.sqlite'),{throwIfNoEntry:false}) ? latestBatchAttempt(m.state,`${t.kind}://${t.host??t.gitlabHost}/${t.project}`,key.batch,key.ticket):null;
+}
 type Scope={id:string;repositoryId:string;destinationRef:string;expectedHead:string;members:number[]};
 /** Passive dispatch observer. Reconfirm the current owned tip AND inclusion of the observed landed commit. */
 export function batchDeliveryObserver(p:HostPaths,project:string) {
@@ -171,24 +176,24 @@ function deliver(p:HostPaths,key:DeliveryKey, candidate?:AttemptBinding):BatchDe
   });
 }
 /** Join a producer invoked by dispatch under the same claim. The supplied IDs select, not authorize, a host attempt. */
-export async function deliverReviewedBatchMember(p:HostPaths,key:DeliveryKey,selected:Pick<AttemptBinding,'attempt'|'candidate'>,credential:()=>string){
+export async function deliverReviewedBatchMember(p:HostPaths,key:DeliveryKey,selected:Pick<AttemptBinding,'attempt'|'candidate'>,credential:()=>string,gate=runStandardBatchMember){
   const m=local(p,key), t=m.config.TRACKER;
   const row=latestBatchAttempt(m.state,`${t.kind}://${t.host??t.gitlabHost}/${t.project}`,key.batch,key.ticket);
   if(!row || row.binding.attempt!==selected.attempt || row.binding.candidate!==selected.candidate || row.binding.run!==key.run)throw Error('Not the selected current host attempt');
   requireDeliveryEvidence(row.binding,row);
   durableDirectory(m.dir);
   const outcome=deliver(p,key,row.binding);
-  return outcome==='rebuild'?runAndDeliverBatchMember(p,key,credential):outcome;
+  return outcome==='rebuild'?runAndDeliverBatchMember(p,key,credential,gate):outcome;
 }
 /** Caller holds the exclusive admission claim for the recorded run throughout. No ref, proof or SHA is accepted. */
-export async function runAndDeliverBatchMember(p:HostPaths,key:DeliveryKey,credential:()=>string):Promise<BatchDeliveryOutcome|BatchEvidence> {
+export async function runAndDeliverBatchMember(p:HostPaths,key:DeliveryKey,credential:()=>string,gate=runStandardBatchMember):Promise<BatchDeliveryOutcome|BatchEvidence> {
   const {project,batch,ticket,run}=key;
   for(let round=0;round<4;round++) {
     const m=local(p,key);durableDirectory(m.dir);
     if(load(m,key)) {const saved=deliver(p,key);if(saved!=='rebuild')return saved}
     const owned=()=>readOwnedBatch(p,project,batch), identity=owned(), current=inputs(m,ticket);
     requireMemberClaim(p,key,m,current.ticket.hash);
-    const result=await runStandardBatchMember({repo:m.root,state:m.state,batch,destination:identity.destinationRef,expectedHead:identity.expectedHead,run,ticket:current.ticket,
+    const result=await gate({repo:m.root,state:m.state,batch,destination:identity.destinationRef,expectedHead:identity.expectedHead,run,ticket:current.ticket,
       observeHead:async()=>({kind:'owned',head:owned().expectedHead})},m.config,current.image,credential);
     if(result.status!=='approved')return result;
     const observed=deliver(p,key,result.binding);

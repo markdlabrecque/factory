@@ -1,7 +1,10 @@
 // Copied install and data-only init execute the normal workflow against fixture-owned boundaries.
 import { test } from 'node:test';
 import { normalEntrypointFixture } from '../../orchestrator/verification-entrypoint-fixture.mts';
+import { batchJourney } from './batch-journey-fixture.mts';
 import { recoveryEntrypointFixture } from '../../orchestrator/recovery-entrypoint-fixture.mts';
+
+test('copied batch submit and resume deliver only gated members and hand off once', batchJourney);
 
 test('copied install runs Pi Terra implementation and independent verification', t =>
   normalEntrypointFixture(t, 'pass', 'openai', 'mid', true));

@@ -12,6 +12,14 @@ See the [domain model](domain-model.md) for relationships, lifecycle rules and c
 A repository configured for Factory to work on, with its own work-selection and delivery policies.
 _Avoid_: Workspace, installation
 
+**Batch**:
+A fixed set of named tickets for one project whose approved changes share a single integration branch.
+_Avoid_: Queue, milestone
+
+**Batch handoff**:
+The final account of the branch tip and each member’s outcome returned to the operator for testing and onward decisions.
+_Avoid_: Deployment, promotion
+
 **Tracker**:
 The service that holds a project's tickets and receives its proposed changes, such as GitHub or GitLab.
 _Avoid_: Issue system, forge

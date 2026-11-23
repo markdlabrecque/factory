@@ -49,6 +49,10 @@ flowchart TD
 
 The arrows describe relationships, not an unconditional sequence. Each execution, verification and delivery boundary has its own gates.
 
+### Batch handoff
+
+Explicit membership fixes which tickets may run, not which will land. An admitted member needs a passing candidate test and both independent approvals on the prospective integrated commit. Only observed landing on the batch branch **and** tracker completion release a submitted prerequisite. A stopped provider leaves its dependants held without vetoing other deliveries. The operator receives one historical branch tip with per-member outcomes, not permission for Factory to keep that branch synchronized or promote it.
+
 ### Project and ticket identity
 
 A ticket number is meaningful only within its tracker repository or project. Shared state distinguishes projects so similarly numbered tickets cannot share admission authority accidentally.

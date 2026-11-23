@@ -41,7 +41,7 @@ test('authenticated member responses distinguish invalid tickets from incomplete
   assert.equal(lab([parent([{workItemType:{name:'Task'}}],false)]),'invalid');assert.equal(lab([item],'foreign'),'invalid');
 });
 
-test('copied batch CLI selects only validated members and owns only confirmed writes to its named remote', async t => {
+test('copied batch ownership boundary selects only validated members and owns only confirmed writes to its named remote', async t => {
   const {p} = home(t,'factory-batch-');
   const root = join(p.home,'project'), server = join(p.home,'remote.git'), otherServer = join(p.home,'other.git');
   const bin = join(p.home,'bin'), effects = join(p.home,'forbidden'), transports = join(p.home,'transports'), reads = join(p.home,'tracker-reads');
@@ -112,7 +112,12 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   const toml=join(root,'.factory/factory.toml'), githubConfig=factoryToml('org/repo',{host:'fixture.test'}); writeFileSync(toml,githubConfig); addProject(p,root);
   await install(p,new Fake(p),{schedule:new FakeSchedule(p)});
   const node = (args:string[], extra={}) => spawnSync(process.execPath,['--require',preload,...args],{env:{...env,...extra},encoding:'utf8',timeout:30000});
-  const cli = (args:string[],extra={}) => node([p.bin,'batch',...args],extra);
+  // Exercise the ownership boundary alone: command orchestration intentionally acquires claims after this returns.
+  const cli = ([action,project,...args]:string[],extra={}) => node(['--input-type=module','-e',`
+    import {paths} from ${JSON.stringify(join(p.app,'cli/src/paths.mts'))};
+    import {submitBatch,resumeBatch} from ${JSON.stringify(join(p.app,'cli/src/batch.mts'))};
+    const p=paths(process.env.FACTORY_HOME), project=${JSON.stringify(project)}, args=${JSON.stringify(args)};
+    console.log(JSON.stringify(${action==='submit'?'submitBatch(p,project,args,id=>console.error("Reserved batch "+id))':'resumeBatch(p,project,args[0])'}));`],extra);
   type Result = ReturnType<typeof cli>;
   function refused(result:Result, reason?:RegExp) {
     assert.ifError(result.error); assert.equal(result.signal,null); assert.equal(result.status,1,result.stderr); if(reason) assert.match(result.stderr,reason);

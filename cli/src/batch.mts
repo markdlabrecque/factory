@@ -233,6 +233,21 @@ export function submitBatch(p:Paths,project:string,ids:string[],onReserved?: (id
   onReserved?.(id);
   try { return resumeBatch(p,project,id); } catch (e) { throw Error(`Batch ${id}: ${(e as Error).message}`); }
 }
+/** Status only: distinguish the actual remote ref (or an unavailable observation) from the last settled head. */
+export function inspectBatchHead(p:Paths,project:string,id:string) {
+  const c=context(p,project), b=identity(load(location(p,id),c,id));
+  try {verifyRepository(c,b.repositoryId);return {b,observedHead:observe(c,b.destinationRef)}}
+  catch {return {b,observedHead:null}}
+}
+/** Historical command namespace: registration and private original only, independent of live tracker or Git. */
+export function batchCommandStore(p:Paths,project:string,id:string) {
+  const dir=location(p,id), root=batchRegistration(p,project).root;
+  batchStore(p,root); privatePath(dirname(dir),true); privatePath(dir,true);
+  const file=join(dir,'batch.json'); privatePath(file,false);
+  const original=JSON.parse(readBoundedText(file,1<<20,'batch identity'));
+  if(original.id!==id || original.root!==root || original.version!==2 || original.destinationRef!==destination(id)) throw Error('Mismatched batch command identity');
+  return dir;
+}
 /** Passive dispatch/delivery lookup; an incomplete transaction requires explicit operator resume. */
 export function readOwnedBatch(p:Paths,project:string,id:string):BatchIdentity {
   const dir = location(p,id), c = context(p,project), r = load(dir,c,id);
