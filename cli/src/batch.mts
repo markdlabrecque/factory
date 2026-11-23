@@ -73,6 +73,17 @@ function checkedOrigin(c:Context) {
   if (originEndpoint(c.root) !== c.endpoint) throw Error('Batch origin endpoint changed');
   return origin;
 }
+// Named pushes also update the local ref selected by remote.origin.fetch. Never let
+// that implicit update target an operator branch, including via a symbolic tracking ref.
+function checkTracking(root:string, id?:string) {
+  const mappings = git(root,'config','--null','--get-all','remote.origin.fetch');
+  if (!['+refs/heads/*:refs/remotes/origin/*\0','refs/heads/*:refs/remotes/origin/*\0'].includes(mappings))
+    throw Error('Batch requires conventional origin fetch tracking');
+  if (id) {
+    const probe = spawnSync('git',[...gitArgs(root),'symbolic-ref','--quiet','--no-recurse',`refs/remotes/origin/factory/batch/${id}`],{timeout:30000,stdio:'ignore'});
+    if (probe.error || probe.signal || probe.status !== 1) throw Error('Unsafe batch tracking ref');
+  }
+}
 function verifyRepository(c:Context, expected:string) {
   if (trackerRepositoryId(c.config) !== expected) throw Error('Batch held: tracker repository identity changed');
 }
@@ -85,6 +96,13 @@ function observe(c:Context, ref:string): string|null {
   const [value,name] = out.split('\t');
   if (!isSha(value) || name !== ref) throw Error('Ambiguous remote batch ref');
   return value;
+}
+// No local retention ref: a stale checkout can lose an unreachable object to GC.
+// Always fetch by the saved object ID, never the possibly moved base branch.
+function fetchCommit(c:Context, repositoryId:string, sha:string) {
+  verifyRepository(c,repositoryId);
+  git(c.root,'fetch','--no-prune','--no-prune-tags','--no-tags','--no-write-fetch-head','--no-auto-maintenance','--recurse-submodules=no','--refmap=','--',checkedOrigin(c),sha);
+  if (git(c.root,'cat-file','-t',sha) !== 'commit') throw Error('Batch base is not a commit');
 }
 function privatePath(path:string, directory:boolean) {
   const stat = lstatSync(path);
@@ -131,7 +149,12 @@ function check(dir:string,c:Context,r:Record) {
   verifyRepository(c,r.repositoryId);
   if (r.phase === 'ready' && head === r.expectedHead) return 'ready';
   if (r.pending && receipt(dir,r) && head === r.pending.next) return 'settle';
-  if (r.phase === 'creating' && head === null && !lstatSync(join(dir,r.pending!.attempt+'.push'),{throwIfNoEntry:false})) return 'create';
+  // The marker directory entry is synced before spawn. Only ENOENT, not an
+  // empty receipt or dangling symlink, proves this intent didn't reach Git.
+  if (r.pending && !lstatSync(join(dir,r.pending.attempt+'.push'),{throwIfNoEntry:false})) {
+    if (r.phase === 'creating' && head === null) return 'create';
+    if (r.phase === 'advancing' && head === r.expectedHead) return 'discard-advance';
+  }
   throw Error('Batch held: destination missing, collided, drifted, or lacks a confirmed host write');
 }
 function settle(dir:string,c:Context,r:Record):BatchIdentity {
@@ -141,9 +164,18 @@ function settle(dir:string,c:Context,r:Record):BatchIdentity {
 }
 function push(dir:string,c:Context,r:Record):BatchIdentity {
   const {next,attempt} = r.pending!;
+  if (r.phase === 'creating') {
+    let present = false;
+    try { present = git(c.root,'cat-file','-t',next) === 'commit'; } catch { /* missing or unreadable locally */ }
+    if (!present) {
+      checkTracking(c.root,r.id);
+      fetchCommit(c,r.repositoryId,next);
+    }
+  }
   // Last identity reads precede both the advance intent and receipt: a changed/unknown ID is not an attempted write.
   verifyRepository(c,r.repositoryId);
   const target = checkedOrigin(c);
+  checkTracking(c.root,r.id);
   const marker = join(dir,attempt+'.push');
   if (lstatSync(marker,{throwIfNoEntry:false})) throw Error('Batch attempt already exists');
   const args = [...gitArgs(c.root),'-c','push.pushOption=','push','--porcelain',`--force-with-lease=${r.destinationRef}:${r.phase === 'creating' ? '' : r.expectedHead}`,'--',target,`${next}:${r.destinationRef}`];
@@ -155,9 +187,9 @@ function push(dir:string,c:Context,r:Record):BatchIdentity {
     mayHaveLaunched = true;
     const result = spawnSync('git',args,{stdio:['ignore',fd,'pipe'],timeout:30000,env:{...process.env,LC_ALL:'C'}});
     const error = result.error as NodeJS.ErrnoException|undefined;
-    if (error?.code === 'ENOENT' && error.syscall === 'spawnSync git' && result.pid === 0 && result.status === null && result.signal === null) {
+    if ((error?.code === 'ENOENT' || error?.code === 'EACCES') && error.syscall === 'spawnSync git' && result.pid === 0 && result.status === null && result.signal === null) {
       mayHaveLaunched = false;
-      throw Error('Batch Git push executable not found');
+      throw Error(`Batch Git push executable did not launch: ${error.code}`);
     }
     fsyncSync(fd);
   } catch (error) {
@@ -176,6 +208,7 @@ function push(dir:string,c:Context,r:Record):BatchIdentity {
 }
 export function submitBatch(p:Paths,project:string,ids:string[],onReserved?: (id:string)=>void):BatchIdentity {
   const members = batchMembers(ids), c = context(p,project);
+  checkTracking(c.root);
   const repositoryId = trackerRepositoryId(c.config);
   resolveMembers(c.config,members,repositoryId);
   const baseRef = c.branch ? `refs/heads/${c.branch}` : /^ref: (refs\/heads\/[^\s]+)\tHEAD$/m.exec(git(c.root,'ls-remote','--symref','--',checkedOrigin(c),'HEAD'))?.[1];
@@ -184,9 +217,7 @@ export function submitBatch(p:Paths,project:string,ids:string[],onReserved?: (id
   const sourceSha = observe(c,baseRef); if (!sourceSha) throw Error('Configured base missing from origin');
   // The checkout may be stale; fetch only the pinned commit, without changing any checkout or local branch.
   batchStore(p,c.root);
-  verifyRepository(c,repositoryId);
-  git(c.root,'fetch','--no-tags','--no-write-fetch-head','--recurse-submodules=no','--refmap=','--',checkedOrigin(c),sourceSha);
-  if (git(c.root,'cat-file','-t',sourceSha) !== 'commit') throw Error('Base is not a commit');
+  fetchCommit(c,repositoryId,sourceSha);
   const id = randomUUID(), dir = location(p,id), parent = batchStore(p,c.root);
   verifyRepository(c,repositoryId);
   durableDirectory(parent); privatePath(parent,true); mkdirSync(dir,{mode:0o700}); syncDirectory(parent);
@@ -208,6 +239,10 @@ export function resumeBatch(p:Paths,project:string,id:string):BatchIdentity {
     const current = load(dir,c,id), action = check(dir,c,current);
     if (action === 'ready') return identity(current);
     if (action === 'settle') return settle(dir,c,current);
+    if (action === 'discard-advance') {
+      const ready:Record = {...current,phase:'ready',pending:null};
+      save(dir,ready); return identity(ready);
+    }
     return push(dir,c,current);
   });
 }
