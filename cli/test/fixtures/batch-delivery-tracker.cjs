@@ -2,13 +2,20 @@
 const fs=require('node:fs'), assert=require('node:assert/strict'), path=require('node:path');
 const github=process.env.KIND==='github', a=process.argv.slice(2), facts=process.env.FACTS;
 const f=JSON.parse(fs.readFileSync(facts)), host='fixture.invalid', repo='org/project', iid=7, base=github?'repos/org/project/issues':'projects/42/issues';
+if(f.offline)process.exit(1);
 const print=x=>console.log(JSON.stringify(x));
 if(a[1]==='graphql'){
   const query=a.find(s=>s.startsWith('query='));assert(query);assert(a.includes(host)||process.env.GH_HOST===host);
   if(query.includes('viewer {id}'))print({data:{viewer:{id:'fixture'},repository:{id:'repo_original',nameWithOwner:repo,issue:{number:iid,state:'OPEN',subIssues:{totalCount:0}}}}});
   else if(query.includes('currentUser {id}'))print({data:{currentUser:{id:'fixture'},project:{id:'gid://gitlab/Project/42',fullPath:repo,workItems:{nodes:[{iid:'7',state:'OPEN',workItemType:{name:'Task'}}]}}}});
-  else if(github)print({data:{repository:{issue:{parent:null}}}});
-  else print({data:{project:{workItems:{nodes:[{iid:'7',workItemType:{name:'Task'},widgets:[{parent:{iid:'8'}}]}]}}}});
+  else if(github){
+    const repository={id:'repo_original',nameWithOwner:repo};
+    print({data:{repository:{...repository,issue:{number:7,parent:f.parentIid?{number:8,...(query.includes('repository { id nameWithOwner }') && f.scope!=='missing'?{repository:f.scope==='foreign'?{id:'other',nameWithOwner:'foreign/project'}:repository}:{})}:null}}}});
+  }else{
+    const project=f.scope==='foreign'?{id:'gid://gitlab/Project/43',fullPath:'foreign/project'}:{id:'gid://gitlab/Project/42',fullPath:repo};
+    const nodes=[{iid:'7',workItemType:{name:'Task'},widgets:[{parent:{iid:'8',...(query.includes('parent { iid project { id fullPath }') && f.scope!=='missing'?{project}:{})}}]}];
+    print({data:{project:{id:'gid://gitlab/Project/42',fullPath:repo,workItems:{nodes}}}});
+  }
 } else if(a[0]==='api' && a[1].startsWith(base+'/')) {
   if(process.env.FAIL_OBSERVE && a[1]===base+'/7' && a[2]==='--hostname')process.exit(1);
   const n=Number(a[1].slice(base.length+1).split('/')[0]);assert([7,8].includes(n));
@@ -19,5 +26,5 @@ if(a[1]==='graphql'){
   assert.deepEqual(a,github?['issue','edit','7','-R','fixture.invalid/org/project','--add-label','merged','--remove-label','ready-for-agent']:['api','--hostname',host,'-X','PUT',base+'/7','-f','state_event=close']);
   fs.appendFileSync(process.env.UPDATES,JSON.stringify(a)+'\n');
   if(f.deny)process.exit(1);
-  fs.writeFileSync(facts,JSON.stringify({...f,done:true}));
+  if(!f.ackOnly)fs.writeFileSync(facts,JSON.stringify({...f,done:true}));
 }

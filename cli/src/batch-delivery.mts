@@ -9,7 +9,7 @@ import { readBoundedText } from '../../orchestrator/ownership.mts';
 import { commandContextSource } from '../../orchestrator/ticket-context-source.mts';
 import { freezeTicketInput } from '../../orchestrator/ticket-input.mts';
 import { BATCH_EVIDENCE_VERSION, latestBatchAttempt, runStandardBatchMember, standardChecks, type AttemptBinding, type BatchEvidence } from '../../orchestrator/batch-review.mts';
-import { advanceBatch, batchMemberLocation, observedBatchAdvance, readOwnedBatch } from './batch.mts';
+import { advanceBatch, confirmedBatchAdvance, batchMemberLocation, observedBatchAdvance, readOwnedBatch } from './batch.mts';
 import { resolveMembers } from './batch-tracker.mts';
 import { batchCompletion } from './batch-completion.mts';
 import type { Paths } from './paths.mts';
@@ -82,7 +82,7 @@ function requireMemberClaim(p:HostPaths,key:DeliveryKey,m:ReturnType<typeof loca
   if(claim?.token!==key.run || claim.kind!=='normal' || claim.project!==project || claim.iid!==iid || ownerState(claim.owner)!=='alive' || row.claim!==key.run || row.executionId!==key.run || row.pid!==claim.owner.pid || row.project!==project || row.iid!==iid || row.batchMember?.id!==key.batch || row.batchMember.repositoryId!==m.identity.repositoryId || row.ticketHash!==requirements)throw Error('Original batch member claim or requirements no longer current');
 }
 function inputs(m:ReturnType<typeof local>,ticket:number) {
-  const t=m.config.TRACKER, source=commandContextSource({kind:t.kind,host:t.host??t.gitlabHost!,project:t.project},t.projectId);
+  const t=m.config.TRACKER, source=commandContextSource({kind:t.kind,host:t.host??t.gitlabHost!,project:t.project},t.projectId,process.env,m.identity.repositoryId);
   const image=execFileSync('docker',['image','inspect','--format','{{.Id}}',m.config.config.image],{encoding:'utf8',timeout:10000,stdio:['ignore','pipe','pipe']}).trim();
   // Sample effective requirements after external image inspection, not before it.
   const frozen=freezeTicketInput(source,ticket);
@@ -129,13 +129,15 @@ function deliver(p:HostPaths,key:DeliveryKey, candidate?:AttemptBinding):BatchDe
           save({...r,reason:'Owned head advanced; a rebuilt candidate, passing tests and two fresh approvals are required'});
           return 'rebuild';
         }
-        advanceBatch(p,project,batch,b.expectedHead,b.candidate,b.attempt,()=>{
+        const settled=advanceBatch(p,project,batch,b.expectedHead,b.candidate,b.attempt,()=>{
           const completion=validate(b);
           return write=>publish(b,()=>{
             r=save({...r!,completion,git:'attempted',reason:'Git advance intent; receipt/readback required'});
             write();
           });
         });
+        if(settled.expectedHead!==b.candidate)throw Error('Unexpected settled batch head');
+        r=save({...r!,git:'landed',reason:'Exact advance confirmed; tracker not confirmed'});
       } catch(e){
         if(r.git==='not-started'){
           try {if(owned().expectedHead!==b.expectedHead)return 'rebuild'} catch { /* unknown movement is never a rebuild */ }
@@ -145,7 +147,7 @@ function deliver(p:HostPaths,key:DeliveryKey, candidate?:AttemptBinding):BatchDe
     }
     if(r.git!=='landed'){
       let git:'landed'|'refused'|'unknown'='unknown';
-      try {git=observedBatchAdvance(p,project,batch,b.expectedHead,b.candidate,b.attempt)} catch { /* Ownership/transport inconclusive: no retry. */ }
+      try {git=confirmedBatchAdvance(p,project,batch,ticket,b.expectedHead,b.candidate,b.attempt)?'landed':observedBatchAdvance(p,project,batch,b.expectedHead,b.candidate,b.attempt)} catch { /* Ownership/transport inconclusive: no retry. */ }
       r=save({...r,git,reason:git==='landed'?'Exact advance confirmed; tracker not confirmed':git==='refused'?'Git refused the advance; inspect permissions/protection or movement':'No conclusive host receipt and Git readback; do not retry'});
       if(git!=='landed')return r;
     }

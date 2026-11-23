@@ -57,16 +57,20 @@ async function journey(t:TestContext,kind:'github'|'gitlab') {
   writeFileSync(contender,`import {withAdmissionLock,admissionFile,readAdmission,keyFor} from '${new URL('../../board/admission.mts',import.meta.url).href}';import {appendFileSync} from 'node:fs';
     const state=${JSON.stringify(p.state)},phase=process.argv[2];try{withAdmissionLock(state,write=>{const s=readAdmission(state);delete s.claims[keyFor('7','org/project')];write(admissionFile(state),JSON.stringify(s));},0);appendFileSync(${JSON.stringify(probeLog)},'released:'+phase+'\\n');}catch(e){if(!e.message.includes('locked by process'))throw e;appendFileSync(${JSON.stringify(probeLog)},'blocked:'+phase+'\\n');}`);
   const injection=join(p.home,'after-approval.cjs');
-  writeFileSync(injection,`const fs=require('node:fs'),rename=fs.renameSync,link=fs.linkSync;let fired=false;
+  writeFileSync(injection,`const fs=require('node:fs'),rename=fs.renameSync;let fired=false;
     const cp=require('node:child_process'),exec=cp.execFileSync,spawn=cp.spawnSync;
     const revoke=phase=>exec(process.execPath,[${JSON.stringify(contender)},phase]);
     cp.spawnSync=function(cmd,args,...rest){if(process.env.CONTEND && cmd==='git' && args.includes('--porcelain'))revoke('git');return spawn(cmd,args,...rest)};
     cp.execFileSync=function(cmd,args,...rest){if(process.env.CONTEND && ['gh','glab'].includes(cmd) && (args[0]==='issue'||args.includes('PUT')))revoke('tracker');return exec(cmd,args,...rest)};
     // Release wins immediately BEFORE the publisher takes the real admission lock, after gate checks.
-    fs.linkSync=function(from,to){if(process.env.PREEMPT && to===${JSON.stringify(join(p.state,'admission','lock'))} && !fired){fired=true;revoke('before-'+process.env.PREEMPT)}return link(from,to)};
-    fs.renameSync=function(from,to){rename(from,to);if(to.endsWith('/delivery.json') && process.env.INTERRUPT==='landed' && JSON.parse(fs.readFileSync(to)).git==='landed')process.kill(process.pid,'SIGKILL');if(!fired && to.endsWith('/delivery.json') && process.env.MOVE && JSON.parse(fs.readFileSync(to)).git==='not-started'){
+    const sqlite=require('node:sqlite'),DB=sqlite.DatabaseSync;
+    sqlite.DatabaseSync=class extends DB{constructor(file,...args){if(process.env.PREEMPT && file===${JSON.stringify(join(p.state,'admission','mutex.sqlite'))} && !fired){fired=true;revoke('before-'+process.env.PREEMPT)}super(file,...args)}};
+    fs.renameSync=function(from,to){rename(from,to);
+      if(process.env.LOSE_TRACKER && to.endsWith('/batch.json')){const b=JSON.parse(fs.readFileSync(to));if(b.phase==='ready' && b.expectedHead!==b.sourceSha){const f=JSON.parse(fs.readFileSync(process.env.FACTS));fs.writeFileSync(process.env.FACTS,JSON.stringify({...f,offline:true}));if(process.env.LOSE_TRACKER==='crash')process.kill(process.pid,'SIGKILL');}}
+      if(to.endsWith('/delivery.json') && process.env.INTERRUPT==='landed' && JSON.parse(fs.readFileSync(to)).git==='landed')process.kill(process.pid,'SIGKILL');if(!fired && to.endsWith('/delivery.json') && process.env.MOVE && JSON.parse(fs.readFileSync(to)).git==='not-started'){
       fired=true;const b=JSON.parse(fs.readFileSync(to)).binding, cp=require('node:child_process');
-      if(process.env.MOVE==='image')fs.writeFileSync(${JSON.stringify(image)},'sha256:'+'b'.repeat(64)+'\\n');
+      if(process.env.MOVE.startsWith('scope-')){const f=JSON.parse(fs.readFileSync(process.env.FACTS));fs.writeFileSync(process.env.FACTS,JSON.stringify({...f,scope:process.env.MOVE.slice(6)}));}
+      else if(process.env.MOVE==='image')fs.writeFileSync(${JSON.stringify(image)},'sha256:'+'b'.repeat(64)+'\\n');
       else if(process.env.MOVE==='foreign')cp.execFileSync('/usr/bin/git',['-C',process.env.SERVER,'update-ref',b.destination,process.env.NEXT,b.expectedHead]);
       else {if(process.env.MOVE==='stop')fs.writeFileSync(${JSON.stringify(rejectMarker)},'reject');cp.execFileSync(process.execPath,['--input-type=module','-e','import {advanceBatch} from '+JSON.stringify(${JSON.stringify(batchUrl)})+'; advanceBatch(...'+JSON.stringify([${JSON.stringify({projects:p.projects,state:p.state})},'project',b.batch,b.expectedHead,process.env.NEXT])+')']);}
     }};require('node:module').syncBuiltinESMExports();`);
@@ -133,5 +137,27 @@ async function journey(t:TestContext,kind:'github'|'gitlab') {
     before=lines(pushes).length;writeFileSync(join(server,'hooks/pre-receive'),'#!/bin/sh\nexit 1\n',{mode:0o700});
     const denied=await execute(sibling.id);assert.equal(denied.git,'refused',denied.reason);assert.equal(denied.tracker,'not-started');assert.equal(ref(sibling.destinationRef),original);assert.equal((await execute(sibling.id)).git,'refused');assert.equal(lines(pushes).length,before+1);assert.equal(lines(updates).length,count);assert.equal(ref('main'),original);assert.equal(ref(batch.destinationRef),out.binding.candidate);
   }
+  invalidate=false;if(kind==='github')fsUnlink(join(server,'hooks/pre-receive'));
+  for(const scope of ['foreign','missing'])await t.test(`${scope} parent identity cannot name the same-number local decoy`,async()=>{
+    reset({parentIid:8});const b=await submit(),before=lines(pushes).length,changes=lines(updates).length;
+    const result=await execute(b.id,{MOVE:'scope-'+scope});assert.equal(result.gate,'approved');assert.equal(result.git,'not-started');assert.equal(result.tracker,'not-started');
+    assert.equal(ref(b.destinationRef),original);assert.equal(lines(pushes).length,before);assert.equal(lines(updates).length,changes);
+  });
+  if(kind==='github')await t.test('positive Git settlement survives immediate tracker loss and remains included on a later owned descendant',async()=>{
+    reset();const b=await submit(),before=lines(pushes).length,changes=lines(updates).length;
+    const result=await execute(b.id,{LOSE_TRACKER:'1'});assert.equal(ref(b.destinationRef),result.binding.candidate);assert.equal(result.git,'landed');assert.equal(result.tracker,'not-started');assert.deepEqual(await saved(b.id),result);assert.equal(lines(updates).length,changes);
+    reset();const done=await execute(b.id);assert.equal(done.tracker,'complete');assert.equal(lines(pushes).length,before+1);assert.equal(lines(updates).length,changes+1);
+    const commit=done.binding.candidate, descendant=git(root,'commit-tree',commit+'^{tree}','-p',commit,'-m','later owned advance');const current=await call(batchUrl,'advanceBatch',[paths,'project',b.id,commit,descendant]);
+    assert.equal(ref(b.destinationRef),descendant);assert.deepEqual(await observe(current),{state:'landed',batch:b.id,repositoryId:b.repositoryId,destination:b.destinationRef,observedHead:descendant,iid:7,commit});
+  });
+  if(kind==='github')await t.test('settled receipt survives process death before the member journal is updated',async()=>{
+    reset();const b=await submit(),before=lines(pushes).length,changes=lines(updates).length;
+    await assert.rejects(execute(b.id,{LOSE_TRACKER:'crash'}),(err:any)=>err.signal==='SIGKILL');assert.equal((await saved(b.id)).git,'attempted');
+    const result=await execute(b.id);assert.equal(result.git,'landed');assert.equal(result.tracker,'not-started');assert.equal(ref(b.destinationRef),result.binding.candidate);assert.equal(lines(pushes).length,before+1);assert.equal(lines(updates).length,changes);
+  });
+  await t.test('acknowledged update without issue state change is incomplete and never replayed',async()=>{
+    reset({ackOnly:true});const b=await submit(),before=lines(pushes).length,changes=lines(updates).length;
+    const result=await execute(b.id);assert.equal(result.git,'landed');assert.equal(result.tracker,'incomplete');assert.equal((await observe({...b,expectedHead:ref(b.destinationRef)})).state,'waiting');assert.equal((await execute(b.id)).tracker,'incomplete');assert.equal(lines(pushes).length,before+1);assert.equal(lines(updates).length,changes+1);
+  });
 }
 for(const kind of ['github','gitlab'] as const)test(`${kind}: admitted delivery observes exact Git and tracker outcomes without replay`,t=>journey(t,kind));

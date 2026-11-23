@@ -159,6 +159,9 @@ function check(dir:string,c:Context,r:Record) {
 }
 function settle(dir:string,c:Context,r:Record):BatchIdentity {
   if (check(dir,c,r) !== 'settle') throw Error('Batch push not confirmed');
+  // Retain the observed historical fact before clearing the intent. A crash between batch
+  // settlement and member journalling must not require a working tracker to remember landing.
+  if(r.phase==='advancing')writeDurable(join(dir,r.pending!.attempt+'.settled'),JSON.stringify({version:1,id:r.id,repositoryId:r.repositoryId,destination:r.destinationRef,old:r.expectedHead,next:r.pending!.next,attempt:r.pending!.attempt}));
   const ready:Record = {...r,expectedHead:r.pending!.next,phase:'ready',pending:null};
   save(dir,ready); return identity(ready);
 }
@@ -255,6 +258,17 @@ export function batchMemberLocation(p:Paths,project:string,id:string,ticket:numb
   const c=context(p,project), dir=location(p,id), r=load(dir,c,id);
   if(!r.members.includes(ticket)) throw Error('Ticket is not an owned batch member');
   return {dir, root:c.root, config:c.config, identity:identity(r)};
+}
+/** Historical settlement only, never authority for another write. Requires both the host's
+ * authenticated exact readback at settlement and the positive porcelain receipt for this attempt. */
+export function confirmedBatchAdvance(p:Paths,project:string,id:string,ticket:number,old:string,next:string,attempt:string):boolean {
+  if(!uuid.test(attempt)||!isSha(old)||!isSha(next))throw Error('Invalid delivery identity');
+  const {dir,identity:r}=batchMemberLocation(p,project,id,ticket),file=join(dir,attempt+'.settled');
+  if(!lstatSync(file,{throwIfNoEntry:false}))return false;
+  privatePath(file,false);
+  const s=JSON.parse(readBoundedText(file,65536,'batch settlement'));
+  if(s.version!==1||s.id!==id||s.repositoryId!==r.repositoryId||s.destination!==r.destinationRef||s.old!==old||s.next!==next||s.attempt!==attempt)throw Error('Mismatched batch settlement');
+  return receipt(dir,{...r,phase:'advancing',pending:{next,attempt}});
 }
 /** Read-only receipt reconciliation; settle ONLY the named advance with its positive receipt and exact readback. */
 export function observedBatchAdvance(p:Paths,project:string,id:string,old:string,next:string,attempt:string):'landed'|'refused'|'unknown' {
