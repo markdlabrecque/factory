@@ -76,6 +76,7 @@ export interface RunState {
   startedAt: string;
   executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
   payloadCustody?: { version: 1; nonce: string }; // private source journal pointer; never readiness/projection authority
+  batchMember?: { id:string; repositoryId:string; footprint:string[]; attempt?:string; gate?:string };
   implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
   acceptanceBaseline?: { version: 1; bindingDigest: string; sha: string }; // original full-scope/current-host admission binding, never replaced by repair
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
@@ -284,6 +285,7 @@ export interface AdmitOptions {
   iid: string;
   pid: number;
   cap: number;
+  projectRoot?: string;
   project?: string;
   patch?: Partial<RunState>;
   /** `recovery`: holds the project and is refused while any other run of the project is in flight. Default `normal`. */
@@ -303,14 +305,21 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   const proj = o.project ?? project;
   const key = keyFor(o.iid, proj);
   const kind = o.kind ?? "normal";
-  const exclusion = supervisorExclusion(tx.state, proj, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()));
+  const root = realpathSync(o.projectRoot ?? process.env.FACTORY_PROJECT_ROOT ?? process.cwd());
+  const exclusion = supervisorExclusion(tx.state, proj, root);
   if (exclusion) return { ok: false, reason: exclusion };
   const baselines = readBaselineReservations(dir);
-  if (baselines.some(b => b.project.tracker.project === proj || b.project.root === realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd())))
+  if (baselines.some(b => b.project.tracker.project === proj || b.project.root === root))
     return { ok: false, reason: 'project held by acceptance baseline cleanup' };
-  const runs = readRuns(dir);
+  // A scoped batch pass must not delete or reconcile an outsider's stale starting reservation.
+  const runs = readRuns(dir, !o.patch?.batchMember);
   const claims = Object.entries(tx.state.claims).filter(([, c]) => claimLive(c));
   const current = runs.find((r) => r.key === key);
+  // A legacy launch has no batch footprint contract. Never replace a batch record or race a live batch member.
+  if (!o.patch?.batchMember && (current?.batchMember || runs.some(r => r.project === proj && r.batchMember && (inFlight(r) || r.stage==='waiting' && r.batchMember.gate==='approved'))))
+    return {ok:false,reason:'batch work requires owned batch dispatch'};
+  if (o.patch?.batchMember && claims.some(([,c]) => c.project===proj && !runs.some(r=>r.claim===c.token && r.batchMember)))
+    return {ok:false,reason:'project has a live claim without a known batch footprint'};
   const own = tx.state.claims[key];
   if (own && claimLive(own)) return { ok: false, reason: `#${o.iid} already has a run in flight (${own.kind} claim, process ${own.owner.pid})` };
   if (current && inFlight(current)) return { ok: false, reason: `#${o.iid} already has a run in flight (${current.stage}, process ${current.pid})` };

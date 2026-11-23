@@ -2,6 +2,7 @@
 // Keep native queries and pagination in step with the execution adapters.
 import { execFileSync } from 'node:child_process';
 import type { EffectiveConfig } from './project-config.mts';
+import { batchLinks } from './batch-links.mts';
 import type { Child } from './graph.mts';
 import type { Ticket, ReadyTicket, Select } from './tracker.mts';
 export function nativeGitlab(config: EffectiveConfig) {
@@ -9,7 +10,7 @@ export function nativeGitlab(config: EffectiveConfig) {
   const { gitlabHost: HOST = "", projectId: ID = 0 } = TRACKER as { gitlabHost?: string; projectId?: number };
 
   function glab(args: string[]): string {
-    return execFileSync("glab", args, { encoding: "utf8", killSignal: 'SIGKILL', env: { ...process.env, GITLAB_HOST: HOST }, stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
+    return execFileSync("glab", args, { encoding: "utf8", timeout:20_000, killSignal: 'SIGKILL', env: { ...process.env, GITLAB_HOST: HOST }, stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 }).trim();
   }
 
   const currentUsername = () => JSON.parse(glab(['api', 'user', '--hostname', HOST])).username as string;
@@ -51,8 +52,9 @@ export function nativeGitlab(config: EffectiveConfig) {
     return p ? Number(p.iid) : undefined;
   }
 
-  function ticket(iid: number): Ticket {
-    const t = api<Ticket>(`projects/${ID}/issues/${iid}`);
+  function ticket(iid: number, strict = false): Ticket {
+    const t = api<Ticket & {project_id:number}>(`projects/${ID}/issues/${iid}`);
+    if(strict && (t.iid!==iid || t.project_id!==ID || !['opened','closed'].includes(t.state??'') || !Array.isArray(t.labels) || !t.labels.every(l=>typeof l==='string'))) throw Error(`Member identity, state or exclusion facts unavailable for #${iid}`);
     return slim(t);
   }
 
@@ -81,5 +83,11 @@ export function nativeGitlab(config: EffectiveConfig) {
     }
   }
 
-  return { ticket, readyList, currentUsername, parentOf, children };
+  const blockers = (iid:number) => batchLinks(iid,{kind:'gitlab',project:TRACKER.project,projectId:ID,host:HOST},api);
+  const mergedInto = (branch:string,base:string) => {
+    const rows=api<unknown>(`projects/${ID}/merge_requests?state=merged&source_branch=${encodeURIComponent(branch)}&target_branch=${encodeURIComponent(base)}&per_page=1`);
+    if(!Array.isArray(rows)||rows.some(r=>!Number.isSafeInteger(r?.iid))) throw Error('Unknown merged MR state');
+    return rows.length>0;
+  };
+  return { ticket, blockers, mergedInto, readyList, currentUsername, parentOf, children };
 }

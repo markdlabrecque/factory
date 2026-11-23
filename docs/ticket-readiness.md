@@ -2,7 +2,19 @@
 
 Readiness is an observation, not permission to execute, verify or deliver. A saved healthy report never authorizes launch. Existing admission fencing, image/browser gates, independent verification, exact-SHA delivery, cleanup and recovery accounting remain in force.
 
+## Explicit batch selection and admission
+
+After [batch submission](factory-cli.md#explicit-batch-submission-and-resume), run `factory dispatch --project <name> --batch <id>` for one foreground pass. Repeat it to continue, or use `factory tick --project <name> --batch <id>` for the same explicitly scoped pass. Neither command enables a timer. An unscoped timer is not a batch continuation. No ticket list, ready label, caller-supplied base, parent expansion or tracker mutation participates in a batch pass.
+
+The host reopens the owned record and verifies its current remote head. In saved order, it inspects only the named units, their immediate parents, recorded prerequisites and relevant host run records. A member must still be runnable. Its model choice and gate receive the complete frozen child/parent requirements and included comments. Native GitHub blocked-by relations, directional GitLab issue links, local `Depends on:` / `Blocked by:` lines, and edges in the ticket’s recorded graph constrain admission. Unreadable links, unresolvable declarations, stale recorded requirements and unknown provider states hold that member rather than silently dropping the edge. Cyclic recorded blockers are not permission to ignore one. An **external** provider can satisfy the existing closed-ticket or recorded merged-branch check; looking it up never submits it. A **submitted** provider must actually be delivered on this batch. Closure, gate approval, an old Board verdict or a coincident branch head cannot unblock its dependants.
+
+The batch route does not call prepared-acceptance or baseline admission. It still checks project, workspace, current requirements, image readiness, shared capacity, footprint and ticket/project claim fences. In the absence of a usable footprint at the current tip, reserve the whole checkout. Pending approved work retains its footprint; stopped batch work does not. A hold is per member: the pass continues examining the remaining members. The host records observations at `<factory-state>/batches/<id>/selection-<iid>.json`; those files never authorize a claim. A successful claim creates a shared run record with `executionId`, `batchMember.id` and the reserved footprint. The claimed gate writes its private attempt store in the batch directory. Gate completion records the attempt ID and gate status on the run; `waiting` with `approved` is **not** delivery. Do not delete records to force a retry.
+
+**Delivery handoff:** `dispatchBatch(paths, project, id, observe)` accepts a trusted host `DeliveryObserver` (`orchestrator/batch-selection.mts`), never worker or CLI input. It receives the checked repository ID, owned destination, expected head, batch ID and member IID. Return `landed` only after independently reconciling actual delivery of that member’s exact commit on that branch and observing it included at the specified head; return `unstarted`, `stopped`, `waiting` or `unknown` with an actionable reason otherwise. The selector checks the returned identities and never advances a ref. Until the host delivery observer is wired, the default is a visible **delivery observation unavailable** hold, including after approval. Repeat the scoped pass after confirmed delivery. There is no background wake or automatic onward merge.
+
 ## Acceptance contract foundation
+
+The following preparation gates apply outside explicit batch dispatch.
 
 The [versioned portable acceptance contract](acceptance-contract.md) defines exact-content
 identity, trusted approval ingress and changed/preservation/reviewed non-transition policy.
