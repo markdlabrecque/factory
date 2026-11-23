@@ -6,7 +6,6 @@ The Request Ticket is an **Issue** work item; each Task ticket is a **Task** wor
 
 ```
 glab label list --per-page 100
-glab label create -n ready-for-agent -c "#428BCA" -d "Planned and split; ready for agents to implement"   # only if missing
 ```
 
 ## Request Ticket, with the estimate
@@ -55,14 +54,7 @@ Every task should appear with type `Task`. If one is missing, attach it again.
 
 ## Blockers
 
-GitLab CE has no blocked-by links, so dependencies live in the description. List the queue before labelling anything from this run:
-
-```
-glab issue list -l ready-for-agent --per-page 100
-glab issue view <N> --comments
-```
-
-In each blocked ticket's description, add this section at the end (Task tickets: directly under `## Done when`; unsplit Request Ticket: after the scope lists, before the estimate):
+Record dependencies in the description. Use `**Depends on:** #12, #14` with same-project IIDs for the machine-readable declaration, and add this section for the technical reasons:
 
 ```markdown
 ## Blocked by
@@ -73,16 +65,10 @@ In each blocked ticket's description, add this section at the end (Task tickets:
 
 Each entry names the blocker and the technical reason: the file, function, or output involved. Write it into the body file before `create`, or update an existing body with `glab issue update <N> -d "$(cat body.md)"`. Keep the `Depends on` line in sync with this list.
 
-## Acceptance and ready
+## Handoff
 
-File and read back scope, plan, model metadata, native child relationships and description-only blockers before [submitting the package](ACCEPTANCE.md#automated-handoff). Use only target-supported model selectors. For Factory, read back the ready label after the trusted preparation workflow applies it. If the workflow is unavailable or reports a hold, leave the item unlabelled. Do not post ordinary receipt notes after freeze; they can change the requirements hash.
+Read back scope, plan, model metadata, native child relationships and description blockers. For an explicit Factory batch, report the filed work-item IIDs and known blockers; description references and child links are not submissions. See the [GitLab batch example](BATCH.md#gitlab-child-with-a-blocker).
 
-Before changing existing ready scope or acceptance, remove readiness without changing other labels:
-
-```
-glab issue update <N> --unlabel ready-for-agent
-```
-
-Repeat the automated handoff for the new inputs. For other runtimes, use the target's documented readiness workflow.
+Only for a target that requires separate acceptance preparation, follow its documented readiness workflow and [automated handoff](ACCEPTANCE.md#automated-handoff), including its rules for invalidating readiness when approved inputs change.
 
 Link format for the report: `[#N](https://<host>/<group>/<project>/-/issues/N)`.
