@@ -10,6 +10,15 @@ import { install } from './runtime-fixture.mts';
 import { Fake, FakeSchedule } from '../src/platform/fake.mts';
 import { addProject, mutate } from '../src/projects.mts';
 import { batchMembers } from '../src/batch-tracker.mts';
+import { matchesTrackerOrigin } from '../src/batch.mts';
+
+test('tracker origin keeps URI ports distinct from SCP repository paths', () => {
+  const host = 'git.example.org:8443', project = 'group/repo';
+  assert.ok(matchesTrackerOrigin(`https://${host}/${project}.git`,host,project));
+  assert.ok(matchesTrackerOrigin(`git@git.example.org:${project}.git`,'git.example.org',project));
+  for (const wrong of [`git@${host}/${project}.git`,`https://git.example.org/${project}.git`,`https://user@${host}/${project}.git`])
+    assert.equal(matchesTrackerOrigin(wrong,host,project),false);
+});
 
 test('membership is an explicit set of canonical positive local IDs', () => {
   assert.deepEqual(batchMembers(['7','3']),[7,3]);
@@ -21,6 +30,8 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   const root = join(p.home,'project'), server = join(p.home,'remote.git'), otherServer = join(p.home,'other.git');
   const bin = join(p.home,'bin'), effects = join(p.home,'forbidden'), transports = join(p.home,'transports'), reads = join(p.home,'tracker-reads');
   const url = 'git@fixture.test:org/repo.git', otherURL = 'git@fixture.test:org/other.git';
+  const ghId='R_fixtureOriginal', glId='gid://gitlab/Project/42', ghIdentity=join(p.home,'gh-repository'), glIdentity=join(p.home,'gl-repository');
+  writeFileSync(ghIdentity,ghId); writeFileSync(glIdentity,glId);
   mkdirSync(join(root,'.factory'),{recursive:true}); mkdirSync(bin); symlinkSync(process.execPath,join(bin,'node'));
   const stub = (name:string,body:string) => writeFileSync(join(bin,name),`#!${process.execPath}\n${body}`,{mode:0o755});
   const recorder = `const fs=require('node:fs');const log=(f,s)=>fs.appendFileSync(f,s+'\\n');const a=process.argv.slice(2);`;
@@ -35,19 +46,26 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
     const remote=m[2]==='org/repo.git'?process.env.SERVER:process.env.OTHER_SERVER;
     process.exit(require('node:child_process').spawnSync('/usr/bin/git',[m[1].slice(4),remote],{stdio:'inherit'}).status??1);`);
   stub('gh',`${recorder}if(a.slice(0,5).join(' ')!=='api graphql --hostname fixture.test -f'||a.length!==6){log(process.env.EFFECTS,'unexpected gh');process.exit(91)}
-    const n=Number(/issue\\(number:(\\d+)\\)/.exec(a[5])[1]);log(process.env.READS,n);
-    const issue=[2,3,4,5].includes(n)?{number:n,state:'OPEN',subIssues:{totalCount:n===4?1:0}}:null;
-    console.log(JSON.stringify({data:{repository:{nameWithOwner:n===5?'org/other':'org/repo',issue}}}));`);
-  stub('glab',`${recorder}if(a.slice(0,5).join(' ')!=='api graphql --hostname fixture.test -f'||a.length!==6){log(process.env.EFFECTS,'unexpected glab');process.exit(93)}
-    const iid=/iids:\\["(\\d+)"\\]/.exec(a[5])[1];log(process.env.READS,iid);
+    const m=/issue\\(number:(\\d+)\\)/.exec(a[5]),n=m?Number(m[1]):null;if(m)log(process.env.READS,n);
+    const id=a[5].includes('{id nameWithOwner')?fs.readFileSync(process.env.GH_ID,'utf8')||undefined:undefined;
+    const issue=[2,3,4,5,7].includes(n)?{number:n,state:n===7?'CLOSED':'OPEN',subIssues:{totalCount:n===4?1:0}}:null;
+    const viewer=a[5].includes('viewer {id}')&&!process.env.ANON?{id:'fixture-user'}:null;
+    console.log(JSON.stringify({data:{viewer,repository:{id,nameWithOwner:n===5?'org/other':'org/repo',...(m?{issue}:{})}}}));`);
+  stub('glab',`${recorder}if(!['fixture.test','fixture.test:8443'].some(h=>a.slice(0,5).join(' ')==='api graphql --hostname '+h+' -f')||a.length!==6){log(process.env.EFFECTS,'unexpected glab');process.exit(93)}
+    const m=/iids:\\["(\\d+)"\\]/.exec(a[5]),iid=m?.[1];if(m)log(process.env.READS,iid);
+    const id=a[5].includes('{id fullPath')?(iid==='6'?'gid://gitlab/Project/101':fs.readFileSync(process.env.GL_ID,'utf8')||undefined):undefined;
+    const currentUser=a[5].includes('currentUser {id}')&&!process.env.ANON?{id:'gid://gitlab/User/1'}:null;
     const children={nodes:iid==='4'?[{workItemType:{name:'Task'}}]:[],pageInfo:{hasNextPage:iid==='5'}};
-    console.log(JSON.stringify({data:{project:{id:'gid://gitlab/Project/'+(iid==='6'?'101':'42'),fullPath:'org/repo',workItems:{nodes:[{iid,state:'OPEN',workItemType:{name:iid==='2'?'Task':'Issue'},widgets:[{__typename:'WorkItemWidgetHierarchy',children}]}]}}}}));`);
+    console.log(JSON.stringify({data:{currentUser,project:{id,fullPath:'org/repo',workItems:{nodes:[{iid,state:'OPEN',workItemType:{name:iid==='2'?'Task':'Issue'},widgets:[{__typename:'WorkItemWidgetHierarchy',children}]}]}}}}));`);
   // Never allow an anonymous transport target in the host under test. The real SSH boundary can only serve our two bare repos.
   stub('git',`${recorder}const cp=require('node:child_process'),op=a.find(x=>['fetch','push','ls-remote'].includes(x));
     if(op){const target=a[a.indexOf('--')+1];log(process.env.TRANSPORTS,op+' '+target);if(target!=='origin')process.exit(94)}
     if(op==='push'&&process.env.COMPETING_SHA){const ref=a.at(-1).split(':')[1];cp.execFileSync('/usr/bin/git',['-C',process.env.SERVER,'update-ref',ref,process.env.COMPETING_SHA])}
+    if(op==='ls-remote'&&a.at(-1).startsWith('refs/heads/factory/batch/')&&process.env.INTERRUPT_RESERVED){process.kill(process.ppid,'SIGKILL');process.exit(0)}
+    if(op&&process.env.PORT_TRANSPORT){const remote=cp.execFileSync('/usr/bin/git',['-C',process.env.ROOT,'remote','get-url','origin'],{encoding:'utf8'}).trim();if(remote!=='https://fixture.test:8443/org/repo.git')process.exit(95);a[a.indexOf('--')+1]=process.env.SERVER}
+    if(a.includes('merge-base')&&process.env.CHANGE_DURING_ANCESTRY&&fs.existsSync(process.env.BATCH_LOCK))fs.writeFileSync(process.env.GH_ID,'R_replacement');
     const result=cp.spawnSync('/usr/bin/git',a,{stdio:'inherit'});if(op==='push'&&process.env.INTERRUPT&&result.status===0)process.kill(process.ppid,'SIGKILL');process.exit(result.status??1);`);
-  const env = {HOME:p.home,FACTORY_HOME:p.home,PATH:bin,SERVER:server,OTHER_SERVER:otherServer,EFFECTS:effects,TRANSPORTS:transports,READS:reads,
+  const env = {HOME:p.home,FACTORY_HOME:p.home,PATH:bin,GH_ID:ghIdentity,GL_ID:glIdentity,ROOT:root,SERVER:server,OTHER_SERVER:otherServer,EFFECTS:effects,TRANSPORTS:transports,READS:reads,
     SANDCASTLE_STATE_DIR:p.state,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_SSH:join(bin,'ssh'),GIT_SSH_VARIANT:'simple',GIT_ALLOW_PROTOCOL:'file:ssh'};
   const git = (cwd:string,...args:string[]) => execFileSync('/usr/bin/git',['-c','user.name=Fixture','-c','user.email=f@example.test','-C',cwd,...args],{env,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
   git(root,'init','-b','main'); git(root,'commit','--allow-empty','-m','original'); const source = git(root,'rev-parse','HEAD');
@@ -73,7 +91,8 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   const noWork=()=>{ assert.equal(text(effects),''); assert.equal(existsSync(join(p.state,'admission')),false); };
   function invalid(ids:string[],reason:RegExp){refused(cli(['submit','project',...ids]),reason);verifyRefs(initial);noWork();assert.equal(existsSync(batchDir),false);}
   for(const ids of [[],['2','2'],['org/other#2']]) invalid(ids,/positive project-local/);
-  for(const ids of [['2','100'],['5'],['4']]) invalid(ids,/missing or not a runnable member/);
+  for(const ids of [['2','100'],['2','7'],['5'],['4']]) invalid(ids,/missing or not a runnable member/);
+  writeFileSync(ghIdentity,''); invalid(['2'],/authenticated repository identity/); writeFileSync(ghIdentity,ghId);
   renameSync(join(bin,'gh'),join(bin,'gh.off')); invalid(['2'],/Tracker lookup unavailable/); renameSync(join(bin,'gh.off'),join(bin,'gh'));
   git(root,'remote','set-url','--push','origin',otherURL); invalid(['2'],/matching origin fetch\/push/); git(root,'remote','set-url','--push','origin',url);
   // Existing symlink ancestor above a missing leaf: refusal before tracker, fetch, or mkdir anywhere in the resolved target.
@@ -86,12 +105,22 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   assert.equal(existsSync(inside),false);
   assert.deepEqual(readdirSync(inert),[]); assert.deepEqual(checkout(),originalCheckout); assert.equal(text(reads),oldReads); assert.equal(text(transports),''); verifyRefs(initial);noWork();
 
-  const b=success(cli(['submit','project','2','3'])); assert.deepEqual(b.members,[2,3]); assert.equal(b.baseRef,'refs/heads/main');assert.equal(b.sourceSha,source);assert.equal(b.expectedHead,source);
+  const b=success(cli(['submit','project','2','3'])); assert.equal(b.version,2);assert.equal(b.repositoryId,ghId);assert.deepEqual(b.members,[2,3]); assert.equal(b.baseRef,'refs/heads/main');assert.equal(b.sourceSha,source);assert.equal(b.expectedHead,source);
   verifyRefs({...initial,[b.destinationRef]:source});noWork();
   git(root,'push','origin',`${moved}:main`); const resume=(id:string,project='project')=>cli(['resume',project,id]);
   assert.deepEqual(success(resume(b.id)),b); assert.deepEqual(success(host('readOwnedBatch',[b.id])),b);
   const record=(id:string)=>join(batchDir,id,'batch.json');
-  function preserved(id:string,action:()=>Result){const old=text(record(id)), before=refMap(server);refused(action());assert.equal(text(record(id)),old);verifyRefs(before);noWork();}
+  const pushes=()=>text(transports).split('\n').filter(line=>line.startsWith('push ')).length;
+  function savedTree(dir:string):unknown {
+    if (!existsSync(dir)) return null;
+    return readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)).map(e=>{
+      const path=join(dir,e.name); return [e.name,e.isDirectory()?savedTree(path):readFileSync(path).toString('base64')];
+    });
+  }
+  function preserved(id:string,action:()=>Result){
+    const dir=dirname(record(id)), bytes=savedTree(dir), before=refMap(server), attempts=pushes(), selected=text(reads);
+    refused(action());assert.deepEqual(savedTree(dir),bytes);assert.equal(pushes(),attempts);assert.equal(text(reads),selected);verifyRefs(before);noWork();
+  }
   const other=join(p.home,'other');git(root,'clone',otherServer,other);git(other,'remote','set-url','origin',otherURL);mkdirSync(join(other,'.factory'));writeFileSync(join(other,'.factory/factory.toml'),factoryToml('org/other',{host:'fixture.test'}));addProject(p,other);
   preserved(b.id,()=>resume(b.id,'other'));
   git(root,'remote','set-url','origin',otherURL);git(root,'remote','set-url','--push','origin',otherURL);writeFileSync(toml,factoryToml('org/other',{host:'fixture.test'}));
@@ -99,8 +128,22 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   const advance=(old:string,next:string,extra={})=>host('advanceBatch',[b.id,old,next],extra);
   const prior=refMap(server); assert.equal(success(advance(source,dev)).expectedHead,dev);verifyRefs({...prior,[b.destinationRef]:dev});assert.equal(success(resume(b.id)).expectedHead,dev);
   preserved(b.id,()=>advance(source,dev));
+  preserved(b.id,()=>advance(dev,source)); // correct expected-old, but a rewind is not a fast-forward
+  const replacement=join(p.home,'replacement.git'); git(root,'clone','--bare',server,replacement);
+  const identical=refMap(replacement); assert.deepEqual(identical,refMap(server));
+  for(const seen of ['R_fixtureReplacement','']) {
+    writeFileSync(ghIdentity,seen); const transport={SERVER:replacement};
+    preserved(b.id,()=>host('readOwnedBatch',[b.id],transport));
+    preserved(b.id,()=>cli(['resume','project',b.id],transport));
+    preserved(b.id,()=>advance(dev,moved,transport)); assert.deepEqual(refMap(replacement),identical);
+  }
+  writeFileSync(ghIdentity,ghId);preserved(b.id,()=>host('readOwnedBatch',[b.id],{ANON:'1'}));
+  preserved(b.id,()=>advance(dev,moved,{CHANGE_DURING_ANCESTRY:'1',BATCH_LOCK:join(dirname(record(b.id)),'admission/lock')}));
+  assert.equal(text(ghIdentity),'R_replacement');writeFileSync(ghIdentity,ghId);
+  const saved=text(record(b.id)), legacy=JSON.parse(saved); delete legacy.repositoryId; legacy.version=1;
+  writeFileSync(record(b.id),JSON.stringify(legacy));preserved(b.id,()=>resume(b.id));writeFileSync(record(b.id),saved);
   renameSync(record(b.id),record(b.id)+'.held');preserved(b.id,()=>resume(b.id));assert.equal(existsSync(record(b.id)),false);renameSync(record(b.id)+'.held',record(b.id));
-  git(server,'update-ref',b.destinationRef,source);preserved(b.id,()=>resume(b.id));git(server,'update-ref','-d',b.destinationRef);preserved(b.id,()=>resume(b.id));git(server,'update-ref',b.destinationRef,dev);
+  git(server,'update-ref',b.destinationRef,source);preserved(b.id,()=>host('readOwnedBatch',[b.id]));preserved(b.id,()=>resume(b.id));git(server,'update-ref','-d',b.destinationRef);preserved(b.id,()=>resume(b.id));git(server,'update-ref',b.destinationRef,dev);
   // A different writer fast-forwards to the exact proposed commit after the host's check. Up-to-date is not a host write.
   const beforeRace=refMap(server);refused(advance(dev,moved,{COMPETING_SHA:moved}));verifyRefs({...beforeRace,[b.destinationRef]:moved});
   assert.equal(JSON.parse(text(record(b.id))).expectedHead,dev);preserved(b.id,()=>resume(b.id));
@@ -108,15 +151,32 @@ test('copied batch CLI selects only validated members and owns only confirmed wr
   const beforeCreate=refMap(server);assert.notEqual(beforeCreate['refs/heads/main'],beforeCreate['refs/heads/develop']);
   const interrupted=cli(['submit','project','3'],{INTERRUPT:'1'});assert.equal(interrupted.signal,'SIGKILL');
   const reserved=(r:Result)=>{const match=/Reserved batch ([0-9a-f-]{36})/.exec(r.stderr);assert.ok(match,r.stderr);return match[1]};
-  const id=reserved(interrupted), owned=success(resume(id));assert.equal(owned.baseRef,'refs/heads/develop');assert.equal(owned.sourceSha,dev);assert.equal(owned.expectedHead,dev);verifyRefs({...beforeCreate,[owned.destinationRef]:dev});
+  const id=reserved(interrupted);preserved(id,()=>host('readOwnedBatch',[id]));const owned=success(resume(id));assert.equal(owned.baseRef,'refs/heads/develop');assert.equal(owned.sourceSha,dev);assert.equal(owned.expectedHead,dev);verifyRefs({...beforeCreate,[owned.destinationRef]:dev});
   for(const existing of [dev,moved]){
     const before=refMap(server), collision=cli(['submit','project','2'],{COMPETING_SHA:existing});refused(collision);const colliding=reserved(collision);
     verifyRefs({...before,[`refs/heads/factory/batch/${colliding}`]:existing});preserved(colliding,()=>resume(colliding));
   }
+  // The durable reservation exists, but no creation receipt or branch exists. Move the configured base *before* resume.
+  const beforeReservation=refMap(server), attempted=pushes();
+  const stopped=cli(['submit','project','3'],{INTERRUPT_RESERVED:'1'});assert.equal(stopped.signal,'SIGKILL');
+  const emptyId=reserved(stopped);assert.deepEqual(readdirSync(dirname(record(emptyId))),['batch.json']);assert.equal(JSON.parse(text(record(emptyId))).sourceSha,dev);assert.equal(pushes(),attempted);verifyRefs(beforeReservation);
+  preserved(emptyId,()=>host('readOwnedBatch',[emptyId]));
+  git(root,'commit','--allow-empty','-m','new develop');const later=git(root,'rev-parse','HEAD');git(root,'push','origin','HEAD:develop');
+  const beforeResume=refMap(server), ticketReads=text(reads), fromReservation=success(resume(emptyId));
+  assert.equal(text(reads),ticketReads);assert.equal(fromReservation.id,emptyId);assert.equal(fromReservation.sourceSha,dev);assert.equal(fromReservation.expectedHead,dev);
+  verifyRefs({...beforeResume,[`refs/heads/factory/batch/${emptyId}`]:dev});assert.notEqual(later,dev);
   const missing='eeeeeeee-1111-4444-8888-000000000000';preserved(missing,()=>resume(missing));assert.equal(existsSync(dirname(record(missing))),false);
   writeFileSync(toml,factoryToml('org/repo',{kind:'gitlab',host:'fixture.test',projectId:42}));preserved(id,()=>resume(id));
   const beforeLab=refMap(server), dirs=readdirSync(batchDir);
   for(const [iid,reason] of [['4',/not a runnable member/],['5',/Tracker lookup unavailable/],['6',/not a runnable member/]] as const){refused(cli(['submit','project',iid]),reason);verifyRefs(beforeLab);assert.deepEqual(readdirSync(batchDir),dirs);noWork();}
-  const task=success(cli(['submit','project','2']));assert.deepEqual(task.members,[2]);verifyRefs({...beforeLab,[task.destinationRef]:dev});noWork();
+  // Exercise actual configured HTTPS authority parsing; only the fixture transport maps it to the bare repository.
+  const https='https://fixture.test:8443/org/repo.git', port={PORT_TRANSPORT:'1'};
+  git(root,'remote','set-url','origin',https);git(root,'remote','set-url','--push','origin',https);
+  writeFileSync(toml,factoryToml('org/repo',{kind:'gitlab',host:'fixture.test:8443',projectId:42}));
+  const task=success(cli(['submit','project','2'],port));assert.deepEqual(task.members,[2]);assert.equal(task.repositoryId,glId);verifyRefs({...beforeLab,[task.destinationRef]:later});noWork();
+  assert.deepEqual(success(host('readOwnedBatch',[task.id],port)),task);
+  for(const seen of ['gid://gitlab/Project/101','']) {
+    writeFileSync(glIdentity,seen);preserved(task.id,()=>cli(['resume','project',task.id],port));preserved(task.id,()=>host('readOwnedBatch',[task.id],port));
+  }
   assert.deepEqual(new Set(text(transports).trim().split('\n')),new Set(['fetch origin','push origin','ls-remote origin']));
 });

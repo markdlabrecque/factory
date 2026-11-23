@@ -1,4 +1,4 @@
-// Host-owned batch identity and ref transactions. Only a new-ref / fast-forward Git receipt plus exact remote readback can settle a write.
+// Bind batch ownership to the authenticated tracker repository ID and named Git origin. Only a positive push receipt and exact readback settle a write.
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { durableDirectory, syncDirectory, withAdmissionLock, writeDurable } from
 import { readBoundedText } from '../../orchestrator/ownership.mts';
 import { loadTomlConfig } from '../../orchestrator/project-config.mts';
 import { requireProjectLayout } from '../../orchestrator/project-layout.mts';
-import { batchMembers, resolveMembers } from './batch-tracker.mts';
+import { batchMembers, resolveMembers, trackerRepositoryId } from './batch-tracker.mts';
 import { batchRegistration } from './project-registry.mts';
 import type { Paths as FactoryPaths } from './paths.mts';
 type Paths = Pick<FactoryPaths,'state'|'projects'>;
@@ -44,6 +44,16 @@ function originEndpoint(root:string) {
     throw Error('Batch requires one matching origin fetch/push endpoint');
   return fetch;
 }
+// In a URI the port belongs to the authority; in SCP syntax everything after the colon is the repository path.
+export function matchesTrackerOrigin(remote:string, host:string, project:string):boolean {
+  if (/[\s?#]/.test(remote)) return false;
+  const parts = remote.includes('://')
+    ? /^(?:https:\/\/|ssh:\/\/(?:git@)?)([\w.-]+(?::\d{1,5})?)\/(.+)$/.exec(remote)
+    : /^(?:git@)?([\w.-]+):(.+)$/.exec(remote);
+  if (!parts || parts[1].toLowerCase() !== host.toLowerCase() || parts[2].replace(/\.git$/,'') !== project) return false;
+  const port = parts[1].split(':')[1];
+  return !port || (Number(port) > 0 && Number(port) <= 65535);
+}
 function context(p: Paths, project: string) {
   if (!project) throw Error('Batch requires an explicit registered project');
   const registration = batchRegistration(p,project), root = realpathSync(registration.root);
@@ -52,8 +62,7 @@ function context(p: Paths, project: string) {
   const config = loadTomlConfig(requireProjectLayout(root).assets,{strictOriginals:true}), t = config.TRACKER;
   if (config.workflow.mode !== 'factory') throw Error('Batch does not convert project workflow overrides');
   const host = t.host ?? t.gitlabHost!, remote = originEndpoint(root);
-  const url = /^(?:https:\/\/|ssh:\/\/(?:git@)?)([\w.-]+)\/(.+)$/.exec(remote) ?? /^(?:git@)?([\w.-]+):(.+)$/.exec(remote);
-  if (!url || url[1].toLowerCase() !== host.toLowerCase() || url[2].replace(/\.git$/,'') !== t.project)
+  if (!matchesTrackerOrigin(remote,host,t.project))
     throw Error('Batch requires one matching tracker repository and origin fetch/push endpoint');
   return {root, config, endpoint:remote, repository:`${t.kind}:${host}/${t.project}${t.projectId ? `:${t.projectId}` : ''}`, branch:registration.schedule?.branch};
 }
@@ -64,7 +73,10 @@ function checkedOrigin(c:Context) {
   if (originEndpoint(c.root) !== c.endpoint) throw Error('Batch origin endpoint changed');
   return origin;
 }
-export type BatchIdentity = { version:1; id:string; root:string; repository:string; members:number[]; baseRef:string; sourceSha:string; destinationRef:string; expectedHead:string };
+function verifyRepository(c:Context, expected:string) {
+  if (trackerRepositoryId(c.config) !== expected) throw Error('Batch held: tracker repository identity changed');
+}
+export type BatchIdentity = { version:2; id:string; root:string; repository:string; repositoryId:string; members:number[]; baseRef:string; sourceSha:string; destinationRef:string; expectedHead:string };
 type Pending = { next:string; attempt:string };
 type Record = BatchIdentity & { phase:'creating'|'ready'|'advancing'; pending:Pending|null };
 function observe(c:Context, ref:string): string|null {
@@ -88,7 +100,7 @@ function load(dir:string,c:Context,id:string): Record {
   if (inspectDirectory(lockDir)) privatePath(lockDir,true);
   const file = join(dir,'batch.json'); privatePath(file,false);
   const r = JSON.parse(readBoundedText(file,1<<20,'batch record'));
-  if (r?.version !== 1 || r.id !== id || r.root !== c.root || r.repository !== c.repository || r.destinationRef !== destination(id)
+  if (r?.version !== 2 || typeof r.repositoryId !== 'string' || !r.repositoryId || r.id !== id || r.root !== c.root || r.repository !== c.repository || r.destinationRef !== destination(id)
       || !isSha(r.sourceSha) || !isSha(r.expectedHead) || typeof r.baseRef !== 'string' || !r.baseRef.startsWith('refs/heads/')
       || r.baseRef.startsWith('refs/heads/factory/batch/') || !Array.isArray(r.members) || !r.members.every(Number.isSafeInteger))
     throw Error('Missing or mismatched batch ownership');
@@ -103,8 +115,8 @@ function load(dir:string,c:Context,id:string): Record {
 }
 function save(dir:string,r:Record) { writeDurable(join(dir,'batch.json'),JSON.stringify(r)+'\n'); }
 function identity(r:Record):BatchIdentity {
-  const {version,id,root,repository,members,baseRef,sourceSha,destinationRef,expectedHead} = r;
-  return {version,id,root,repository,members,baseRef,sourceSha,destinationRef,expectedHead};
+  const {version,id,root,repository,repositoryId,members,baseRef,sourceSha,destinationRef,expectedHead} = r;
+  return {version,id,root,repository,repositoryId,members,baseRef,sourceSha,destinationRef,expectedHead};
 }
 function receipt(dir:string,r:Record):boolean {
   const file = join(dir,r.pending!.attempt+'.push');
@@ -116,6 +128,7 @@ function receipt(dir:string,r:Record):boolean {
 // Check before locking as well: passive reads and holds must not mutate state.
 function check(dir:string,c:Context,r:Record) {
   const head = observe(c,r.destinationRef);
+  verifyRepository(c,r.repositoryId);
   if (r.phase === 'ready' && head === r.expectedHead) return 'ready';
   if (r.pending && receipt(dir,r) && head === r.pending.next) return 'settle';
   if (r.phase === 'creating' && head === null && !receipt(dir,r)) return 'create';
@@ -128,7 +141,10 @@ function settle(dir:string,c:Context,r:Record):BatchIdentity {
 }
 function push(dir:string,c:Context,r:Record):BatchIdentity {
   const {next,attempt} = r.pending!;
+  // Last identity reads precede both the advance intent and receipt: a changed/unknown ID is not an attempted write.
+  verifyRepository(c,r.repositoryId);
   const target = checkedOrigin(c);
+  if (r.phase === 'advancing') save(dir,r);
   const fd = openSync(join(dir,attempt+'.push'),'wx',0o600);
   try {
     syncDirectory(dir);
@@ -140,18 +156,21 @@ function push(dir:string,c:Context,r:Record):BatchIdentity {
 }
 export function submitBatch(p:Paths,project:string,ids:string[],onReserved?: (id:string)=>void):BatchIdentity {
   const members = batchMembers(ids), c = context(p,project);
-  resolveMembers(c.config,members);
+  const repositoryId = trackerRepositoryId(c.config);
+  resolveMembers(c.config,members,repositoryId);
   const baseRef = c.branch ? `refs/heads/${c.branch}` : /^ref: (refs\/heads\/[^\s]+)\tHEAD$/m.exec(git(c.root,'ls-remote','--symref','--',checkedOrigin(c),'HEAD'))?.[1];
   if (!baseRef || baseRef.startsWith('refs/heads/factory/batch/')) throw Error('Missing or invalid configured base branch');
   git(c.root,'check-ref-format',baseRef);
   const sourceSha = observe(c,baseRef); if (!sourceSha) throw Error('Configured base missing from origin');
   // The checkout may be stale; fetch only the pinned commit, without changing any checkout or local branch.
   batchStore(p,c.root);
+  verifyRepository(c,repositoryId);
   git(c.root,'fetch','--no-tags','--no-write-fetch-head','--recurse-submodules=no','--refmap=','--',checkedOrigin(c),sourceSha);
   if (git(c.root,'cat-file','-t',sourceSha) !== 'commit') throw Error('Base is not a commit');
   const id = randomUUID(), dir = location(p,id), parent = batchStore(p,c.root);
+  verifyRepository(c,repositoryId);
   durableDirectory(parent); privatePath(parent,true); mkdirSync(dir,{mode:0o700}); syncDirectory(parent);
-  const r:Record = {version:1,id,root:c.root,repository:c.repository,members,baseRef,sourceSha,destinationRef:destination(id),expectedHead:sourceSha,phase:'creating',pending:{next:sourceSha,attempt:randomUUID()}};
+  const r:Record = {version:2,id,root:c.root,repository:c.repository,repositoryId,members,baseRef,sourceSha,destinationRef:destination(id),expectedHead:sourceSha,phase:'creating',pending:{next:sourceSha,attempt:randomUUID()}};
   save(dir,r);
   onReserved?.(id);
   try { return resumeBatch(p,project,id); } catch (e) { throw Error(`Batch ${id}: ${(e as Error).message}`); }
@@ -159,7 +178,7 @@ export function submitBatch(p:Paths,project:string,ids:string[],onReserved?: (id
 /** Passive dispatch/delivery lookup; an incomplete transaction requires explicit operator resume. */
 export function readOwnedBatch(p:Paths,project:string,id:string):BatchIdentity {
   const dir = location(p,id), c = context(p,project), r = load(dir,c,id);
-  if (r.phase !== 'ready' || check(dir,c,r) !== 'ready') throw Error('Pending batch transaction; resume first');
+  if (check(dir,c,r) !== 'ready') throw Error('Pending batch transaction; resume first');
   return identity(r);
 }
 export function resumeBatch(p:Paths,project:string,id:string):BatchIdentity {
@@ -184,6 +203,6 @@ export function advanceBatch(p:Paths,project:string,id:string,expectedOld:string
   validate();
   return withAdmissionLock(dir,() => {
     const pending:Record = {...validate(),phase:'advancing',pending:{next,attempt:randomUUID()}};
-    save(dir,pending); return push(dir,c,pending);
+    return push(dir,c,pending);
   });
 }
