@@ -162,7 +162,8 @@ function settle(dir:string,c:Context,r:Record):BatchIdentity {
   const ready:Record = {...r,expectedHead:r.pending!.next,phase:'ready',pending:null};
   save(dir,ready); return identity(ready);
 }
-function push(dir:string,c:Context,r:Record, authorize?:()=>void):BatchIdentity {
+type Publish = (write:()=>void)=>void;
+function push(dir:string,c:Context,r:Record, prepare?:()=>Publish):BatchIdentity {
   const {next,attempt} = r.pending!;
   if (r.phase === 'creating') {
     let present = false;
@@ -173,20 +174,23 @@ function push(dir:string,c:Context,r:Record, authorize?:()=>void):BatchIdentity 
     }
   }
   verifyRepository(c,r.repositoryId);
-  // Delivery rechecks its owned repository, current gate and live claim. Only local Git identity checks follow it.
-  authorize?.();
-  const target = checkedOrigin(c);
-  checkTracking(c.root,r.id);
+  const publish=prepare?.() ?? (write=>write());
   const marker = join(dir,attempt+'.push');
   if (lstatSync(marker,{throwIfNoEntry:false})) throw Error('Batch attempt already exists');
-  const args = [...gitArgs(c.root),'-c','push.pushOption=','push','--porcelain',`--force-with-lease=${r.destinationRef}:${r.phase === 'creating' ? '' : r.expectedHead}`,'--',target,`${next}:${r.destinationRef}`];
+  const args = [...gitArgs(c.root),'-c','push.pushOption=','push','--porcelain',`--force-with-lease=${r.destinationRef}:${r.phase === 'creating' ? '' : r.expectedHead}`,'--',checkedOrigin(c),`${next}:${r.destinationRef}`];
+  checkTracking(c.root,r.id);
+  // Final claim check, both durable intents and the actual bounded Git process share the revocation lock.
+  publish(()=>recordPush(dir,r,marker,args));
+  return settle(dir,c,r);
+}
+function recordPush(dir:string,r:Record,marker:string,args:string[]) {
   let fd:number|undefined, mayHaveLaunched = false;
   try {
     if (r.phase === 'advancing') save(dir,r);
     fd = openSync(marker,'wx',0o600);
     syncDirectory(dir);
     mayHaveLaunched = true;
-    const result = spawnSync('git',args,{stdio:['ignore',fd,'pipe'],timeout:30000,env:{...process.env,LC_ALL:'C'}});
+    const result = spawnSync('git',args,{stdio:['ignore',fd,'pipe'],timeout:30000,killSignal:'SIGKILL',env:{...process.env,LC_ALL:'C'}});
     const error = result.error as NodeJS.ErrnoException|undefined;
     if ((error?.code === 'ENOENT' || error?.code === 'EACCES') && error.syscall === 'spawnSync git' && result.pid === 0 && result.status === null && result.signal === null) {
       mayHaveLaunched = false;
@@ -205,7 +209,6 @@ function push(dir:string,c:Context,r:Record, authorize?:()=>void):BatchIdentity 
     }
     throw error;
   } finally { if (fd !== undefined) closeSync(fd); }
-  return settle(dir,c,r);
 }
 export function submitBatch(p:Paths,project:string,ids:string[],onReserved?: (id:string)=>void):BatchIdentity {
   const members = batchMembers(ids), c = context(p,project);
@@ -272,7 +275,7 @@ export function observedBatchAdvance(p:Paths,project:string,id:string,old:string
   });
 }
 /** Trusted delivery consumer only, AFTER its independent exact-candidate gate. No caller-supplied ref, no public CLI route. */
-export function advanceBatch(p:Paths,project:string,id:string,expectedOld:string,next:string, attempt=randomUUID() as string, authorize?:()=>void):BatchIdentity {
+export function advanceBatch(p:Paths,project:string,id:string,expectedOld:string,next:string, attempt=randomUUID() as string, prepare?:()=>Publish):BatchIdentity {
   if (!uuid.test(attempt)) throw Error('Invalid advance attempt');
   const c = context(p,project), dir = location(p,id);
   function validate() {
@@ -283,6 +286,6 @@ export function advanceBatch(p:Paths,project:string,id:string,expectedOld:string
   validate();
   return withAdmissionLock(dir,() => {
     const pending:Record = {...validate(),phase:'advancing',pending:{next,attempt}};
-    return push(dir,c,pending,authorize);
+    return push(dir,c,pending,prepare);
   });
 }

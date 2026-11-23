@@ -26,14 +26,14 @@ export function requireDeliveryEvidence(expected:AttemptBinding, latest:ReturnTy
       !(['test','code'] as const).every(role=>e.reviews.some(r=>r.role===role && !r.contextHold && r.verdict==='approve' && typeof r.reason==='string' && r.reason.trim() && typeof r.invocation==='string' && uuid.test(r.invocation) && (!r.followup || r.role==='test' && r.followup.invocation===r.invocation) && same(r.binding,expected))) || e.reviews[0].invocation===e.reviews[1].invocation)
     throw Error('Missing current exact test pass and independent role approvals');
 }
-export type BatchDeliveryOutcome={version:1;key:DeliveryKey;binding:AttemptBinding;completion:{child:boolean;done:string;ready:string[]}|null;gate:'approved';git:'not-started'|'attempted'|'refused'|'unknown'|'landed';tracker:'not-started'|'attempted'|'incomplete'|'complete';reason:string};
+export type BatchDeliveryOutcome={version:1;key:DeliveryKey;binding:AttemptBinding;completion:{child:boolean;done:string;ready:string[]}|null;gate:'approved'|'stopped';git:'not-started'|'attempted'|'refused'|'unknown'|'landed';tracker:'not-started'|'attempted'|'incomplete'|'complete';reason:string};
 function local(p:HostPaths,key:Member) {
   const m=batchMemberLocation(p,key.project,key.batch,key.ticket),dir=join(m.dir,`member-${key.ticket}`);
   const stat=lstatSync(dir,{throwIfNoEntry:false});
   if(stat && (realpathSync(dir)!==dir || !stat.isDirectory() || stat.uid!==process.getuid?.() || (stat.mode & 0o077))) throw Error('Unsafe host member directory');
   return {...m,dir,state:m.dir,file:join(dir,'delivery.json')};
 }
-function load(m:ReturnType<typeof local>,key:Member):BatchDeliveryOutcome|null {
+function readPublication(m:ReturnType<typeof local>,key:Member):BatchDeliveryOutcome|null {
   if(!lstatSync(m.file,{throwIfNoEntry:false}))return null;
   const stat=lstatSync(m.file);
   if(!stat.isFile() || stat.nlink!==1 || stat.uid!==process.getuid?.() || (stat.mode&0o077))throw Error('Unsafe host delivery record');
@@ -41,6 +41,17 @@ function load(m:ReturnType<typeof local>,key:Member):BatchDeliveryOutcome|null {
   if(r?.version!==1 || r.key?.project!==key.project || r.key.batch!==key.batch || r.key.ticket!==key.ticket || r.binding?.ticket!==key.ticket || r.binding.batch!==key.batch || r.binding.run!==r.key.run || r.binding.destination!==m.identity.destinationRef || !uuid.test(r.binding.attempt) || !sha.test(r.binding.candidate) || !sha.test(r.binding.expectedHead) || r.gate!=='approved' || !['not-started','attempted','refused','unknown','landed'].includes(r.git) || !['not-started','attempted','incomplete','complete'].includes(r.tracker) || r.tracker!=='not-started' && r.git!=='landed')throw Error('Invalid host delivery record');
   if(r.git!=='not-started' && (typeof r.completion?.child!=='boolean' || typeof r.completion.done!=='string' || !Array.isArray(r.completion.ready) || !r.completion.ready.every((l:unknown)=>typeof l==='string')))throw Error('Missing original tracker completion plan');
   return r;
+}
+// SQLite is the durable gate journal. A terminal rebuild supersedes earlier PRE-publication approval,
+// even when the producer died immediately after committing its result. Never overwrite an actual effect.
+function load(m:ReturnType<typeof local>,key:Member):BatchDeliveryOutcome|null {
+  const record=readPublication(m,key);
+  if(record && record.git!=='not-started')return record;
+  const t=m.config.TRACKER;
+  const latest=lstatSync(join(m.state,'batch-review.sqlite'),{throwIfNoEntry:false}) && latestBatchAttempt(m.state,`${t.kind}://${t.host??t.gitlabHost}/${t.project}`,key.batch,key.ticket);
+  if(latest?.evidence && !same(latest.evidence.binding,latest.binding))throw Error('Latest batch gate binding is inconsistent');
+  if(latest?.evidence?.status==='stopped')return {version:1,key:{...key,run:latest.binding.run},binding:latest.binding,completion:null,gate:'stopped',git:'not-started',tracker:'not-started',reason:latest.evidence.reason};
+  return record;
 }
 /** Passive historical outcome for dispatch/handoff. Only landed + complete is clean delivery. */
 export function readBatchDelivery(p:HostPaths,key:Member){return load(local(p,key),key)}
@@ -56,6 +67,7 @@ export function batchDeliveryObserver(p:HostPaths,project:string) {
         if(!attempt)return {state:'unstarted' as const,reason:'No recorded member gate or delivery'};
         return {state:attempt.evidence?.status==='stopped'?'stopped' as const:'waiting' as const,reason:attempt.evidence?.reason??'Unresolved host gate attempt'};
       }
+      if(r.gate==='stopped')return {state:'stopped' as const,reason:r.reason};
       if(r.git!=='landed' || r.tracker!=='complete')return {state:'waiting' as const,reason:r.reason};
       execFileSync('git',['--no-replace-objects','-C',current.root,'merge-base','--is-ancestor',r.binding.candidate,current.expectedHead],{timeout:10000,stdio:'ignore'});
       return {state:'landed' as const,batch:current.id,repositoryId:current.repositoryId,destination:current.destinationRef,observedHead:current.expectedHead,iid:ticket,commit:r.binding.candidate};
@@ -96,6 +108,12 @@ function deliver(p:HostPaths,key:DeliveryKey, candidate?:AttemptBinding):BatchDe
       requireMemberClaim(p,key,current,b.requirementsDigest);
       return {child:Boolean(i.ticket.context.parent),done:current.config.LABELS.done,ready:current.config.LABELS.ready};
     }
+    if(r?.gate==='stopped')return r;
+    // Lock order: member -> (Git only: batch) -> global admission. The last lock is also
+    // used for claim replacement/release. Never acquire a member/batch lock from this callback.
+    function publish(b:AttemptBinding,write:()=>void){
+      withAdmissionLock(p.state,()=>{requireMemberClaim(p,key,m,b.requirementsDigest);write()});
+    }
     if(r && r.key.run!==key.run)throw Error('Delivery belongs to another host run');
     if(candidate && (!r || r.git==='not-started' && r.binding.attempt!==candidate.attempt)) {
       // Record what the host gate approved even if authority was revoked before publication.
@@ -113,7 +131,10 @@ function deliver(p:HostPaths,key:DeliveryKey, candidate?:AttemptBinding):BatchDe
         }
         advanceBatch(p,project,batch,b.expectedHead,b.candidate,b.attempt,()=>{
           const completion=validate(b);
-          r=save({...r!,completion,git:'attempted',reason:'Git advance intent; receipt/readback required'});
+          return write=>publish(b,()=>{
+            r=save({...r!,completion,git:'attempted',reason:'Git advance intent; receipt/readback required'});
+            write();
+          });
         });
       } catch(e){
         if(r.git==='not-started'){
@@ -137,12 +158,14 @@ function deliver(p:HostPaths,key:DeliveryKey, candidate?:AttemptBinding):BatchDe
       if(!observed.complete && r.tracker==='not-started'){
         // Only a new write needs current gate authority; reconciliation reads the originally intended state.
         if(!same(validate(b,true),plan))throw Error('Tracker completion inputs changed');
-        r=save({...r,tracker:'attempted',reason:'Tracker update intent; readback required'});
-        try { tracker.update(observed.remove); } catch { /* Read actual tracker state; never blindly replay. */ }
+        publish(b,()=>{
+          r=save({...r!,tracker:'attempted',reason:'Tracker update intent; readback required'});
+          try { tracker.update(observed.remove); } catch { /* Read actual tracker state; never blindly replay. */ }
+        });
         if(!tracker.observe().complete)throw Error('Tracker completion not observed after update');
       } else if(!observed.complete)throw Error('Tracker remains incomplete after previous intent');
       return save({...r,tracker:'complete',reason:'Exact Git landing and tracker completion observed'});
-    } catch(e){return save({...r,tracker:'incomplete',reason:`Git landed; ${(e as Error).message.split('\n')[0]}`})}
+    } catch(e){return save({...r,tracker:r.tracker==='not-started'?'not-started':'incomplete',reason:`Git landed; ${(e as Error).message.split('\n')[0]}`})}
   });
 }
 /** Join a producer invoked by dispatch under the same claim. The supplied IDs select, not authorize, a host attempt. */

@@ -42,7 +42,7 @@ Automated tests use temporary homes, synthetic projects, fake clocks and stubbed
 
 ## Exact batch delivery
 
-`node --test cli/test/batch-delivery.test.mts` covers the evidence policy and admitted host delivery. Unit mutations invalidate each receipt and binding independently. The GitHub/GitLab process fixtures run the actual producer, record the SHA checked out by the test, update disposable bare Git and observe tracker state using strict fixture-only commands. They cover known advancement after approval, conflicting and unexplained movement, protection refusal, parent edits, process death after push, positive-receipt loss despite a matching remote ref, and tracker failure after confirmed landing. The only host gate reuses the configured synthetic `check.cjs`; no live agent, tracker, service manager or container runs. `orchestrator/{handoff,recovery-runner,delivery,delivery-followup}.test.mts` exercise reserved-ref refusal at the legacy write and reconciliation boundaries. These tests do not prove real provider judgment, service availability or cross-service atomicity.
+`node --test cli/test/batch-delivery.test.mts` covers the evidence policy and admitted host delivery. Unit mutations invalidate each receipt and binding independently. The GitHub/GitLab process fixtures run the actual producer, record the SHA checked out by the test, update disposable bare Git and observe tracker state using strict fixture-only commands. They cover known advancement after approval, conflicting and unexplained movement, protection refusal, parent edits, process death after push, positive-receipt loss despite a matching remote ref, and tracker failure after confirmed landing. Separate processes try to revoke the real admission claim both before lock acquisition and immediately before Git/tracker command launch. Crash/readback fixtures exercise transient pre-intent reads, post-landing parent/claim revocation, image drift, and durable exhaustion of a rebuilt gate. The only host gate reuses the configured synthetic `check.cjs`; no live agent, tracker, service manager or container runs. `orchestrator/{handoff,recovery-runner,delivery,delivery-followup}.test.mts` exercise reserved-ref refusal at the legacy write and reconciliation boundaries. These tests do not prove real provider judgment, service availability or cross-service atomicity.
 
 ## Owned acceptance baseline runner
 
@@ -1060,7 +1060,7 @@ smallest changed-boundary run:
 node --test orchestrator/recovery-runner.test.mts orchestrator/recovery-entrypoint.test.mts orchestrator/acceptance-baseline-recovery.test.mts orchestrator/handoff.test.mts orchestrator/verification.test.mts
 ```
 
-Adapter tests assert fresh host authorization after CI and before SHA-guarded merge.
+Adapter tests assert a green PR/MR holds without a merge mutation: neither API can fence a changed target.
 These tests do not validate live verifier judgment, video codecs or atomicity between
 an external ticket edit and a tracker merge. The full commit gates above still apply.
 
@@ -1075,7 +1075,7 @@ node --test orchestrator/refresh*.test.mts cli/test/init.test.mts cli/test/updat
 ```
 
 Adapter fixtures exercise exact-head checks/jobs, required gates, identity/approval
-holds and lost merge responses without live trackers. The exact replay fixture reuses a
+holds and observation of externally completed merges without live trackers. The exact replay fixture reuses a
 genuine policy 3 proof for pending then green CI observation of the same PR, and checks
 admission, configuration, raw output, current requirements and transport holds. The
 selected-runtime dispatch fixture checks explicit legacy migration against a temporary

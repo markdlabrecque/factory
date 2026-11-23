@@ -5,7 +5,7 @@ export function batchCompletion(config:EffectiveConfig, iid:number, labels:{chil
   const t=config.TRACKER, github=t.kind==='github', host=t.host??t.gitlabHost!, {child}=labels;
   if(!child && ([labels.done,...labels.ready].some(l=>!l.trim() || l.includes(',')) || labels.ready.includes(labels.done)))throw Error('Ambiguous completion labels');
   const path=github?`repos/${t.project}/issues/${iid}`:`projects/${t.projectId}/issues/${iid}`;
-  const run=(args:string[])=>execFileSync(github?'gh':'glab',args,{encoding:'utf8',timeout:15000,maxBuffer:1<<20,stdio:['ignore','pipe','pipe'],env:{...process.env,GH_HOST:host,GITLAB_HOST:host}});
+  const run=(args:string[])=>execFileSync(github?'gh':'glab',args,{encoding:'utf8',timeout:15000,killSignal:'SIGKILL',maxBuffer:1<<20,stdio:['ignore','pipe','pipe'],env:{...process.env,GH_HOST:host,GITLAB_HOST:host}});
   function observe() {
     const issue=JSON.parse(run(['api',path,'--hostname',host]));
     if((github?issue.number:issue.iid)!==iid || (github?issue.html_url:issue.web_url)!==`https://${host}/${t.project}/${github?'':'-/'}issues/${iid}` || issue.pull_request || !Array.isArray(issue.labels)) throw Error('Unconfirmed tracker issue identity');

@@ -205,12 +205,12 @@ export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: 
   return { url, merged: false };
 }
 
-/** #150: open first; same-SHA CI and fresh host authorization precede the SHA-guarded merge. */
+/** Open first, observe exact-head CI and hold for operator merge. */
 async function autoDeliver(d: Delivery & { waitMinutes: number; noCiMinutes: number }): Promise<Delivered> {
   const path = `projects/${ID}/merge_requests`;
   const mr = JSON.parse(glab(["api", "-X", "POST", path, "--hostname", HOST,
     "-f", `source_branch=${d.branch}`, "-f", `target_branch=${d.base}`, "-f", `title=${d.title}`,
-    "-f", `description=${d.body("Sandcastle merges only after the head pipeline and required jobs pass on the pushed commit.")}`,
+    "-f", `description=${d.body("Sandcastle observes the head pipeline and required jobs. A person must merge this MR.")}`,
   ])) as { iid: number; web_url: string };
   const url = mr.web_url;
   console.log(url);
@@ -236,9 +236,9 @@ async function autoDeliver(d: Delivery & { waitMinutes: number; noCiMinutes: num
   return { ...block(`CI deadline reached after ${d.waitMinutes} min: ${reason}`), state: 'ci-waiting', reasonCode: 'checks-pending' };
 }
 
-function existing(path: string, deadline: number, fields?: string[]): any {
+function existing(path: string, deadline: number): any {
   const left = deadline - Date.now(); if (left <= 0) throw Error('delivery deadline');
-  return JSON.parse(execFileSync('glab', ['api', ...(fields ? ['-X', 'PUT'] : []), path, '--hostname', HOST, ...(fields ?? [])], {
+  return JSON.parse(execFileSync('glab', ['api', path, '--hostname', HOST], {
     encoding: 'utf8', env: { ...process.env, GITLAB_HOST: HOST }, timeout: Math.min(10000, left), killSignal: 'SIGKILL', maxBuffer: 8 << 20, stdio: ['ignore', 'pipe', 'pipe'],
   }));
 }
@@ -272,21 +272,11 @@ export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 300
   }
   return { state: 'ci-waiting', reasonCode: gate === 'none' ? 'checks-missing' : 'checks-pending', reason: `CI ${pipeline.status}; required jobs: ${missingChecks(checks, MERGE.requiredChecks ?? []).join(', ')}` };
 }
-export async function mergeExistingDelivery(d: DeliveryIdentity, beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
+export async function mergeExistingDelivery(d: DeliveryIdentity, _beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
   if(reservedBatchRef(d.branch,d.base)) return hold('authorization','MR continuation cannot target a batch ref');
   const observed = observeDelivery(d, deadline);
   if (observed.state !== 'ready') return observed;
-  if (!MERGE.auto) return hold('authorization', 'Manual merge policy');
-  let refused: string | undefined;
-  try { refused = typeof beforeMerge === 'function' ? await beforeMerge() : 'Host authorization missing'; }
-  catch (e) {
-    if ((e as any).code === 'DELIVERY_READ_UNKNOWN') return { state: 'ci-waiting', reasonCode: 'transport-unknown', reason: (e as Error).message };
-    refused = `Host authorization unknown: ${(e as Error).message}`;
-  }
-  if (refused !== undefined) return hold('authorization', refused);
-  const result = existing(`projects/${ID}/merge_requests/${d.number}/merge`, deadline, ['-f', `sha=${d.sha}`, '-F', `squash=${MERGE.method === 'squash'}`]);
-  if (result.state !== 'merged') return hold('merge-restricted', 'GitLab did not confirm merge');
-  return observeDelivery(d, deadline);
+  return hold('authorization','Operator merge required: GitLab cannot condition an MR merge on its target ref');
 }
 
 /** Comments, oldest first. */

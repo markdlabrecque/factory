@@ -10,6 +10,7 @@ if(a[1]==='graphql'){
   else if(github)print({data:{repository:{issue:{parent:null}}}});
   else print({data:{project:{workItems:{nodes:[{iid:'7',workItemType:{name:'Task'},widgets:[{parent:{iid:'8'}}]}]}}}});
 } else if(a[0]==='api' && a[1].startsWith(base+'/')) {
+  if(process.env.FAIL_OBSERVE && a[1]===base+'/7' && a[2]==='--hostname')process.exit(1);
   const n=Number(a[1].slice(base.length+1).split('/')[0]);assert([7,8].includes(n));
   if(a[1].includes('?'))print([]);
   else if(github)print({number:n,title:'Ticket',body:'Requirement',html_url:`https://${host}/${repo}/issues/${n}`,state:'open',labels:(f.done?['merged']:['ready-for-agent']).map(name=>({name}))});

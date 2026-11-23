@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { execFile,execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync,mkdirSync,readFileSync,writeFileSync } from 'node:fs';
+import { unlinkSync as fsUnlink, existsSync,mkdirSync,readFileSync,writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { home } from './schedule-helpers.mts';
@@ -38,13 +38,14 @@ async function journey(t:TestContext,kind:'github'|'gitlab') {
   const facts=join(p.home,'issue'),updates=join(p.home,'updates'),pushes=join(p.home,'pushes');
   const reset=(overrides={})=>writeFileSync(facts,JSON.stringify({parent:'Parent requirements',done:false,deny:false,...overrides}));reset();
   const lines=(f:string)=>existsSync(f)?readFileSync(f,'utf8').trim().split('\n').filter(Boolean):[];
-  const args=['node','check.cjs'];let invalidate=false;
-  const agents=await installBatchFixture(p.home,args,()=>{if(invalidate)reset({parent:'Edited parent'});return {verdict:'approve',reason:'Exact candidate passed'}},`console.log(JSON.stringify({edits:[{path:'api.cjs',content:'module.exports=1'}]}))`);t.after(agents.close);
+  const args=['node','check.cjs'], rejectMarker=join(p.home,'reject-rebuild'), image=join(p.home,'image-id');let invalidate=false;
+  writeFileSync(image,'sha256:'+'a'.repeat(64)+'\n');
+  const agents=await installBatchFixture(p.home,args,()=>{if(invalidate)reset({parent:'Edited parent'});return existsSync(rejectMarker)?{verdict:'reject',reason:'Rebuilt candidate still deficient'}:{verdict:'approve',reason:'Exact candidate passed'}},`const {feedback}=JSON.parse(prompt.split('Host proposal input:\\n').at(-1));console.log(JSON.stringify({edits:[{path:'api.cjs',content:'module.exports=1;// '+(feedback?.attempt??'initial')}]}))`);t.after(agents.close);
   const stub=(name:string,text:string)=>writeFileSync(join(bin,name),text,{mode:0o700});
   stub(kind==='github'?'gh':'glab',`#!${process.execPath}\n`+readFileSync(new URL('./fixtures/batch-delivery-tracker.cjs',import.meta.url),'utf8'));
   stub(kind==='github'?'glab':'gh','#!/bin/sh\nexit 97');
   stub('ssh',`#!/bin/sh\n[ "$1" = git@fixture.invalid ] || exit 92\ncase "$2" in "git-upload-pack 'org/project.git'") exec /usr/bin/git upload-pack "$SERVER";; "git-receive-pack 'org/project.git'") exec /usr/bin/git receive-pack "$SERVER";; *) exit 93;; esac`);
-  stub('docker',`#!/bin/sh\nif [ "$*" = 'image inspect --format {{.Id}} fixture' ]; then echo 'sha256:${'a'.repeat(64)}'; exit; fi\nexec /usr/bin/env -i PATH="$PATH" '${join(agents.bin,'docker')}' "$@"`);
+  stub('docker',`#!/bin/sh\nif [ "$*" = 'image inspect --format {{.Id}} fixture' ]; then /usr/bin/cat '${image}'; exit; fi\nexec /usr/bin/env -i PATH="$PATH" '${join(agents.bin,'docker')}' "$@"`);
   stub('git',`#!/bin/sh\ncase " $* " in *' push --porcelain '*) echo "$*" >> "$PUSHES"; if [ "$INTERRUPT" = lose ]; then /usr/bin/git "$@" >/dev/null; exit 1; fi; /usr/bin/git "$@"; result=$?; if [ "$INTERRUPT" = after ] && [ "$result" = 0 ]; then kill -9 "$PPID"; fi; exit "$result";; esac\nexec /usr/bin/git "$@"`);
   const env={HOME:p.home,PATH:`${bin}:${agents.bin}:/usr/bin:/bin`,GIT_SSH:join(bin,'ssh'),GIT_SSH_VARIANT:'simple',GIT_ALLOW_PROTOCOL:'ssh:file',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',KIND:kind,FACTS:facts,UPDATES:updates,SERVER:server,PUSHES:pushes};
   const git=(dir:string,...a:string[])=>execFileSync('/usr/bin/git',['-C',dir,'-c','core.hooksPath=/dev/null','-c','user.name=Fixture','-c','user.email=local@invalid',...a],{encoding:'utf8',env,stdio:['ignore','pipe','pipe']}).trim();
@@ -52,13 +53,22 @@ async function journey(t:TestContext,kind:'github'|'gitlab') {
   git(root,'add','*.cjs');git(root,'commit','-m','fixture');const original=git(root,'rev-parse','HEAD');git(root,'init','--bare','-b','main',server);git(root,'remote','add','origin','git@fixture.invalid:org/project.git');git(root,'push','origin','main');
   writeFileSync(join(root,'.factory/factory.toml'),factoryToml('org/project',{kind,host:'fixture.invalid'})+'\n[ci]\nbatch_test_argv=["node","check.cjs"]\nbatch_test_paths=["check.cjs"]\n');addProject(p,root);
   const batchUrl=new URL('../src/batch.mts',import.meta.url).href, deliveryUrl=new URL('../src/batch-delivery.mts',import.meta.url).href;
+  const probeLog=join(p.home,'revocations'), contender=join(p.home,'revoke.mjs');
+  writeFileSync(contender,`import {withAdmissionLock,admissionFile,readAdmission,keyFor} from '${new URL('../../board/admission.mts',import.meta.url).href}';import {appendFileSync} from 'node:fs';
+    const state=${JSON.stringify(p.state)},phase=process.argv[2];try{withAdmissionLock(state,write=>{const s=readAdmission(state);delete s.claims[keyFor('7','org/project')];write(admissionFile(state),JSON.stringify(s));},0);appendFileSync(${JSON.stringify(probeLog)},'released:'+phase+'\\n');}catch(e){if(!e.message.includes('locked by process'))throw e;appendFileSync(${JSON.stringify(probeLog)},'blocked:'+phase+'\\n');}`);
   const injection=join(p.home,'after-approval.cjs');
-  writeFileSync(injection,`const fs=require('node:fs'),rename=fs.renameSync;let fired=false;
-    fs.renameSync=function(from,to){rename(from,to);if(!fired && to.endsWith('/delivery.json') && process.env.MOVE && JSON.parse(fs.readFileSync(to)).git==='not-started'){
+  writeFileSync(injection,`const fs=require('node:fs'),rename=fs.renameSync,link=fs.linkSync;let fired=false;
+    const cp=require('node:child_process'),exec=cp.execFileSync,spawn=cp.spawnSync;
+    const revoke=phase=>exec(process.execPath,[${JSON.stringify(contender)},phase]);
+    cp.spawnSync=function(cmd,args,...rest){if(process.env.CONTEND && cmd==='git' && args.includes('--porcelain'))revoke('git');return spawn(cmd,args,...rest)};
+    cp.execFileSync=function(cmd,args,...rest){if(process.env.CONTEND && ['gh','glab'].includes(cmd) && (args[0]==='issue'||args.includes('PUT')))revoke('tracker');return exec(cmd,args,...rest)};
+    // Release wins immediately BEFORE the publisher takes the real admission lock, after gate checks.
+    fs.linkSync=function(from,to){if(process.env.PREEMPT && to===${JSON.stringify(join(p.state,'admission','lock'))} && !fired){fired=true;revoke('before-'+process.env.PREEMPT)}return link(from,to)};
+    fs.renameSync=function(from,to){rename(from,to);if(to.endsWith('/delivery.json') && process.env.INTERRUPT==='landed' && JSON.parse(fs.readFileSync(to)).git==='landed')process.kill(process.pid,'SIGKILL');if(!fired && to.endsWith('/delivery.json') && process.env.MOVE && JSON.parse(fs.readFileSync(to)).git==='not-started'){
       fired=true;const b=JSON.parse(fs.readFileSync(to)).binding, cp=require('node:child_process');
-      if(process.env.MOVE==='revoke'){const file=${JSON.stringify(join(p.state,keyFor('7','org/project')+'.json'))};const row=JSON.parse(fs.readFileSync(file));delete row.claim;fs.writeFileSync(file,JSON.stringify(row));}
+      if(process.env.MOVE==='image')fs.writeFileSync(${JSON.stringify(image)},'sha256:'+'b'.repeat(64)+'\\n');
       else if(process.env.MOVE==='foreign')cp.execFileSync('/usr/bin/git',['-C',process.env.SERVER,'update-ref',b.destination,process.env.NEXT,b.expectedHead]);
-      else cp.execFileSync(process.execPath,['--input-type=module','-e','import {advanceBatch} from '+JSON.stringify(${JSON.stringify(batchUrl)})+'; advanceBatch(...'+JSON.stringify([${JSON.stringify({projects:p.projects,state:p.state})},'project',b.batch,b.expectedHead,process.env.NEXT])+')']);
+      else {if(process.env.MOVE==='stop')fs.writeFileSync(${JSON.stringify(rejectMarker)},'reject');cp.execFileSync(process.execPath,['--input-type=module','-e','import {advanceBatch} from '+JSON.stringify(${JSON.stringify(batchUrl)})+'; advanceBatch(...'+JSON.stringify([${JSON.stringify({projects:p.projects,state:p.state})},'project',b.batch,b.expectedHead,process.env.NEXT])+')']);}
     }};require('node:module').syncBuiltinESMExports();`);
   const call=async(module:string,fn:string,a:unknown[],suffix='',extra={})=>{const script=`import {${fn}} from ${JSON.stringify(module)};const value=await ${fn}(...${JSON.stringify(a)}${suffix});console.log(JSON.stringify(value));`;
     const {stdout}=await promisify(execFile)(process.execPath,['--require',injection,'--input-type=module','-e',script],{env:{...env,...extra},timeout:60000});return JSON.parse(stdout)};
@@ -75,6 +85,7 @@ async function journey(t:TestContext,kind:'github'|'gitlab') {
   }
   const execute=(id:string,extra={})=>call(deliveryUrl,'runAndDeliverBatchMember',[paths,admitted(id)],",()=> 'fixture-only'",extra);
   const saved=(id:string)=>call(deliveryUrl,'readBatchDelivery',[paths,{project:'project',batch:id,ticket:7}]);
+  const observe=async(scope:object)=>{const script=`import {batchDeliveryObserver} from '${deliveryUrl}';console.log(JSON.stringify(batchDeliveryObserver(${JSON.stringify(paths)},'project')(${JSON.stringify(scope)},7)))`;return JSON.parse((await promisify(execFile)(process.execPath,['--input-type=module','-e',script],{env})).stdout)};
   const sibling=await submit(),batch=await submit(),ref=(name:string)=>git(server,'rev-parse',name),oldWrites=lines(pushes).length;
   if(kind==='github'){
     // Dispatch may already have invoked the real producer under its claim; join that exact host attempt.
@@ -84,19 +95,26 @@ async function journey(t:TestContext,kind:'github'|'gitlab') {
     const joinGate=(selected:object,extra={})=>call(deliveryUrl,'deliverReviewedBatchMember',[paths,originalRun,selected],",()=> 'fixture-only'",extra);
     await assert.rejects(joinGate({attempt:randomUUID(),candidate:binding.candidate}),/selected current host attempt/);
     await assert.rejects(joinGate({attempt:binding.attempt,candidate:original}),/selected current host attempt/);assert.equal(lines(pushes).length,oldWrites);
-    await assert.rejects(joinGate(binding,{INTERRUPT:'after'}),(err:any)=>err.signal==='SIGKILL');
+    await assert.rejects(joinGate(binding,{INTERRUPT:'after',CONTEND:'yes'}),(err:any)=>err.signal==='SIGKILL');
     const interrupted=await saved(batch.id);assert.equal(interrupted.git,'attempted');assert.equal(interrupted.tracker,'not-started');assert.equal(lines(updates).length,0);assert.equal(ref(batch.destinationRef),interrupted.binding.candidate);
+    const held=await execute(batch.id,{FAIL_OBSERVE:'yes'});assert.equal(held.git,'landed');assert.equal(held.tracker,'not-started');assert.equal(lines(updates).length,0);assert.equal((await observe({...batch,expectedHead:binding.candidate})).state,'waiting');
   }else reset({deny:true});
-  let out=await execute(batch.id);assert.equal(out.git,'landed',out.tests?.stderr??out.reason);assert.equal(out.gate,'approved');
+  let out=await execute(batch.id,{CONTEND:'yes'});assert.equal(out.git,'landed',out.tests?.stderr??out.reason);assert.equal(out.gate,'approved');
   assert.equal(ref(batch.destinationRef),out.binding.candidate);assert.equal(ref('main'),original);assert.equal(ref(sibling.destinationRef),original);assert.equal(git(server,'rev-parse',out.binding.candidate+'^'),original);
   if(kind==='gitlab'){
     assert.equal(out.tracker,'incomplete');reset();out=await execute(batch.id);assert.equal(out.tracker,'incomplete');assert.equal(lines(updates).length,1,'no blind tracker retry');reset({done:true,parent:'Changed after landing'});out=await execute(batch.id);
   }
   assert.equal(out.tracker,'complete',out.reason);assert.deepEqual(await saved(batch.id),out);
-  const observer=async(scope:object)=>{const script=`import {batchDeliveryObserver} from '${deliveryUrl}';console.log(JSON.stringify(batchDeliveryObserver(${JSON.stringify(paths)},'project')(${JSON.stringify(scope)},7)))`;return JSON.parse((await promisify(execFile)(process.execPath,['--input-type=module','-e',script],{env})).stdout)};
-  assert.equal((await observer(batch)).state,'unknown','stale scope is not delivery evidence');assert.deepEqual(await observer({...batch,expectedHead:out.binding.candidate}),{state:'landed',batch:batch.id,repositoryId:batch.repositoryId,destination:batch.destinationRef,observedHead:out.binding.candidate,iid:7,commit:out.binding.candidate});assert.deepEqual(await execute(batch.id),out);assert.equal(lines(updates).length,1);assert.equal(lines(pushes).length,oldWrites+1);assert.equal(agents.entries().length,3);
+  assert.deepEqual(lines(probeLog),['blocked:git','blocked:tracker']);
+  assert.equal((await observe(batch)).state,'unknown','stale scope is not delivery evidence');assert.deepEqual(await observe({...batch,expectedHead:out.binding.candidate}),{state:'landed',batch:batch.id,repositoryId:batch.repositoryId,destination:batch.destinationRef,observedHead:out.binding.candidate,iid:7,commit:out.binding.candidate});assert.deepEqual(await execute(batch.id),out);assert.equal(lines(updates).length,1);assert.equal(lines(pushes).length,oldWrites+1);assert.equal(agents.entries().length,3);
   if(kind==='gitlab'){
-    reset();invalidate=true;const held=await execute(sibling.id);assert.equal(held.git,'not-started');assert.match(held.reason,/Missing current exact|Changed batch/);assert.deepEqual(await saved(sibling.id),held);assert.equal(ref(sibling.destinationRef),original);assert.equal(lines(pushes).length,oldWrites+1);assert.equal(lines(updates).length,1);
+    for(const hold of ['parent','claim']){
+      reset();const interrupted=await submit();await assert.rejects(execute(interrupted.id,{INTERRUPT:'landed'}),(err:any)=>err.signal==='SIGKILL');
+      const checkpoint=await saved(interrupted.id);assert.equal(checkpoint.git,'landed');assert.equal(checkpoint.tracker,'not-started');assert.equal(ref(interrupted.destinationRef),checkpoint.binding.candidate);
+      if(hold==='parent')reset({parent:'Changed after confirmed push'});
+      const reconciled=await execute(interrupted.id,hold==='claim'?{PREEMPT:'tracker'}:{});assert.equal(reconciled.git,'landed');assert.equal(reconciled.tracker,'not-started');assert.match(reconciled.reason,hold==='parent'?/Missing current exact/:/claim/);assert.equal(ref(interrupted.destinationRef),reconciled.binding.candidate);assert.equal(lines(updates).length,1);
+    }
+    const unchangedWrites=lines(pushes).length;reset();invalidate=true;const held=await execute(sibling.id);assert.equal(held.git,'not-started');assert.match(held.reason,/Missing current exact|Changed batch/);assert.deepEqual(await saved(sibling.id),held);assert.equal(ref(sibling.destinationRef),original);assert.equal(lines(pushes).length,unchangedWrites);assert.equal(lines(updates).length,1);
   }else{
     reset();const moved=await submit(),lost=await submit(),unknown=await submit(),conflict=await submit(),revoked=await submit();
     writeFileSync(join(root,'batch-only'),'host change');git(root,'add','batch-only');git(root,'commit','-m','host advance');const next=git(root,'rev-parse','HEAD');
@@ -106,8 +124,13 @@ async function journey(t:TestContext,kind:'github'|'gitlab') {
     let before=lines(pushes).length,count=lines(updates).length;const missing=await execute(lost.id,{INTERRUPT:'lose'});assert.equal(ref(lost.destinationRef),missing.binding.candidate);assert.equal(missing.git,'unknown');assert.equal((await execute(lost.id)).git,'unknown');assert.equal(lines(pushes).length,before+1);assert.equal(lines(updates).length,count);
     before=lines(pushes).length;const drift=await execute(unknown.id,{MOVE:'foreign',NEXT:next});assert.equal(drift.git,'not-started');assert.equal(ref(unknown.destinationRef),next);assert.equal(lines(pushes).length,before);
     writeFileSync(join(root,'api.cjs'),'module.exports=99');git(root,'add','api.cjs');git(root,'commit','-m','competing implementation');const competing=git(root,'rev-parse','HEAD');await assert.rejects(execute(conflict.id,{MOVE:'owned',NEXT:competing}),/merge-tree|conflict/i);assert.equal(ref(conflict.destinationRef),competing);assert.equal(lines(updates).length,count);assert.equal(lines(pushes).length,before+1);
-    before=lines(pushes).length;const stale=await execute(revoked.id,{MOVE:'revoke'});assert.equal(stale.git,'not-started');assert.match(stale.reason,/claim/);assert.equal(ref(revoked.destinationRef),original);assert.equal((await execute(revoked.id)).git,'not-started');assert.equal(lines(pushes).length,before);
-    writeFileSync(join(server,'hooks/pre-receive'),'#!/bin/sh\nexit 1\n',{mode:0o700});
+    before=lines(pushes).length;const stale=await execute(revoked.id,{PREEMPT:'git'});assert.equal(stale.git,'not-started');assert.match(stale.reason,/claim/);assert.equal(ref(revoked.destinationRef),original);assert.equal((await execute(revoked.id)).git,'not-started');assert.equal(lines(pushes).length,before);
+    const changed=await submit(), exhausted=await submit(), prior=lines(pushes).length;
+    const badGate=await execute(changed.id,{MOVE:'image'});assert.equal(badGate.gate,'approved');assert.equal(badGate.binding.gate.image,'sha256:'+'a'.repeat(64));assert.equal(badGate.git,'not-started');assert.match(badGate.reason,/Missing current exact/);assert.equal(ref(changed.destinationRef),original);assert.equal(lines(pushes).length,prior);assert.equal(lines(updates).length,count);writeFileSync(image,'sha256:'+'a'.repeat(64)+'\n');
+    const stopped=await execute(exhausted.id,{MOVE:'stop',NEXT:next});assert.equal(stopped.status,'stopped');const latest=await saved(exhausted.id);assert.equal(latest.gate,'stopped');assert.deepEqual(latest.binding,stopped.binding);assert.equal((await observe({...exhausted,expectedHead:next})).state,'stopped');assert.deepEqual(await execute(exhausted.id),latest);assert.equal(ref(exhausted.destinationRef),next);assert.equal(lines(pushes).length,prior+1);assert.equal(lines(updates).length,count);
+    // Clear the fixture reviewer response, not any host-owned gate/attempt state.
+    fsUnlink(rejectMarker);
+    before=lines(pushes).length;writeFileSync(join(server,'hooks/pre-receive'),'#!/bin/sh\nexit 1\n',{mode:0o700});
     const denied=await execute(sibling.id);assert.equal(denied.git,'refused',denied.reason);assert.equal(denied.tracker,'not-started');assert.equal(ref(sibling.destinationRef),original);assert.equal((await execute(sibling.id)).git,'refused');assert.equal(lines(pushes).length,before+1);assert.equal(lines(updates).length,count);assert.equal(ref('main'),original);assert.equal(ref(batch.destinationRef),out.binding.candidate);
   }
 }

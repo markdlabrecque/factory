@@ -328,9 +328,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   assert.match(prompts[1], /first read `\/home\/agent\/evidence\/7\/recovery-report\.json` and `\/home\/agent\/evidence\/7\/recovery-report\.md`/);
   assert.equal(git(origin, "rev-parse", "7-fix-login"), tip, "the exact verified tip was pushed");
   const gh = readFileSync(join(fake, "gh.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).args as string[]);
-  // #153: the REST merge API preserves the same exact-head guard as initial/continued delivery.
-  const merge = gh.find((a) => a[0] === 'api' && a.includes('repos/owner/repo/pulls/9/merge'))!;
-  assert.ok(merge.includes(`sha=${tip}`), 'delivery merged only that tip');
+  assert.ok(!gh.some(a=>a.includes('repos/owner/repo/pulls/9/merge')), 'a repaired PR cannot be merged through a target-unconditional API');
   assert.equal(gh.filter((a) => a[0] === "pr" && a[1] === "create").length, 1);
   // The repair and verifier ran with AGENT.model, not the ticket's model:sonnet label.
   assert.deepEqual([...new Set(readFileSync(join(fake, "models.log"), "utf8").trim().split("\n"))], [copied ? 'pi openai/gpt-6.1-sol' : 'pi pi-claude-subscription/claude-opus-5-5']);
@@ -372,7 +370,7 @@ export async function recoveryEntrypointFixture(t: TestContext, scenario: string
   assert.deepEqual(green.results.assertions.map((a:any)=>[a.assertionId,a.status]),[['A-summary','pass'],['A-order','pass']]);
   assert.throws(() => createProof(state,record.evidence,{...identity,attemptId:'c13ee4ab-be1d-4727-8e74-40ad52ff957b'},proof.provenance,undefined,proof.candidateReplay),/attempt mismatch/);
   if (copied) assert.equal(runRec.implementationModel, 'openai/gpt-6.1-terra');
-  assert.deepEqual([runRec.stage, runRec.verdict, runRec.mr], ["done", "PASS", "https://github.com/owner/repo/pull/9"]);
+  assert.deepEqual([runRec.stage, runRec.verdict, runRec.mr], ["waiting", "PASS", "https://github.com/owner/repo/pull/9"]);
 
   // The pre-upgrade run's exact branch was adopted into an ownership receipt; the recovery claim holds until settled.
   const receipt = readReceipt(receiptFile(state, projectId(root, { kind: "github", host: "github.com", project: "owner/repo" }), "7"))!;
