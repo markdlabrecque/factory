@@ -19,7 +19,7 @@ export interface TicketContextSource {
   notes(iid: number, page: number, budget: ReadBudget): ContextRead<{ notes: ContextNote[]; nextPage: number | null }>;
 }
 export type ContextOperation = 'ticket' | 'parentOf' | 'notes';
-export type ContextHoldReason = 'read-failed' | 'timeout' | 'byte-limit' | 'page-limit' | 'malformed' | 'pagination';
+export type ContextHoldReason = 'read-failed' | 'timeout' | 'byte-limit' | 'page-limit' | 'malformed' | 'pagination' | 'parent-repository';
 export class ContextReadError extends Error {
   readonly reason: ContextHoldReason;
   constructor(reason: ContextHoldReason) { super(reason); this.reason = reason; }
@@ -114,7 +114,7 @@ export function collectTicketContext(source: TicketContextSource, iid: number,
     return { status: 'complete', context };
   } catch (error) {
     const reason = error instanceof ContextReadError ? error.reason : 'read-failed';
-    const nextAction = reason === 'byte-limit' || reason === 'page-limit'
+    const nextAction = reason === 'parent-repository' ? 'Verify that the tracker parent belongs to the owned repository and its project identity is readable. Cross-repository parents are not supported.' : reason === 'byte-limit' || reason === 'page-limit'
       ? 'Inspect the required tracker source size or pagination with the Factory maintainer; retry collection only after it fits the code-owned limits.'
       : 'Inspect the named tracker source and structured read for availability, permissions or malformed pagination, then retry collection. Do not launch with partial context.';
     return { status: 'hold', version: 1, identity: { ...source.identity }, iid, source: role, sourceIid, operation,

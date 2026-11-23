@@ -9,7 +9,7 @@ New Factory projects use versioned TOML, not edits to Factory implementation fil
 `factory init --profile personal|client` creates a commented profile with values from
 `--repo`, `--image` and (client) `--host` / `--project-id`. Reference profiles are
 [personal](../orchestrator/factory.personal.toml) and [client](../orchestrator/factory.client.toml).
-Both profiles explicitly select OpenAI and have empty sandbox setup. Personal uses GitHub, the `merged` done label, one readiness label and automatic merging. Client uses GitLab, the `Internal QA` done label, both `Ready to do` and `ready-for-agent`, issue type `issue` and manual merging. These profile values are not all schema defaults.
+Both profiles explicitly select OpenAI and have empty sandbox setup. Personal uses GitHub, the `merged` done label, one readiness label and `merge.auto = true` (automatic CI observation, not authority to merge a PR). Client uses GitLab, the `Internal QA` done label, both `Ready to do` and `ready-for-agent`, issue type `issue` and manual merging. These profile values are not all schema defaults.
 
 ## Inspecting effective settings
 
@@ -101,6 +101,7 @@ are schema defaults; profiles explicitly override some of them.
 | `graph.analysis_timeout_minutes` | `10`, positive finite number |
 | `graph.conflict_ignore` | `[]`, existing footprint-ignore paths |
 | `graph.prune_after_days` | `30`, positive finite number |
+| `ci.batch_test_argv`, `ci.batch_test_paths` | Optional together for original workflows; required for prospective batch tests. Nonempty argv (no implicit shell) and literal repository-relative test files/directories. Use the host's pinned configuration, not a candidate-supplied command. |
 | `ci.wait_minutes` | `30`, positive finite number |
 | `ci.no_pipeline_minutes` | `5`, positive finite number |
 | `sandbox.image` | **required**, nonempty image name |
@@ -311,10 +312,7 @@ manual-start exceptions and launch pacing are unchanged. `--max N` overrides the
 cap with a positive safe integer; the CLI rejects unsafe integers before shell
 preflight. Dispatch logs the cap/work override sources.
 
-Merge settings preserve SHA-guarded CI and tracker delivery behavior. An exact
-required check/job must pass, not skip. An empty required list retains the existing
-all-checks gate. GitLab's project strategy still controls merge/rebase; squash
-requests squash. Missing/pending CI parks the open PR/MR; existing GitHub failed-CI
+For built-in PR/MR delivery, `merge.auto` selects automatic CI observation, not an automatic merge. Neither tracker can condition its merge operation on the target ref, so a green open request is held for an operator regardless of `merge.method`. Batch publication uses the exact owned Git ref instead. An exact required check/job must pass, not skip. An empty required list retains the all-checks gate. Missing/pending CI parks the open PR/MR; existing GitHub failed-CI
 behavior is unchanged.
 
 ### Startup commands and quoting

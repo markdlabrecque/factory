@@ -1,10 +1,11 @@
-// Structured context reads use collector-owned deadlines/output bounds, independent of delivery state.
-// #153: continuation never creates/posts/reruns; REST checks are bound to the recorded commit, reread before SHA merge.
+// Legacy PR operations cannot publish or infer batch delivery. Structured context reads have independent deadlines.
+// Continuation reads exact-head REST checks; it never creates, posts, reruns or merges.
 // #137: TOML identity and labels are authoritative; legacy adapter exports are preserved.
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { ciGate, missingChecks } from "./ci.mts";
+import { reservedBatchRef } from './batch-refs.mts';
 import { commandContextSource } from './ticket-context-source.mts';
 import type { Gate } from "./ci.mts";
 import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
@@ -14,8 +15,7 @@ import type { Delivered, Delivery, DeliveryIdentity, DeliveryObservation, Merged
 // GitHub adapter for tracker.mts, via `gh` on the host (TRACKER.kind "github", TRACKER.project
 // "owner/repo"). Units of work can be sub-issues. Verification media is attached to one issue
 // comment with native `gh --attach` support. Upload failure stops delivery; no evidence branch is pushed.
-// Delivery: open a PR, and with MERGE.auto merge it only when ciGate (ci.mts) says "pass" for the
-// pushed commit. Missing/pending CI is a durable wait; failure is an operator hold without draft mutation.
+// Delivery: open a PR, and with MERGE.auto observe CI on the pushed commit; never issue a merge. Missing/pending CI is a durable wait; failure is an operator hold without draft mutation.
 // mergedPr: the newest merged PR into the base from the run's branch, else one titled `#N: ...`.
 // readyList rejects GitHub Search's 1000-result boundary rather than infer deselection from a partial list (#135).
 
@@ -180,11 +180,13 @@ export function openMrBranches(): Set<string> {
 }
 
 export function mergedInto(branch: string, base: string): boolean {
+  if(reservedBatchRef(branch,base)) return false;
   return json<unknown[]>(["pr", "list", "-R", REPO, "--state", "merged", "--head", branch, "--base", base, "--limit", "1", "--json", "number"]).length > 0;
 }
 
 /** The newest PR merged into `base` from the run's branch, else one whose title starts with `#N:`. */
 export function mergedPr(iid: number, branch: string | undefined, base: string): MergedPr | undefined {
+  if(reservedBatchRef(branch,base)) return;
   type Pr = { number: number; title: string; url: string; mergedAt: string };
   const list = (filter: string[]) => json<Pr[]>(["pr", "list", "-R", REPO, "--state", "merged", "--base", base, ...filter, "--limit", "100", "--json", "number,title,url,mergedAt"]);
   const pick = (prs: Pr[], matchedBy: MergedPr["matchedBy"]) => prs.map((p): MergedPr => ({ number: p.number, title: p.title, url: p.url, mergedAt: p.mergedAt, matchedBy }))
@@ -249,14 +251,15 @@ function checks(pr: string): { name: string; bucket: string }[] {
 
 /**
  * Open a PR into the base. Without `autoMerge`, stop there (you merge it). With it, poll the checks
- * until ciGate decides: "pass" merges (only while the head is still the pushed commit); "fail", no
+ * until ciGate decides: "pass" requires an operator merge; "fail", no
  * checks within `noCiMinutes`, or still pending at `waitMinutes` parks it for a person. Failed CI
  * becomes an operator hold, without reruns or draft mutation. Required checks must pass, not skip.
  */
-// #150: fresh host authorization after CI, immediately before the SHA-guarded merge.
+// Observation only: checking a PR's target before an API call cannot fence a later retarget.
 export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered> {
+  if(reservedBatchRef(d.branch,d.base)) throw Error('PR delivery cannot target a batch ref');
   const note = d.autoMerge
-    ? "Sandcastle merges this PR once every CI check on this commit has passed. It is never merged without CI."
+    ? "Sandcastle observes CI on this commit. A person must merge this PR."
     : "CI runs on this PR.";
   const url = gh(["pr", "create", "-R", REPO, "--base", d.base, "--head", d.branch, "--title", d.title, "--body-file", "-"], d.body(note)).split(/\s+/).find((w) => w.startsWith("http")) ?? "";
   console.log(url);
@@ -305,6 +308,7 @@ function existing(args: string[], deadline: number): any {
 }
 const hold = (reasonCode: DeliveryObservation['reasonCode'], reason: string): DeliveryObservation => ({ state: 'operator-required', reasonCode, reason });
 export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 30000): DeliveryObservation {
+  if(reservedBatchRef(d.branch,d.base)) return hold('authorization','PR state is not batch landing evidence');
   if (!/^[0-9a-f]{40,64}$/.test(d.sha) || !d.branch || !d.base || d.kind !== 'github' || d.host !== HOST || d.repository !== REPO || !Number.isSafeInteger(d.number) || d.number < 1 || d.url !== `https://${HOST}/${REPO}/pull/${d.number}`) return hold('identity-changed', 'Unknown tracker identity');
   const pr = existing(['api', `repos/${REPO}/pulls/${d.number}`], deadline);
   if (pr.number !== d.number || pr.base?.repo?.full_name !== REPO || pr.head?.repo?.full_name !== REPO || pr.head?.ref !== d.branch || pr.base?.ref !== d.base || pr.head?.sha !== d.sha) return hold('identity-changed', 'PR repository, branch, base or head changed');
@@ -333,20 +337,9 @@ export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 300
     : gate === 'fail' ? hold('checks-failed', 'CI failed or cancelled')
     : { state: 'ci-waiting', reasonCode: gate === 'none' ? 'checks-missing' : 'checks-pending', reason: `CI ${gate}; required checks: ${missingChecks(checks, MERGE.requiredChecks ?? []).join(', ')}` };
 }
-export async function mergeExistingDelivery(d: DeliveryIdentity, beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
+export async function mergeExistingDelivery(d: DeliveryIdentity, _beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
+  if(reservedBatchRef(d.branch,d.base)) return hold('authorization','PR continuation cannot target a batch ref');
   const observed = observeDelivery(d, deadline);
   if (observed.state !== 'ready') return observed;
-  if (!MERGE.auto) return hold('authorization', 'Manual merge policy');
-  let blocked: string | undefined;
-  try { blocked = typeof beforeMerge === 'function' ? await beforeMerge() : 'host authorization missing'; }
-  catch (e) {
-    if ((e as any).code === 'DELIVERY_READ_UNKNOWN') return { state: 'ci-waiting', reasonCode: 'transport-unknown', reason: (e as Error).message };
-    blocked = `host authorization unknown: ${(e as Error).message}`;
-  }
-  if (blocked !== undefined) return hold('authorization', blocked);
-  const head = existing(['api', `repos/${REPO}/pulls/${d.number}`], deadline);
-  if (head.head?.sha !== d.sha || head.base?.ref !== d.base || head.head?.ref !== d.branch || head.state !== 'open' || head.draft !== false) return hold('identity-changed', 'PR changed immediately before merge');
-  const result = existing(['api', '-X', 'PUT', `repos/${REPO}/pulls/${d.number}/merge`, '-f', `sha=${d.sha}`, '-f', `merge_method=${MERGE.method}`], deadline);
-  if (result.merged !== true) return hold('merge-restricted', 'GitHub refused SHA-guarded merge');
-  return observeDelivery(d, deadline);
+  return hold('authorization','Operator merge required: GitHub cannot condition a PR merge on its target ref');
 }

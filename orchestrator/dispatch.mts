@@ -1,3 +1,4 @@
+// Label dispatch never reconciles or launches owned batch records; explicit batch dispatch is host-owned (cli/src/batch-dispatch.mts).
 // Fresh host/project, complete ticket and current frozen acceptance gates precede analysis, cached selection and claim.
 // Pinned runtime children keep independent leases and explicit project artifacts; authenticated current owned baseline precedes claim.
 // Only scheduled non-dry passes observe at most ten host CI waits, oldest first, before launches.
@@ -134,7 +135,7 @@ log(`${active} active run(s), cap ${cap} (source: ${opts.max !== undefined ? '--
 // Runs whose MR merged into their base since the last pass: close the Task, or move the ticket on.
 const openMrs = tracker.openMrBranches();
 for (const r of allRuns) {
-  if (r.project !== PROJECT || r.stage !== "done" || !r.branch || r.mergedAt || openMrs.has(r.branch)) continue;
+  if (r.batchMember || r.project !== PROJECT || r.stage !== "done" || !r.branch || r.mergedAt || openMrs.has(r.branch)) continue;
   let checkpoint = r.delivery;
   if (checkpoint) {
     if (!validDelivery(checkpoint)) continue;
@@ -165,7 +166,7 @@ for (const p of advance) {
 // ---- merged outside Factory (#87) ----------------------------------------------
 const taskIids = new Set([...work.childrenOf.values()].flat().map((k) => k.iid));
 for (const r of allRuns) {
-  if (r.project !== PROJECT || r.mergedAt || !(r.stage === "stopped" || PARKED.includes(r.stage))) continue;
+  if (r.batchMember || r.project !== PROJECT || r.mergedAt || !(r.stage === "stopped" || PARKED.includes(r.stage))) continue;
   const into = r.base ?? base;
   let pr: (tracker.MergedPr & { checkpoint?: NonNullable<typeof r.delivery> }) | undefined;
   try {
@@ -254,7 +255,7 @@ const runOf = new Map(runs.map((r) => [Number(r.iid), r]));
 
 const unstarted = issues.filter((i) => {
   const r = runOf.get(i.iid);
-  if (r && !PARKED.includes(r.stage)) return false; // has a run record that isn't parked
+  if (r?.batchMember || r && !PARKED.includes(r.stage)) return false; // has a run record that isn't parked
   return true;
 });
 // Resolve all selected descriptions, including active tickets, without touching their attempt model.

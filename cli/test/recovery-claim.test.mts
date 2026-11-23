@@ -275,6 +275,27 @@ test('claims race across processes: exactly one claimant wins a ticket', async t
   assert.equal(Object.keys(readAdmission(dir).claims).length, 1);
 });
 
+test('dead holder and competing waiters serialize without overlap or changes to unrelated records',async t=>{
+  const {dir}=fixture(t), mod=new URL('../../board/admission.mts',import.meta.url).href;
+  const pre=`import {withAdmissionLock} from '${mod}';import fs from 'node:fs';const dir=${JSON.stringify(dir)};`;
+  const dead=spawnSync(process.execPath,['--input-type=module','-e',pre+`withAdmissionLock(dir,()=>process.kill(process.pid,'SIGKILL'))`]);assert.equal(dead.signal,'SIGKILL');
+  const other=join(dir,'other--7.json');writeFileSync(other,'unrelated unchanged bytes');
+  const kids=Array.from({length:4},(_,i)=>{
+    const code=pre+`process.send('ready');process.once('message',()=>{withAdmissionLock(dir,()=>{const proof=dir+'/one-active';fs.writeFileSync(proof,'${i}',{flag:'wx'});fs.appendFileSync(dir+'/order','in-${i}\\n');fs.appendFileSync(dir+'/order','out-${i}\\n');fs.unlinkSync(proof)});process.disconnect()})`;
+    const child=spawn(process.execPath,['--input-type=module','-e',code],{stdio:['ignore','ignore','inherit','ipc']});return {child,ready:once(child,'message'),exit:once(child,'exit')};
+  });await Promise.all(kids.map(k=>k.ready));for(const k of kids)k.child.send('go');
+  for(const [code,signal] of await Promise.all(kids.map(k=>k.exit))){assert.equal(signal,null);assert.equal(code,0)}
+  const order=readFileSync(join(dir,'order'),'utf8').trim().split('\n');assert.equal(order.length,8);for(let i=0;i<8;i+=2)assert.equal(order[i+1],order[i].replace('in-','out-'));
+  assert.equal(readFileSync(other,'utf8'),'unrelated unchanged bytes');
+});
+test('a missing owner marker cannot open a simultaneous critical section; release preserves a replacement',t=>{
+  const {dir}=fixture(t), lock=join(dir,'admission','lock');
+  let contender='';const mutation=()=>withAdmissionLock(dir,()=>{
+    rmSync(lock);const code=`import {withAdmissionLock} from '${new URL('../../board/admission.mts',import.meta.url).href}';try{withAdmissionLock(${JSON.stringify(dir)},()=>console.log('entered'),0)}catch{console.log('held')}`;
+    const other=spawnSync(process.execPath,['--input-type=module','-e',code],{encoding:'utf8'});assert.equal(other.status,0);contender=other.stdout.trim();writeFileSync(lock,'replacement',{flag:'wx'});
+  });assert.throws(mutation,/ownership changed/);assert.equal(contender,'held');assert.equal(readFileSync(lock,'utf8'),'replacement');
+});
+
 test('the admission lock is never taken over by age or a live pid alone; corrupt or unknown records fail closed', t => {
   const { dir, pid } = fixture(t);
   const lock = join(dir, 'admission', 'lock');

@@ -1,9 +1,12 @@
 // Authoritative source mapping for the flat runtime and shared project scaffold files.
-// Dispatch, recovery, supervisor, acceptance contracts and delivery assets ship as one complete inventory.
+// Original workflows and prospective batch review ship as one complete inventory, without mixing their evidence contracts.
+export const BATCH_REVIEW_ASSETS = ['batch-refs.mts', 'batch-candidate.mts', 'batch-sandbox.mts', 'batch-review.mts',
+  'prompt.batch-implementation.md', 'prompt.batch-test.md', 'prompt.batch-code.md'] as const;
 export const FROM_ORCHESTRATOR = ['acceptance-baseline-admission.mts', 'acceptance-admission.mts', 'acceptance-contract.mts', 'acceptance-custody.mts', 'acceptance-receipt.mts', 'acceptance-runner.mts', 'acceptance-worker.mts', 'acceptance-sandbox.mjs', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'recovery-triage.mts', 'recovery-triage-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'host-launch.mts', 'launch-readiness.mts', 'readiness-identity.mts', 'ticket-context.mts', 'ticket-context-source.mts', 'ticket-input.mts', 'ticket-input-evidence.mts', 'delivery-followup.mts', 'verification.mts', 'readiness.mts', 'readiness-schema.mts', 'no-commit.mts', 'implementation-outcome.mts', 'sandbox-readiness.mts', 'payload-custody.mts',
   'capabilities.mts', 'ci.mts', 'models.mts', 'model-policy.mts', 'manifests.mts', 'preflight.mts', 'prompt.analyze.md', 'prompt.recover.md', 'prompt.triage.md', 'handoff.mts',
   'workflow.mts', 'context.mts', 'instructions.mts', 'context-process.mts', 'recovery.mts', 'recovery-sandbox.mts', 'ownership.mts', 'project-config.mts', 'runtime-config.mts', 'config-read.mts', 'selection.mts',
+  ...BATCH_REVIEW_ASSETS,
   'project-layout.mts', 'supervisor-contract.mts', 'supervisor-policy.mts', 'supervisor.mts', 'prompt.supervisor.md', 'gate-review.mts', 'prompt.gate-review.md',
   ...['index.js','date.js','error.js','extract.js','parse.js','primitive.js','stringify.js','struct.js','util.js','package.json','LICENSE','UPSTREAM.md'].map(n => `vendor/smol-toml/${n}`)];
 // journal.mts is a mandatory board projection import, including in project dispatcher copies.

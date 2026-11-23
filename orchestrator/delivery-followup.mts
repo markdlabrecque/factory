@@ -6,6 +6,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { EXACT_PROOF_POLICY, readProof, sha256 } from './verification.mts';
 import { acceptanceHash } from './acceptance-contract.mts';
+import { reservedBatchRef } from './batch-refs.mts';
 import { validDelivery } from './delivery.mts';
 import type { DeliveryCheckpoint, DeliveryIdentity, DeliveryObservation } from './delivery.mts';
 import type { RunState } from './board.mts';
@@ -46,6 +47,7 @@ export interface FollowupHost {
 /** Missing/malformed proof/config is an operator hold. Only a tracker transport/read failure remains retryable. */
 export async function observeWaitingDelivery(run: RunState, host: FollowupHost): Promise<string> {
   if (!validDelivery(run.delivery) || run.delivery.state !== 'ci-waiting') return 'Not a host-recorded CI wait';
+  if(reservedBatchRef(run.branch,run.base,run.delivery.branch,run.delivery.base)) return 'Batch delivery cannot continue through a legacy CI checkpoint';
   const deadline = Date.now() + 30000;
   const admitted = host.claim(run); if (!admitted.ok) return admitted.reason;
   const owned = admitted.run, d = owned.delivery!, token = owned.claim!;

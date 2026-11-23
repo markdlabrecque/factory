@@ -53,6 +53,10 @@ async function until(what: string, ok: () => boolean) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
+test('legacy repair refuses a claimed batch destination without changing the attempt, Git or tracker',async t=>{
+  const f=fixture(t), refs=f.refs();writeAttemptRecord(f.record,{...f.rec(),base:'refs/heads/factory/batch/example'});const before=f.rec();
+  await assert.rejects(f.run(),/Legacy repair/);assert.deepEqual(f.rec(),before);assert.equal(f.refs(),refs);assert.deepEqual([...f.agentRuns,...f.delivered,...f.pushes,...f.comments],[]);
+});
 const REPORT = (o: Record<string, unknown> = {}) => JSON.stringify({ cause: "flaky fixture", filesChanged: ["fix.txt"],
   tests: [{ command: "npm test", result: "pass" }], canProceed: true, remainingBlockers: [], requiresHostUpdate: false, ...o });
 const writeReport = (o?: Record<string, unknown>) => `printf '%s' '${REPORT(o)}' > "$EVIDENCE/recovery-report.json" && echo report > "$EVIDENCE/recovery-report.md"`;

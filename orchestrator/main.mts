@@ -1,4 +1,5 @@
-// Execute one fixed Pi workflow with durable managed admission before readiness/tracker/model work.
+// Execute the original non-batch Pi workflow with durable managed admission before readiness/tracker/model work.
+// Already-admitted batch members enter via runStandardBatchMember (batch-review.mts); a destination alone never selects the new rules.
 // A pinned leased runtime binds explicit project assets and state; immutable payload custody retains uncertain admission ownership.
 // Normal handoff closure is sealed only after the entire implementation/verifier/delivery scope unwinds.
 // Current original acceptance and authorized baselines matching the immutable launch image gate claims and adoption.
@@ -166,6 +167,7 @@ if (recovering) {
   if (opts["no-push"]) fail("--recover always delivers normally; --no-push is not allowed with it.");
 }
 const base = opts.base;
+if (/^(?:refs\/heads\/)?factory\/batch\//.test(base)) fail('Batch destinations require an owned batch attempt; legacy verification cannot target them');
 await tracker.ensureLabels(allLabels());
 
 // ---- pick the ticket -------------------------------------------------------

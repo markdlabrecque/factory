@@ -23,7 +23,7 @@ export type EffectiveConfig = {
   SUBTASKS: { enabled: boolean };
   GRAPH: { maxAnalysesPerPass: number; analysisTimeoutMinutes: number; conflictIgnore: string[]; pruneAfterDays: number };
   selection: Selection; dispatch: { maxConcurrent: number; staggerSeconds: number };
-  config: { image: string; ciWaitMinutes: number; noPipelineMinutes: number; sandboxSetup: { command: string; timeoutMs?: number; sudo: boolean }[] };
+  config: { batchTests?: { argv: string[]; paths: string[] }; image: string; ciWaitMinutes: number; noPipelineMinutes: number; sandboxSetup: { command: string; timeoutMs?: number; sudo: boolean }[] };
 };
 type Table = Record<string, any>;
 /** Validate lexical repository-relative paths on both Unix and Windows. */
@@ -168,7 +168,17 @@ export function loadTomlConfig(scaffoldDir: string, options: { strictOriginals?:
   const d = section('dispatch',['max_concurrent','stagger_seconds']);
   const m = section('merge',['auto','method','required_checks']);
   const g = section('graph',['max_analyses_per_pass','analysis_timeout_minutes','conflict_ignore','prune_after_days']);
-  const ci = section('ci',['wait_minutes','no_pipeline_minutes']);
+  const ci = section('ci',['wait_minutes','no_pipeline_minutes','batch_test_argv','batch_test_paths']);
+  let batchTests: EffectiveConfig['config']['batchTests'];
+  if ('batch_test_argv' in ci || 'batch_test_paths' in ci) {
+    const argv = arr(ci,'batch_test_argv','ci'), paths = arr(ci,'batch_test_paths','ci');
+    if (!argv.length || argv.some(s => s.includes('\0')) || !paths.length) fail('ci.batch_test_argv','batch tests require both nonempty argv and paths');
+    for (const p of paths) {
+      validateRelativePath(p);
+      if (p.startsWith(':') || p.split('/').some(x => !x || x === '.')) fail('ci.batch_test_paths','expected literal test file or directory paths');
+    }
+    batchTests = {argv,paths};
+  }
   const sandbox = section('sandbox',['image','setup'],true);
   sources['sandbox.setup'] = Object.hasOwn(sandbox, 'setup') ? 'explicit' : 'default';
   sources['selection.issue_type'] = Object.hasOwn(s, 'issue_type') ? 'explicit' : 'default';
@@ -186,7 +196,7 @@ export function loadTomlConfig(scaffoldDir: string, options: { strictOriginals?:
     SUBTASKS: { enabled: en(w,'units','work',['issues','subtasks'],'subtasks') === 'subtasks' },
     GRAPH: { maxAnalysesPerPass: num(g,'max_analyses_per_pass','graph',5,true), analysisTimeoutMinutes: num(g,'analysis_timeout_minutes','graph',10), conflictIgnore: arr(g,'conflict_ignore','graph'), pruneAfterDays: num(g,'prune_after_days','graph',30) },
     selection, dispatch: { maxConcurrent: num(d,'max_concurrent','dispatch',3,true), staggerSeconds: value(d,'stagger_seconds','dispatch',v => typeof v === 'number' && Number.isFinite(v) && v >= 0,'expected a nonnegative finite number',20) },
-    config: { image: str(sandbox,'image','sandbox'), sandboxSetup, ciWaitMinutes: num(ci,'wait_minutes','ci',30), noPipelineMinutes: num(ci,'no_pipeline_minutes','ci',5) } };
+    config: { ...(batchTests ? {batchTests} : {}), image: str(sandbox,'image','sandbox'), sandboxSetup, ciWaitMinutes: num(ci,'wait_minutes','ci',30), noPipelineMinutes: num(ci,'no_pipeline_minutes','ci',5) } };
 }
 /** Identity lookup does not execute a project module; malformed TOML deliberately propagates. */
 export function tomlIdentity(scaffoldDir: string) {

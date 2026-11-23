@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Batch submit/resume select explicit tickets and reconcile their owned integration ref without dispatching work.
 // Telemetry exports local observations as JSON/JSONL without recording controls or reconciling state.
 // workflow status compares source/app/project content and local image identity without changing state.
 // config explain reads data-only configuration and runtime identity without starting work.
@@ -21,6 +22,7 @@ import { backend } from '../src/platform/index.mts';
 import { install } from '../src/commands/install.mts';
 import { uninstall } from '../src/commands/uninstall.mts';
 import { doctor } from '../src/commands/doctor.mts';
+import { batch } from '../src/commands/batch.mts';
 import { board } from '../src/commands/board.mts';
 import { project } from '../src/commands/project.mts';
 import { init } from '../src/commands/init.mts';
@@ -46,10 +48,14 @@ import { scheduleBackend } from '../src/platform/scheduler.mts';
 const USAGE = `factory install [--link]
 factory doctor [--project <name|path>] [--probe-filesystem] [--json]
 factory board start|stop|status
+factory batch submit <project> <ticket-id>...
+factory batch resume <project> <batch-id>
 factory uninstall [--dry-run] [--purge | --keep-state]
 factory project add|ls|rm [path] [--json (ls)]
 factory init [path] --profile personal|client --repo <namespace/project> --image <image> [--host <gitlab host> --project-id <n>]
 factory dispatch [--dry-run] [--max N] [--whole-issues] [--project <name>]
+factory dispatch --project <name> --batch <id>
+factory tick --project <name> --batch <id>
 factory run <ticket> [--project <name>]
 factory retry <ticket> [--project <name>]
 factory status [--json] [--project <name>]
@@ -78,7 +84,7 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   uninstall: { 'dry-run': { type: 'boolean' }, purge: { type: 'boolean' }, 'keep-state': { type: 'boolean' } },
   project: { json: { type: 'boolean' } },
   init: { profile: { type: 'string' }, repo: { type: 'string' }, image: { type: 'string' }, host: { type: 'string' }, 'project-id': { type: 'string' } },
-  dispatch: { 'dry-run': { type: 'boolean' }, max: { type: 'string' }, 'whole-issues': { type: 'boolean' }, project: { type: 'string' } },
+  dispatch: { batch: { type: 'string' }, 'dry-run': { type: 'boolean' }, max: { type: 'string' }, 'whole-issues': { type: 'boolean' }, project: { type: 'string' } },
   run: { project: { type: 'string' } },
   retry: { project: { type: 'string' } },
   status: { json: { type: 'boolean' }, project: { type: 'string' } },
@@ -94,18 +100,25 @@ const SCHEMAS: Record<string, Record<string, { type: 'boolean' | 'string'; short
   selection: { project: { type: 'string' }, json: { type: 'boolean' } },
   config: { project: { type: 'string' }, json: { type: 'boolean' } },
   telemetry: { project: { type: 'string' }, ticket: { type: 'string' }, since: { type: 'string' }, format: { type: 'string' } },
-  tick: {}, supervise: {},
+  batch: {}, tick: { project:{type:'string'}, batch:{type:'string'} }, supervise: {},
 };
 try {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === '-h' || command === '--help' || rest.includes('--help') || rest.includes('-h')) console.log(USAGE);
   else {
     if (!SCHEMAS[command]) throw new Error(`Unknown command: ${command}`);
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: SCHEMAS[command] });
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: command==='tick' && !rest.some(arg=>arg==='--batch' || arg.startsWith('--batch=')) ? {} : SCHEMAS[command] });
     const v = values as Record<string, any>;
     const [first, second, ...extra] = positionals;
     const p = paths();
-    if (command === 'init') {
+    if ((command==='dispatch' || command==='tick') && (v.batch!==undefined || command==='tick' && v.project!==undefined)) {
+      if (!v.project || !v.batch || positionals.length || Object.keys(v).some(k=>!['project','batch'].includes(k))) throw Error('Explicit batch pass requires only --project <name> --batch <id>');
+      const {continueBatch}=await import('../src/batch-journey.mts');
+      const result=await continueBatch(p,v.project,v.batch,true);
+      console.log(JSON.stringify(result));
+      if(result.error)process.exitCode=1;
+    } else if (command === 'batch') await batch(p, positionals);
+    else if (command === 'init') {
       if (second || extra.length) throw new Error('Unexpected arguments');
       await init(p, first, v);
     } else if (command === 'logs') {

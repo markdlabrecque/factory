@@ -33,6 +33,7 @@ else if (args[0] === 'pr' && args[1] === 'checks') out(s.checks ?? [{name:'test'
 else if (args[0] === 'pr' && args[1] === 'comment') out('');
 else if (args.includes('POST') && args.some(x => x.endsWith('/merge_requests'))) out({iid:1,web_url:glUrl});
 else if (args.some(x => /\\/merge$/.test(x))) {
+  if(s.retargetOnMerge)s.base='factory/batch/other'; // mutation-time target, unchanged source SHA
   if (s.refuse) out(tool === 'gh' ? {merged:false} : {state:'opened'});
   else { s.merged = true; fs.writeFileSync(path, JSON.stringify(s)); if(s.lostResponse) process.exit(1); out(tool === 'gh' ? {merged:true} : {state:'merged'}); }
 } else if (args.some(x => x.endsWith('/notes'))) out({});
@@ -59,24 +60,31 @@ globalThis.setTimeout = ((fn: () => void) => { now += 15000; fn(); return 0; }) 
 const delivery = { beforeMerge: () => undefined, branch: 'topic', base: 'main', sha, title: 'title', body: (s: string) => s, onStage: () => {}, waitMinutes: 1, noCiMinutes: 0, autoMerge: true };
 for (const [kind, adapter] of Object.entries({ github, gitlab })) {
   const identity = identities[kind];
+  test(`${kind}: batch refs are never PR/MR publication or reconciliation authority`,async()=>{
+    setup();for(const field of ['branch','base']){
+      const d={...identity,[field]:'factory/batch/example'};
+      await assert.rejects(adapter.deliver({...delivery,[field]:d[field]}),/batch ref/);
+      assert.equal((await adapter.mergeExistingDelivery(d,()=>undefined)).state,'operator-required');
+      assert.equal(adapter.observeDelivery(d).state,'operator-required');assert.equal(adapter.mergedInto(d.branch,d.base),false);assert.equal(adapter.mergedPr(1,d.branch,d.base),undefined);
+    }assert.deepEqual(calls(),[]);
+  });
   test(`${kind}: opened callback precedes CI and crash does not lose PR identity`, async () => {
     setup(); let captured: DeliveryIdentity | undefined;
     await assert.rejects(adapter.deliver({ ...delivery, onOpened: d => { captured = d; throw Error('crash after durable save'); } }), /crash after durable save/);
     assert.deepEqual(captured, identity); assert.equal(calls().length, 1);
   });
-  test(`${kind}: initial exact-head success, required gates and mandatory authorization`, async () => {
-    setup(); assert.equal((await adapter.deliver(delivery)).merged, true); assert.equal(merges().length, 1);
-    assert.ok(merges()[0].includes(`sha=${sha}`));
+  test(`${kind}: initial green exact-head CI cannot authorize a target-unconditional merge`, async () => {
+    setup(); const result=await adapter.deliver(delivery);assert.equal(result.merged,false);assert.match(result.blocked,/target ref/);assert.equal(merges().length,0);
     for (const beforeMerge of [() => 'requirements changed', () => { throw Error('unknown'); }, undefined]) {
       setup(); assert.equal((await adapter.deliver({ ...delivery, beforeMerge: beforeMerge as any })).merged, false); assert.equal(merges().length, 0);
     }
   });
-  test(`${kind}: continuation pending then green merges once, no side effects`, async () => {
+  test(`${kind}: continuation pending then green remains read-only even if retargeted at mutation time`, async () => {
     setup(kind === 'github' ? { checks: [{name:'test',bucket:'pending'}] } : { status:'running', jobs:[{name:'test',status:'running'}] });
     assert.equal(adapter.observeDelivery(identity).state, 'ci-waiting');
-    setup(); assert.equal((await adapter.mergeExistingDelivery(identity, () => undefined)).state, 'merged');
-    assert.equal((await adapter.mergeExistingDelivery(identity, () => undefined)).state, 'merged');
-    assert.equal(merges().length, 1);
+    setup({retargetOnMerge:true}); const held=await adapter.mergeExistingDelivery(identity,()=>undefined);
+    assert.equal(held.state,'operator-required');assert.match(held.reason,/target ref/);
+    assert.equal(merges().length,0);assert.equal(JSON.parse(readFileSync(join(dir,'scenario'),'utf8')).merged,undefined);
     assert.ok(calls().every(a => a[1] === 'api' && !a.includes('POST') && !a.some(x => /notes|rerun/.test(x))));
   });
   test(`${kind}: changed identities, failed/skipped/missing checks and restrictions refuse merge`, async () => {
@@ -85,9 +93,9 @@ for (const [kind, adapter] of Object.entries({ github, gitlab })) {
         : [{noPipeline:true}, {pipelineSha:'b'.repeat(40)}, {jobs:[]}, {jobs:[{name:'test',status:'skipped'}]}, {jobs:[{name:'test',status:'failed'}]}, {jobs:[{name:'test',status:'canceled'}]}])];
     for (const s of scenarios) { setup(s); const r = await adapter.mergeExistingDelivery(identity, () => undefined); assert.notEqual(r.state, 'merged', JSON.stringify(s)); assert.equal(merges().length, 0); }
   });
-  test(`${kind}: lost merge response is reconciled on same PR, not blindly repeated`, async () => {
-    setup({lostResponse:true}); await assert.rejects(adapter.mergeExistingDelivery(identity, () => undefined));
-    assert.equal(adapter.observeDelivery(identity).state, 'merged'); assert.equal(merges().length, 1);
+  test(`${kind}: externally merged historical identity is observable without issuing any mutation`, async () => {
+    setup({merged:true}); assert.equal((await adapter.mergeExistingDelivery(identity,()=>undefined)).state,'merged');
+    assert.equal(adapter.observeDelivery(identity).state, 'merged'); assert.equal(merges().length, 0);
   });
 }
 test('GitHub legacy commit statuses are bound by exact-SHA endpoint and newest context result', async () => {

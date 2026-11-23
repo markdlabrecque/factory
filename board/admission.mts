@@ -5,6 +5,7 @@
 // Directory creation/replacement is strictly synced; unsupported or failed durability never returns successful publication.
 // Optional advisory candidate identities are consumed with the SAME recovery claim/charge, never a second scheduler.
 // #153: short-lived delivery ownership uses normal PID/start fencing and advances project activity without repair charges.
+import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
@@ -23,11 +24,9 @@ import { dirname, join, resolve } from "node:path";
 //   been applied to the project's recovery record (`pending`). A recovery claim and its attempt charge are written in one
 //   replacement; the charge is then applied to the recovery record idempotently by attempt UUID and cleared, so a crash
 //   between the two writes is replayed later without charging twice or refunding (cli/src/recovery-claim.mts).
-// Every change runs under one short interprocess lock across all projects, `<stateDir>/admission/lock`, created complete
-// (written to a temp file, then hard-linked into place) and naming its holder's pid and start identity. It is taken over
-// only when that exact process is gone (the pid has exited, including an exited process its parent has not reaped, a
-// zombie, since #64; or the pid now belongs to a process started at another time), never
-// because of its age or a live pid alone. Writes are temp file, fsync, rename, fsync of the folder. A corrupt record or an
+// Every writer first takes SQLite's process-death-safe writer mutex on the permanent local admission/mutex.sqlite.
+// The private owner marker admission/lock is inspected, reclaimed and released only under that mutex. Never move,
+// replace or delete the mutex file. Mixing protocols or filesystems without local SQLite locking is unsupported. Writes are temp file, fsync, rename, fsync of the folder. A corrupt record or an
 // unknown version fails closed: nothing is claimed and the file is never overwritten. readAdmission never writes.
 // Import-safe and dependency-free apart from Node, so factory init copies it next to board.mts (cli/src/scaffold.mts).
 
@@ -207,16 +206,23 @@ export function supervisorExclusion(s: AdmissionState, tracker?: string, root?: 
   return hold ? `project held by supervisor ${hold.id} (${hold.invocationId}/${hold.fence})` : undefined;
 }
 /** Short synchronous admission transaction only; callers own subprocess lifetime outside this lock.
- * Entries survive owner death: an exited controller does not prove its descendants or handoff settled. */
-export function claimManagedEntry(dir: string, project: AdmissionIdentity): string {
+ * Entries survive owner death: an exited controller does not prove its descendants or handoff settled.
+ * A refusal observer runs under the same lock; no entry is created and no admission state committed. */
+export function claimManagedEntry(dir: string, project: AdmissionIdentity, onRefused?: (reason:string,state:Readonly<AdmissionState>)=>void): string {
   if (!validAdmissionIdentity(project)) throw Error('Managed entry identity unknown');
   project = { root: realpathSync(project.root), tracker: { ...project.tracker, host: project.tracker.host.toLowerCase() } };
   return withAdmission(dir, tx => {
     const reason = supervisorExclusion(tx.state, project.tracker.project, project.root);
-    if (reason) throw Error(reason);
-    if (readBaselineReservations(dir).some(b => admissionConflict(b.project, project))) throw Error('Project held by acceptance baseline cleanup');
+    const refuse=(message:string):never=>{
+      try { onRefused?.(message,tx.state); } catch(error) { throw Error(`${message}; cannot publish refusal observation: ${(error as Error).message}`); }
+      throw Error(message);
+    };
+    if (reason) refuse(reason);
+    let baselines:BaselineReservation[];
+    try { baselines=readBaselineReservations(dir); } catch(error) { return refuse((error as Error).message); }
+    if (baselines.some(b => admissionConflict(b.project, project))) refuse('Project held by acceptance baseline cleanup');
     const owner = ownerOf(process.pid);
-    if (!owner.start) throw Error('Managed entry owner unknown');
+    if (!owner.start) refuse('Managed entry owner unknown');
     const id = newToken(); tx.state.entries[id] = { id, project: structuredClone(project), owner }; tx.commit(); return id;
   });
 }
@@ -264,7 +270,6 @@ function writePrepared(file: string, text: string): void {
   syncDirectory(dirname(file));
 }
 
-const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Take <stateDir>/admission/lock, run `fn`, release. See the file comment for when a lock is taken over. */
 // Observational callbacks run only after all authoritative admission locks have been released.
@@ -287,11 +292,24 @@ export type DurableWriter = (file: string, text: string) => void;
 export function withAdmissionLock<T>(stateDir: string, fn: (write: DurableWriter) => T, waitMs = 10_000): T {
   const dir = admissionDir(stateDir);
   durableDirectory(dir);
+  if(!Number.isSafeInteger(waitMs)||waitMs< -1||waitMs>2147483647)throw Error('Invalid admission lock timeout');
+  const db=new DatabaseSync(join(dir,'mutex.sqlite'));
+  try {
+    // Existing journal callers use -1 for a single nonblocking attempt.
+    db.exec(`PRAGMA busy_timeout=${Math.max(0,waitMs)}`);
+    try { db.exec('BEGIN IMMEDIATE'); } catch(e){
+      if((e as {errcode?:number}).errcode===5)throw Error(`Run admission is locked by process (SQLite writer busy in ${dir}). Retry shortly.`);
+      throw e;
+    }
+    return underMutex(stateDir,dir,fn);
+  } finally { try {db.close()} finally {flushObservations()} }
+}
+function underMutex<T>(stateDir:string, dir:string, fn:(write:DurableWriter)=>T):T {
   const lock = join(dir, "lock");
-  const me = ownerOf(process.pid);
+  const me = {...ownerOf(process.pid),token:randomUUID()};
   const tmp = join(dir, `lock.${process.pid}.${randomUUID().slice(0, 8)}`);
   writePrepared(tmp, JSON.stringify(me));
-  const deadline = Date.now() + waitMs;
+  // Only this transaction may touch the marker. A surviving legacy owner or malformed marker holds.
   try {
     for (;;) {
       try {
@@ -301,34 +319,20 @@ export function withAdmissionLock<T>(stateDir: string, fn: (write: DurableWriter
         if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       }
       let holder: Owner | undefined;
-      let ino = 0;
+
       try {
-        ino = statSync(lock).ino;
         const h = JSON.parse(readFileSync(lock, "utf8"));
         if (validOwner(h)) holder = h;
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "ENOENT") continue; // released meanwhile
       }
       if (holder && ownerState(holder) === "dead") {
-        // Take over only that exact lock: move it aside, and put it back if someone else's replaced it meanwhile.
-        const aside = join(dir, `lock.stale.${randomUUID().slice(0, 8)}`);
-        try {
-          renameSync(lock, aside);
-        } catch {
-          continue;
-        }
-        if (statSync(aside).ino !== ino) {
-          try { linkSync(aside, lock); } catch { /* a third claimant holds it now */ }
-        }
-        rmSync(aside, { force: true });
+        rmSync(lock);
         continue;
       }
-      if (Date.now() > deadline) {
-        throw new Error(holder
+      throw new Error(holder
           ? `Run admission is locked by process ${holder.pid} (${lock}). Retry shortly.`
           : `Run admission lock ${lock} is unreadable; it is never taken over by age. Remove it once no factory or dispatcher process runs.`);
-      }
-      sleep(25);
     }
   } finally {
     rmSync(tmp, { force: true });
@@ -350,8 +354,10 @@ export function withAdmissionLock<T>(stateDir: string, fn: (write: DurableWriter
     return fn(write);
   } finally {
     active = false;
-    try { rmSync(lock, { force: true }); }
-    finally { admissionDepth--; flushObservations(); }
+    try {
+      if(readFileSync(lock,'utf8')!==JSON.stringify(me))throw Error('Admission marker ownership changed; retained for inspection');
+      rmSync(lock);
+    } finally { admissionDepth--; }
   }
 }
 

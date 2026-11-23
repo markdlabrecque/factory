@@ -10,7 +10,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // Persisted transitions emit observations after authoritative locks, never on heartbeat writes.
 import { observeRun } from './execution-events.mts';
-import { claimLive, keyFor, newToken, ownerOf, readBaselineReservations, releaseClaim, supervisorExclusion, withAdmission, writeDurable } from "./admission.mts";
+import { claimLive, keyFor, newToken, ownerOf, processStart, readBaselineReservations, releaseClaim, supervisorExclusion, withAdmission, writeDurable } from "./admission.mts";
 import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
 import { readAssessments, requestRefresh } from "./assessment.mts";
@@ -76,6 +76,7 @@ export interface RunState {
   startedAt: string;
   executionId?: string; // unique normal admission; legacy runs cannot authorize delivery
   payloadCustody?: { version: 1; nonce: string }; // private source journal pointer; never readiness/projection authority
+  batchMember?: { id:string; repositoryId:string; footprint:string[]; policyIdentity?:string; attempt?:string; gate?:string };
   implementationBaseSha?: string; // #150: actual historical before revision, preserved across repairs
   acceptanceBaseline?: { version: 1; bindingDigest: string; sha: string }; // original full-scope/current-host admission binding, never replaced by repair
   verification?: { id: string; tip: string; requirementsHash: string }; // informational host proof pointer
@@ -284,6 +285,7 @@ export interface AdmitOptions {
   iid: string;
   pid: number;
   cap: number;
+  projectRoot?: string;
   project?: string;
   patch?: Partial<RunState>;
   /** `recovery`: holds the project and is refused while any other run of the project is in flight. Default `normal`. */
@@ -292,7 +294,7 @@ export interface AdmitOptions {
   attempt?: string;
   /** Runs under the lock after the shared checks, with the ticket's current record; may throw to refuse (its message is
    *  the reason, nothing is written) or return more fields for the record. */
-  also?: (current: RunState | undefined) => Partial<RunState> | void;
+  also?: (current: RunState | undefined, busyKeys: ReadonlySet<string>) => Partial<RunState> | void;
 }
 export type Admitted = { ok: true; key: string; token: string; claim: AdmissionClaim; current?: RunState; run: RunState } | { ok: false; reason: string };
 
@@ -303,14 +305,21 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
   const proj = o.project ?? project;
   const key = keyFor(o.iid, proj);
   const kind = o.kind ?? "normal";
-  const exclusion = supervisorExclusion(tx.state, proj, realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd()));
+  const root = realpathSync(o.projectRoot ?? process.env.FACTORY_PROJECT_ROOT ?? process.cwd());
+  const exclusion = supervisorExclusion(tx.state, proj, root);
   if (exclusion) return { ok: false, reason: exclusion };
   const baselines = readBaselineReservations(dir);
-  if (baselines.some(b => b.project.tracker.project === proj || b.project.root === realpathSync(process.env.FACTORY_PROJECT_ROOT ?? process.cwd())))
+  if (baselines.some(b => b.project.tracker.project === proj || b.project.root === root))
     return { ok: false, reason: 'project held by acceptance baseline cleanup' };
-  const runs = readRuns(dir);
+  // A scoped batch pass must not delete or reconcile an outsider's stale starting reservation.
+  const runs = readRuns(dir, !o.patch?.batchMember);
   const claims = Object.entries(tx.state.claims).filter(([, c]) => claimLive(c));
   const current = runs.find((r) => r.key === key);
+  // A legacy launch has no batch footprint contract. Never replace a batch record or race a live batch member.
+  if (!o.patch?.batchMember && (current?.batchMember || runs.some(r => r.project === proj && r.batchMember && (inFlight(r) || r.stage==='waiting' && r.batchMember.gate==='approved'))))
+    return {ok:false,reason:'batch work requires owned batch dispatch'};
+  if (o.patch?.batchMember && claims.some(([,c]) => c.project===proj && !runs.some(r=>r.claim===c.token && r.batchMember)))
+    return {ok:false,reason:'project has a live claim without a known batch footprint'};
   const own = tx.state.claims[key];
   if (own && claimLive(own)) return { ok: false, reason: `#${o.iid} already has a run in flight (${own.kind} claim, process ${own.owner.pid})` };
   if (current && inFlight(current)) return { ok: false, reason: `#${o.iid} already has a run in flight (${current.stage}, process ${current.pid})` };
@@ -321,11 +330,15 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
     const other = claims.find(([k, c]) => k !== key && c.project === proj)?.[1].iid ?? runs.find((r) => r.key !== key && r.project === proj && inFlight(r))?.iid;
     if (other) return { ok: false, reason: `project ${proj ?? "(unnamed)"} has #${other} in flight; recovery needs the project to itself` };
   }
-  const busy = new Set([...claims.map(([k]) => k), ...runs.filter(inFlight).map((r) => r.key)]);
+  // Count normal run rows without mutating them during batch dispatch. A missing/invalid PID or an
+  // unreadable start is ambiguous; only a positively dead process loses its slot. Live claims,
+  // recovery ownership and baseline cleanup are independent fences, even for a dead row PID.
+  const occupying = runs.filter(r => inFlight(r) && (!o.patch?.batchMember || !Number.isSafeInteger(r.pid) || r.pid<=0 || processStart(r.pid)!==null));
+  const busy = new Set([...claims.map(([k]) => k), ...occupying.map((r) => r.key)]);
   if (busy.size + baselines.length >= o.cap) return { ok: false, reason: `no capacity: ${busy.size + baselines.length} ${baselines.length ? 'run(s)/baseline(s)' : 'run(s)'} in flight, cap ${o.cap}` };
   let extra: Partial<RunState> | void;
   try {
-    extra = o.also?.(current);
+    extra = o.also?.(current,busy);
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
   }
