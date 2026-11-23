@@ -10,7 +10,7 @@ import { commandContextSource } from '../../orchestrator/ticket-context-source.m
 import { freezeTicketInput } from '../../orchestrator/ticket-input.mts';
 import { nativeGithub } from '../../orchestrator/selection-tracker.github.mts';
 import { nativeGitlab } from '../../orchestrator/selection-tracker.gitlab.mts';
-import { declaredBlockers, memberDelivery, prerequisiteHold, recordedGraph, unavailableDelivery, type DeliveryObserver } from '../../orchestrator/batch-selection.mts';
+import { declaredBlockers, memberDelivery, policyFootprint, prerequisiteHold, recordedGraph, unavailableDelivery, type DeliveryObserver } from '../../orchestrator/batch-selection.mts';
 import { dependencyState } from '../../orchestrator/dependencies.mts';
 import { overlap } from '../../orchestrator/graph.mts';
 import { projectLaunchReadiness, readinessReason, ticketBranch, ticketWorkspaceProblem } from '../../orchestrator/launch-readiness.mts';
@@ -32,8 +32,11 @@ export async function dispatchBatch(paths:Paths, project:string, id:string, obse
   if(dir!==paths.state) throw Error('Batch dispatch requires the registered host run-state directory');
   const workflow=projectWorkflow(paths,batch.root), config=workflow.config, tracker=config.TRACKER, host=tracker.host??tracker.gitlabHost!;
   if(workflow.mode!=='factory') throw Error('Batch dispatch requires standard workflow');
+  // Use the same policy digest as the analysis producer (runtime, settings, templates and additive instructions).
+  const {loadExecutionContext}:typeof import('../../orchestrator/context.mts')=await import(pathToFileURL(join(workflow.root,'context.mts')).href);
+  const policy=await loadExecutionContext({cwd:batch.root,env:{...workflow.env,SANDCASTLE_STATE_DIR:dir}});
   const adapter=tracker.kind==='github'?nativeGithub(config):nativeGitlab(config);
-  const identity={kind:tracker.kind,host,project:tracker.project}, source=commandContextSource(identity,tracker.projectId);
+  const identity={kind:tracker.kind,host,project:tracker.project}, source=commandContextSource(identity,tracker.projectId,process.env,batch.repositoryId);
   const rows=()=>readRuns(dir,false).filter(r=>r.project===tracker.project);
   const row=(iid:number)=>rows().find(r=>r.iid===String(iid));
   const report=(iid:number,status:string,reason:string)=>{
@@ -42,7 +45,7 @@ export async function dispatchBatch(paths:Paths, project:string, id:string, obse
   };
   const delivery:DeliveryObserver=(b,iid)=>{
     const result=observe(b,iid), run=row(iid);
-    if(result.state!=='landed' && run?.batchMember?.id===id && run.stage==='stopped') return {state:'stopped',reason:`stopped: ${run.note}`};
+    if(result.state!=='landed' && run?.batchMember?.id===b.id && run.stage==='stopped') return {state:'stopped',reason:`stopped: ${run.note}`};
     return result;
   };
   function collect(iid:number) {
@@ -60,8 +63,8 @@ export async function dispatchBatch(paths:Paths, project:string, id:string, obse
     try { manifest=JSON.parse(readFileSync(join(dir,'graph',keyFor(String(iid),tracker.project)+'.json'),'utf8')); }
     catch(e) { if((e as NodeJS.ErrnoException).code!=='ENOENT') throw Error('Recorded ticket graph unavailable; inspect manifest'); }
     if(manifest===null) throw Error('Unreadable ticket graph; inspect manifest');
-    const graph=recordedGraph(manifest,tracker.project,iid,ticket.hash,b.expectedHead);
-    const blockers=[...graph.blockers,...units.flatMap(u=>[...adapter.blockers(u.iid),...declaredBlockers(u.description),...u.notes.flatMap(n=>declaredBlockers(n.body))])];
+    const graph=recordedGraph(manifest,tracker.project,iid,ticket.hash,b.expectedHead,policy.policyIdentity);
+    const blockers=[...graph.blockers,...units.flatMap(u=>[...adapter.blockers(u.iid,b.members),...declaredBlockers(u.description),...u.notes.flatMap(n=>declaredBlockers(n.body))])];
     const hold=prerequisiteHold(b,blockers,delivery,n=>dependencyState(n,{ticket:k=>{const t=adapter.ticket(k,true);return t.iid===k?t:undefined},run:row,mergedInto:adapter.mergedInto,base:b.baseRef.slice(11)}));
     if(hold) throw Error(hold);
     const workspace=ticketWorkspaceProblem(batch.root,ticketBranch(iid,ticket.context.child.title));
@@ -93,16 +96,27 @@ export async function dispatchBatch(paths:Paths, project:string, id:string, obse
         const {b,ticket,footprint}=collect(iid);
         const now=projectWorkflow(paths,b.root);
         if(first.ticket.hash!==ticket.hash || first.b.expectedHead!==b.expectedHead || now.id!==workflow.id || JSON.stringify(now.config)!==JSON.stringify(config)) throw Error('Ownership, runtime or requirements changed; repeat dispatch');
-        const settled=new Set(rows().filter(r=>r.batchMember?.id===id && r.batchMember.gate==='approved' && memberDelivery(b,Number(r.iid),delivery).state==='satisfied').map(r=>r.executionId));
+        // Approval cards may outlive delivery, including a different batch's delivery. Only its own
+        // checked destination and trusted landing observation can release that execution's footprint.
+        const settled=new Set<string>();
+        for(const r of rows()) {
+          const member=r.batchMember;
+          if(r.stage!=='waiting' || member?.gate!=='approved' || !r.executionId || !overlap(footprint,policyFootprint(member,policy.policyIdentity),config.GRAPH.conflictIgnore).length) continue;
+          try {
+            const owner=member.id===id?b:readOwnedBatch(paths,project,member.id);
+            if(member.repositoryId===owner.repositoryId && memberDelivery(owner,Number(r.iid),delivery).state==='satisfied') settled.add(r.executionId);
+          } catch { /* Unavailable or foreign evidence leaves this reservation intact. */ }
+        }
         if(owned().expectedHead!==b.expectedHead) throw Error('Owned batch moved during admission; repeat dispatch');
+        policy.assertCurrent();
         const claim=claimRun({dir,project:tracker.project,projectRoot:b.root,iid:String(iid),pid:process.pid,cap:config.dispatch.maxConcurrent,
-          patch:{batchMember:{id,repositoryId:b.repositoryId,footprint},starting:false,title:ticket.context.child.title,ticketHash:ticket.hash,stage:'implementing',parentIid:ticket.context.parent?.iid.toString()},
+          patch:{batchMember:{id,repositoryId:b.repositoryId,footprint,policyIdentity:policy.policyIdentity},starting:false,title:ticket.context.child.title,ticketHash:ticket.hash,stage:'implementing',parentIid:ticket.context.parent?.iid.toString()},
           also:current=>{
             if(current) throw Error('Ticket already has a run; reconcile before dispatch');
             for(const r of rows()) {
-              const pending=r.stage==='waiting' && r.batchMember?.gate==='approved' && !settled.has(r.executionId);
+              const pending=r.stage==='waiting' && r.batchMember?.gate==='approved' && (!r.executionId || !settled.has(r.executionId));
               if(!pending && (TERMINAL.includes(r.stage)||PARKED.includes(r.stage)) && (!r.branch || r.mergedAt)) continue;
-              const conflicts=overlap(footprint,r.batchMember?.footprint??['*'],config.GRAPH.conflictIgnore);
+              const conflicts=overlap(footprint,policyFootprint(r.batchMember,policy.policyIdentity),config.GRAPH.conflictIgnore);
               if(conflicts.length) throw Error(`Footprint conflict with #${r.iid}: ${conflicts.join(', ')}; retry after its work settles`);
             }
           }});

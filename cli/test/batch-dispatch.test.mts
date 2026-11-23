@@ -11,8 +11,14 @@ import {factoryToml} from './config-fixture.mts';
 import {addProject} from '../src/projects.mts';
 import {advanceBatch,submitBatch} from '../src/batch.mts';
 import {dispatchBatch} from '../src/batch-dispatch.mts';
-import {claimRun,readRuns} from '../../board/board.mts';
-import {batchLinks} from '../../orchestrator/batch-links.mts';
+import {freezeTicketInput} from '../../orchestrator/ticket-input.mts';
+import {commandContextSource} from '../../orchestrator/ticket-context-source.mts';
+import {claimRun,keyFor,readRuns} from '../../board/board.mts';
+import {batchLinks,gitlabBlockerIds} from '../../orchestrator/batch-links.mts';
+import {nativeGithub} from '../../orchestrator/selection-tracker.github.mts';
+import {nativeGitlab} from '../../orchestrator/selection-tracker.gitlab.mts';
+import {dependencyState} from '../../orchestrator/dependencies.mts';
+import {loadTomlConfig} from '../../orchestrator/project-config.mts';
 import {declaredBlockers,prerequisiteHold,recordedGraph,unavailableDelivery,type DeliveryObserver} from '../../orchestrator/batch-selection.mts';
 
 test('batch claim leaves an unrelated dead starting reservation byte-for-byte intact',t=>{
@@ -23,22 +29,29 @@ test('batch claim leaves an unrelated dead starting reservation byte-for-byte in
 });
 
 test('native blocker reads exhaust pages, skip reverse/non-blocking GitLab links and never localize foreign IDs',()=>{
-  for(const kind of ['gitlab','github'] as const){
-    const repo={kind,project:'org/r',host:'h',projectId:5};
-    const page=Array.from({length:100},(_,i)=>kind==='github'?{number:i+1,html_url:`https://h/org/r/issues/${i+1}`}:{iid:i+1,project_id:5,link_type:'is_blocked_by'});
-    assert.deepEqual(batchLinks(111,repo,path=>path.endsWith('page=1')?page:kind==='gitlab'?[{link_type:'blocks'},{link_type:'relates_to'}]:[]),page.map((_,i)=>i+1));
+  {
+    const repo={kind:'github' as const,project:'org/r',host:'h'};
+    const page=Array.from({length:100},(_,i)=>({number:i+1,html_url:`https://h/org/r/issues/${i+1}`}));
+    assert.deepEqual(batchLinks(111,repo,path=>path.endsWith('page=1')?page:[]),page.map((_,i)=>i+1));
     for(const bad of [null,[{}],[{...page[0],html_url:'https://h/other/issues/1',project_id:55}]])assert.throws(()=>batchLinks(111,repo,()=>bad));
     assert.throws(()=>batchLinks(111,repo,path=>path.endsWith('page=1')?page:null));
   }
+  const incoming={iid:1,project_id:5,link_type:'is_blocked_by',state:'opened'};
+  const links=[incoming,{...incoming,iid:2,state:'closed'},{link_type:'blocks'},{link_type:'relates_to'}];
+  assert.deepEqual(gitlabBlockerIds(links,5,1),[1,2]);
+  for(const count of [null,undefined,0,2]) assert.throws(()=>gitlabBlockerIds(links,5,count),/blocker inventory/i);
+  for(const patch of [{state:null},{project_id:55},{link_type:'unknown'}]) assert.throws(()=>gitlabBlockerIds([{...incoming,...patch}],5,1));
+  assert.throws(()=>gitlabBlockerIds([incoming,incoming],5,2));
   assert.deepEqual(declaredBlockers('**Depends on:** #1 (description), #2'),[1,2]);
   assert.throws(()=>declaredBlockers('Blocked by: org/other#2'));
 });
 
 test('recorded providers and implementer blockers are never expanded; unsafe or stale graph facts do not narrow reservations',()=>{
-  const m={iid:11,project:'p',hash:'h',baseSha:'head',footprint:['code/'],requires:[{providedBy:44}],implementerBlockers:[{iid:55}]} as any;
-  assert.deepEqual(recordedGraph(m,'p',11,'h','head'),{blockers:[44,55],footprint:['code/']});
-  assert.deepEqual(recordedGraph(m,'p',11,'h','moved').footprint,['*']);
-  for(const patch of [{hash:'changed'},{project:'other'},{requires:[{providedBy:null}]},{implementerBlockers:[{iid:null}]}]) assert.throws(()=>recordedGraph({...m,...patch},'p',11,'h','head'));
+  const m={iid:11,project:'p',hash:'h',baseSha:'head',policyIdentity:'current',footprint:['code/'],requires:[{providedBy:44}],implementerBlockers:[{iid:55}]} as any;
+  assert.deepEqual(recordedGraph(m,'p',11,'h','head','current'),{blockers:[44,55],footprint:['code/']});
+  assert.deepEqual(recordedGraph(m,'p',11,'h','moved','current').footprint,['*']);
+  for(const policyIdentity of [undefined,'old']) assert.deepEqual(recordedGraph({...m,policyIdentity},'p',11,'h','head','current'),{blockers:[44,55],footprint:['*']});
+  for(const patch of [{hash:'changed'},{project:'other'},{requires:[{providedBy:null}]},{implementerBlockers:[{iid:null}]}]) assert.throws(()=>recordedGraph({...m,...patch},'p',11,'h','head','current'));
 });
 
 test('a landed observation must match the exact owned head, member, stable repository and destination',()=>{
@@ -60,33 +73,61 @@ for(const kind of ['github','gitlab'] as const) test(`${kind}: fixed batch dispa
   stub('ssh',`const a=process.argv.slice(2);if(a.length!==2||a[0]!=='git@fixture.test'||!/^git-(upload|receive)-pack 'org\\/repo\\.git'$/.test(a[1]))process.exit(80);process.exit(require('node:child_process').spawnSync('/usr/bin/git',[a[1].split(' ')[0].slice(4),${JSON.stringify(server)}],{stdio:'inherit'}).status??1);`);
   const calls=join(bin,'calls');
   stub('gh',`const a=process.argv.slice(2),s=a.join(' ');require('node:fs').appendFileSync(${JSON.stringify(calls)},s+'\\n');const out=v=>console.log(JSON.stringify(v));
-    const desc=n=>n===12?'Depends on: #11':n===16?'Blocked by: #12':n===90?'Parent requirements': 'Implement '+n;
+    const desc=n=>n===12?'Depends on: #11':n===16?'Blocked by: #12':n===22?'Depends on: #77':n===90?'Parent requirements': 'Implement '+n;
     if(s.startsWith('api graphql --hostname')){const n=Number(/issue\\(number:(\\d+)/.exec(s)?.[1]);out({data:{viewer:{id:'V'},repository:{id:'R',nameWithOwner:'org/repo',issue:{number:n,state:'OPEN',subIssues:{totalCount:0}}}}})}
-    else if(s.startsWith('api graphql')){const n=Number(/issue\\(number: (\\d+)/.exec(s)?.[1]);out({data:{repository:{issue:{parent:n===11?{number:90}:null}}}})}
-    else if(s.startsWith('issue view')){const n=Number(a[2]);out({number:n,title:'ticket'+n,body:desc(n),state:'OPEN',labels:n===99?[{name:'ready-for-agent'}]:[]})}
+    else if(s.startsWith('api graphql')){const n=Number(/issue\\(number: (\\d+)/.exec(s)?.[1]);out({data:{repository:{id:'R',nameWithOwner:'org/repo',issue:{parent:n===11?{number:90,...(s.includes('parent { number repository { id nameWithOwner }')?{repository:{id:'R',nameWithOwner:'org/repo'}}:{})}:n===23?{number:79,repository:{id:'foreign',nameWithOwner:'org/other'}}:n===24?{number:79}:null}}}})}
+    else if(s.startsWith('issue view')){const n=Number(a[2]);out({number:n,title:'ticket'+n,body:desc(n),state:n===77&&process.env.RESOLVED_EXTERNAL?'CLOSED':'OPEN',labels:n===99?[{name:'ready-for-agent'}]:[]})}
     else if(a[0]==='api' && a[1].includes('/dependencies/blocked_by?')){const n=Number(a[1].split('/')[4]);if(n===14)process.exit(1);out(n===13?[{number:77,html_url:'https://fixture.test/org/repo/issues/77'}]:[])}
     else if(a[0]==='api' && a[1].includes('/comments?'))out([]);
     else if(a[0]==='api' && /issues\\/\\d+$/.test(a[1])){const n=Number(a[1].split('/').at(-1));out({number:n,title:'ticket'+n,body:desc(n),issue_dependencies_summary:{total_blocked_by:n===13?1:0}})}
+    else if(a[0]==='pr' && a[1]==='list' && a.includes('--head') && a[a.indexOf('--head')+1]==='provider' && a[a.indexOf('--base')+1]==='recorded')out([{number:7,state:'MERGED',baseRefName:process.env.ACTUAL_MERGE_BASE,headRefName:'provider',isCrossRepository:false}]);
     else process.exit(88);`);
   stub('glab',`const a=process.argv.slice(2),s=a.join(' ');require('node:fs').appendFileSync(${JSON.stringify(calls)},s+'\\n');const out=v=>console.log(JSON.stringify(v));
-    const desc=n=>n===12?'Depends on: #11':n===16?'Blocked by: #12':n===90?'Parent requirements':'Implement '+n;
-    if(a[1]==='graphql'){const iid=/iids:\\s*\\["(\\d+)"/.exec(s)?.[1]??'0',name=iid==='11'?'Task':'Issue';out({data:{currentUser:{id:'U'},project:{id:'gid://gitlab/Project/42',fullPath:'org/repo',workItems:{nodes:[{iid,state:'OPEN',workItemType:{name},widgets:[{__typename:'WorkItemWidgetHierarchy',parent:iid==='11'?{iid:'90'}:null,children:{pageInfo:{hasNextPage:false},nodes:[]}}]}]}}}})}
-    else if(a[1].includes('/links?')){const n=Number(a[1].split('/')[3]);if(n===14)process.exit(1);out(n===13?[{iid:77,project_id:42,link_type:'is_blocked_by'}]:[])}
+    const desc=n=>n===12?'Depends on: #11':n===16?'Blocked by: #12':n===22?'Depends on: #77':n===90?'Parent requirements':'Implement '+n;
+    if(a[1]==='graphql'){const iid=/iids:\\s*\\["(\\d+)"/.exec(s)?.[1]??'0',name=iid==='11'?'Task':'Issue';out({data:{currentUser:{id:'U'},project:{id:'gid://gitlab/Project/42',fullPath:'org/repo',workItems:{nodes:[{iid,state:'OPEN',workItemType:{name},widgets:[{__typename:'WorkItemWidgetLinkedItems',...(s.includes('... on WorkItemWidgetLinkedItems {blockedByCount}')?{blockedByCount:iid==='23'?null:iid==='13'||iid==='24'?1:0}:{})},{__typename:'WorkItemWidgetHierarchy',parent:iid==='11'?{iid:'90'}:null,children:{pageInfo:{hasNextPage:false},nodes:[]}}]}]}}}})}
+    else if(a[1].endsWith('/links')){const n=Number(a[1].split('/')[3]);if(n===14)process.exit(1);out(n===13?[{iid:77,project_id:42,link_type:'is_blocked_by',state:'opened'}]:[])}
     else if(a[1].includes('/notes?'))out([]);
-    else if(/^projects\\/42\\/issues\\/\\d+$/.test(a[1])){const n=Number(a[1].split('/').at(-1));out({iid:n,project_id:42,title:'ticket'+n,description:desc(n),state:'opened',labels:n===99?['ready-for-agent']:[]})}
+    else if(a[1].startsWith('projects/42/merge_requests?state=merged&source_branch=provider&target_branch=recorded&'))out([{iid:7,state:'merged',source_project_id:42,target_project_id:42,source_branch:'provider',target_branch:process.env.ACTUAL_MERGE_BASE}]);
+    else if(/^projects\\/42\\/issues\\/\\d+$/.test(a[1])){const n=Number(a[1].split('/').at(-1));if(n===22&&process.env.HIDE_SUBMITTED)process.exit(1);out({iid:n,project_id:42,title:'ticket'+n,description:desc(n),state:n===77&&process.env.RESOLVED_EXTERNAL?'closed':'opened',labels:n===99?['ready-for-agent']:[]})}
     else process.exit(89);`);
   const git=(...args:string[])=>execFileSync('/usr/bin/git',['-C',root,'-c','user.name=fixture','-c','user.email=f@example.org',...args],{stdio:'pipe'});
   git('init','-b','main');git('commit','--allow-empty','-m','base');git('init','--bare','-b','main',server);git('remote','add','origin','git@fixture.test:org/repo.git');git('push','origin','main');
   writeFileSync(join(root,'.factory/factory.toml'),factoryToml('org/repo',{kind,host:'fixture.test'})+'\n[ci]\nbatch_test_argv=["true"]\nbatch_test_paths=["tests"]\n[dispatch]\nmax_concurrent=2\n');addProject(p,root);
   await install(p,new Fake(p),{schedule:new FakeSchedule(p)});
+  await t.test('an open external provider needs its recorded source AND recorded merge destination',()=>{
+    const adapter=(kind==='github'?nativeGithub:nativeGitlab)(loadTomlConfig(join(root,'.factory')));
+    const state=()=>dependencyState(77,{ticket:i=>adapter.ticket(i,true),run:()=>({branch:'provider',base:'recorded'}),base:'other',mergedInto:adapter.mergedInto}).state;
+    set('ACTUAL_MERGE_BASE','other');assert.equal(state(),'unsatisfied');process.env.ACTUAL_MERGE_BASE='recorded';assert.equal(state(),'satisfied');
+  });
+  // Run the installed CLI with only fixture executables. The fake Pi records the shared token held during its turn and stops there.
+  const turns=join(bin,'claimed-turns'), dockerFixture=new URL('../../orchestrator/fixtures/capability-docker.mjs',import.meta.url).href;
+  stub('docker',`import(${JSON.stringify(dockerFixture)}).then(m=>{const s=m.capabilityDocker(process.argv.slice(2),${JSON.stringify(bin)});if(s===undefined)process.exit(94);console.log(s)})`);
+  stub('pi',`const fs=require('node:fs');const dir=${JSON.stringify(p.state)};for(const file of fs.readdirSync(dir).filter(f=>/^org_repo--[0-9]+\\.json$/.test(f))){const r=JSON.parse(fs.readFileSync(dir+'/'+file));if(r.claim)fs.appendFileSync(${JSON.stringify(turns)},JSON.stringify([r.iid,r.claim])+'\\n')}process.stdin.resume();process.exitCode=1;`);
+  const installed=submitBatch(p,'project',['23','24','21','22']);
+  const cmd=(command:string,extra={})=>execFileSync(process.execPath,[p.bin,command,'--project','project','--batch',installed.id],{encoding:'utf8',env:{...process.env,OPENAI_API_KEY:'fixture-only',...extra}});
+  const ledger=()=>readRuns(p.state,false).filter(r=>r.batchMember?.id===installed.id).map(r=>[r.iid,r.executionId]).sort();
+  if(kind==='gitlab') {
+    assert.match(cmd('dispatch',{HIDE_SUBMITTED:'1'}),/#21 held: .*blocker inventory.*#22/i);
+    assert.deepEqual(ledger(),[],'zero open blockers cannot disprove a hidden, closed member edge');
+  }
+  const firstPass=cmd('dispatch');assert.match(firstPass,/#22 held: Waiting on #77/);
+  for(const iid of [23,24]) assert.match(firstPass,new RegExp(`#${iid} held: .*${kind==='gitlab'?'blocker inventory':'parent'}`,'i'));
+  assert.doesNotMatch(readFileSync(calls,'utf8'),/issues\/79\b|issue view 79\b/,'foreign/unknown parent must not resolve the local decoy');
+  assert.deepEqual(ledger().map(r=>r[0]),['21']);const firstToken=ledger()[0][1];
+  cmd('tick',{RESOLVED_EXTERNAL:'1'});const final=ledger();assert.deepEqual(final.map(r=>r[0]),['21','22']);assert.equal(final[0][1],firstToken);assert.notEqual(final[1][1],firstToken);
+  assert.deepEqual(readFileSync(turns,'utf8').trim().split('\n').map(s=>JSON.parse(s)),final);
   const b=submitBatch(p,'project',['11','12','13','14','15','16']);
+  const source=commandContextSource({kind,host:'fixture.test',project:'org/repo'},42,process.env,b.repositoryId);
+  const hash=freezeTicketInput(source,11).hash;
+  mkdirSync(join(p.state,'graph'),{recursive:true});
+  writeFileSync(join(p.state,'graph',keyFor('11','org/repo')+'.json'),JSON.stringify({iid:11,project:'org/repo',hash,baseSha:b.expectedHead,policyIdentity:'old',footprint:['only-one-path'],requires:[]}));
   git('commit','--allow-empty','-m','fixture candidate 11');const candidate=git('rev-parse','HEAD').toString().trim();
   const launches:number[]=[];
-  const obs:DeliveryObserver=(scope,iid)=>iid===11 && scope.expectedHead===candidate?{state:'landed',iid,batch:scope.id,repositoryId:scope.repositoryId,destination:scope.destinationRef,observedHead:scope.expectedHead,commit:candidate}:unavailableDelivery(scope,iid);
+  const obs:DeliveryObserver=(scope,iid)=>scope.id===b.id && iid===11 && scope.expectedHead===candidate?{state:'landed',iid,batch:scope.id,repositoryId:scope.repositoryId,destination:scope.destinationRef,observedHead:scope.expectedHead,commit:candidate}:unavailableDelivery(scope,iid);
   const pass=()=>dispatchBatch(p,'project',b.id,obs,{image:async()=>({ok:true,imageId:'sha256:'+'1'.repeat(64),cached:false}),load:async()=>async input=>{
     const iid=input.ticket.context.child.iid;launches.push(iid);
-    assert.ok(readRuns(p.state,false).some(r=>r.iid===String(iid)&&r.claim===input.run));
-    if(iid===11) assert.match(input.ticket.text,/Parent requirements/);
+    const run=readRuns(p.state,false).find(r=>r.iid===String(iid)&&r.claim===input.run);assert.match(run?.batchMember?.policyIdentity??'',/^[a-f0-9]{64}$/);
+    if(iid===11) {assert.match(input.ticket.text,/Parent requirements/);assert.deepEqual(run?.batchMember?.footprint,['*'],'a stale policy cannot narrow the actual shared reservation');}
     return {status:iid===12?'stopped':'approved',reason:'fixture gate',binding:{attempt:'fixture'}};
   }});
   const hold=(n:number)=>JSON.parse(readFileSync(join(p.state,'batches',b.id,`selection-${n}.json`),'utf8')).reason;
@@ -98,13 +139,18 @@ for(const kind of ['github','gitlab'] as const) test(`${kind}: fixed batch dispa
   await pass();assert.match(hold(12),/capacity/);assert.deepEqual(launches,[11]);
   // Free only the fixture claims by using the real normal parked transition instead of editing admission state.
   const board=await import('../../board/board.mts');for(const n of [1,2]){board.setProject(`other${n}`);board.holdClaim(readRuns(p.state,false).find(r=>r.project===`other${n}`)!.claim);board.setStage('1',{stage:'waiting'})}board.holdClaim(undefined);
+  // The first batch's landed prerequisite still has its approval card. Its observer may release that footprint, not transfer write authority.
+  const other=submitBatch(p,'project',['31']);
+  const runOther=(observer:DeliveryObserver)=>dispatchBatch(p,'project',other.id,observer,{image:async()=>({ok:true,imageId:'sha256:'+'1'.repeat(64),cached:true}),load:async()=>async()=>({status:'stopped',reason:'fixture',binding:{attempt:'another'}})});
+  await runOther(unavailableDelivery);assert.ok(!readRuns(p.state,false).some(r=>r.iid==='31'));
+  await runOther(obs);assert.equal(readRuns(p.state,false).find(r=>r.iid==='31')?.batchMember?.id,other.id);
   await pass();assert.deepEqual(launches,[11,12,15]);assert.match(hold(16),/#12.*stopped/);
-  assert.deepEqual(readRuns(p.state,false).filter(r=>r.project==='org/repo').map(r=>r.iid).sort(),['11','12','15']);
+  assert.deepEqual(readRuns(p.state,false).filter(r=>r.project==='org/repo').map(r=>r.iid).sort(),['11','12','15','21','22','31']);
   for(const cmd of ['dispatch','tick']) {
     const out=execFileSync(process.execPath,[p.bin,cmd,'--project','project','--batch',b.id],{encoding:'utf8',stdio:'pipe'});
     assert.match(out,/#11 waiting: Gate approved; awaiting observed delivery/);assert.match(out,/#13 held: Waiting on #77/);
     assert.match(hold(16),/#12.*stopped/);
-    assert.deepEqual(readRuns(p.state,false).filter(r=>r.project==='org/repo').map(r=>r.iid).sort(),['11','12','15']);
+    assert.deepEqual(readRuns(p.state,false).filter(r=>r.project==='org/repo').map(r=>r.iid).sort(),['11','12','15','21','22','31']);
   }
   const requests=readFileSync(calls,'utf8');assert.match(requests,kind==='github'?/issue view 77 /:/projects\/42\/issues\/77 /);assert.doesNotMatch(requests,/issue list|issue view 99 |issue\(number:99\)|issues\/99/);
 });

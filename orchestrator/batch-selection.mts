@@ -37,10 +37,15 @@ export function declaredBlockers(text:string):number[] {
   }
   return ids;
 }
-export function recordedGraph(m:Manifest|undefined,project:string,iid:number,hash:string,head:string) {
+/** An active reservation made under a different (or unknown) analysis policy cannot exempt other paths. */
+export function policyFootprint(reservation:{policyIdentity?:string;footprint?:string[]}|undefined,policyIdentity:string):string[] {
+  const paths=reservation?.footprint;
+  return policyIdentity && reservation?.policyIdentity===policyIdentity && Array.isArray(paths) && paths.length && paths.every(p=>typeof p==='string' && p.trim()) ? paths : ['*'];
+}
+export function recordedGraph(m:Manifest|undefined,project:string,iid:number,hash:string,head:string,policyIdentity:string) {
   if(!m) return {blockers:[],footprint:['*']}; // no prediction: reserve the whole checkout
   if(m.iid!==iid || m.project!==project || m.hash!==hash || [...m.requires.map(r=>r.providedBy),...(m.implementerBlockers??[]).map(b=>b.iid)].some(n=>!Number.isSafeInteger(n)||n===iid||Number(n)<=0))
     throw Error('Recorded graph dependencies are stale or unresolved; refresh ticket analysis');
   const paths=m.actualFootprint??m.footprint;
-  return {blockers:edgesOf(m).map(e=>e.from),footprint:m.baseSha===head && paths?.length && paths.every(p=>typeof p==='string'&&p.trim())?paths:['*']};
+  return {blockers:edgesOf(m).map(e=>e.from),footprint:m.baseSha===head?policyFootprint({policyIdentity:m.policyIdentity,footprint:paths},policyIdentity):['*']};
 }

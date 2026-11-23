@@ -6,7 +6,7 @@ import type { ContextIdentity, ContextNote, ContextRead, ContextTicket, ReadBudg
 export interface ContextRequest { args: string[] }
 export type ContextTransport = (request: ContextRequest, budget: ReadBudget) => string;
 /** Shared bounded command transport for selected-runtime adapters and host-owned pre-charge checks. */
-export function commandContextSource(identity: ContextIdentity, gitlabProjectId?: number, env: NodeJS.ProcessEnv = process.env): TicketContextSource {
+export function commandContextSource(identity: ContextIdentity, gitlabProjectId?: number, env: NodeJS.ProcessEnv = process.env, ownedRepositoryId?: string): TicketContextSource {
   const github = identity.kind === 'github';
   return structuredContextSource(identity, ({ args }, budget) => {
     try {
@@ -18,7 +18,7 @@ export function commandContextSource(identity: ContextIdentity, gitlabProjectId?
       const code = (error as NodeJS.ErrnoException).code;
       throw new ContextReadError(code === 'ETIMEDOUT' ? 'timeout' : code === 'ENOBUFS' ? 'byte-limit' : 'read-failed');
     }
-  }, gitlabProjectId);
+  }, gitlabProjectId, ownedRepositoryId);
 }
 const PAGE_SIZE = 100;
 function record(v: unknown): Record<string, any> {
@@ -29,7 +29,7 @@ function text(v: unknown): string { if (typeof v !== 'string') throw new Context
 function number(v: unknown): number { if (!Number.isSafeInteger(v) || (v as number) <= 0) throw new ContextReadError('malformed'); return v as number; }
 function body(v: unknown): string { return v === null ? '' : text(v); }
 function list(v: unknown): any[] { if (!Array.isArray(v)) throw new ContextReadError('malformed'); return v; }
-export function structuredContextSource(identity: ContextIdentity, transport: ContextTransport, gitlabProjectId?: number): TicketContextSource {
+export function structuredContextSource(identity: ContextIdentity, transport: ContextTransport, gitlabProjectId?: number, ownedRepositoryId?: string): TicketContextSource {
   const github = identity.kind === 'github';
   const base = github ? `repos/${identity.project}/issues` : `projects/${gitlabProjectId}/issues`;
   const url = (iid: number) => `https://${identity.host}/${identity.project}/${github ? '' : '-/'}issues/${iid}`;
@@ -75,8 +75,11 @@ export function structuredContextSource(identity: ContextIdentity, transport: Co
       number(iid);
       if (github) {
         const [owner, name] = identity.project.split('/');
-        const read = graphql(`{ repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { issue(number: ${iid}) { parent { number } } } }`, budget);
-        const issue = record(record(read.value.repository).issue);
+        const scoped = ownedRepositoryId !== undefined;
+        const read = graphql(`{ repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${scoped?'id nameWithOwner ':''}issue(number: ${iid}) { parent { number${scoped?' repository { id nameWithOwner }':''} } } } }`, budget);
+        const repo = record(read.value.repository), issue = record(repo.issue);
+        const sameRepository = (r:any) => r?.id===ownedRepositoryId && r?.nameWithOwner===identity.project;
+        if (scoped && (!sameRepository(repo) || issue.parent!==null && !sameRepository(issue.parent?.repository))) throw new ContextReadError('parent-repository');
         if (!Object.hasOwn(issue, 'parent')) throw new ContextReadError('malformed');
         return { bytes: read.bytes, value: issue.parent === null ? null : number(record(issue.parent).number) };
       }

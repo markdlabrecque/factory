@@ -106,9 +106,9 @@ export function nativeGithub(config: EffectiveConfig) {
     return ids;
   }
   const mergedInto = (branch:string,base:string) => {
-    const rows=json<unknown>(['pr','list','-R',REPO,'--state','merged','--head',branch,'--base',base,'--limit','1','--json','number']);
-    if(!Array.isArray(rows)||rows.some(r=>!Number.isSafeInteger(r?.number))) throw Error('Unknown merged PR state');
-    return rows.length>0;
+    const rows=json<unknown>(['pr','list','-R',REPO,'--state','merged','--head',branch,'--base',base,'--limit','1','--json','number,state,isCrossRepository,headRefName,baseRefName']);
+    if(!Array.isArray(rows)||rows.some(r=>!Number.isSafeInteger(r?.number) || typeof r.state!=='string' || typeof r.isCrossRepository!=='boolean' || typeof r.headRefName!=='string' || typeof r.baseRefName!=='string')) throw Error('Unknown merged PR state');
+    return rows.some(r=>!r.isCrossRepository && r.state==='MERGED' && r.headRefName===branch && r.baseRefName===base);
   };
   return { ticket, blockers, mergedInto, readyList, currentUsername, parentOf, children };
 }
