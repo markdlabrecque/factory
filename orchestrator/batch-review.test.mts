@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { prepareRuntimeBundle } from '../cli/src/runtime-bundle.mts';
+import { installPackages } from '../cli/test/runtime-fixture.mts';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { classifyBatchReview, runStandardBatchMember, runBatchAttempt, readBatchEvidence, latestBatchAttempt, type BatchAttemptInput, type ReviewReceipt } from './batch-review.mts';
 import { fixtureTicketInput } from './fixtures/ticket-input.mts';
@@ -31,10 +33,15 @@ function setup(workerStarts=false) {
 const approval = {verdict:'approve',reason:'matches requirements'};
 
 test('admitted implementation revises code and tests from host feedback; exact independent approvals rebuild after a batch advance', async t=>{
-  const {input,root,git}=setup(true), records=join(root,'turns.jsonl');writeFileSync(records,'');
+  const {input,root,git,commit}=setup(true), records=join(root,'turns.jsonl');writeFileSync(records,'');
   const dest='refs/heads/factory/batch/b1', firstHead=git('rev-parse',dest), main=git('rev-parse','main');
   const advance=(parent:string,msg:string)=>git('commit-tree',git('rev-parse',`${parent}^{tree}`),'-p',parent,'-m',msg);
-  const resumedHead=advance(firstHead,'before first test'), revisedHead=advance(resumedHead,'while implementing'), advanced=advance(revisedHead,'during reviews');
+  const resumedHead=advance(firstHead,'before first test');
+  let revisedHead:string, advanced:string;
+  const advanceTree=(parent:string,content:string)=>{
+    git('switch','--detach','-q',parent);const head=commit({'batch-only':content});git('switch','-q','ticket');
+    git('update-ref',dest,head,parent);return head;
+  };
   const project='github://github.com/owner/repo', seen:{role:string,prompt:string,id:string}[]=[];
   const turns=()=>readFileSync(records,'utf8').trim().split('\n').filter(Boolean).map(s=>JSON.parse(s));
   const implementation=`
@@ -42,16 +49,16 @@ test('admitted implementation revises code and tests from host feedback; exact i
     const file=${JSON.stringify(records)}, prior=fs.readFileSync(file,'utf8').trim().split('\\n').filter(Boolean).length;
     const feedback=JSON.parse(prompt.split('Host test argv and prior feedback:\\n').at(-1)).feedback;
     if(prior===0)assert.equal(feedback,null);
-    else if(prior===1)assert.match(feedback.tests.stderr,/WRONG_RESULT/);
+    else if(prior===1){assert.equal(feedback.tests.exit,255);assert.match(feedback.tests.stderr,/WRONG_RESULT/);}
     else {assert.equal(prior,2);assert.equal(feedback.reviews.find(x=>x.role==='test').reason,'cover revision two');}
     const start=git('rev-parse','HEAD'),api='module.exports='+prior+';// IMPLEMENTATION_ONLY';
-    const check="console.log(require('node:child_process').execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim());require('node:assert/strict').equal(require('../api.cjs'),"+(prior||99)+",'WRONG_RESULT');";
+    const check="process.on('uncaughtException',err=>{console.error(err);process.exitCode=255});console.log(require('node:child_process').execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim());require('node:assert/strict').equal(require('../api.cjs'),"+(prior||99)+",'WRONG_RESULT');console.log(require('node:fs').readFileSync('batch-only','utf8'));";
     fs.writeFileSync('api.cjs',api);fs.writeFileSync('tests/check.cjs',check);git('add','.');git('commit','-qm','fixture implementer revision');
     fs.appendFileSync(file,JSON.stringify({prompt,feedback,start,api,check,tip:git('rev-parse','HEAD'),tree:git('rev-parse','HEAD^{tree}'),entries:fs.readFileSync(${JSON.stringify(join(root,'agent-entries.jsonl'))},'utf8')})+'\\n');`;
   const fixture=await installBatchFixture(root,input.testArgv,(role,prompt)=>{
     const id=latestBatchAttempt(input.state,project,'b1',7)!.binding.attempt;seen.push({role,prompt,id});
     const round=new Set(seen.map(x=>x.id)).size;
-    if(round===2 && role==='code') git('update-ref',dest,advanced,revisedHead);
+    if(round===2 && role==='code') advanced=advanceTree(revisedHead,'during reviews');
     if(round===3 && role==='test' && !prompt.includes('\nFinal context stage:'))return {context:['api.cjs']};
     return round===1 && role==='test'?{verdict:'reject',reason:'cover revision two'}:approval;
   },implementation);
@@ -65,7 +72,7 @@ test('admitted implementation revises code and tests from host feedback; exact i
   let moved=false;
   member.observeHead=async()=>{
     // The ref advances immediately after this owned sample. Sampling once more outside the gate is insufficient.
-    if(turns().length===2 && !moved){moved=true;const sampled=git('rev-parse',dest);git('update-ref',dest,revisedHead,resumedHead);return {kind:'owned',head:sampled}}
+    if(turns().length===2 && !moved){moved=true;const sampled=git('rev-parse',dest);revisedHead=advanceTree(resumedHead,'after implementation');return {kind:'owned',head:sampled}}
     return {kind:'owned',head:git('rev-parse',dest)};
   };
   const run=()=>runStandardBatchMember(member,loadTomlConfig(root),'sha256:'+'a'.repeat(64),()=> 'fixture-only');
@@ -86,7 +93,8 @@ test('admitted implementation revises code and tests from host feedback; exact i
     assert.equal(b.deltaTip,turn.tip);assert.equal(git('rev-parse',`${b.deltaTip}^{tree}`),turn.tree);
     if(i<3){assert.equal(turn.start,priorTip);assert.equal(git('rev-parse',`${b.deltaTip}^`),priorTip);priorTip=b.deltaTip}else assert.equal(b.deltaTip,priorTip);
     assert.equal(git('rev-parse',`${b.candidate}^`),head);assert.notEqual(b.candidate,b.deltaTip);
-    assert.equal(r.tests.stdout.trim(),b.candidate);assert.deepEqual(r.tests.binding,b);
+    assert.deepEqual(r.tests.stdout.trim().split('\n'),i?[b.candidate,i===3?'during reviews':'after implementation']:[b.candidate]);
+    assert.equal(git('ls-tree',turn.tip,'batch-only'),'');assert.deepEqual(r.tests.binding,b);
     if(!i){assert.notEqual(r.tests.exit,0);assert.deepEqual(r.reviews,[]);continue}
     assert.equal(r.tests.exit,0);assert.deepEqual(r.reviews.map(x=>x.role),['test','code']);
     for(const v of r.reviews){assert.deepEqual(v.binding,b);assert(!sessions.has(v.invocation));sessions.add(v.invocation)}
@@ -110,12 +118,39 @@ test('admitted implementation revises code and tests from host feedback; exact i
   assert.equal(git('rev-parse',dest),advanced);assert.equal(git('rev-parse','main'),main);
 });
 
+test('assembled standard member runs its implementer and both role verdicts with each configured family',async t=>{
+  const store=mkdtempSync(join(tmpdir(),'batch-runtime-'));
+  const {directory}=prepareRuntimeBundle({sourceRoot:fileURLToPath(new URL('../',import.meta.url)),runtimeStore:store,install:installPackages});
+  const load=(name:string)=>import(pathToFileURL(join(directory,name)).href);
+  const {runStandardBatchMember}=await load('batch-review.mts'), {loadTomlConfig}=await load('project-config.mts');
+  for(const [family,implementation,review] of [['openai','openai/gpt-6.1-terra','openai/gpt-6.1-sol'],
+    ['anthropic','pi-claude-subscription/claude-sonnet-5-5','pi-claude-subscription/claude-opus-5-5']]){
+    await t.test(family,async t=>{
+      const {input,root}=setup(true),{testArgv,testPaths,deltaTip,deltaBase,...member}=input;
+      const extension=join(root,'fixture-extension.ts');writeFileSync(extension,'');
+      const fixture=await installBatchFixture(root,testArgv,role=>({verdict:'approve',reason:role+' fixture verdict'}),`
+        fs.writeFileSync('api.cjs','module.exports=1');require('node:child_process').execFileSync('git',['commit','-qam','implementation']);`);
+      const path=process.env.PATH,prev=process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION;
+      process.env.PATH=fixture.bin+':'+path;process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION=extension;
+      t.after(()=>{fixture.close();process.env.PATH=path;if(prev===undefined)delete process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION;else process.env.FACTORY_PI_SUBSCRIPTION_EXTENSION=prev});
+      writeFileSync(join(root,'factory.toml'),readFileSync(new URL('./factory.personal.toml',import.meta.url),'utf8')
+        .replace('family = "openai"',`family = "${family}"`).replace('[ci]',`[ci]\nbatch_test_argv = ${JSON.stringify(testArgv)}\nbatch_test_paths = ["tests"]`));
+      const receipt=await runStandardBatchMember(member,loadTomlConfig(root),'sha256:'+'a'.repeat(64),()=> 'fixture-only');
+      assert.equal(receipt.status,'approved');assert.equal(receipt.tests.exit,0);
+      assert.deepEqual(receipt.reviews.map(v=>[v.role,v.verdict,v.reason]),[['test','approve','test fixture verdict'],['code','approve','code fixture verdict']]);
+      const ext=family==='anthropic';assert.deepEqual(fixture.entries().map(({entry,model,extension})=>[entry,model,extension]),[
+        ['implementer',implementation,ext?'/home/agent/.pi/agent/extensions/pi-claude-subscription/index.ts':null],
+        ...Array(2).fill(['reviewer',review,ext?extension:null])]);
+    });
+  }
+});
+
 test('durable budget charges rejected rounds, not batch movement, and survives new run IDs', async()=>{
   const {input,commit} = setup(); let sequence=0, moving=true;
   const observe = input.observeHead; input.observeHead=async()=>moving && ++sequence%2===0 ? {kind:'owned',head:'e'.repeat(40)} : observe();
   const sessions = new Set<string>(), tested: string[]=[];
   const sandbox = {test:async(sha:string)=>{tested.push(sha);return {exit:0,stdout:'',stderr:''}},review:async(role:string,id:string)=>{
-    assert(!sessions.has(id));sessions.add(id);return {exit:0,stdout:JSON.stringify(role==='test'?{verdict:'reject',reason:'omission'}:approval),stderr:''};}};
+    assert(!sessions.has(id));sessions.add(id);return {exit:0,stdout:JSON.stringify(role==='test'?{context:['missing']}:{verdict:'reject',reason:'code defect'}),stderr:''};}};
   assert.equal((await runBatchAttempt(input,sandbox)).status,'rebuild'); moving=false;
   for (const [i,want] of ['rework','rework'].entries()) {
     input.run=`resume-${i}`; input.deltaTip=commit({'round':String(i)});
@@ -163,24 +198,24 @@ test('interrupted or overlapping work holds the same ticket; malformed role outp
 test('bounded tails follow actual test completion; absent, signalled, timed out or unconfirmed processes cannot masquerade as assertions',async()=>{
   const run=(cmd:string,args:string[],ms=10000)=>observeTestProcess(cmd,args,Buffer.alloc(0),ms);
   const driver=(...args:string[])=>run(process.execPath,['-e',TEST_DRIVER,'--',...args]);
-  for(const status of [0,17]){
+  for(const status of [0,17,124,255]){
     const r=await driver(process.execPath,'-e',`const fs=require('fs');for(const fd of [1,2]){for(let i=0;i<256;i++)fs.writeSync(fd,Buffer.alloc(8192,120));fs.writeSync(fd,'TAIL')}process.exit(${status})`);
     assert.equal(r.exit,status);for(const tail of [r.stdout,r.stderr]){assert(tail.endsWith('TAIL'));assert(Buffer.byteLength(tail)<=32768)}
   }
-  for(const r of [await driver('/nonexistent-fixture-command'),await driver(process.execPath,'-e','process.exit(124)'),await driver(process.execPath,'-e',"process.kill(process.pid,'SIGKILL')"),
+  for(const r of [await driver('/nonexistent-fixture-command'),await run(process.execPath,['-e','process.exit(124)']),await run(process.execPath,['-e',"process.kill(process.pid,'SIGTERM')"]),await driver(process.execPath,'-e',"process.kill(process.pid,'SIGKILL')"),
     await run(process.execPath,['-e','process.exit(0)']),await run(process.execPath,['-e','setInterval(()=>{},1000)'],100)])assert.equal(r.exit,null);
   const {input}=setup();const evidence=await runBatchAttempt(input,{test:async()=>({exit:null,stdout:'',stderr:'transport unavailable'}),review:async()=>{throw Error('unexpected')}});
   assert.equal(evidence.status,'held');assert.deepEqual(evidence.reviews,[]);
 });
 
-test('invalid or repeated context requests hold without substituting the other verdict',async()=>{
+test('invalid or repeated context requests hold without substituting the other role’s approval',async()=>{
   const {input,commit}=setup();
   const tooLarge=commit({'first':'x'.repeat(32769),'second':'x'.repeat(32768)});
   for(const paths of [['first','second'],['api.cjs','api.cjs'],['a','b','c','d','e']])assert.throws(()=>requestedContext(input.repo,tooLarge,paths,performance.now()+5000));
   assert.throws(()=>requestedContext(input.repo,tooLarge,['api.cjs'],performance.now()-1),/deadline/);
   for(const paths of [['../api.cjs'],['missing'],['api.cjs']]){
     let calls=0;const result=await runBatchAttempt(input,{test:async()=>({exit:0,stdout:'',stderr:''}),review:async role=>{
-      if(role==='test')calls++;return {exit:0,stdout:JSON.stringify(role==='test'?{context:paths}:{verdict:'reject',reason:'code defect'}),stderr:''}}});
+      if(role==='test')calls++;return {exit:0,stdout:JSON.stringify(role==='test'?{context:paths}:approval),stderr:''}}});
     assert.equal(result.status,'held');assert.equal(calls,paths[0]==='api.cjs'?2:1);assert.equal(result.reviews.find(r=>r.role==='test')?.verdict,'inconclusive');
   }
 });

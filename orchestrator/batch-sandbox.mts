@@ -15,7 +15,7 @@ export interface BatchSandbox {
 // close of the transport AND a matching terminal trailer/status from the test driver, never test prose.
 export const TEST_DRIVER = `const {spawnSync}=require('node:child_process');
 const [cmd,...args]=process.argv.slice(1); const r=spawnSync(cmd,args,{stdio:'inherit'});
-if(r.error||r.signal||!Number.isInteger(r.status)||r.status>=124)process.exit(120);
+if(r.error||r.signal||!Number.isInteger(r.status))process.exit(120);
 require('node:fs').writeSync(2,'\\nFACTORY-TEST-COMPLETE '+r.status+'\\n');process.exit(r.status===0?0:42);`;
 export function observeTestProcess(command:string,args:string[],input:Buffer,timeoutMs=15*60_000):Promise<ProcessResult> {
   return new Promise(resolve=>{
@@ -29,7 +29,7 @@ export function observeTestProcess(command:string,args:string[],input:Buffer,tim
     child.once('close',(code,signal)=>{
       clearTimeout(timer);const text=textTail(err), trailer=/\nFACTORY-TEST-COMPLETE (\d{1,3})\n$/.exec(text);
       const status=trailer?Number(trailer[1]):null;
-      const complete=!unavailable && !signal && status!==null && status<124 && code===(status===0?0:42);
+      const complete=!unavailable && !signal && status!==null && status<=255 && code===(status===0?0:42);
       resolve({exit:complete?status:null,stdout:textTail(out),stderr:complete?text.slice(0,trailer!.index):text});
     });
   });

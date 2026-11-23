@@ -204,7 +204,7 @@ async function evaluateAttempt(input:BatchAttemptInput,sandbox:BatchSandbox,memb
       }
       return sandbox.test(candidate,pack,[...testArgv]);
     });
-    const completed=typeof observed?.exit==='number' && Number.isInteger(observed.exit) && observed.exit>=0 && observed.exit<124 && typeof observed.stdout==='string' && typeof observed.stderr==='string';
+    const completed=typeof observed?.exit==='number' && Number.isInteger(observed.exit) && observed.exit>=0 && observed.exit<=255 && typeof observed.stdout==='string' && typeof observed.stderr==='string';
     const tests = {binding,argv:testArgv,exit:completed?observed.exit:null,stdout:typeof observed?.stdout==='string'?observed.stdout.slice(-32768):'',stderr:typeof observed?.stderr==='string'?observed.stderr.slice(-32768):''};
     let reviews: ReviewReceipt[] = [], missingMaterial=false;
     const passed = tests.exit === 0;
@@ -243,7 +243,6 @@ async function evaluateAttempt(input:BatchAttemptInput,sandbox:BatchSandbox,memb
       : final.head !== expectedHead ? {status:'rebuild',reason:'Host advanced batch; construct and recheck on current head'}
       : tests.exit===null ? {status:'held',reason:'Host could not observe completion of the configured test process'}
       : missingMaterial ? {status:'held',reason:'Exact review material missing, unrepresentable or over limit'}
-      : reviews.some(r=>r.contextHold) ? {status:'held',reason:'Requested test-review context or final verdict unavailable'}
       : classifyBatchReview(passed,reviews,rejected);
     const result: BatchEvidence = {version:BATCH_EVIDENCE_VERSION,binding,tests,reviews,...outcome};
     db.prepare('UPDATE attempts SET rejected=?,result=? WHERE id=? AND result IS NULL').run(Number(['rework','stopped'].includes(outcome.status)),JSON.stringify(result),attempt);
