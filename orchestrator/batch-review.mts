@@ -24,7 +24,7 @@ export function runStandardBatchAttempt(input: Omit<BatchAttemptInput,'testArgv'
   return runBatchAttempt({...input,...checks,testArgv:checks.argv,testPaths:checks.paths},
     standardBatchSandbox(pinnedImage,modelForRole(config.AGENT.family,'verification').model,reviewerCredential));
 }
-function standardChecks(input: Pick<BatchAttemptInput,'ticket'>,config:EffectiveConfig,image:string):GateInputs {
+export function standardChecks(input: Pick<BatchAttemptInput,'ticket'>,config:EffectiveConfig,image:string):GateInputs {
   if(!/^sha256:[a-f0-9]{64}$/.test(image))throw Error('Unverifiable gate inputs: pinned image required');
   if (config.workflow.mode !== 'factory' || !config.config.batchTests) throw Error('Standard batch test configuration required');
   const id = input.ticket.context.identity, tracker = config.TRACKER;
@@ -77,8 +77,11 @@ export function readBatchEvidence(state: string, attempt: string): BatchEvidence
 export function latestBatchAttempt(state: string, project: string, batch: string, ticket: number): {binding:AttemptBinding; evidence:BatchEvidence|null} | null {
   const db = openStore(state,true);
   try {
-    const row = db.prepare('SELECT binding,result FROM attempts WHERE scope=? ORDER BY rowid DESC LIMIT 1').get(JSON.stringify([project,batch,ticket]));
-    return row ? {binding:JSON.parse(String(row.binding)),evidence:row.result ? currentEvidence(String(row.result)) : null} : null;
+    const row = db.prepare('SELECT id,binding,result FROM attempts WHERE scope=? ORDER BY rowid DESC LIMIT 1').get(JSON.stringify([project,batch,ticket]));
+    if(!row)return null;
+    const binding=JSON.parse(String(row.binding));
+    if(binding.attempt!==row.id || binding.project!==project || binding.batch!==batch || binding.ticket!==ticket)throw Error('Attempt row identity mismatch');
+    return {binding,evidence:row.result ? currentEvidence(String(row.result)) : null};
   } finally { db.close(); }
 }
 export function classifyBatchReview(testsPassed: boolean, reviews: Pick<ReviewReceipt,'role'|'verdict'|'invocation'>[], previousRejections: number): Pick<BatchEvidence,'status'|'reason'> {

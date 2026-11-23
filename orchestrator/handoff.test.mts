@@ -50,6 +50,14 @@ const handoff = (dir: string, extra: Partial<Handoff> = {}): Handoff => {
   return { iid: '7', project: 'o/r', branch: '7-fix', base: 'main', baseSha: identity.baseline, tip: identity.tip, title: 'Fix', evidenceHost: dir,
     identity, state, proofId, recheck: () => undefined, origin: { kind: 'repaired', attempt: 2 }, ciWaitMinutes: 1, noCiMinutes: 1, autoMerge: false, ...extra };
 };
+test('normal handoff cannot publish a batch ref even with an authentic host PASS', async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'handoff-batch-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  writeFileSync(join(dir,'verdict.md'),'VERDICT: PASS\n');const h=handoff(dir);t.after(()=>rmSync(h.state,{recursive:true,force:true}));
+  const {host,calls,record}=fakeHost();for(const field of ['branch','base']){
+    const ref='factory/batch/example';const result=await postAndDeliver({...h,[field]:ref,identity:{...h.identity,[field]:ref}},host);
+    assert.equal(result.ok,false);assert.deepEqual(calls,[]);assert.deepEqual(record,{});
+  }
+});
 const requireVerdict = (dir: string) => readFileSync(join(dir, 'verdict.md'), 'utf8').split('\n')[0].slice(9);
 
 test("a repaired branch is independently verified, posted and delivered like an implemented one", async () => {

@@ -59,6 +59,14 @@ globalThis.setTimeout = ((fn: () => void) => { now += 15000; fn(); return 0; }) 
 const delivery = { beforeMerge: () => undefined, branch: 'topic', base: 'main', sha, title: 'title', body: (s: string) => s, onStage: () => {}, waitMinutes: 1, noCiMinutes: 0, autoMerge: true };
 for (const [kind, adapter] of Object.entries({ github, gitlab })) {
   const identity = identities[kind];
+  test(`${kind}: batch refs are never PR/MR publication or reconciliation authority`,async()=>{
+    setup();for(const field of ['branch','base']){
+      const d={...identity,[field]:'factory/batch/example'};
+      await assert.rejects(adapter.deliver({...delivery,[field]:d[field]}),/batch ref/);
+      assert.equal((await adapter.mergeExistingDelivery(d,()=>undefined)).state,'operator-required');
+      assert.equal(adapter.observeDelivery(d).state,'operator-required');assert.equal(adapter.mergedInto(d.branch,d.base),false);assert.equal(adapter.mergedPr(1,d.branch,d.base),undefined);
+    }assert.deepEqual(calls(),[]);
+  });
   test(`${kind}: opened callback precedes CI and crash does not lose PR identity`, async () => {
     setup(); let captured: DeliveryIdentity | undefined;
     await assert.rejects(adapter.deliver({ ...delivery, onOpened: d => { captured = d; throw Error('crash after durable save'); } }), /crash after durable save/);

@@ -1,10 +1,11 @@
-// Structured context reads use collector-owned deadlines/output bounds, independent of delivery state.
+// Legacy PR operations cannot publish or infer batch delivery. Structured context reads have independent deadlines.
 // #153: continuation never creates/posts/reruns; REST checks are bound to the recorded commit, reread before SHA merge.
 // #137: TOML identity and labels are authoritative; legacy adapter exports are preserved.
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { ciGate, missingChecks } from "./ci.mts";
+import { reservedBatchRef } from './batch-refs.mts';
 import { commandContextSource } from './ticket-context-source.mts';
 import type { Gate } from "./ci.mts";
 import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
@@ -180,11 +181,13 @@ export function openMrBranches(): Set<string> {
 }
 
 export function mergedInto(branch: string, base: string): boolean {
+  if(reservedBatchRef(branch,base)) return false;
   return json<unknown[]>(["pr", "list", "-R", REPO, "--state", "merged", "--head", branch, "--base", base, "--limit", "1", "--json", "number"]).length > 0;
 }
 
 /** The newest PR merged into `base` from the run's branch, else one whose title starts with `#N:`. */
 export function mergedPr(iid: number, branch: string | undefined, base: string): MergedPr | undefined {
+  if(reservedBatchRef(branch,base)) return;
   type Pr = { number: number; title: string; url: string; mergedAt: string };
   const list = (filter: string[]) => json<Pr[]>(["pr", "list", "-R", REPO, "--state", "merged", "--base", base, ...filter, "--limit", "100", "--json", "number,title,url,mergedAt"]);
   const pick = (prs: Pr[], matchedBy: MergedPr["matchedBy"]) => prs.map((p): MergedPr => ({ number: p.number, title: p.title, url: p.url, mergedAt: p.mergedAt, matchedBy }))
@@ -255,6 +258,7 @@ function checks(pr: string): { name: string; bucket: string }[] {
  */
 // #150: fresh host authorization after CI, immediately before the SHA-guarded merge.
 export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered> {
+  if(reservedBatchRef(d.branch,d.base)) throw Error('PR delivery cannot target a batch ref');
   const note = d.autoMerge
     ? "Sandcastle merges this PR once every CI check on this commit has passed. It is never merged without CI."
     : "CI runs on this PR.";
@@ -305,6 +309,7 @@ function existing(args: string[], deadline: number): any {
 }
 const hold = (reasonCode: DeliveryObservation['reasonCode'], reason: string): DeliveryObservation => ({ state: 'operator-required', reasonCode, reason });
 export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 30000): DeliveryObservation {
+  if(reservedBatchRef(d.branch,d.base)) return hold('authorization','PR state is not batch landing evidence');
   if (!/^[0-9a-f]{40,64}$/.test(d.sha) || !d.branch || !d.base || d.kind !== 'github' || d.host !== HOST || d.repository !== REPO || !Number.isSafeInteger(d.number) || d.number < 1 || d.url !== `https://${HOST}/${REPO}/pull/${d.number}`) return hold('identity-changed', 'Unknown tracker identity');
   const pr = existing(['api', `repos/${REPO}/pulls/${d.number}`], deadline);
   if (pr.number !== d.number || pr.base?.repo?.full_name !== REPO || pr.head?.repo?.full_name !== REPO || pr.head?.ref !== d.branch || pr.base?.ref !== d.base || pr.head?.sha !== d.sha) return hold('identity-changed', 'PR repository, branch, base or head changed');
@@ -334,6 +339,7 @@ export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 300
     : { state: 'ci-waiting', reasonCode: gate === 'none' ? 'checks-missing' : 'checks-pending', reason: `CI ${gate}; required checks: ${missingChecks(checks, MERGE.requiredChecks ?? []).join(', ')}` };
 }
 export async function mergeExistingDelivery(d: DeliveryIdentity, beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
+  if(reservedBatchRef(d.branch,d.base)) return hold('authorization','PR continuation cannot target a batch ref');
   const observed = observeDelivery(d, deadline);
   if (observed.state !== 'ready') return observed;
   if (!MERGE.auto) return hold('authorization', 'Manual merge policy');

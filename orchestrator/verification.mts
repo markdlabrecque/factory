@@ -129,7 +129,9 @@ export function validateEvidence(root: string, criterionIds?: readonly string[],
 }
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^[0-9a-f]{40,64}$/;
+import { reservedBatchRef } from './batch-refs.mts';
 function checkIdentity(i: Identity) {
+  demand(!reservedBatchRef(i.branch,i.base), 'Legacy proof grants no batch authority');
   demand([i.project, i.ticket, i.executionId, i.branch, i.base].every(text) && SHA.test(i.baseline) && SHA.test(i.tip) && /^(?:[0-9a-f]{16}|[0-9a-f]{64})$/.test(i.requirementsHash), 'missing execution identity, requirements hash or recorded baseline/tip');
   demand(i.attemptId === undefined || ID.test(i.attemptId), 'invalid recovery attempt identity');
 }

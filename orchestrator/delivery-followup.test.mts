@@ -45,6 +45,9 @@ function fixture() {
 // verification-entrypoint-proof.test.mts, not historical PASS repackaged as modern authority.
 test('a same-SHA historical PASS requires explicit migration even with a valid CI checkpoint', async () => {
   const f=fixture(); try {
+    const run=f.read(), base='factory/batch/example';
+    assert.match(await observeWaitingDelivery({...run,base,delivery:{...run.delivery,base}},f.host),/batch delivery/i);
+    assert.deepEqual(f.read(),run);assert.deepEqual(f.counts(),{observations:0,merges:0});
     assert.match(await observeWaitingDelivery({...f.read(),delivery:undefined},f.host),/Not a host-recorded/);
     assert.match(await observeWaitingDelivery(f.read(),f.host),/legacy proof.*fresh verification/i);
     assert.equal(f.read().delivery?.state,'operator-required');

@@ -10,6 +10,7 @@ import { existsSync, rmSync, writeFileSync } from "node:fs";
 const {gateProofHold}=await import(existsSync(new URL('./supervisor-gate-apply.mts',import.meta.url))?'./supervisor-gate-apply.mts':'../cli/src/supervisor-gate-apply.mts');
 import { EXACT_PROOF_POLICY, readProof, validateEvidence } from './verification.mts';
 import type { Criterion } from './acceptance-contract.mts';
+import { reservedBatchRef } from './batch-refs.mts';
 import type { Identity } from './verification.mts';
 import { sha256 } from './verification.mts';
 import { ticketContextHash, renderTicketContext } from './ticket-context.mts';
@@ -200,6 +201,7 @@ export type Outcome =
  *  with verdict and PR on success; on failure returns the reason (the caller ends the run, as `stopped`). */
 export async function postAndDeliver(h: Handoff, host: Host): Promise<Outcome> {
   const { iid, branch, base, tip } = h;
+  if(reservedBatchRef(branch,base)) return {ok:false,reason:'Batch references require owned exact-candidate delivery'};
   host.setStage(iid, { stage: "posting" });
   const authorize = (): string | undefined => {
     try {

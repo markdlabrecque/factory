@@ -1,10 +1,11 @@
-// Structured context reads use collector-owned deadlines/output bounds, independent of delivery state.
+// Legacy MR operations cannot publish or infer batch delivery. Structured context reads have independent deadlines.
 // #153: existing MR continuation reads exact-head pipeline/jobs and performs no create/post/rerun/draft mutation.
 // #137: validated TOML selection; confidential=false is explicitly non-confidential, not unrestricted.
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { LABELS, MERGE, TRACKER } from "./runtime-config.mts";
 import { ciGate, missingChecks } from "./ci.mts";
+import { reservedBatchRef } from './batch-refs.mts';
 import { commandContextSource } from './ticket-context-source.mts';
 import type { Child, Note } from "./graph.mts";
 import type { Delivered, Delivery, DeliveryIdentity, DeliveryObservation, MergedPr, ReadyTicket, Select, Ticket } from "./tracker.mts";
@@ -177,6 +178,7 @@ function uploadEvidence(_iid: string, _tip: string, files: string[]): string[] {
  * `noCiMinutes`, the MR opens anyway and CI runs on it. Never merges.
  */
 export async function deliver(d: Delivery & { waitMinutes: number; noCiMinutes: number; autoMerge: boolean }): Promise<Delivered> {
+  if(reservedBatchRef(d.branch,d.base)) throw Error('MR delivery cannot target a batch ref');
   if (d.autoMerge) return autoDeliver(d);
   d.onStage("ci");
   let status = "none";
@@ -242,6 +244,7 @@ function existing(path: string, deadline: number, fields?: string[]): any {
 }
 const hold = (reasonCode: DeliveryObservation['reasonCode'], reason: string): DeliveryObservation => ({ state: 'operator-required', reasonCode, reason });
 export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 30000): DeliveryObservation {
+  if(reservedBatchRef(d.branch,d.base)) return hold('authorization','MR state is not batch landing evidence');
   if (!/^[0-9a-f]{40,64}$/.test(d.sha) || !d.branch || !d.base || d.kind !== 'gitlab' || d.host !== HOST || d.repository !== TRACKER.project || d.projectId !== ID || !Number.isSafeInteger(d.number) || d.number < 1 || d.url !== `https://${HOST}/${TRACKER.project}/-/merge_requests/${d.number}`) return hold('identity-changed', 'Unknown tracker identity');
   const mr = existing(`projects/${ID}/merge_requests/${d.number}`, deadline);
   if (mr.iid !== d.number || mr.project_id !== ID || mr.source_project_id !== ID || mr.target_project_id !== ID || mr.source_branch !== d.branch || mr.target_branch !== d.base || mr.sha !== d.sha) return hold('identity-changed', 'MR repository, branch, base or head changed');
@@ -270,6 +273,7 @@ export function observeDelivery(d: DeliveryIdentity, deadline = Date.now() + 300
   return { state: 'ci-waiting', reasonCode: gate === 'none' ? 'checks-missing' : 'checks-pending', reason: `CI ${pipeline.status}; required jobs: ${missingChecks(checks, MERGE.requiredChecks ?? []).join(', ')}` };
 }
 export async function mergeExistingDelivery(d: DeliveryIdentity, beforeMerge: Delivery['beforeMerge'], deadline = Date.now() + 30000): Promise<DeliveryObservation> {
+  if(reservedBatchRef(d.branch,d.base)) return hold('authorization','MR continuation cannot target a batch ref');
   const observed = observeDelivery(d, deadline);
   if (observed.state !== 'ready') return observed;
   if (!MERGE.auto) return hold('authorization', 'Manual merge policy');
@@ -296,11 +300,13 @@ export function openMrBranches(): Set<string> {
 }
 
 export function mergedInto(branch: string, base: string): boolean {
+  if(reservedBatchRef(branch,base)) return false;
   return api<unknown[]>(`projects/${ID}/merge_requests?state=merged&source_branch=${enc(branch)}&target_branch=${enc(base)}&per_page=1`).length > 0;
 }
 
 /** The newest MR merged into `base` from the run's branch, else one whose title starts with `#N:`. */
 export function mergedPr(iid: number, branch: string | undefined, base: string): MergedPr | undefined {
+  if(reservedBatchRef(branch,base)) return;
   type Mr = { iid: number; title: string; web_url: string; merged_at: string | null };
   const list = (filter: string) => api<Mr[]>(`projects/${ID}/merge_requests?state=merged&target_branch=${enc(base)}&${filter}&per_page=100`);
   const pick = (mrs: Mr[], matchedBy: MergedPr["matchedBy"]) => mrs.map((m): MergedPr => ({ number: m.iid, title: m.title, url: m.web_url, mergedAt: m.merged_at ?? "", matchedBy }))

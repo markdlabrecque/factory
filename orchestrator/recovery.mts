@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { browserPreflight } from './capabilities.mts';
 // #150: a repair binds fresh proof to its execution, historical baseline and exact attempt UUID after teardown.
 import { postAndDeliver, runVerifier } from "./handoff.mts";
+import { reservedBatchRef } from './batch-refs.mts';
 import { createProof, validateEvidence } from './verification.mts';
 import type { CandidateReplay } from './acceptance-baseline-admission.mts';
 import type { Criterion } from './acceptance-contract.mts';
@@ -329,6 +330,7 @@ export async function runRecoveryAttempt(ctx: RecoveryContext, deps: RecoveryDep
   const read = readAttemptRecord(ctx.record);
   if (!read.ok) throw new Error(`recovery attempt refused: ${read.reason}`);
   const rec = read.record;
+  if(reservedBatchRef(rec.branch,rec.base)) throw Error('Legacy repair cannot publish or import a batch ref');
   if (rec.id !== ctx.attempt.id || rec.startSha !== ctx.attempt.startSha) throw Error('Recovery attempt identity changed after claim validation');
   if (rec.outcome || rec.phase !== "claimed") throw new Error(`recovery attempt ${rec.id} was already started (phase ${rec.phase}); it is never run twice`);
   const iso = () => new Date(deps.clock.now()).toISOString();

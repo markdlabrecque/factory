@@ -162,7 +162,7 @@ function settle(dir:string,c:Context,r:Record):BatchIdentity {
   const ready:Record = {...r,expectedHead:r.pending!.next,phase:'ready',pending:null};
   save(dir,ready); return identity(ready);
 }
-function push(dir:string,c:Context,r:Record):BatchIdentity {
+function push(dir:string,c:Context,r:Record, authorize?:()=>void):BatchIdentity {
   const {next,attempt} = r.pending!;
   if (r.phase === 'creating') {
     let present = false;
@@ -172,8 +172,9 @@ function push(dir:string,c:Context,r:Record):BatchIdentity {
       fetchCommit(c,r.repositoryId,next);
     }
   }
-  // Last identity reads precede both the advance intent and receipt: a changed/unknown ID is not an attempted write.
   verifyRepository(c,r.repositoryId);
+  // Delivery rechecks its owned repository, current gate and live claim. Only local Git identity checks follow it.
+  authorize?.();
   const target = checkedOrigin(c);
   checkTracking(c.root,r.id);
   const marker = join(dir,attempt+'.push');
@@ -246,8 +247,33 @@ export function resumeBatch(p:Paths,project:string,id:string):BatchIdentity {
     return push(dir,c,current);
   });
 }
+/** Local host member namespace. Does not adopt or settle pending Git transactions. */
+export function batchMemberLocation(p:Paths,project:string,id:string,ticket:number) {
+  const c=context(p,project), dir=location(p,id), r=load(dir,c,id);
+  if(!r.members.includes(ticket)) throw Error('Ticket is not an owned batch member');
+  return {dir, root:c.root, config:c.config, identity:identity(r)};
+}
+/** Read-only receipt reconciliation; settle ONLY the named advance with its positive receipt and exact readback. */
+export function observedBatchAdvance(p:Paths,project:string,id:string,old:string,next:string,attempt:string):'landed'|'refused'|'unknown' {
+  if(!uuid.test(attempt)||!isSha(old)||!isSha(next)) throw Error('Invalid delivery identity');
+  const c=context(p,project),dir=location(p,id);
+  return withAdmissionLock(dir,()=>{
+    const r=load(dir,c,id), file=join(dir,attempt+'.push');
+    verifyRepository(c,r.repositoryId);
+    if(!existsSync(file)) return 'unknown';
+    privatePath(file,false);
+    const lines=readBoundedText(file,65536,'Git push receipt').split('\n');
+    if(lines.some(l=>l.startsWith(`!\t${next}:${r.destinationRef}\t`))) return 'refused';
+    if(!lines.some(l=>l.startsWith(` \t${next}:${r.destinationRef}\t`))) return 'unknown';
+    if(r.phase==='advancing' && r.expectedHead===old && r.pending?.attempt===attempt && r.pending.next===next) { settle(dir,c,r); return 'landed'; }
+    if(r.phase!=='ready'||check(dir,c,r)!=='ready') return 'unknown';
+    git(c.root,'merge-base','--is-ancestor',next,r.expectedHead);
+    return 'landed';
+  });
+}
 /** Trusted delivery consumer only, AFTER its independent exact-candidate gate. No caller-supplied ref, no public CLI route. */
-export function advanceBatch(p:Paths,project:string,id:string,expectedOld:string,next:string):BatchIdentity {
+export function advanceBatch(p:Paths,project:string,id:string,expectedOld:string,next:string, attempt=randomUUID() as string, authorize?:()=>void):BatchIdentity {
+  if (!uuid.test(attempt)) throw Error('Invalid advance attempt');
   const c = context(p,project), dir = location(p,id);
   function validate() {
     const r = load(dir,c,id);
@@ -256,7 +282,7 @@ export function advanceBatch(p:Paths,project:string,id:string,expectedOld:string
   }
   validate();
   return withAdmissionLock(dir,() => {
-    const pending:Record = {...validate(),phase:'advancing',pending:{next,attempt:randomUUID()}};
-    return push(dir,c,pending);
+    const pending:Record = {...validate(),phase:'advancing',pending:{next,attempt}};
+    return push(dir,c,pending,authorize);
   });
 }
