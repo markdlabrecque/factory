@@ -7,6 +7,7 @@ import {mkdirSync,readFileSync,readdirSync,writeFileSync,symlinkSync} from 'node
 import {withAdmission,writeBaselineReservations,ownerOf,readAdmission} from '../../board/admission.mts';
 import {home} from './schedule-helpers.mts';
 import {install} from './runtime-fixture.mts';
+import {installBatchFixture} from '../../orchestrator/fixtures/batch-review.mts';
 import {Fake,FakeSchedule} from '../src/platform/fake.mts';
 import {factoryToml} from './config-fixture.mts';
 import {addProject} from '../src/projects.mts';
@@ -109,7 +110,9 @@ for(const kind of ['github','gitlab'] as const) test(`${kind}: fixed batch dispa
   });
   // Run the installed CLI with only fixture executables. The fake Pi records the shared token held during its turn and stops there.
   const turns=join(bin,'claimed-turns'), dockerFixture=new URL('../../orchestrator/fixtures/capability-docker.mjs',import.meta.url).href;
-  stub('docker',`import(${JSON.stringify(dockerFixture)}).then(m=>{const s=m.capabilityDocker(process.argv.slice(2),${JSON.stringify(bin)});if(s===undefined)process.exit(94);console.log(s)})`);
+  const checkout=await installBatchFixture(p.home,['true'],()=>{throw Error('Unexpected review')});t.after(checkout.close);
+  stub('docker',`import(${JSON.stringify(dockerFixture)}).then(m=>{const a=process.argv.slice(2);const s=m.capabilityDocker(a,${JSON.stringify(bin)});
+    if(s!==undefined)console.log(s);else process.exitCode=require('node:child_process').spawnSync(${JSON.stringify(join(checkout.bin,'docker'))},a,{stdio:'inherit',env:{PATH:process.env.PATH}}).status??94;})`);
   stub('pi',`const fs=require('node:fs');const dir=${JSON.stringify(p.state)};for(const file of fs.readdirSync(dir).filter(f=>/^org_repo--[0-9]+\\.json$/.test(f))){const r=JSON.parse(fs.readFileSync(dir+'/'+file));if(r.claim)fs.appendFileSync(${JSON.stringify(turns)},JSON.stringify([r.iid,r.claim])+'\\n')}process.stdin.resume();process.exitCode=1;`);
   const malformed=kind==='github'?['{','0','""','null','[]','{"requires":false}']:[];
   const badIds=malformed.map((_,i)=>String(40+i));

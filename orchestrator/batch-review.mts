@@ -4,7 +4,7 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'nod
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { frozenTicketIdentity, type FrozenTicketInput } from './ticket-input.mts';
-import { candidatePack, applyProposal, implementationSources, prospectiveCommit, requestedContext, reviewMaterial } from './batch-candidate.mts';
+import { candidatePack, prospectiveCommit, requestedContext, validateReviewInputs } from './batch-candidate.mts';
 import { proposeImplementation, standardBatchSandbox, type BatchSandbox, type ProcessResult, type ReviewRole, type SendTurn } from './batch-sandbox.mts';
 import type { EffectiveConfig } from './project-config.mts';
 import { modelForRole } from './model-policy.mts';
@@ -14,7 +14,7 @@ type GateIdentity = {image:string;configDigest:string};
 type GateInputs = GateIdentity & {argv:string[];paths:string[]};
 export interface BatchAttemptInput extends GateIdentity {
   repo: string; state: string; batch: string; destination: string; expectedHead: string; run: string;
-  ticket: FrozenTicketInput; deltaBase: string; deltaTip: string; testArgv: string[]; testPaths: string[];
+  ticket: FrozenTicketInput; deltaBase: string; deltaTip: string; testArgv: string[]; testPaths: string[]; signal?:AbortSignal;
   // Host reads current ref AND the batch ownership ledger, not worker-reported Git state.
   observeHead(): Promise<{kind:'owned'|'unknown'; head:string}>;
 }
@@ -22,7 +22,7 @@ export interface BatchAttemptInput extends GateIdentity {
 export function runStandardBatchAttempt(input: Omit<BatchAttemptInput,'testArgv'|'testPaths'|keyof GateIdentity>, config: EffectiveConfig, pinnedImage: string, reviewerCredential: () => string) {
   const checks = standardChecks(input,config,pinnedImage);
   return runBatchAttempt({...input,...checks,testArgv:checks.argv,testPaths:checks.paths},
-    standardBatchSandbox(pinnedImage,modelForRole(config.AGENT.family,'verification').model,reviewerCredential));
+    standardBatchSandbox(pinnedImage,modelForRole(config.AGENT.family,'verification').model,reviewerCredential,input.signal));
 }
 export function standardChecks(input: Pick<BatchAttemptInput,'ticket'>,config:EffectiveConfig,image:string):GateInputs {
   if(!/^sha256:[a-f0-9]{64}$/.test(image))throw Error('Unverifiable gate inputs: pinned image required');
@@ -30,7 +30,8 @@ export function standardChecks(input: Pick<BatchAttemptInput,'ticket'>,config:Ef
   const id = input.ticket.context.identity, tracker = config.TRACKER;
   if (id.kind !== tracker.kind || id.host !== (tracker.gitlabHost ?? tracker.host) || id.project !== tracker.project) throw Error('Ticket does not belong to the pinned project');
   const policy={config,implementation:resolveTicketModel(input.ticket.context.child.description,config.AGENT.family),review:modelForRole(config.AGENT.family,'verification'),
-    prompts:[template('implementation'),template('test'),template('code')]};
+    prompts:[template('implementation'),template('test'),template('code')],
+    transport:['batch-checkout.mts','batch-candidate.mts','batch-sandbox.mts','batch-review.mts'].map(name=>createHash('sha256').update(readFileSync(new URL(`./${name}`,import.meta.url))).digest('hex'))};
   return {image,configDigest:createHash('sha256').update(JSON.stringify(policy)).digest('hex'),argv:[...config.config.batchTests.argv],paths:[...config.config.batchTests.paths]};
 }
 export interface AttemptBinding {
@@ -38,7 +39,7 @@ export interface AttemptBinding {
   requirementsDigest: string; gate:GateInputs; candidate: string; deltaBase: string; deltaTip: string;
 }
 export type ReviewReceipt = {binding: AttemptBinding; role: ReviewRole; invocation: string; followup?:{invocation:string;assessment:string;paths:string[]}; contextHold?:true; verdict: 'approve'|'reject'|'inconclusive'; reason: string};
-export const BATCH_EVIDENCE_VERSION = 'batch-review-v3' as const;
+export const BATCH_EVIDENCE_VERSION = 'batch-review-v4' as const;
 export interface BatchEvidence {
   version: typeof BATCH_EVIDENCE_VERSION; binding: AttemptBinding;
   tests: {binding: AttemptBinding; argv: string[]; exit: number|null; stdout: string; stderr: string};
@@ -127,8 +128,9 @@ async function reviewRole(sandbox:BatchSandbox,repo:string,binding:AttemptBindin
     } finally {clearTimeout(timer)}
   };
   try {
-    if(role==='test' && sandbox.withTestSession)return await sandbox.withTestSession(invocation,send=>assess(send,true));
-    return await assess(prompt=>sandbox.review(role,invocation,prompt),false);
+    const pins={repo,base:binding.expectedHead,candidate:binding.candidate,testPaths:binding.gate.paths};
+    if(role==='test' && sandbox.withTestSession)return await sandbox.withTestSession(invocation,send=>assess(send,true),pins);
+    return await assess(prompt=>sandbox.review(role,invocation,prompt,pins),false);
   } catch {return hold}
 }
 export function batchImplementationPrompt(ticket: FrozenTicketInput) {
@@ -139,13 +141,14 @@ function template(role: 'implementation'|ReviewRole) { return readFileSync(new U
 /** Entry for one already-admitted member. The caller retains its exclusive admission claim across this call.
  * No worker-provided tip, selection, receipt or publish capability is accepted here. */
 export async function runStandardBatchMember(input: Omit<BatchAttemptInput,'deltaBase'|'deltaTip'|'testArgv'|'testPaths'|keyof GateIdentity>, config:EffectiveConfig, image:string, providerCredential:()=>string):Promise<BatchEvidence> {
+  input.signal?.throwIfAborted();
   const checks=standardChecks(input,config,image), prompt=batchImplementationPrompt(input.ticket), id=input.ticket.context.identity;
   const project=`${id.kind}://${id.host}/${id.project}`, ticket=input.ticket.context.child.iid;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(input.batch) || input.destination!==`refs/heads/factory/batch/${input.batch}` || !input.run?.trim() || !/^[0-9a-f]{40}$/.test(input.expectedHead)) throw Error('Invalid admitted batch identity');
   if(resolve(input.state)===realpathSync(input.repo) || resolve(input.state).startsWith(realpathSync(input.repo)+'/')) throw Error('Gate store must be outside the project');
   const model=resolveTicketModel(input.ticket.context.child.description,config.AGENT.family);
   if(model.status!=='resolved') throw Error('Unresolved batch implementer model');
-  const sandbox=standardBatchSandbox(image,modelForRole(config.AGENT.family,'verification').model,providerCredential);
+  const sandbox=standardBatchSandbox(image,modelForRole(config.AGENT.family,'verification').model,providerCredential,input.signal);
   const scope=JSON.stringify([project,input.batch,ticket]);
   type Ready={gate:GateInputs;id:string;run:string;requirements:string;destination:string;previous:string|null;base:string;start:string;tip:string};
   const store=openStore(input.state);
@@ -159,14 +162,15 @@ export async function runStandardBatchMember(input: Omit<BatchAttemptInput,'delt
   // Bounded even if tests never pass or the host repeatedly advances. Only explicit review rejections spend the durable per-member rework budget.
   for(let step=0;step<8;step++) {
     const current=await input.observeHead();
+    input.signal?.throwIfAborted();
     if(current.kind!=='owned' || !/^[0-9a-f]{40}$/.test(current.head) || (!step && !ready && !prior && current.head!==input.expectedHead)) throw Error('Expected owned batch head not current');
     if(previous?.status==='stopped' || previous?.status==='held') return previous;
     if(previous?.status==='approved' && previous.binding.run===input.run && previous.binding.expectedHead===current.head) return previous;
     if(!ready && (!previous || previous.status==='implementation' || previous.status==='rework')) {
       const feedback=previous?{attempt:previous.binding.attempt,candidate:previous.binding.candidate,reason:previous.reason,tests:{exit:previous.tests.exit,stdout:previous.tests.stdout,stderr:previous.tests.stderr},reviews:previous.reviews.map(({role,verdict,reason})=>({role,verdict,reason}))}:null;
-      const task=prompt+'\nHost proposal input:\n'+JSON.stringify({start:tip,files:implementationSources(input.repo,tip),feedback});
-      const proposal=await proposeImplementation(model.model,providerCredential,task);
-      const revised=applyProposal(input.repo,tip,proposal);
+      const task=prompt+'\nHost proposal input:\n'+JSON.stringify({start:tip,feedback});
+      const revised=await proposeImplementation(input.repo,image,tip,model.model,providerCredential,task,input.signal);
+      input.signal?.throwIfAborted();
       // Persist the exact immutable result before sampling another head.
       ready={gate:checks,id:randomUUID(),run:input.run,requirements:input.ticket.hash,destination:input.destination,previous:previous?.binding.attempt??null,base,start:tip,tip:revised};
       const db=openStore(input.state);try{db.prepare('INSERT INTO ready_deltas VALUES(?,?)').run(scope,JSON.stringify(ready))}finally{db.close()}
@@ -183,7 +187,8 @@ export async function runBatchAttempt(input: BatchAttemptInput, sandbox: BatchSa
   return evaluateAttempt(input,sandbox);
 }
 async function evaluateAttempt(input:BatchAttemptInput,sandbox:BatchSandbox,member?:{ready?:string}):Promise<BatchEvidence> {
-  const {repo,state,batch,destination,run,deltaBase,deltaTip} = input;
+  const {repo,state,batch,destination,run,deltaBase,deltaTip,signal} = input;
+  signal?.throwIfAborted();
   let expectedHead=input.expectedHead;
   const {contentHash: requirementsDigest} = frozenTicketIdentity(input.ticket);
   const {identity,child} = input.ticket.context, project = `${identity.kind}://${identity.host}/${identity.project}`, ticket = child.iid;
@@ -244,26 +249,28 @@ async function evaluateAttempt(input:BatchAttemptInput,sandbox:BatchSandbox,memb
         const check=await input.observeHead().catch(()=>({kind:'unknown' as const,head:''}));
         if(check.kind!=='owned' || check.head!==expectedHead){beforeLaunch=check;return {exit:null,stdout:'',stderr:'Batch head no longer current before tests'}}
       }
+      signal?.throwIfAborted();
       return sandbox.test(candidate,pack,[...testArgv]);
     });
     const completed=typeof observed?.exit==='number' && Number.isInteger(observed.exit) && observed.exit>=0 && observed.exit<=255 && typeof observed.stdout==='string' && typeof observed.stderr==='string';
     const tests = {binding,argv:testArgv,exit:completed?observed.exit:null,stdout:typeof observed?.stdout==='string'?observed.stdout.slice(-32768):'',stderr:typeof observed?.stderr==='string'?observed.stderr.slice(-32768):''};
     let reviews: ReviewReceipt[] = [], missingMaterial=false;
     const passed = tests.exit === 0;
-    if (passed) {
+    if (passed && !signal?.aborted) {
       try {
-        const {tests: sources,diff} = reviewMaterial(repo,expectedHead,candidate,testPaths);
-        if (!sources.length) throw Error('No candidate tests to review');
-        const prompts = {test: template('test')+'\n'+JSON.stringify({requirements,tests:sources}),
-          code: template('code')+'\n'+JSON.stringify({diff,requirements})};
+        validateReviewInputs(repo,expectedHead,candidate,testPaths);
+        const pins={requirements,base:expectedHead,candidate,attempt};
+        const prompts = {test: template('test')+'\n'+JSON.stringify({...pins,testPaths,tests:{argv:testArgv,exit:tests.exit,stdout:tests.stdout,stderr:tests.stderr}}),
+          code: template('code')+'\n'+JSON.stringify(pins)};
         if (Object.values(prompts).some(p=>Buffer.byteLength(p)>8*1024*1024)) throw Error('Review prompt exceeds limit');
         const current=await input.observeHead().catch(()=>({kind:'unknown' as const,head:''}));
         if(current.kind!=='owned'||current.head!==expectedHead)beforeLaunch=current;
-        else reviews = await Promise.all((['test','code'] as const).map(role=>reviewRole(sandbox,repo,binding,role,prompts[role])));
+        else if(!signal?.aborted) reviews = await Promise.all((['test','code'] as const).map(role=>reviewRole(sandbox,repo,binding,role,prompts[role])));
       } catch { missingMaterial=true; }
     }
     const final = beforeLaunch ?? await input.observeHead().catch(() => ({kind:'unknown',head:''}));
-    const outcome: Pick<BatchEvidence,'status'|'reason'> = final.kind !== 'owned' ? {status:'held',reason:'Batch ownership or movement unknown'}
+    const outcome: Pick<BatchEvidence,'status'|'reason'> = signal?.aborted ? {status:'held',reason:'Batch gate cancelled'}
+      : final.kind !== 'owned' ? {status:'held',reason:'Batch ownership or movement unknown'}
       : final.head !== expectedHead ? {status:'rebuild',reason:'Host advanced batch; construct and recheck on current head'}
       : tests.exit===null ? {status:'held',reason:'Host could not observe completion of the configured test process'}
       : missingMaterial ? {status:'held',reason:'Exact review material missing, unrepresentable or over limit'}

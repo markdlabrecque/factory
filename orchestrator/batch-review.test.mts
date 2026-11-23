@@ -1,7 +1,7 @@
 // Public producer tests: real prospective Git trees, fixture-only test/agent processes, independent evidence and durable rework policy.
 import test, {type TestContext} from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepareRuntimeBundle } from '../cli/src/runtime-bundle.mts';
@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { classifyBatchReview, runStandardBatchMember, runBatchAttempt, readBatchEvidence, latestBatchAttempt, type BatchAttemptInput, type ReviewReceipt } from './batch-review.mts';
 import { fixtureTicketInput } from './fixtures/ticket-input.mts';
 import { installBatchFixture } from './fixtures/batch-review.mts';
-import { applyProposal, implementationSources, requestedContext } from './batch-candidate.mts';
+import { applyProposal, openReviewView, requestedContext } from './batch-candidate.mts';
 import { observeTestProcess, standardBatchSandbox, TEST_DRIVER } from './batch-sandbox.mts';
 import { loadTomlConfig } from './project-config.mts';
 
@@ -22,7 +22,7 @@ function setup(t:TestContext,workerStarts=false) {
     {cwd:repo,env:{PATH:process.env.PATH,HOME:root,GIT_CONFIG_NOSYSTEM:'1'},encoding:'utf8'}).trim();
   const commit = (files:Record<string,string>) => { for (const [p,s] of Object.entries(files)) writeFileSync(join(repo,p),s); git('add','.');git('commit','-qm','fixture');return git('rev-parse','HEAD'); };
   git('init','-q','-b','main'); mkdirSync(join(repo,'tests'));
-  const base = commit({'.gitattributes':'api.cjs binary','api.cjs':'module.exports=0','tests/check.cjs':`const assert=require('node:assert/strict');assert.equal(process.env.OPENAI_API_KEY,undefined);assert.equal(process.env.CLAUDE_CODE_OAUTH_TOKEN,undefined);assert.equal(require('../api.cjs'),1);`});
+  const base = commit({'large.txt':'LARGE_IRRELEVANT '.repeat(70_000),'.gitattributes':'api.cjs binary','api.cjs':'module.exports=0','tests/check.cjs':`const assert=require('node:assert/strict');assert.equal(process.env.OPENAI_API_KEY,undefined);assert.equal(process.env.CLAUDE_CODE_OAUTH_TOKEN,undefined);assert.equal(require('../api.cjs'),1);`});
   git('switch','-qc','factory/batch/b1'); const expectedHead = commit({'prerequisite':'integrated'});
   git('switch','-qc','ticket',base); const deltaTip = workerStarts?base:commit({'api.cjs':'module.exports=2;// DIFF_ONLY'});
   const destination = 'refs/heads/factory/batch/b1';
@@ -32,6 +32,27 @@ function setup(t:TestContext,workerStarts=false) {
   return {input,root,git,commit};
 }
 const approval = {verdict:'approve',reason:'matches requirements'};
+
+test('read-only review tools use exact Git objects without requiring the repository tree to fit the context limit',t=>{
+  const { input, commit, git }=setup(t);
+  const candidate=commit({'large.txt':'UNRELATED_CONTEXT '.repeat(70_000),'tests/extra.cjs':'// pinned-search-marker\n'});
+  writeFileSync(join(input.repo,'tests/extra.cjs'),'// dirty-worktree-marker\n');
+  const view=openReviewView(input.repo,input.deltaBase,candidate);
+  t.after(view.close);
+  assert.ok(view.list('candidate').includes('tests'));assert.deepEqual(view.list('candidate','tests'),['tests/check.cjs','tests/extra.cjs']);
+  assert.deepEqual(view.search('candidate','pinned-search-marker','tests'),[`${candidate}:tests/extra.cjs`]);
+  assert.deepEqual(view.search('candidate','dirty-worktree-marker'),[]);
+  assert.deepEqual(view.read('candidate','tests/extra.cjs'),{path:'tests/extra.cjs',oid:git('rev-parse',`${candidate}:tests/extra.cjs`),content:'// pinned-search-marker\n'});
+  assert.equal(view.read('base','api.cjs').content,'module.exports=0');
+  assert.match(view.diff(),/\btests\/extra\.cjs\b/);
+  assert.match(view.diff('api.cjs'),/\+module\.exports=2;\/\/ DIFF_ONLY/);
+  assert.throws(()=>view.read('candidate','large.txt'),/limit/);
+  assert.throws(()=>view.diff('large.txt'),/limit/);
+  for(const path of ['../outside','/etc/passwd','.GIT/config','tests/../api.cjs'])assert.throws(()=>view.read('candidate',path),/Invalid checkout path/);
+  assert.throws(()=>view.read(candidate,'tests/extra.cjs'),/Invalid review side/);
+  assert.deepEqual(Object.keys(view).sort(),['close','diff','list','read','search']);
+  assert.equal(git('rev-parse','HEAD'),candidate);
+});
 
 test('admitted implementation revises code and tests from host feedback; exact independent approvals rebuild after a batch advance', async t=>{
   const {input,root,git,commit}=setup(t,true), records=join(root,'turns.jsonl');writeFileSync(records,'');
@@ -43,11 +64,11 @@ test('admitted implementation revises code and tests from host feedback; exact i
     git('switch','--detach','-q',parent);const head=commit({'batch-only':content});git('switch','-q','ticket');
     git('update-ref',dest,head,parent);return head;
   };
-  const project='github://github.com/owner/repo', seen:{role:string,prompt:string,id:string}[]=[];
+  const project='github://github.com/owner/repo', seen:{role:string,prompt:string,id:string,output:unknown}[]=[];
   const turns=()=>readFileSync(records,'utf8').trim().split('\n').filter(Boolean).map(s=>JSON.parse(s));
   const implementation=`
     const file=${JSON.stringify(records)}, prior=fs.readFileSync(file,'utf8').trim().split('\\n').filter(Boolean).length;
-    const {start,feedback,files}=JSON.parse(prompt.split('Host proposal input:\\n').at(-1));assert(files.some(f=>f.path==='api.cjs'));assert(files.some(f=>f.path==='tests/check.cjs'));
+    const {start,feedback,files}=JSON.parse(prompt.split('Host proposal input:\\n').at(-1));assert.equal(files,undefined);
     if(prior===0)assert.equal(feedback,null);
     else if(prior===1){assert.equal(feedback.tests.exit,255);assert.match(feedback.tests.stderr,/WRONG_RESULT/);}
     else {assert.equal(prior,2);assert.equal(feedback.reviews.find(x=>x.role==='test').reason,'cover revision two');}
@@ -55,8 +76,8 @@ test('admitted implementation revises code and tests from host feedback; exact i
     const check="process.on('uncaughtException',err=>{console.error(err);process.exitCode=255});console.log(require('node:child_process').execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim());require('node:assert/strict').equal(require('../api.cjs'),"+(prior||99)+",'WRONG_RESULT');console.log(require('node:fs').readFileSync('batch-only','utf8'));";
     console.log(JSON.stringify({edits:[{path:'api.cjs',content:api},{path:'tests/check.cjs',content:check}]}));
     fs.appendFileSync(file,JSON.stringify({prompt,feedback,start,api,check,entries:fs.readFileSync(${JSON.stringify(join(root,'agent-entries.jsonl'))},'utf8')})+'\\n');`;
-  const fixture=await installBatchFixture(root,input.testArgv,(role,prompt)=>{
-    const id=latestBatchAttempt(input.state,project,'b1',7)!.binding.attempt;seen.push({role,prompt,id});
+  const fixture=await installBatchFixture(root,input.testArgv,(role,prompt,output)=>{
+    const id=latestBatchAttempt(input.state,project,'b1',7)!.binding.attempt;seen.push({role,prompt,id,output});
     const round=new Set(seen.map(x=>x.id)).size;
     if(round===2 && role==='code') advanced=advanceTree(revisedHead,'during reviews');
     if(round===3 && role==='test' && !prompt.startsWith('Final context stage:'))return {context:['api.cjs'],assessment:'initial assessment '+id};
@@ -77,12 +98,12 @@ test('admitted implementation revises code and tests from host feedback; exact i
   };
   const run=()=>runStandardBatchMember(member,loadTomlConfig(root),'sha256:'+'a'.repeat(64),()=> 'fixture-only');
   assert.equal(latestBatchAttempt(input.state,project,'b1',7),null);
-  assert.deepEqual(fixture.entries().map(x=>x.entry),['implementer']);
+  assert.deepEqual(fixture.entries().filter(x=>x.initial).map(x=>x.entry),['implementer']);
   const pass=await run();
   const history=turns();assert.equal(history.length,3);assert.match(history[0].prompt,/CHILD_REQUIREMENT/);assert.match(history[0].prompt,/PARENT_REQUIREMENT/);
   assert.doesNotMatch(history[1].entries,/reviewer/,'no reviewer process entry before failed-test repair');
-  assert.equal(fixture.entries().filter(x=>x.entry==='reviewer').length,7);assert.equal(new Set(fixture.entries().map(x=>x.pid)).size,10);
-  const homes=fixture.entries().map(e=>e.home);assert.equal(new Set(homes).size,homes.length-1);assert(homes.every(home=>!existsSync(home)));
+  assert.equal(fixture.entries().filter(x=>x.entry==='reviewer'&&x.initial).length,6);
+  const homes=fixture.entries().filter(e=>e.initial).map(e=>e.home);assert.equal(new Set(homes).size,homes.length);assert(homes.every(home=>!existsSync(home)));
   const ids=[history[1].feedback.attempt,...new Set(seen.map(x=>x.id))];assert.equal(ids.length,4);
   let priorTip=firstHead;const receipts=ids.map(id=>readBatchEvidence(input.state,id)!);
   assert.deepEqual(receipts.map(r=>r.status),['implementation','rework','rebuild','approved']);
@@ -100,13 +121,15 @@ test('admitted implementation revises code and tests from host feedback; exact i
     if(!i){assert.notEqual(r.tests.exit,0);assert.deepEqual(r.reviews,[]);continue}
     assert.equal(r.tests.exit,0);assert.deepEqual(r.reviews.map(x=>x.role),['test','code']);
     for(const v of r.reviews){assert.deepEqual(v.binding,b);assert(!sessions.has(v.invocation));sessions.add(v.invocation)}
-    const code=seen.find(x=>x.id===b.attempt&&x.role==='code')!.prompt, tests=seen.find(x=>x.id===b.attempt&&x.role==='test')!.prompt;
+    const codeTurn=seen.find(x=>x.id===b.attempt&&x.role==='code')!, testTurn=seen.find(x=>x.id===b.attempt&&x.role==='test')!;
+    const code=codeTurn.prompt,tests=testTurn.prompt;
     const material=(s:string)=>JSON.parse(s.slice(s.indexOf('\n{')+1));
-    const side=(sha:string,path:string)=>({mode:'100644',oid:git('rev-parse',`${sha}:${path}`),content:git('show',`${sha}:${path}`)});
-    const files=['api.cjs','tests/check.cjs'];assert.deepEqual(git('diff','--name-only',head,b.candidate).split('\n'),files);
-    assert.deepEqual(material(code),{requirements:input.ticket.text,diff:files.map(path=>({path,before:side(head,path),after:side(b.candidate,path)}))});
-    assert.equal(side(b.candidate,'api.cjs').content,turn.api);assert.equal(side(b.candidate,'tests/check.cjs').content,turn.check);
-    assert.deepEqual(material(tests),{requirements:input.ticket.text,tests:[{path:'tests/check.cjs',content:turn.check}]});
+    const side=(sha:string,path:string)=>({oid:git('rev-parse',`${sha}:${path}`),content:git('show',`${sha}:${path}`)});
+    const pins={requirements:input.ticket.text,base:head,candidate:b.candidate,attempt:b.attempt};
+    assert.deepEqual(material(code),pins);
+    assert.match(String(codeTurn.output),/\bapi\.cjs\b/);assert.match(String(codeTurn.output),/\btests\/check\.cjs\b/);
+    assert.deepEqual(testTurn.output,{path:'tests/check.cjs',...side(b.candidate,'tests/check.cjs')});
+    assert.deepEqual(material(tests),{...pins,testPaths,tests:{argv:testArgv,exit:0,stdout:r.tests.stdout,stderr:r.tests.stderr}});
     assert.match(tests,/tautolog/i);assert.match(tests,/wrong behavior/i);assert.match(tests,/material omissions/i);assert.doesNotMatch(tests,/IMPLEMENTATION_ONLY/);
     assert.doesNotMatch(tests+code,/cover revision two/);
     if(i===3){
@@ -149,7 +172,7 @@ test('assembled standard member runs its implementer and both role verdicts with
       }
       await assert.rejects(resume(config,'sha256:'+'b'.repeat(64)),/gate inputs/i);await assert.rejects(resume(config,'unpinned'),/gate inputs/i);
       await assert.rejects(resume({...config,AGENT:{family:family==='openai'?'anthropic':'openai'}}),/gate inputs/i);
-      const ext=family==='anthropic';assert.deepEqual(fixture.entries().map(({entry,model,extension})=>[entry,model,extension]),[
+      const ext=family==='anthropic';assert.deepEqual(fixture.entries().filter(e=>e.initial).map(({entry,model,extension})=>[entry,model,extension]),[
         ['implementer',implementation,ext?extension:null],
         ...Array(2).fill(['reviewer',review,ext?extension:null])]);
     });
@@ -160,7 +183,7 @@ test('loss of the initial private assessment cannot start a replacement deciding
   const {input,root}=setup(t);
   const fixture=await installBatchFixture(root,input.testArgv,(role)=>{
     if(role==='code')return approval;
-    const home=fixture.entries().find(e=>existsSync(join(e.home,'history'))).home;
+    const home=fixture.entries().find(e=>e.role==='test'&&e.initial).home;
     rmSync(join(home,'history','fixture-session.jsonl'));
     return {assessment:'initial assessment',context:['api.cjs']};
   });
@@ -168,16 +191,47 @@ test('loss of the initial private assessment cannot start a replacement deciding
   const sandbox=standardBatchSandbox(input.image,'openai/fixture',()=> 'fixture-only');
   const result=await runBatchAttempt(input,{...sandbox,test:async()=>({exit:0,stdout:'',stderr:''})});
   assert.equal(result.status,'held');assert.deepEqual(result.reviews.map(r=>r.verdict),['inconclusive','approve']);
-  const entries=fixture.entries();assert.equal(entries.length,2);assert.equal(new Set(entries.map(e=>e.home)).size,2);assert(entries.every(e=>!existsSync(e.home)));
+  const entries=fixture.entries();assert.equal(entries.filter(e=>e.initial).length,2);assert.equal(new Set(entries.map(e=>e.home)).size,2);assert(entries.every(e=>!existsSync(e.home)));
 });
 
-test('tool-less proposals change only ordinary Git blobs on the exact parent; invalid proposals and unrepresentable source hold',t=>{
-  const {input,git,commit}=setup(t),start=input.deltaTip;
+test('reviewers cannot run commands or write after reading the pinned candidate',async t=>{
+  const {input,root}=setup(t);
+  const fixture=await installBatchFixture(root,input.testArgv,role=>role==='test'
+    ? {tool:'run',args:{argv:['sh','-c','exit 0']}}
+    : {tool:'edit',args:{edits:[{path:'api.cjs',content:'not authorized'}]}});
+  const path=process.env.PATH;process.env.PATH=fixture.bin+':'+path;t.after(()=>{process.env.PATH=path;fixture.close()});
+  const sandbox=standardBatchSandbox(input.image,'openai/fixture',()=> 'fixture-only');
+  const result=await runBatchAttempt(input,{...sandbox,test:async()=>({exit:0,stdout:'',stderr:''})});
+  assert.equal(result.status,'held');assert.deepEqual(result.reviews.map(r=>r.verdict),['inconclusive','inconclusive']);
+  assert.equal(fixture.entries().length,5,'no additional model turn after the forbidden tool');
+  assert.deepEqual(readdirSync(fixture.containers),[]);
+  assert.equal(readFileSync(join(input.repo,'api.cjs'),'utf8'),'module.exports=2;// DIFF_ONLY');
+});
+
+for(const fault of ['refuse-cleanup','foreign-owner'])test(`checkout custody failure (${fault}) cannot start review or approve`,async t=>{
+  const {input,root,commit}=setup(t);input.deltaTip=commit({'api.cjs':'module.exports=1'});
+  const fixture=await installBatchFixture(root,input.testArgv,()=>{throw Error('unexpected reviewer')});
+  writeFileSync(join(fixture.bin,fault),'simulate unavailable custody');
+  const path=process.env.PATH;process.env.PATH=fixture.bin+':'+path;t.after(()=>{process.env.PATH=path;fixture.close()});
+  const r=await runBatchAttempt(input,standardBatchSandbox(input.image,'openai/fixture',()=>{throw Error('unexpected provider')}));
+  assert.equal(r.status,'held');assert.equal(r.tests.exit,null);assert.deepEqual(r.reviews,[]);assert.deepEqual(fixture.entries(),[]);
+  assert.equal(readdirSync(fixture.containers).length,1);
+});
+
+test('cancellation during a passing test holds even on an unchanged owned head',async t=>{
+  const {input}=setup(t),cancel=new AbortController();let reviews=0;
+  const r=await runBatchAttempt({...input,signal:cancel.signal},{test:async()=>{cancel.abort();return {exit:0,stdout:'',stderr:''}},
+    review:async()=>{reviews++;return {exit:0,stdout:JSON.stringify(approval),stderr:''}}});
+  assert.equal(r.status,'held');assert.match(r.reason,/cancelled/);assert.equal(reviews,0);
+});
+
+test('proposals change only ordinary Git blobs on the exact parent; invalid deltas hold',t=>{
+  const {input,git}=setup(t),start=input.deltaTip;
   const apply=(edits:unknown[])=>applyProposal(input.repo,start,JSON.stringify({edits}));
   const tip=apply([{path:'api.cjs',content:null},{path:'src/new',content:'new bytes\n'}]);
   assert.equal(git('rev-parse',`${tip}^`),start);assert.equal(git('ls-tree',tip,'api.cjs'),'');assert.equal(git('show',`${tip}:src/new`),'new bytes');
   for(const edits of [[{path:'.git/config',content:'x'}],[{path:'../outside',content:'x'}],[{path:'a',content:'x'},{path:'a',content:'y'}],[]])assert.throws(()=>apply(edits));
-  assert.equal(git('rev-parse','HEAD'),start);assert.throws(()=>implementationSources(input.repo,commit({'binary':'before\0after'})),/Unrepresentable/);
+  assert.equal(git('rev-parse','HEAD'),start);
 });
 
 test('durable budget charges rejected rounds, not batch movement, and survives new run IDs', async t=>{

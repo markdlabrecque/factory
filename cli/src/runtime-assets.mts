@@ -1,6 +1,6 @@
 // Authoritative source mapping for the flat runtime and shared project scaffold files.
 // Original workflows and prospective batch review ship as one complete inventory, without mixing their evidence contracts.
-export const BATCH_REVIEW_ASSETS = ['batch-refs.mts', 'batch-candidate.mts', 'batch-sandbox.mts', 'batch-review.mts',
+export const BATCH_REVIEW_ASSETS = ['batch-refs.mts', 'batch-candidate.mts', 'batch-checkout.mts', 'batch-sandbox.mts', 'batch-review.mts',
   'prompt.batch-implementation.md', 'prompt.batch-test.md', 'prompt.batch-code.md'] as const;
 export const FROM_ORCHESTRATOR = ['acceptance-baseline-admission.mts', 'acceptance-admission.mts', 'acceptance-contract.mts', 'acceptance-custody.mts', 'acceptance-receipt.mts', 'acceptance-runner.mts', 'acceptance-worker.mts', 'acceptance-sandbox.mjs', 'recovery-analysis.mts', 'recovery-analysis-contract.mts', 'recovery-triage.mts', 'recovery-triage-contract.mts', 'dependencies.mts', 'dispatch.mts', 'dispatch.sh', 'refresh.mts', 'graph.mts', 'analyze.mts', 'tracker.mts', 'tracker.gitlab.mts', 'tracker.github.mts',
   'host-launch.mts', 'launch-readiness.mts', 'readiness-identity.mts', 'ticket-context.mts', 'ticket-context-source.mts', 'ticket-input.mts', 'ticket-input-evidence.mts', 'delivery-followup.mts', 'verification.mts', 'readiness.mts', 'readiness-schema.mts', 'no-commit.mts', 'implementation-outcome.mts', 'sandbox-readiness.mts', 'payload-custody.mts',
