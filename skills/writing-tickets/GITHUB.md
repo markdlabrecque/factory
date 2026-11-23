@@ -14,7 +14,6 @@ Personal repos and orgs without types return nothing or 404. Leave `--type` off 
 
 ```
 gh label list --limit 200
-gh label create ready-for-agent --color 428BCA --description "Planned and split; ready for agents to implement"   # only if missing
 ```
 
 ## Request Ticket, with the estimate
@@ -59,13 +58,7 @@ gh api repos/<owner>/<repo>/issues/<N>/sub_issues --jq '.[] | "\(.number) \(.tit
 
 ## Blockers
 
-List the queue before labelling anything from this run:
-
-```
-gh issue list --label ready-for-agent --state open --limit 200 --json number,title,body
-```
-
-Add each link on the blocked ticket, after all tickets exist:
+Record local blocker numbers in the blocked issue's `Depends on` line and their reasons in the body. Add the native links after all the tickets exist:
 
 ```
 gh issue edit <blocked> --add-blocked-by <blocker>[,<blocker>...]
@@ -79,16 +72,10 @@ gh api repos/<owner>/<repo>/issues/<blocked>/dependencies/blocked_by --jq '.[].n
 
 Every blocker must appear. If one is missing, add it again.
 
-## Acceptance and ready
+## Handoff
 
-File and read back the body, model metadata, plan, children and blockers before [submitting the package](ACCEPTANCE.md#automated-handoff). Use only target-supported model selectors. For Factory, read back the ready label after the trusted preparation workflow applies it. If the workflow is unavailable or reports a hold, leave the issue unlabelled. Do not post ordinary receipt comments after freeze; they can change the requirements hash.
+Read back the body, model metadata, plan, sub-issues and native blockers. For an explicit Factory batch, report the filed issue numbers and known blockers; native links and sub-issue relationships are not submissions. See the [GitHub batch example](BATCH.md#github-unsplit-issue).
 
-Before changing existing ready scope or acceptance, remove readiness:
-
-```
-gh issue edit <N> --remove-label ready-for-agent
-```
-
-Repeat the automated handoff for the new inputs. For other runtimes, use the target's documented readiness workflow.
+Only for a target that requires separate acceptance preparation, follow its documented readiness workflow and [automated handoff](ACCEPTANCE.md#automated-handoff), including its rules for invalidating readiness when approved inputs change.
 
 Link format for the report: `[#N](https://github.com/<owner>/<repo>/issues/N)`.

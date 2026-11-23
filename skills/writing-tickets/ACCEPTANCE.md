@@ -1,6 +1,6 @@
 # Acceptance preparation
 
-Use this when drafting and submitting acceptance for a runnable ticket on either tracker. Use the target's documented acceptance format; without one, retain the inventory and actual artifact bytes as a held draft. The routine path requires no human approval or manual host records. This guide does not install a submission service or create a new runtime role.
+Use this only for a target workflow that explicitly requires separate, immutable acceptance preparation. For explicit Factory batches, use [the batch authoring and handoff path](BATCH.md) instead. Use the target's documented acceptance format; if it requires preparation but has no supported format or submission workflow, retain the inventory and actual artifact bytes as a held draft. The routine path requires no human approval or manual host records. This guide does not install a submission service or create a new runtime role.
 
 ## Prepare → freeze → approve → observe → decide
 
@@ -35,9 +35,9 @@ Independent semantic verification remains required even when structure, approval
 
 ## Automated handoff
 
-1. File and read back the ticket body, requirements comments and parent relationship before submission. Send the ticket ID, target project/base and draft contract plus actual artifact bytes through the target's documented submission interface. For Factory, find the supported contract and submission instructions in the target checkout's `docs/acceptance-contract.md`. The current host custody and baseline APIs are not a ticket-writer submission workflow.
+1. File and read back the ticket body, requirements comments and parent relationship before submitting it for preparation. Send the ticket ID, target project/base and draft contract plus actual artifact bytes through the target's documented preparation interface. Host custody and baseline APIs alone are not a ticket-writer submission workflow.
 2. Let the trusted workflow snapshot the tracker input, review and publish the exact package, and run the policy-authorized baseline. Prefer isolated, self-contained probes. Do not invent a CLI, write private approval/grant records, run probe commands on the host, or ask for routine human approval when the workflow is absent.
-3. Confirm `ready` against the current ticket and package identity, and read back the tracker label. If the target is Factory, its trusted workflow owns applying `ready-for-agent`; the ticket writer does not. Another target may document applying the label from verified readiness evidence. If the interface or required evidence is missing, retain the draft, leave the ticket unlabelled and report `held` with the precise reason. Do not put generated status or receipt links into hashed requirements after approval.
+3. Confirm `ready` against the current ticket and package identity. Follow the target's label policy: read back readiness if the workflow applies it; apply it yourself only if the target explicitly permits that based on verified evidence. If the interface or required evidence is missing, retain the draft, leave readiness unset and report `held` with the precise reason. Do not put generated status or receipt links into hashed requirements after approval.
 
 ## Portable package outline
 
@@ -71,9 +71,9 @@ baseline: <separate authenticated receipt/evidence, exact SHA and identities>
 readiness: <ready/held, reason, next actor>
 ```
 
-For a target with its own schema, translate the inventory into that schema and freeze its actual identity; this outline is not parser input. In Factory, consult the target checkout's `docs/acceptance-contract.md` for the versioned contract and model/runtime documentation for supported selectors. Its pure parser does not supply custody, execution or semantic approval. Projects without Factory follow the same preparation decisions using their own trusted mechanisms.
+Translate the inventory into the target's schema and freeze its actual identity; this outline is not parser input. A parser does not supply custody, execution or semantic approval. Use the target's trusted mechanisms and documented model selectors.
 
-## Walkthroughs (apply on GitHub and GitLab)
+## Separate preparation walkthroughs (either tracker)
 
 These are hypothetical review decisions, not actual frozen bundles or executed evidence. Tracker syntax does not change approval semantics; use the automated handoff above on either tracker.
 
@@ -87,7 +87,7 @@ These are hypothetical review decisions, not actual frozen bundles or executed e
 
 Model tier describes implementation size; Planning model records the actual planner. The example planner below is illustrative, not a claim about the model preparing any real ticket. Select the implementation family/table as in step 4 and honor the target runtime's documented selectors.
 
-Factory-compatible runnable ticket (same body fields on either tracker):
+Tier-based runnable ticket (same body fields on either tracker):
 
 ```markdown
 **Model tier:** mid
@@ -104,4 +104,4 @@ For another runtime that explicitly supports exact Pi selectors, a Small task pr
 **Pi model:** pi-claude-subscription/claude-haiku-5-5
 ```
 
-That selector is conditional on target support, not a second workflow or a Factory-only route. If unsupported, omit it and use the target's supported tier/selector convention. The approved model table and family fallback still determine intended implementation selection, not historical planning provenance.
+That selector is conditional on target support. If unsupported, omit it and use the target's supported tier/selector convention. The approved model table and family fallback still determine intended implementation selection, not historical planning provenance.
