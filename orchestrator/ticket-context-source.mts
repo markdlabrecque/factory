@@ -83,8 +83,13 @@ export function structuredContextSource(identity: ContextIdentity, transport: Co
         if (!Object.hasOwn(issue, 'parent')) throw new ContextReadError('malformed');
         return { bytes: read.bytes, value: issue.parent === null ? null : number(record(issue.parent).number) };
       }
-      const read = graphql(`{ project(fullPath: ${JSON.stringify(identity.project)}) { workItems(iids: [${JSON.stringify(String(iid))}], first: 1) { nodes { iid workItemType { name } widgets { ... on WorkItemWidgetHierarchy { parent { iid } } } } } } }`, budget);
-      const nodes = list(record(record(read.value.project).workItems).nodes);
+      const scoped = ownedRepositoryId !== undefined;
+      const projectFields = scoped ? 'id fullPath ' : '';
+      const read = graphql(`{ project(fullPath: ${JSON.stringify(identity.project)}) { ${projectFields}workItems(iids: [${JSON.stringify(String(iid))}], first: 1) { nodes { iid workItemType { name } widgets { ... on WorkItemWidgetHierarchy { parent { iid${scoped?' project { id fullPath }':''} } } } } } } }`, budget);
+      const project=record(read.value.project);
+      const sameProject=(p:unknown)=>p && typeof p==='object' && 'id' in p && p.id===ownedRepositoryId && 'fullPath' in p && p.fullPath===identity.project;
+      if(scoped && !sameProject(project)) throw new ContextReadError('parent-repository');
+      const nodes = list(record(project.workItems).nodes);
       if (nodes.length !== 1) throw new ContextReadError('malformed');
       const item = record(nodes[0]);
       if (text(item.iid) !== String(iid)) throw new ContextReadError('malformed');
@@ -92,7 +97,11 @@ export function structuredContextSource(identity: ContextIdentity, transport: Co
       const hierarchy = list(item.widgets).map(record).filter(w => Object.hasOwn(w, 'parent'));
       if (hierarchy.length !== 1) throw new ContextReadError('malformed');
       const parent = hierarchy[0].parent;
-      const parentIid = parent === null ? null : Number(text(record(parent).iid));
+      // WorkItem.project is nullable (e.g. group-owned items). Namespace or an IID alone is not a project binding.
+      if(scoped && parent!==null && !sameProject(record(parent).project)) throw new ContextReadError('parent-repository');
+      const raw=parent===null?null:text(record(parent).iid);
+      if(raw!==null && !/^[1-9]\d*$/.test(raw)) throw new ContextReadError('malformed');
+      const parentIid = raw===null ? null : Number(raw);
       return { bytes: read.bytes, value: parentIid === null ? null : number(parentIid) };
     },
   };

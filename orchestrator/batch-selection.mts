@@ -42,8 +42,21 @@ export function policyFootprint(reservation:{policyIdentity?:string;footprint?:s
   const paths=reservation?.footprint;
   return policyIdentity && reservation?.policyIdentity===policyIdentity && Array.isArray(paths) && paths.length && paths.every(p=>typeof p==='string' && p.trim()) ? paths : ['*'];
 }
-export function recordedGraph(m:Manifest|undefined,project:string,iid:number,hash:string,head:string,policyIdentity:string) {
-  if(!m) return {blockers:[],footprint:['*']}; // no prediction: reserve the whole checkout
+const object = (v:unknown):v is Record<string,unknown> => !!v && typeof v==='object' && !Array.isArray(v);
+const text = (v:unknown):v is string => typeof v==='string';
+const localId = (v:unknown) => Number.isSafeInteger(v) && Number(v)>0;
+const list = (v:unknown,valid:(item:unknown)=>boolean) => Array.isArray(v) && v.every(valid);
+function isManifest(v:unknown):v is Manifest {
+  return object(v) && localId(v.iid) && text(v.project) && text(v.hash) && text(v.baseSha) && text(v.base) && text(v.analyzedAt)
+    && (v.policyIdentity===undefined || text(v.policyIdentity)) && (v.recoveryAnalysisKey===undefined || text(v.recoveryAnalysisKey))
+    && list(v.provides,text) && list(v.footprint,text) && (v.actualFootprint===undefined || list(v.actualFootprint,text))
+    && list(v.catalogueIids,localId) && object(v.blockerHashes) && Object.entries(v.blockerHashes).every(([id,h])=>/^[1-9]\d*$/.test(id) && text(h))
+    && list(v.requires,r=>object(r) && (r.providedBy===null || localId(r.providedBy)) && text(r.what) && text(r.evidence) && typeof r.confidence==='number' && r.confidence>=0 && r.confidence<=1)
+    && (v.implementerBlockers===undefined || list(v.implementerBlockers,r=>object(r) && (r.iid===null || localId(r.iid)) && text(r.what) && text(r.evidence)));
+}
+export function recordedGraph(m:unknown,project:string,iid:number,hash:string,head:string,policyIdentity:string) {
+  if(m===undefined) return {blockers:[],footprint:['*']}; // only an absent record means no prediction
+  if(!isManifest(m)) throw Error('Malformed recorded ticket graph; inspect and refresh the manifest before dispatch');
   if(m.iid!==iid || m.project!==project || m.hash!==hash || [...m.requires.map(r=>r.providedBy),...(m.implementerBlockers??[]).map(b=>b.iid)].some(n=>!Number.isSafeInteger(n)||n===iid||Number(n)<=0))
     throw Error('Recorded graph dependencies are stale or unresolved; refresh ticket analysis');
   const paths=m.actualFootprint??m.footprint;

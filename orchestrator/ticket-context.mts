@@ -114,7 +114,7 @@ export function collectTicketContext(source: TicketContextSource, iid: number,
     return { status: 'complete', context };
   } catch (error) {
     const reason = error instanceof ContextReadError ? error.reason : 'read-failed';
-    const nextAction = reason === 'parent-repository' ? 'Verify that the GitHub parent belongs to the owned repository and is readable. Cross-repository parents are not supported.' : reason === 'byte-limit' || reason === 'page-limit'
+    const nextAction = reason === 'parent-repository' ? 'Verify that the tracker parent belongs to the owned repository and its project identity is readable. Cross-repository parents are not supported.' : reason === 'byte-limit' || reason === 'page-limit'
       ? 'Inspect the required tracker source size or pagination with the Factory maintainer; retry collection only after it fits the code-owned limits.'
       : 'Inspect the named tracker source and structured read for availability, permissions or malformed pagination, then retry collection. Do not launch with partial context.';
     return { status: 'hold', version: 1, identity: { ...source.identity }, iid, source: role, sourceIid, operation,

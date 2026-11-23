@@ -10,7 +10,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // Persisted transitions emit observations after authoritative locks, never on heartbeat writes.
 import { observeRun } from './execution-events.mts';
-import { claimLive, keyFor, newToken, ownerOf, readBaselineReservations, releaseClaim, supervisorExclusion, withAdmission, writeDurable } from "./admission.mts";
+import { claimLive, keyFor, newToken, ownerOf, processStart, readBaselineReservations, releaseClaim, supervisorExclusion, withAdmission, writeDurable } from "./admission.mts";
 import type { AdmissionClaim, AdmissionTx, ClaimKind } from "./admission.mts";
 export { keyFor } from "./admission.mts";
 import { readAssessments, requestRefresh } from "./assessment.mts";
@@ -294,7 +294,7 @@ export interface AdmitOptions {
   attempt?: string;
   /** Runs under the lock after the shared checks, with the ticket's current record; may throw to refuse (its message is
    *  the reason, nothing is written) or return more fields for the record. */
-  also?: (current: RunState | undefined) => Partial<RunState> | void;
+  also?: (current: RunState | undefined, busyKeys: ReadonlySet<string>) => Partial<RunState> | void;
 }
 export type Admitted = { ok: true; key: string; token: string; claim: AdmissionClaim; current?: RunState; run: RunState } | { ok: false; reason: string };
 
@@ -330,11 +330,15 @@ export function admitRun(tx: AdmissionTx, dir: string, o: AdmitOptions): Admitte
     const other = claims.find(([k, c]) => k !== key && c.project === proj)?.[1].iid ?? runs.find((r) => r.key !== key && r.project === proj && inFlight(r))?.iid;
     if (other) return { ok: false, reason: `project ${proj ?? "(unnamed)"} has #${other} in flight; recovery needs the project to itself` };
   }
-  const busy = new Set([...claims.map(([k]) => k), ...runs.filter(inFlight).map((r) => r.key)]);
+  // Count normal run rows without mutating them during batch dispatch. A missing/invalid PID or an
+  // unreadable start is ambiguous; only a positively dead process loses its slot. Live claims,
+  // recovery ownership and baseline cleanup are independent fences, even for a dead row PID.
+  const occupying = runs.filter(r => inFlight(r) && (!o.patch?.batchMember || !Number.isSafeInteger(r.pid) || r.pid<=0 || processStart(r.pid)!==null));
+  const busy = new Set([...claims.map(([k]) => k), ...occupying.map((r) => r.key)]);
   if (busy.size + baselines.length >= o.cap) return { ok: false, reason: `no capacity: ${busy.size + baselines.length} ${baselines.length ? 'run(s)/baseline(s)' : 'run(s)'} in flight, cap ${o.cap}` };
   let extra: Partial<RunState> | void;
   try {
-    extra = o.also?.(current);
+    extra = o.also?.(current,busy);
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
   }
